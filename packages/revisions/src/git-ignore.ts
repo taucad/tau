@@ -8,9 +8,9 @@
  * device holds (I5). `core.ignoreCase` is the repository's own, and folds
  * ASCII letters as Git does.
  *
- * The rules are gitignore(5)'s, and each piece follows Git's own code (Git
- * 2.43, `dir.c` and `wildmatch.c`) so a corner of the format answers as Git
- * answers it:
+ * The rules are gitignore(5)'s, and each piece follows Git's own code
+ * (`dir.c` and `wildmatch.c`, as of Git 2.52) so a corner of the format
+ * answers as Git answers it:
  *
  * - a leading UTF-8 byte-order mark is dropped; an empty line or a `#` line is
  *   nothing; a trailing space is dropped unless a `\` escapes it, and a line
@@ -22,9 +22,10 @@
  *   one without matches a name at any depth below it;
  * - matching is wildmatch's, byte by byte over UTF-8: `*`, `?` and `[...]`
  *   never match a `/` in an anchored pattern, `**` matches any number of
- *   directories where it stands alone between slashes (after the pattern's
- *   literal prefix, as Git strips it), and a malformed class (an unterminated
- *   one, an unknown `[:name:]`) makes the line match nothing;
+ *   directories only as a whole segment (a leading `**` + `/`, a `/` + `**` +
+ *   `/`, a trailing `/` + `**`) and is a plain `*` anywhere else (`a**` + `/b`
+ *   is `a*` + `/b`), and a malformed class (an unterminated one, an unknown
+ *   `[:name:]`) makes the line match nothing;
  * - a deeper file's lines win over a shallower one's, every `.gitignore` over
  *   `info/exclude`, and within one file the last matching line wins.
  *
@@ -369,15 +370,19 @@ const ruleMatches = (rule: IgnoreRule, relative: Uint8Array<ArrayBuffer>, caseFo
     const name = relative.subarray(relative.lastIndexOf(slash) + 1);
     return wildmatch({ pattern: rule.pattern, text: name, pathname: false, caseFold });
   }
-  /* The literal prefix is compared first and stripped, so a `**` right after it stands at the pattern's start. */
+  /*
+   * The literal prefix is compared first and stripped, all but its last byte
+   * (Git 2.52, `match_pathname`): that byte tells wildmatch whether what
+   * follows starts a directory component, so a `**` straight after `a` is a
+   * plain `*`. Git before 2.52 stripped the whole prefix, and read `a**` +
+   * `/b` as matching `a/x/b`.
+   */
   const { literal, pattern } = rule;
   if (!startsWithBytes(pattern.subarray(0, literal), relative, caseFold)) {
     return false;
   }
-  if (literal === pattern.length && literal === relative.length) {
-    return true;
-  }
-  return wildmatch({ pattern: pattern.subarray(literal), text: relative.subarray(literal), pathname: true, caseFold });
+  const kept = Math.max(literal - 1, 0);
+  return wildmatch({ pattern: pattern.subarray(kept), text: relative.subarray(kept), pathname: true, caseFold });
 };
 
 /* `dir.c`'s `trim_trailing_spaces`: a space a `\` escapes stays, and a lone trailing `\` keeps the line as it is. */

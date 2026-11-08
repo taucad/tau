@@ -286,6 +286,11 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
    * wildmatch's corners (`**` after a literal prefix, three stars before a slash, byte-wise `?` and
    * classes, reversed ranges, unknown and unterminated classes) and the line
    * format's (escaped and lone trailing `\`).
+   *
+   * A `**` straight after a literal prefix is answered by the installed Git's
+   * version: Git 2.52 reads it as a plain `*`, as gitignore(5) documents, and
+   * an older Git as a whole segment. Those patterns are held to the documented
+   * answer, and every other one to the installed Git's.
    */
   it.each([false, true])(
     'matches as `git check-ignore` matches, pattern by pattern (core.ignoreCase %s)',
@@ -395,11 +400,18 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
         queried,
       );
 
+      /* `a**` + `/b` is `a*` + `/b`, and `lib**` + `/gen` is `lib*` + `/gen` (Git 2.52's `match_pathname`). */
+      const documented: Readonly<Record<string, readonly string[]>> = {
+        'a**/b': ['a/b', 'ab/b'],
+        'lib**/gen': ['lib/gen'],
+      };
       const verdicts = (ignored: (path: string) => boolean) =>
         patterns.map((pattern, index) => [pattern, paths.filter((path) => ignored(`p${String(index)}/${path}`))]);
-      expect(verdicts((path) => excludedBy(listing, [path]).length > 0)).toStrictEqual(
-        verdicts((path) => reported.has(path)),
-      );
+      const expected = verdicts((path) => reported.has(path)).map(([pattern, matched]) => {
+        const fixed = documented[pattern as string];
+        return [pattern, fixed === undefined ? matched : paths.filter((path) => fixed.includes(path))];
+      });
+      expect(verdicts((path) => excludedBy(listing, [path]).length > 0)).toStrictEqual(expected);
     },
   );
 

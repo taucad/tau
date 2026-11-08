@@ -30,7 +30,11 @@ export type ImportGrant = Readonly<{
 }>;
 
 type ImportGrantsOptions = Readonly<{
-  /** The most grants held at once; the oldest is let go first. */
+  /**
+   * The most grants one window holds at once; its oldest is let go first.
+   * Another window's grants never count against it, so one window minting
+   * cannot evict a grant another window's import is using.
+   */
   maxGrants: number;
   /** Tell the services host every grant it may resolve, in full, after each change. */
   publish: (grants: readonly ImportGrant[]) => void;
@@ -80,9 +84,9 @@ export const createImportGrants = (options: ImportGrantsOptions): ImportGrants =
         identity: { dev: String(metadata.dev), ino: String(metadata.ino) },
         owner: String(owner),
       });
-      while (grants.size > options.maxGrants) {
-        const [oldest] = grants.keys();
-        grants.delete(oldest!);
+      const held = [...grants.values()].filter((entry) => entry.owner === String(owner));
+      for (const evicted of held.slice(0, Math.max(0, held.length - options.maxGrants))) {
+        grants.delete(evicted.grant);
       }
       publish();
       return { grant, name: basename(canonical) };

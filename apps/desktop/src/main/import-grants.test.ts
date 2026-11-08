@@ -60,13 +60,18 @@ describe('createImportGrants', () => {
     expect(published.at(-1)?.map(({ grant }) => grant)).toEqual([other.grant]);
   });
 
-  it('lets the oldest grant go past its bound', async () => {
+  it("lets a window's oldest grant go past its bound, never another window's", async () => {
     const root = sandbox();
     const grants = createImportGrants({ maxGrants: 2, publish: () => undefined });
+    const importing = await grants.mint(root, 'directory', 2);
     const first = await grants.mint(root, 'directory', 1);
-    await grants.mint(root, 'directory', 1);
-    await grants.mint(root, 'directory', 1);
-    expect(grants.list()).toHaveLength(2);
-    expect(grants.list().some(({ grant }) => grant === first.grant)).toBe(false);
+    const second = await grants.mint(root, 'directory', 1);
+    const third = await grants.mint(root, 'directory', 1);
+    const fourth = await grants.mint(root, 'directory', 1);
+    expect(grants.list().map(({ grant }) => grant)).toEqual([importing.grant, third.grant, fourth.grant]);
+    expect(grants.list().some(({ grant }) => grant === first.grant || grant === second.grant)).toBe(false);
+    const next = await grants.mint(root, 'directory', 2);
+    const last = await grants.mint(root, 'directory', 2);
+    expect(grants.list().map(({ grant }) => grant)).toEqual([third.grant, fourth.grant, next.grant, last.grant]);
   });
 });

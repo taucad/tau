@@ -21,6 +21,20 @@
  * names the same inode from two places and is imported as the file it is, as a
  * browser folder import does.
  *
+ * These checks are only as strong as the file system's identities and times.
+ * FAT and exFAT have no inodes: Node reports a number derived from the entry's
+ * place, which a rename can reuse, and their modification times are coarse
+ * (2 s on FAT, 10 ms on exFAT) with no change time. An SMB share reports the
+ * server's file id where it has one and a synthesized number where it does
+ * not, and its times are what the server and the client's cache report. ReFS
+ * file ids are 128 bits, wider than the 64-bit inode Node sees, so two files
+ * can share one. On those volumes an identity match is weaker evidence and a
+ * write within the time resolution can go unseen. A write through a shared
+ * memory mapping changes the bytes without always moving mtime or ctime until
+ * it is flushed, so a concurrent mmap writer is not detected either: the copy
+ * can hold bytes from before and after its write. The facts are hashed from
+ * the landed copy, so they always describe exactly the bytes that landed.
+ *
  * @module
  */
 

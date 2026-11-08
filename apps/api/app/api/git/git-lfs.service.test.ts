@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GoneException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';

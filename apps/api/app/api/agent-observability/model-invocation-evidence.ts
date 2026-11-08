@@ -3,7 +3,7 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@tauca
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#api/agent-observability/provider-stream-facts.js';
-import type { ModelInvocationSurface, ModelProviderWire } from '#api/llm/model-invocation.types.js';
+import type { ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
 export const apiProviderMapper = 'api-provider-v2';

@@ -21,10 +21,12 @@ import { maximumChangesetEntries } from '#changeset.js';
  * requests; version 8 adds `hashFiles`, digests computed beside the bytes;
  * version 9 drops the head-only stat and listing modes, and a stat or listing
  * row carries content facts only when already known (I3); version 10 adds
- * `applyBatch`, one changeset phase per request, fsynced once per directory (D16).
+ * `applyBatch`, one changeset phase per request, fsynced once per directory (D16);
+ * version 11 lets a batch write name a large object by its id, for the host to
+ * clone from the root's store, and answers its verified id (EQ13).
  * @public
  */
-export const nodeFsProtocolVersion = 10;
+export const nodeFsProtocolVersion = 11;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -84,12 +86,18 @@ const watchRequestSchema = z.object({
 });
 
 const fileModeEnum = z.enum(['100644', '100755']);
-/* One provider batch entry as it crosses the port: bytes in hand, since a staged `Blob` is read before it is sent. */
+/* A large object the host resolves against the root's own store, by id: never a path (EQ13, I6). */
+const largeObjectSourceSchema = z.object({
+  largeObject: z.string().regex(/^[\da-f]{64}$/u),
+  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+/* One provider batch entry as it crosses the port: bytes in hand, since a staged `Blob` is read before it is sent,
+ * or a large object by its id. */
 const batchEntrySchema = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('write'),
     path: rootedPathSchema,
-    data: bytesSchema,
+    data: z.union([bytesSchema, largeObjectSourceSchema]),
     mode: fileModeEnum.optional(),
     create: z.boolean().optional(),
   }),
@@ -212,6 +220,7 @@ const batchReceiptSchema = z.object({
   outcome: z.enum(['applied', 'failed', 'uncertain']),
   kind: z.enum(['file', 'dir']).optional(),
   created: z.boolean().optional(),
+  largeObject: largeObjectSourceSchema.optional(),
   error: z.object({ message: z.string(), code: z.string().optional(), name: z.string().optional() }).optional(),
 });
 

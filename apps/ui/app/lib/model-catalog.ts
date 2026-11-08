@@ -1,7 +1,4 @@
-/* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
-import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
-/* oxlint-enable import/extensions -- Re-enable project import checks. */
+import type { Model as ApiModel } from '@taucad/chat/model-catalog';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** One row of the public model catalog, `/v1/models`. */

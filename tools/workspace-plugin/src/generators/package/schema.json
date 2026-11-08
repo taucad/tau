@@ -25,9 +25,9 @@
     },
     "scopeTag": {
       "type": "string",
-      "enum": ["shared", "ui"],
+      "enum": ["shared", "ui", "api"],
       "default": "shared",
-      "description": "Audience tag; packages, libs, and tools require shared, while apps/libs supports shared or ui"
+      "description": "Audience tag; packages, libs, and tools require shared, while apps/libs supports shared, ui, or api (an API server library named api-<name>, which also gets the api:<name> tag)"
     },
     "layer": {
       "type": "string",

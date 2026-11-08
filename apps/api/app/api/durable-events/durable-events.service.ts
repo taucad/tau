@@ -5,12 +5,12 @@ import type { Redis } from 'ioredis';
 import { Topic } from '@taucad/events';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { DatabaseType } from '#database/database.service.js';
-import { DatabaseService } from '#database/database.service.js';
-import { durableStream, durableStreamEvent } from '#database/schema.js';
-import { RedisService } from '#redis/redis.service.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { DatabaseService } from '@taucad/api-database';
+import { durableStream, durableStreamEvent } from '@taucad/api-database/schema';
+import { RedisService } from '@taucad/api-redis';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type {
   DurableAppendOutcome,
   DurableStreamEvent,

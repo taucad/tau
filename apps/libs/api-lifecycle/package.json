@@ -1,0 +1,48 @@
+{
+  "name": "@taucad/api-lifecycle",
+  "version": "0.1.0-beta.0",
+  "description": "API shutdown, upgrade routing and WebSocket transport",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-lifecycle"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-lifecycle#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./shutdown": "./src/shutdown.service.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@nestjs/platform-fastify": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "ws": "catalog:"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2"
+  }
+}

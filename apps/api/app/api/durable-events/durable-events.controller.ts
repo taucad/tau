@@ -1,7 +1,6 @@
 /* oxlint-disable new-cap -- NestJS decorators are factories */
 import { Controller, Get, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { AuthGuard, UseAuth, User } from '@taucad/api-auth';
 import { ReadDurableEventsDto } from '#api/durable-events/durable-events.dto.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { DurableStreamReadOutcome } from '#api/durable-events/durable-events.types.js';

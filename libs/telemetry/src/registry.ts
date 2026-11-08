@@ -14,6 +14,16 @@ import {
   tauToolNames,
 } from '#ingest.js';
 import { runtimeMetrics } from '#runtime-metrics.js';
+import {
+  llmAdmissionOutcomes,
+  llmGatewayProviders,
+  llmGatewayWires,
+  llmRequestEncodings,
+  promptCacheOutcomes,
+  turnGaps,
+  turnStepTokenTypes,
+  turnSteps,
+} from '#llm-gateway-vocabulary.js';
 
 /**
  * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
@@ -319,7 +329,8 @@ export const TauMetrics = {
     name: 'gen_ai.client.time_to_first_token',
     unit: 's',
     description: 'Streaming responsiveness (time to first SSE chunk)',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    /* 20–60 s: a cold re-prefill of a long chat can pass 10 s, and a capped histogram hides it. */
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
     attributes: z.object({
       'gen_ai.operation.name': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
@@ -546,6 +557,102 @@ export const TauMetrics = {
       'gen_ai.context_compaction.failure_disposition': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
+    }),
+  }),
+
+  // --- Funded LLM gateway latency and prompt cache (chat latency and prompt cache program, W3.1) ---
+  // Upload, parse and admission split the time before the supplier request; the turn-step series
+  // label each settled step by the agent host's turn boundary and pause. Durations, sizes and
+  // enumerated labels only (I4): never a chat, project, user or attempt id.
+
+  llmGatewayAdmissionDuration: defineHistogram({
+    name: 'tau.llm.gateway.admission.duration',
+    unit: 's',
+    description: 'Funded LLM call admission, from invocation entry to the supplier request or the exit taken instead',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.surface': z.enum(['gateway', 'project_name', 'commit_name', 'other']),
+      outcome: z.enum(llmAdmissionOutcomes),
+    }),
+  }),
+
+  llmGatewayRequestReceiveDuration: defineHistogram({
+    name: 'tau.llm.gateway.request_body.receive.duration',
+    unit: 's',
+    description: 'Gateway request upload: request headers received to the last body byte',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+      'http.request.encoding': z.enum(llmRequestEncodings),
+    }),
+  }),
+
+  llmGatewayRequestParseDuration: defineHistogram({
+    name: 'tau.llm.gateway.request_body.parse.duration',
+    unit: 's',
+    description: 'Gateway request body parse: the last body byte to validation',
+    buckets: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+    }),
+  }),
+
+  llmGatewayRequestSize: defineHistogram({
+    name: 'tau.llm.gateway.request_body.size',
+    unit: 'By',
+    description: 'Gateway request body bytes as received on the wire',
+    buckets: Array.from({ length: 13 }, (_, step) => 16_384 * 2 ** step),
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+      'http.request.encoding': z.enum(llmRequestEncodings),
+    }),
+  }),
+
+  llmGatewayInlineImageBytes: defineHistogram({
+    name: 'tau.llm.gateway.request_body.inline_image_bytes',
+    unit: 'By',
+    description: 'Base64 image bytes carried inline in one funded request (images re-sent with history count again)',
+    buckets: [0, ...Array.from({ length: 13 }, (_, step) => 16_384 * 2 ** step)],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+    }),
+  }),
+
+  llmTurnStepCacheTokens: defineCounter({
+    name: 'tau.llm.turn_step.cache_tokens',
+    unit: '{token}',
+    description: 'Settled tokens of funded steps by turn step, pause bucket and token type',
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'gen_ai.token.type': z.enum(turnStepTokenTypes),
+    }),
+  }),
+
+  llmTurnStepCacheOutcomes: defineCounter({
+    name: 'tau.llm.turn_step.cache_outcomes',
+    unit: '{step}',
+    description: 'Settled funded steps by prompt-cache outcome, turn step and pause bucket',
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
+    }),
+  }),
+
+  llmTurnStepTimeToFirstToken: defineHistogram({
+    name: 'tau.llm.turn_step.time_to_first_token',
+    unit: 's',
+    description: 'Supplier time to first token of settled streaming steps by prompt-cache outcome, turn step and pause',
+    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
     }),
   }),
 

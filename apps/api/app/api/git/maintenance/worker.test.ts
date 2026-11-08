@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Database } from '#database/owner-lock.js';
+import type { Database } from '@taucad/api-database/owner-lock';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { completeProjectDeletion } from '#api/projects/project-deletion.js';
 import { projectRecoveryBudget, recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintenance/worker.js';

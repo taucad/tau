@@ -5,7 +5,7 @@ import { KernelsGateway } from '#api/kernels/kernels.gateway.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import { ZooTokensController } from '#api/kernels/zoo-tokens.controller.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 @Module({})
 export class KernelsModule {

@@ -103,7 +103,7 @@ export function BillingSettings(): React.JSX.Element {
       ) : undefined}
       {entitlements.cancelAtPeriodEnd && entitlements.paidThrough ? (
         <div className='rounded-md border border-border bg-card px-3 py-2 text-sm'>
-          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage Subscription.
+          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage subscription.
         </div>
       ) : undefined}
 

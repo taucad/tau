@@ -11,12 +11,12 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObservabilityHarnessFailure } from '#api/observability-debug/observability-debug.controller.js';
 import { isObservabilityFailureRouteEnabled } from '#api/observability-debug/observability-debug.gate.js';
 import { ObservabilityDebugModule } from '#api/observability-debug/observability-debug.module.js';
-import type * as Sentry from '#telemetry/sentry.js';
+import type * as Sentry from '@taucad/api-observability/sentry';
 
 const reportServerError = vi.hoisted(() =>
   vi.fn<(error: unknown, requestId?: string, sentryTrace?: string | string[]) => void>(),
 );
-vi.mock('#telemetry/sentry.js', async (importOriginal) => ({
+vi.mock('@taucad/api-observability/sentry', async (importOriginal) => ({
   ...(await importOriginal<typeof Sentry>()),
   reportServerError,
 }));

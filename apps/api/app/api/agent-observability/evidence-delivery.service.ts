@@ -4,12 +4,12 @@ import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { Evidence } from '@taucad/agent-observability/contract';
-import { DatabaseService } from '#database/database.service.js';
-import { readProjectDeletion } from '#database/project-lifecycle.js';
-import type { Environment } from '#config/environment.config.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { AgentEvidenceDeliveryOutcome } from '#telemetry/metrics.js';
+import { DatabaseService } from '@taucad/api-database';
+import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import type { Environment } from '@taucad/api-core';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceDeliveryOutcome } from '@taucad/api-observability/metrics';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#api/agent-observability/evidence-seal.js';
 import {

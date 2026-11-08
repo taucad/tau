@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  isServableAssetPath,
+  isServableRuntimePath,
   mapWithConcurrency,
   parseServedAssetsIndex,
   planRetention,
@@ -15,6 +17,7 @@ import {
   retentionWindow,
   servedAssetsIndexFileName,
   servedAssetsIndexSchema,
+  servedRuntimesIndexFileName,
 } from '#scripts/retain-previous-assets.mts';
 import type { ServedAsset, ServedAssetsIndex } from '#scripts/retain-previous-assets.mts';
 
@@ -71,6 +74,10 @@ const startLiveDeploy = async (
     }
     if (typeof fault === 'object') {
       response.writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter }).end();
+      return;
+    }
+    if (path === servedRuntimesIndexFileName && files[path] !== undefined) {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(files[path]);
       return;
     }
     if (path === servedAssetsIndexFileName && index) {
@@ -568,5 +575,130 @@ describe('retainPreviousAssets', () => {
     expect(await readIndex(client)).toStrictEqual(
       indexOf([{ path: 'assets/nested/worker-NEW1.js', integrity: integrityOf('worker'), generation: 0 }]),
     );
+  });
+});
+
+describe('runtime bundles (PicoGK and the C# language service)', () => {
+  const oldHost = `picogk-browser/${'a'.repeat(64)}`;
+  const newHost = `picogk-browser/${'b'.repeat(64)}`;
+  const language = `csharp-language/${'c'.repeat(64)}`;
+  /** The store's file name for some bytes: their integrity, safe as a file name. */
+  const storeNameOf = (bytes: string): string => integrityOf(bytes).replaceAll('/', '_').replaceAll('+', '-');
+
+  it('should accept a file under a bundle content address and refuse any other path under its root', () => {
+    expect(isServableRuntimePath(`${oldHost}/_framework/dotnet.js`)).toBe(true);
+    expect(isServableRuntimePath(`${language}/manifest.json`)).toBe(true);
+    expect(isServableRuntimePath('picogk-browser/unprepared/_framework/dotnet.js')).toBe(false);
+    expect(isServableRuntimePath(`picogk-browser/${'A'.repeat(64)}/dotnet.js`)).toBe(false);
+    expect(isServableRuntimePath(oldHost)).toBe(false);
+    expect(isServableRuntimePath(`${oldHost}/../escape.js`)).toBe(false);
+    expect(isServableRuntimePath(`other-runtime/${'a'.repeat(64)}/x.js`)).toBe(false);
+    // The assets index never lists a runtime file: a build from before runtime retention would refuse it.
+    expect(isServableAssetPath(`${oldHost}/_framework/dotnet.js`)).toBe(false);
+  });
+
+  it('should keep the previous PicoGK host when a deploy changes it, so a tab loaded before can still start it', async () => {
+    const previous = await createClient({
+      'assets/app-OLD1.js': 'app-old',
+      [`${oldHost}/_framework/dotnet.js`]: 'host-old',
+      [`${language}/manifest.json`]: 'language',
+    });
+    const { index, runtimes } = await retainPreviousAssets({ clientDirectory: previous, origin: undefined, now });
+    const live = await startLiveDeploy(
+      {
+        'assets/app-OLD1.js': 'app-old',
+        [`${oldHost}/_framework/dotnet.js`]: 'host-old',
+        [servedRuntimesIndexFileName]: JSON.stringify(runtimes),
+      },
+      index,
+    );
+    const next = await createClient({
+      'assets/app-NEW1.js': 'app-new',
+      [`${newHost}/_framework/dotnet.js`]: 'host-new',
+      [`${language}/manifest.json`]: 'language',
+    });
+
+    await retainPreviousAssets({ clientDirectory: next, origin: live.origin, now });
+
+    expect(await readFile(join(next, `${oldHost}/_framework/dotnet.js`), 'utf8')).toBe('host-old');
+    // The unchanged C# bundle is this build's own, so nothing is fetched for it.
+    expect(live.requests).not.toContain(`${language}/manifest.json`);
+    const { assets } = await readIndex(next);
+    expect(assets.map((asset) => [asset.path, asset.generation])).toStrictEqual([
+      ['assets/app-NEW1.js', 0],
+      ['assets/app-OLD1.js', 1],
+    ]);
+    const served = JSON.parse(await readFile(join(next, servedRuntimesIndexFileName), 'utf8')) as ServedAssetsIndex;
+    expect(served.assets.map((asset) => [asset.path, asset.generation])).toStrictEqual([
+      [`${language}/manifest.json`, 0],
+      [`${oldHost}/_framework/dotnet.js`, 1],
+      [`${newHost}/_framework/dotnet.js`, 0],
+    ]);
+  });
+
+  it('should read a kept bundle file from the store instead of downloading it, and leave the store holding what this deploy serves', async () => {
+    const store = await createClient({ [storeNameOf('host-old')]: 'host-old', [storeNameOf('stale')]: 'stale' });
+    const live = await startLiveDeploy(
+      {
+        'assets/app-OLD1.js': 'app-old',
+        [`${oldHost}/_framework/dotnet.js`]: 'host-old',
+        [servedRuntimesIndexFileName]: JSON.stringify(
+          indexOf([{ path: `${oldHost}/_framework/dotnet.js`, integrity: integrityOf('host-old'), generation: 0 }]),
+        ),
+      },
+      indexOf([{ path: 'assets/app-OLD1.js', integrity: integrityOf('app-old'), generation: 0 }]),
+    );
+    const next = await createClient({
+      'assets/app-NEW1.js': 'app-new',
+      [`${newHost}/_framework/dotnet.js`]: 'host-new',
+    });
+
+    const result = await retainPreviousAssets({ clientDirectory: next, origin: live.origin, now, store });
+
+    expect(await readFile(join(next, `${oldHost}/_framework/dotnet.js`), 'utf8')).toBe('host-old');
+    expect(live.requests).not.toContain(`${oldHost}/_framework/dotnet.js`);
+    // Ordinary assets change every build, so they are not stored: they are downloaded as before.
+    expect(live.requests).toContain('assets/app-OLD1.js');
+    expect(result.storedBytes).toBe('host-old'.length);
+    const stored = await readdir(store);
+    expect(stored.toSorted()).toStrictEqual([storeNameOf('host-new'), storeNameOf('host-old')].toSorted());
+    expect(await readFile(join(store, storeNameOf('host-new')), 'utf8')).toBe('host-new');
+  });
+
+  it('should download a bundle file the store holds with other bytes, never publishing them, and store it again', async () => {
+    const store = await createClient({ [storeNameOf('host-old')]: 'corrupted' });
+    const live = await startLiveDeploy(
+      {
+        [`${oldHost}/_framework/dotnet.js`]: 'host-old',
+        [servedRuntimesIndexFileName]: JSON.stringify(
+          indexOf([{ path: `${oldHost}/_framework/dotnet.js`, integrity: integrityOf('host-old'), generation: 0 }]),
+        ),
+      },
+      indexOf([]),
+    );
+    const next = await createClient({ 'assets/app-NEW1.js': 'app-new' });
+
+    const result = await retainPreviousAssets({ clientDirectory: next, origin: live.origin, now, store });
+
+    expect(await readFile(join(next, `${oldHost}/_framework/dotnet.js`), 'utf8')).toBe('host-old');
+    expect(live.requests).toContain(`${oldHost}/_framework/dotnet.js`);
+    expect(result.storedBytes).toBe(0);
+    expect(await readFile(join(store, storeNameOf('host-old')), 'utf8')).toBe('host-old');
+  });
+});
+
+describe('runtime index compatibility', () => {
+  it('should retain nothing for runtimes when the live build answers their index with its catch-all', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/app-OLD1.js': 'app-old' },
+      indexOf([{ path: 'assets/app-OLD1.js', integrity: integrityOf('app-old'), generation: 0 }]),
+      (path) => (path === servedRuntimesIndexFileName ? { status: 200 } : undefined),
+    );
+    const next = await createClient({ 'assets/app-NEW1.js': 'app-new' });
+
+    const result = await retainPreviousAssets({ clientDirectory: next, origin: live.origin, now });
+
+    expect(result.runtimes.assets).toStrictEqual([]);
+    expect(result.retained).toBe(1);
   });
 });

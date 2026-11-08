@@ -24,18 +24,18 @@ import { APP_FILTER } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   incompleteRepositoryMarker,
 } from '#api/git/git.constants.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -54,8 +54,8 @@ import {
   deriveScanIntervalMilliseconds,
 } from '#api/git/forwarding/derive-scheduler.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitAccess, ReceiptVerification } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
@@ -78,12 +78,12 @@ import type {
   StoredObject,
 } from '#api/git/store/port.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { project, projectDeletion, projectGit, user } from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
+import { project, projectDeletion, projectGit, user } from '@taucad/api-database/schema';
 
 /* Every lease is still a real one; the spy is how DB1 shows an advertisement builds none. */
 vi.mock('#api/git/store/lease.js', async (importOriginal) => {

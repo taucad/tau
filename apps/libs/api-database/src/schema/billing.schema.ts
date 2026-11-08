@@ -1,0 +1,1803 @@
+import type {
+  PaymentOfferSnapshot,
+  PaidPaymentEvidence,
+  NoChargeEvidence,
+  CheckoutExpiryEvidence,
+  SubscriptionCancellationEvidence,
+  SubscriptionCheckoutExpiryEvidence,
+  PaymentCheckoutExpiryEvidence,
+  RequestRejectedEvidence,
+} from '#schema/billing-payment.types.js';
+import type { SupplierValuation, JointInputMaximum, PersistedInputCountEvidence } from '#schema/billing.types.js';
+import { sql, desc } from 'drizzle-orm';
+import type { AnyPgColumn, PgTableExtraConfigValue } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  pgSchema,
+  numeric,
+  foreignKey,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  unique,
+} from 'drizzle-orm/pg-core';
+import { user } from '#schema/auth.schema.js';
+
+/* oxlint-disable @typescript-eslint/no-unsafe-return -- Drizzle `references(() => …)` FK factories defer table symbols */
+
+/**
+ * First-party subscription projection. Historical unbound rows await explicit
+ * financial migration; their labels and auth reference never authorize access.
+ */
+export const subscription = pgTable(
+  'subscription',
+  {
+    id: text('id').primaryKey(),
+    /** The tier the subscription grants: `pro`, or `enterprise` for a sales-led deal. */
+    plan: text('plan').notNull(),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    status: text('status').default('incomplete').notNull(),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false),
+    canceledAt: timestamp('canceled_at'),
+    endedAt: timestamp('ended_at'),
+    accountId: text('account_id')
+      .notNull()
+      .references((): AnyPgColumn => creditAccount.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    customerBindingId: text('customer_binding_id')
+      .notNull()
+      .references((): AnyPgColumn => billingStripeCustomer.id, {
+        onDelete: 'restrict',
+      }),
+    requestId: text('request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>().notNull(),
+    slotState: text('slot_state').notNull(),
+    paidThrough: timestamp('paid_through', { withTimezone: true }),
+    failedRenewalInvoiceId: text('failed_renewal_invoice_id'),
+    dunningStartedAt: timestamp('dunning_started_at', { withTimezone: true }),
+    graceEndsAt: timestamp('grace_ends_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('subscription_account_id').on(table.accountId, table.id),
+    uniqueIndex('subscription_active_slot')
+      .on(table.accountId)
+      .where(sql`${table.slotState} IN ('pending','current','attention')`),
+    uniqueIndex('subscription_owned_source').on(table.customerBindingId, table.stripeSubscriptionId),
+    uniqueIndex('subscription_owned_request').on(table.accountId, table.requestId),
+    check('subscription_slot_state', sql`${table.slotState} IN ('pending','current','attention','ended')`),
+    check(
+      'subscription_grace',
+      sql`(${table.failedRenewalInvoiceId} IS NULL AND ${table.dunningStartedAt} IS NULL AND ${table.graceEndsAt} IS NULL) OR (${table.failedRenewalInvoiceId} IS NOT NULL AND ${table.dunningStartedAt} IS NOT NULL AND ${table.graceEndsAt} = ${table.dunningStartedAt} + interval '7 days')`,
+    ),
+    index('subscription_stripe_idx').on(table.stripeSubscriptionId),
+  ],
+);
+
+/**
+ * Per-customer Enterprise limit overrides (blueprint Q28/E5). Merged over the
+ * tier's default entitlements at projection time; values are set by ops when a
+ * sales-led subscription is attached (see the stripe-iac runbook).
+ */
+export const subscriptionExtension = pgTable('subscription_extension', {
+  subscriptionId: text('subscription_id')
+    .primaryKey()
+    .references(() => subscription.id, { onDelete: 'cascade' }),
+  // oxlint-disable-next-line typescript-eslint/no-restricted-types -- Drizzle JSONB column distinguishes null (set) from undefined (unset)
+  overrides: jsonb('overrides').$type<Record<string, number | boolean> | null>(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+/**
+ * Credit-ledger account: materialised balances in microdollars (µ$, AD16 —
+ * 1 USD = 1e6 µ$, bigint columns). Split balances per AD10: monthly grants roll
+ * over against `rolloverCeilingMicro`; top-up credits never expire and are
+ * consumed first at commit time. Redis is the hot path; this row is the durable
+ * backstop written through by the ledger outbox.
+ */
+export const legacyCreditAccount = pgTable('credit_account', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  grantBalanceMicro: bigint('grant_balance_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  topupBalanceMicro: bigint('topup_balance_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  reservedMicro: bigint('reserved_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  monthlyGrantMicro: bigint('monthly_grant_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  rolloverCeilingMicro: bigint('rollover_ceiling_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  /** Monotonic write-ordering guard: outbox flushes only apply snapshots with a newer version. */
+  version: bigint('version', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  /** Anchors the free-tier lazy monthly grant (paid grants anchor on invoice.paid). */
+  lastGrantedAt: timestamp('last_granted_at'),
+  /** Server-side dedup markers for the 80%/95% balance-consumed toasts (Q26). */
+  notified80At: timestamp('notified_80_at'),
+  notified95At: timestamp('notified_95_at'),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+/**
+ * Append-only credit journal. Invariant (C12, audited with alerting):
+ * SUM(delta_micro) per user == credit_account.grant_balance_micro + topup_balance_micro.
+ * Reservations are deliberately NOT journaled — only settled money movements are.
+ * `category` is set on spend rows only (grants/top-ups are category-less credit).
+ */
+export const legacyCreditTransaction = pgTable(
+  'credit_transaction',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    deltaMicro: bigint('delta_micro', { mode: 'bigint' }).notNull(),
+    balanceAfterMicro: bigint('balance_after_micro', {
+      mode: 'bigint',
+    }).notNull(),
+    reason: text('reason').notNull(),
+    category: text('category'),
+    stripeEventId: text('stripe_event_id'),
+    chatId: text('chat_id'),
+    modelId: text('model_id'),
+    toolCallId: text('tool_call_id'),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('credit_tx_user_idx').on(table.userId, desc(table.createdAt)),
+    // Webhook idempotency (Q11): a retried Stripe event inserts the same id and no-ops.
+    uniqueIndex('credit_tx_stripe_event_idx')
+      .on(table.stripeEventId)
+      .where(sql`${table.stripeEventId} IS NOT NULL`),
+    check(
+      'credit_tx_reason_check',
+      sql`${table.reason} IN ('monthly_grant', 'topup', 'commit', 'sweep_floor', 'adjustment')`,
+    ),
+    check(
+      'credit_tx_category_check',
+      sql`${table.category} IS NULL OR ${table.category} IN ('llm', 'zoo_engine', 'geospec_hosted', 'solver_orchestration')`,
+    ),
+  ],
+);
+
+/**
+ * In-flight model-call reservations (durable mirror of the Redis reservation
+ * hash). `inputFloorMicro` is the Q36 abort/error floor captured at reserve
+ * time so the sweeper can settle expired holds without re-estimating.
+ */
+export const legacyCreditReservation = pgTable(
+  'credit_reservation',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reservedMicro: bigint('reserved_micro', { mode: 'bigint' }).notNull(),
+    inputFloorMicro: bigint('input_floor_micro', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    chatId: text('chat_id'),
+    turnId: text('turn_id').notNull(),
+    modelId: text('model_id').notNull(),
+    category: text('category').notNull().default('llm'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('credit_res_user_idx').on(table.userId, table.expiresAt)],
+);
+
+/** Financial authority is private; public legacy tables are retained for fenced reconciliation only. */
+export const billing = pgSchema('billing');
+
+export const creditAccount = billing.table(
+  'credit_account',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    status: text('status').notNull().default('open'),
+    promoAtoms: bigint('promo_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    planAtoms: bigint('plan_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    purchasedAtoms: bigint('purchased_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    debtAtoms: bigint('debt_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    promoHeldAtoms: bigint('promo_held_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    planHeldAtoms: bigint('plan_held_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    purchasedHeldAtoms: bigint('purchased_held_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    pendingIssuanceAtoms: bigint('pending_issuance_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    revision: bigint('revision', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    unique('credit_account_environment_id').on(table.environment, table.id),
+    check('credit_account_environment', sql`${table.environment} IN ('development','staging','prod-us','prod-eu')`),
+    check('credit_account_status', sql`${table.status} IN ('open','closing','closed','restricted')`),
+    check(
+      'credit_account_sources',
+      sql`${table.promoAtoms} >= 0 AND ${table.planAtoms} >= 0 AND ${table.purchasedAtoms} >= 0 AND ${table.debtAtoms} >= 0 AND ${table.pendingIssuanceAtoms} >= 0 AND ${table.revision} >= 0`,
+    ),
+    check(
+      'credit_account_holds',
+      sql`${table.promoHeldAtoms} BETWEEN 0 AND ${table.promoAtoms} AND ${table.planHeldAtoms} BETWEEN 0 AND ${table.planAtoms} AND ${table.purchasedHeldAtoms} BETWEEN 0 AND ${table.purchasedAtoms}`,
+    ),
+    check(
+      'credit_account_headroom',
+      sql`${table.promoAtoms}::numeric + ${table.planAtoms} + ${table.purchasedAtoms} + ${table.pendingIssuanceAtoms} <= 9223372036854775807`,
+    ),
+  ],
+);
+
+export const billingOwnerBinding = billing.table(
+  'billing_owner_binding',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    authUserId: text('auth_user_id').references(() => user.id, { onDelete: 'set null' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_owner_active_user')
+      .on(table.environment, table.authUserId)
+      .where(sql`${table.revokedAt} IS NULL AND ${table.authUserId} IS NOT NULL`),
+    uniqueIndex('billing_owner_active_account')
+      .on(table.accountId)
+      .where(sql`${table.revokedAt} IS NULL AND ${table.authUserId} IS NOT NULL`),
+  ],
+);
+
+export const billingPolicy = billing.table(
+  'billing_policy',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    schemaVersion: integer('schema_version').notNull(),
+    contentHash: text('content_hash').notNull(),
+    canonicalContent: text('canonical_content').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_policy_environment_id').on(table.environment, table.id),
+    uniqueIndex('billing_policy_version').on(table.environment, table.policyVersion),
+    uniqueIndex('billing_policy_content').on(table.environment, table.contentHash),
+    check('billing_policy_schema', sql`${table.schemaVersion} = 1`),
+  ],
+);
+
+export const billingPolicyActivation = billing.table(
+  'billing_policy_activation',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    policyId: text('policy_id').notNull(),
+    jobKey: text('job_key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    expectedPredecessorActivationId: text('expected_predecessor_activation_id'),
+    announcedAt: timestamp('announced_at', { withTimezone: true }).notNull(),
+    effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_activation_environment_id').on(table.environment, table.id),
+    unique('billing_activation_policy_id').on(table.environment, table.id, table.policyId),
+    uniqueIndex('billing_activation_job').on(table.environment, table.jobKey),
+    foreignKey({
+      columns: [table.environment, table.policyId],
+      foreignColumns: [billingPolicy.environment, billingPolicy.id],
+    }).onDelete('restrict'),
+    check('billing_activation_time', sql`${table.effectiveAt} >= ${table.announcedAt}`),
+  ],
+);
+
+export const billingPolicyActivationCancellation = billing.table(
+  'billing_policy_activation_cancellation',
+  {
+    environment: text('environment').notNull(),
+    activationId: text('activation_id').primaryKey(),
+    jobKey: text('job_key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('billing_cancellation_job').on(table.environment, table.jobKey),
+    foreignKey({
+      columns: [table.environment, table.activationId],
+      foreignColumns: [billingPolicyActivation.environment, billingPolicyActivation.id],
+    }).onDelete('restrict'),
+  ],
+);
+
+export const billingPolicyHead = billing.table(
+  'billing_policy_head',
+  {
+    environment: text('environment').primaryKey(),
+    revision: bigint('revision', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    currentActivationId: text('current_activation_id'),
+    pendingActivationId: text('pending_activation_id'),
+    observedActivationId: text('observed_activation_id'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.currentActivationId],
+      foreignColumns: [billingPolicyActivation.environment, billingPolicyActivation.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.pendingActivationId],
+      foreignColumns: [billingPolicyActivation.environment, billingPolicyActivation.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.observedActivationId],
+      foreignColumns: [billingPolicyActivation.environment, billingPolicyActivation.id],
+    }).onDelete('restrict'),
+    check('billing_head_revision', sql`${table.revision} >= 0`),
+  ],
+);
+
+/** Lifetime funding is shared by all periods; rollover cannot replenish it. */
+export const billingBudgetFunding = billing.table(
+  'billing_budget_funding',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    kind: text('kind').notNull(),
+    scope: text('scope').notNull(),
+    fundedLifetime: numeric('funded_lifetime', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    consumed: numeric('consumed', { precision: 78, scale: 0, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    held: numeric('held', { precision: 78, scale: 0, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    uniqueIndex('billing_funding_scope').on(table.environment, table.kind, table.scope),
+    unique('billing_funding_environment_id').on(table.environment, table.id),
+    unique('billing_funding_scope_id').on(table.environment, table.id, table.kind, table.scope),
+    check(
+      'billing_funding_cap',
+      sql`${table.fundedLifetime} >= 0 AND ${table.consumed} >= 0 AND ${table.held} >= 0 AND ${table.consumed} + ${table.held} <= ${table.fundedLifetime}`,
+    ),
+  ],
+);
+
+export const billingBudget = billing.table(
+  'billing_budget',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    fundingId: text('funding_id').notNull(),
+    kind: text('kind').notNull(),
+    scope: text('scope').notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    quantum: text('quantum').notNull(),
+    approvedCap: numeric('approved_cap', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    consumed: numeric('consumed', { precision: 78, scale: 0, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    held: numeric('held', { precision: 78, scale: 0, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`1`),
+  },
+  (table) => [
+    unique('billing_budget_environment_id').on(table.environment, table.id),
+    uniqueIndex('billing_budget_period').on(
+      table.environment,
+      table.kind,
+      table.scope,
+      table.periodStart,
+      table.periodEnd,
+    ),
+    foreignKey({
+      columns: [table.environment, table.fundingId, table.kind, table.scope],
+      foreignColumns: [
+        billingBudgetFunding.environment,
+        billingBudgetFunding.id,
+        billingBudgetFunding.kind,
+        billingBudgetFunding.scope,
+      ],
+    }).onDelete('restrict'),
+    check(
+      'billing_budget_cap',
+      sql`${table.approvedCap} >= 0 AND ${table.consumed} >= 0 AND ${table.held} >= 0 AND ${table.consumed} + ${table.held} <= ${table.approvedCap}`,
+    ),
+    check('billing_budget_period_order', sql`${table.periodEnd} > ${table.periodStart} AND ${table.generation} > 0`),
+  ],
+);
+
+// oxlint-disable-next-line typescript/no-restricted-types -- canonical persisted tariff uses null for an untiered rate
+type BillingRateTier = string | null;
+
+export const creditOperation = billing.table(
+  'credit_operation',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    surface: text('surface').notNull(),
+    attemptKey: text('attempt_key').notNull(),
+    requestDigest: text('request_digest').notNull(),
+    requestKeyVersion: integer('request_key_version').notNull(),
+    category: text('category').notNull(),
+    modelId: text('model_id').notNull(),
+    historyVersion: integer('history_version'),
+    modelDisplayName: text('model_display_name'),
+    providerId: text('provider_id'),
+    projectHint: text('project_hint'),
+    chatHint: text('chat_hint'),
+    admittedAt: timestamp('admitted_at', { withTimezone: true }),
+    dispatchIntentAt: timestamp('dispatch_intent_at', { withTimezone: true }),
+    cancellationRequestedAt: timestamp('cancellation_requested_at', { withTimezone: true }),
+    invocation: jsonb('invocation').$type<{
+      contractVersion: string;
+      /** Historical label retained only on pre-removal receipts. New admissions omit it. */
+      credentialAccount?: string;
+      // oxlint-disable-next-line typescript/no-restricted-types -- null explicitly denotes an undated supplier tariff
+      supplierRatesValidUntil: string | null;
+      supplierRates: Array<{
+        dimension: string;
+        tier: BillingRateTier;
+        numeratorPicoUsd: string;
+        denominatorUnits: string;
+      }>;
+      /** Milliseconds. */
+      executionTimeout: number;
+      supplierValuation?: SupplierValuation;
+      jointInputMaximum?: JointInputMaximum;
+      inputCount?: PersistedInputCountEvidence;
+    }>(),
+    sku: text('sku').notNull(),
+    pinnedTariff: jsonb('pinned_tariff')
+      .$type<
+        Array<{
+          rateId: string;
+          dimension: string;
+          tier: BillingRateTier;
+          unit: string;
+          numeratorCreditAtoms: string;
+          denominatorUnits: string;
+        }>
+      >()
+      .notNull(),
+    maximumQuantities: jsonb('maximum_quantities')
+      .$type<Array<{ dimension: string; tier: BillingRateTier; quantity: string }>>()
+      .notNull(),
+    activity: text('activity').notNull(),
+    policyId: text('policy_id')
+      .notNull()
+      .references(() => billingPolicy.id, { onDelete: 'restrict' }),
+    activationId: text('activation_id')
+      .notNull()
+      .references(() => billingPolicyActivation.id, { onDelete: 'restrict' }),
+    meterContractId: text('meter_contract_id').notNull(),
+    authorizedAtoms: bigint('authorized_atoms', { mode: 'bigint' }).notNull(),
+    promoHeldAtoms: bigint('promo_held_atoms', { mode: 'bigint' }).notNull(),
+    planHeldAtoms: bigint('plan_held_atoms', { mode: 'bigint' }).notNull(),
+    purchasedHeldAtoms: bigint('purchased_held_atoms', { mode: 'bigint' }).notNull(),
+    /** Retired supplier holds: no longer written; legacy rows keep theirs until the columns are dropped. */
+    spendBudgetHoldId: text('spend_budget_hold_id'),
+    riskBudgetHoldId: text('risk_budget_hold_id'),
+    dispatchState: text('dispatch_state').notNull().default('admitted'),
+    customerState: text('customer_state').notNull().default('pending'),
+    /** Retired supplier finality state: no longer written or read; legacy rows keep theirs until it is dropped. */
+    supplierState: text('supplier_state'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`1`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+    usageOccurredAt: timestamp('usage_occurred_at', { withTimezone: true }),
+    evidenceOccurredAt: timestamp('evidence_occurred_at', { withTimezone: true }),
+    executionStatus: text('execution_status'),
+    meteringStatus: text('metering_status'),
+    reasoningTokens: numeric('reasoning_tokens', { precision: 78, scale: 0, mode: 'bigint' }),
+    normalizationEvidence: jsonb('normalization_evidence').$type<{
+      version: string;
+      providerRequestId?: string;
+      terminalReason?: string;
+      fields: Record<string, string>;
+    }>(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    terminalRevision: bigint('terminal_revision', { mode: 'bigint' }),
+    baseTransactionId: text('base_transaction_id'),
+    chargedAtoms: bigint('charged_atoms', { mode: 'bigint' }),
+    actualRetailAtoms: numeric('actual_retail_atoms', { precision: 78, scale: 0, mode: 'bigint' }),
+    meterItems: jsonb('meter_items').$type<
+      Array<{
+        dimension: string;
+        tier: BillingRateTier;
+        quantity: string;
+        numeratorCreditAtoms: string;
+        denominatorUnits: string;
+      }>
+    >(),
+    inputTokens: bigint('input_tokens', { mode: 'bigint' }),
+    outputTokens: bigint('output_tokens', { mode: 'bigint' }),
+    /**
+     * Estimated supplier cost in pico-USD, written once with the terminal receipt: usage priced at
+     * the pinned supplier valuation, zero for a refusal or an undispatched call, null when unpriced.
+     * Internal reporting only.
+     */
+    supplierCostPicoUsd: bigint('supplier_cost_pico_usd', { mode: 'bigint' }),
+    /** Why a terminal operation carries no supplier cost: `missing_rate`, `dimension_mismatch` or `absorbed`. */
+    supplierCostUnpricedReason: text('supplier_cost_unpriced_reason'),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.activationId, table.policyId],
+      foreignColumns: [
+        billingPolicyActivation.environment,
+        billingPolicyActivation.id,
+        billingPolicyActivation.policyId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.id, table.baseTransactionId],
+      foreignColumns: [creditTransaction.accountId, creditTransaction.operationId, creditTransaction.id],
+    }).onDelete('restrict'),
+    uniqueIndex('credit_operation_attempt').on(table.accountId, table.surface, table.attemptKey),
+    unique('credit_operation_account_id').on(table.accountId, table.id),
+    unique('credit_operation_environment_id').on(table.environment, table.id),
+    index('credit_operation_due')
+      .on(table.dueAt, table.id)
+      .where(sql`${table.customerState} = 'pending'`),
+    index('credit_operation_pending_llm_account_activity_due')
+      .on(table.accountId, table.activity, table.dueAt, table.id)
+      .where(sql`${table.customerState} = 'pending' AND ${table.category} = 'llm'`),
+    index('credit_operation_usage_page')
+      .on(table.accountId, table.category, desc(table.usageOccurredAt), desc(table.terminalRevision), desc(table.id))
+      .where(sql`${table.terminalRevision} IS NOT NULL`),
+    check(
+      'credit_operation_history',
+      sql`(${table.historyVersion} IS NULL OR (${table.historyVersion} = 1 AND ${table.admittedAt} IS NOT NULL)) AND (${table.executionStatus} IS NULL OR ${table.executionStatus} IN ('succeeded','cancelled','failed','rejected','unknown')) AND (${table.meteringStatus} IS NULL OR ${table.meteringStatus} IN ('complete','partial','unavailable')) AND (${table.reasoningTokens} IS NULL OR ${table.reasoningTokens} >= 0)`,
+    ),
+    check(
+      'credit_operation_amounts',
+      sql`${table.authorizedAtoms} >= 0 AND ${table.promoHeldAtoms} >= 0 AND ${table.planHeldAtoms} >= 0 AND ${table.purchasedHeldAtoms} >= 0 AND ${table.promoHeldAtoms}::numeric + ${table.planHeldAtoms} + ${table.purchasedHeldAtoms} = ${table.authorizedAtoms}`,
+    ),
+    check(
+      'credit_operation_states',
+      sql`${table.category} IN ('llm','zoo_engine') AND ${table.dispatchState} IN ('admitted','intent_recorded','accepted','recovery_required') AND ${table.customerState} IN ('pending','settled','released','absorbed') AND ${table.supplierState} IN ('reserved','preliminary','unresolved','final','funded_exception') AND ${table.generation} > 0`,
+    ),
+    // GI-R2: a row with a reporting history settles only after its dispatch intent; the timestamp is immutable, while
+    // a sweep claim overwrites dispatch_state. Rows from before 0021 (history_version NULL) cannot prove it either way.
+    check(
+      'credit_operation_dispatch',
+      sql`${table.historyVersion} IS NULL OR ${table.customerState} <> 'settled' OR ${table.dispatchIntentAt} IS NOT NULL`,
+    ),
+    check(
+      'credit_operation_supplier_cost',
+      sql`(${table.supplierCostPicoUsd} IS NULL OR (${table.supplierCostPicoUsd} >= 0 AND ${table.supplierCostUnpricedReason} IS NULL)) AND (${table.supplierCostUnpricedReason} IS NULL OR ${table.supplierCostUnpricedReason} IN ('missing_rate','dimension_mismatch','absorbed')) AND (${table.customerState} <> 'pending' OR (${table.supplierCostPicoUsd} IS NULL AND ${table.supplierCostUnpricedReason} IS NULL))`,
+    ),
+    check(
+      'credit_operation_terminal',
+      sql`(${table.customerState} = 'pending' AND ${table.baseTransactionId} IS NULL AND ${table.terminalRevision} IS NULL AND ${table.resolvedAt} IS NULL AND ${table.chargedAtoms} IS NULL) OR (${table.customerState} <> 'pending' AND ${table.baseTransactionId} IS NOT NULL AND ${table.terminalRevision} IS NOT NULL AND ${table.terminalRevision} > 0 AND ${table.resolvedAt} IS NOT NULL AND ${table.chargedAtoms} IS NOT NULL AND ${table.chargedAtoms} BETWEEN 0 AND ${table.authorizedAtoms})`,
+    ),
+  ],
+);
+
+/**
+ * Attempt keys an owner-scoped lookup found unadmitted and fenced (GI-R3): admission refuses a voided key, so a
+ * `not_found` answer means "never admitted, and never will be". Written and checked under the account-row lock.
+ */
+export const creditAttemptVoid = billing.table(
+  'credit_attempt_void',
+  {
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    surface: text('surface').notNull(),
+    attemptKey: text('attempt_key').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.accountId, table.surface, table.attemptKey] }),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+  ],
+);
+
+/** Content-free provider observations survive a crash before financial resolution. */
+export const billingInvocationEvidence = billing.table(
+  'billing_invocation_evidence',
+  {
+    id: text('id').primaryKey(),
+    operationId: text('operation_id')
+      .notNull()
+      .references(() => creditOperation.id, { onDelete: 'restrict' }),
+    payloadDigest: text('payload_digest').notNull(),
+    evidence: jsonb('evidence')
+      .$type<{
+        kind: 'final_usage' | 'provider_rejected' | 'absorbed_unknown' | 'authorized_exhausted';
+        usageOccurredAt?: string;
+        executionStatus?: 'succeeded' | 'cancelled' | 'failed' | 'rejected' | 'unknown';
+        reasoningTokens?: string;
+        meterItems?: Array<{ dimension: string; tier: BillingRateTier; quantity: string }>;
+        normalizationEvidence?: {
+          version: string;
+          providerRequestId?: string;
+          terminalReason?: string;
+          fields: Record<string, string>;
+        };
+      }>()
+      .notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_invocation_evidence_delivery').on(table.operationId, table.payloadDigest),
+    index('billing_invocation_evidence_operation').on(table.operationId, table.receivedAt, table.id),
+    check('billing_invocation_evidence_bound', sql`octet_length(${table.evidence}::text) <= 32768`),
+  ],
+);
+
+/** Retains the full observed overrun separately from the bounded customer charge. */
+export const billingOperationException = billing.table(
+  'billing_operation_exception',
+  {
+    id: text('id').primaryKey(),
+    operationId: text('operation_id')
+      .notNull()
+      .references(() => creditOperation.id, { onDelete: 'restrict' }),
+    kind: text('kind').notNull(),
+    sourceIdentity: text('source_identity').notNull(),
+    quantum: text('quantum').notNull(),
+    observedNumerator: text('observed_numerator').notNull(),
+    observedDenominator: numeric('observed_denominator', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    maximum: numeric('maximum', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_operation_exception_cause').on(table.operationId, table.kind, table.sourceIdentity),
+    check(
+      'billing_operation_exception_amounts',
+      sql`${table.observedNumerator} ~ '^(0|[1-9][0-9]{0,255})$' AND ${table.observedDenominator} > 0 AND ${table.maximum} >= 0`,
+    ),
+    check(
+      'billing_operation_exception_kind',
+      sql`(${table.kind} = 'customer_bound' AND ${table.quantum} = 'credit_atoms') OR (${table.kind} = 'supplier_bound' AND ${table.quantum} = 'pico_usd') OR (${table.kind} = 'input_bound' AND ${table.quantum} = 'input_tokens')`,
+    ),
+  ],
+);
+
+/**
+ * Operator pauses of one route (a base sku and its long-context sibling), appended and resumed
+ * under the owner identity only. At most one pause per route is unresumed; admission reads it and
+ * never writes it. Rows with an `operation_id` are legacy automatic pauses.
+ */
+export const billingRoutePause = billing.table(
+  'billing_route_pause',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    environment: text('environment').notNull(),
+    sku: text('sku').notNull(),
+    operationId: text('operation_id').references(() => creditOperation.id, { onDelete: 'restrict' }),
+    actor: text('actor').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp('resumed_at', { withTimezone: true }),
+    resumedBy: text('resumed_by'),
+    resumeReason: text('resume_reason'),
+  },
+  (table) => [
+    uniqueIndex('billing_route_pause_active')
+      .on(table.environment, table.sku)
+      .where(sql`${table.resumedAt} IS NULL`),
+    foreignKey({
+      columns: [table.environment, table.operationId],
+      foreignColumns: [creditOperation.environment, creditOperation.id],
+    }).onDelete('restrict'),
+  ],
+);
+
+export const billingBudgetHold = billing.table(
+  'billing_budget_hold',
+  {
+    id: text('id').primaryKey(),
+    budgetId: text('budget_id')
+      .notNull()
+      .references(() => billingBudget.id, { onDelete: 'restrict' }),
+    operationId: text('operation_id')
+      .notNull()
+      .references(() => creditOperation.id, { onDelete: 'restrict' }),
+    initialBound: numeric('initial_bound', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    remainingHeld: numeric('remaining_held', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    consumed: numeric('consumed', { precision: 78, scale: 0, mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    finalityState: text('finality_state').notNull().default('reserved'),
+  },
+  (table) => [
+    uniqueIndex('billing_hold_cause').on(table.budgetId, table.operationId),
+    check(
+      'billing_hold_bound',
+      sql`${table.initialBound} >= 0 AND ${table.remainingHeld} >= 0 AND ${table.consumed} >= 0 AND ${table.remainingHeld} + ${table.consumed} <= ${table.initialBound}`,
+    ),
+  ],
+);
+
+/** Stable financial identity, independent of the authentication record. */
+export const billingStripeCustomer = billing.table(
+  'billing_stripe_customer',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    stripeCustomerId: text('stripe_customer_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    unique('billing_stripe_customer_owner_id').on(table.accountId, table.id),
+    unique('billing_stripe_customer_slot').on(
+      table.accountId,
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+    ),
+    unique('billing_stripe_customer_remote').on(table.stripeAccountId, table.livemode, table.stripeCustomerId),
+  ],
+);
+
+/** Paid causes are registered from verified source evidence before a grant. */
+export const billingPurchase = billing.table(
+  'billing_purchase',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    sourceIdentity: text('source_identity').notNull().unique(),
+    offerSnapshot: jsonb('offer_snapshot').notNull(),
+    creditAtoms: bigint('credit_atoms', { mode: 'bigint' }).notNull(),
+    state: text('state').notNull(),
+    customerBindingId: text('customer_binding_id'),
+    requestId: text('request_id'),
+    requestHash: text('request_hash'),
+    returnPath: text('return_path'),
+    purpose: text('purpose'),
+    reloadConsentId: text('reload_consent_id'),
+    reloadConsentVersion: integer('reload_consent_version'),
+    automaticStartedAt: timestamp('automatic_started_at', { withTimezone: true }),
+    automaticGrossCeilingMinor: bigint('automatic_gross_ceiling_minor', { mode: 'bigint' }),
+    automaticSourceAcceptedAt: timestamp('automatic_source_accepted_at', { withTimezone: true }),
+    automaticTerminalOutcome: text('automatic_terminal_outcome'),
+    automaticTerminalAt: timestamp('automatic_terminal_at', { withTimezone: true }),
+    taxEvidence: jsonb('tax_evidence').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    paidEvidence: jsonb('paid_evidence').$type<PaidPaymentEvidence>(),
+    paymentIntentId: text('payment_intent_id'),
+    chargeId: text('charge_id'),
+    stripeAccountId: text('stripe_account_id'),
+    livemode: boolean('livemode'),
+    fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+    receiptId: text('receipt_id'),
+    grantedAtoms: bigint('granted_atoms', { mode: 'bigint' }),
+    fulfilledRevision: bigint('fulfilled_revision', { mode: 'bigint' }),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    unique('billing_purchase_account_id').on(table.accountId, table.id),
+    unique('billing_purchase_request').on(table.accountId, table.purpose, table.requestId),
+    unique('billing_purchase_payment').on(table.stripeAccountId, table.livemode, table.paymentIntentId),
+    unique('billing_purchase_charge').on(table.stripeAccountId, table.livemode, table.chargeId),
+    foreignKey({
+      columns: [table.accountId, table.customerBindingId],
+      foreignColumns: [billingStripeCustomer.accountId, billingStripeCustomer.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.id, table.receiptId],
+      foreignColumns: [creditTransaction.accountId, creditTransaction.purchaseId, creditTransaction.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_purchase_manual_pending')
+      .on(table.accountId)
+      .where(
+        sql`${table.purpose} IN ('manual_checkout','manual_saved_card') AND ${table.state} IN ('prepared','creating','pending','attention','paid_unfulfilled')`,
+      ),
+    foreignKey({
+      columns: [table.accountId, table.reloadConsentId],
+      foreignColumns: [billingReloadConsent.accountId, billingReloadConsent.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_purchase_automatic_pending')
+      .on(table.accountId)
+      .where(sql`${table.purpose} = 'automatic' AND ${table.automaticTerminalOutcome} IS NULL`),
+    check(
+      'billing_purchase_automatic',
+      sql`${table.purpose} IS DISTINCT FROM 'automatic' OR (${table.reloadConsentId} IS NOT NULL AND ${table.reloadConsentVersion} > 0 AND ${table.automaticStartedAt} IS NOT NULL AND ${table.automaticGrossCeilingMinor} > 0 AND (${table.automaticTerminalOutcome} IS NULL OR (${table.automaticTerminalOutcome} IN ('paid','no_charge_failure') AND ${table.automaticTerminalAt} IS NOT NULL)) AND (${table.automaticTerminalOutcome} IS DISTINCT FROM 'paid' OR ${table.automaticSourceAcceptedAt} IS NOT NULL))`,
+    ),
+    check('billing_purchase_atoms', sql`${table.creditAtoms} > 0`),
+    check(
+      'billing_purchase_lifecycle',
+      sql`${table.state} IN ('prepared','creating','pending','attention','paid','paid_unfulfilled','fulfilled','failed','canceled')`,
+    ),
+    check(
+      'billing_purchase_verified',
+      sql`${table.state} NOT IN ('paid_unfulfilled','fulfilled') OR (${table.paidEvidence} IS NOT NULL AND ${table.paidAt} IS NOT NULL AND ${table.paymentIntentId} IS NOT NULL AND ${table.chargeId} IS NOT NULL AND ${table.customerBindingId} IS NOT NULL)`,
+    ),
+    check(
+      'billing_purchase_owned',
+      sql`${table.purpose} IS NULL OR (${table.purpose} IN ('manual_checkout','manual_saved_card','automatic') AND ${table.customerBindingId} IS NOT NULL AND ${table.requestId} IS NOT NULL AND ${table.requestHash} IS NOT NULL AND ${table.stripeAccountId} IS NOT NULL AND ${table.livemode} IS NOT NULL)`,
+    ),
+    check(
+      'billing_purchase_receipt',
+      sql`(${table.state} <> 'fulfilled' AND ${table.receiptId} IS NULL AND ${table.grantedAtoms} IS NULL AND ${table.fulfilledRevision} IS NULL AND ${table.fulfilledAt} IS NULL) OR (${table.state} = 'fulfilled' AND ${table.receiptId} IS NOT NULL AND ${table.grantedAtoms} IS NOT NULL AND ${table.grantedAtoms} BETWEEN 0 AND ${table.creditAtoms} AND ${table.fulfilledRevision} IS NOT NULL AND ${table.fulfilledRevision} > 0 AND ${table.fulfilledAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const billingPeriod = billing.table(
+  'billing_period',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    sourceIdentity: text('source_identity').notNull().unique(),
+    creditAtoms: bigint('credit_atoms', { mode: 'bigint' }).notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    subscriptionId: text('subscription_id'),
+    invoiceId: text('invoice_id').unique(),
+    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>(),
+    paidEvidence: jsonb('paid_evidence').$type<PaidPaymentEvidence>(),
+    state: text('state').notNull().default('verified'),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    receiptId: text('receipt_id'),
+    grantedAtoms: bigint('granted_atoms', { mode: 'bigint' }),
+    fulfilledRevision: bigint('fulfilled_revision', { mode: 'bigint' }),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    unique('billing_period_account_id').on(table.accountId, table.id),
+    unique('billing_period_entitlement').on(table.subscriptionId, table.periodStart, table.periodEnd),
+    foreignKey({
+      columns: [table.accountId, table.subscriptionId],
+      foreignColumns: [subscription.accountId, subscription.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.id, table.receiptId],
+      foreignColumns: [creditTransaction.accountId, creditTransaction.periodId, creditTransaction.id],
+    }).onDelete('restrict'),
+    check('billing_period_range', sql`${table.creditAtoms} > 0 AND ${table.periodEnd} > ${table.periodStart}`),
+    check(
+      'billing_period_verified',
+      sql`${table.subscriptionId} IS NULL OR (${table.offerSnapshot} IS NOT NULL AND ${table.paidEvidence} IS NOT NULL AND ${table.paidAt} IS NOT NULL AND ${table.invoiceId} IS NOT NULL)`,
+    ),
+    check(
+      'billing_period_receipt',
+      sql`(${table.state} = 'verified' AND ${table.receiptId} IS NULL AND ${table.grantedAtoms} IS NULL AND ${table.fulfilledRevision} IS NULL) OR (${table.state} = 'fulfilled' AND ${table.receiptId} IS NOT NULL AND ${table.grantedAtoms} IS NOT NULL AND ${table.grantedAtoms} BETWEEN 0 AND ${table.creditAtoms} AND ${table.fulfilledRevision} IS NOT NULL AND ${table.fulfilledRevision} > 0)`,
+    ),
+  ],
+);
+
+/** Immutable external request; dispatch intent can authorize exactly one POST. */
+export const billingProviderLeg = billing.table(
+  'billing_provider_leg',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    customerBindingId: text('customer_binding_id').notNull(),
+    purchaseId: text('purchase_id'),
+    subscriptionId: text('subscription_id'),
+    reloadConsentId: text('reload_consent_id'),
+    subscriptionOfferId: text('subscription_offer_id'),
+    closureId: text('closure_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    expirationRequestedAt: timestamp('expiration_requested_at', { withTimezone: true }),
+    kind: text('kind').notNull(),
+    requestId: text('request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    request: jsonb('request').$type<Record<string, unknown>>().notNull(),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    dispatchStartedAt: timestamp('dispatch_started_at', { withTimezone: true }),
+    providerObjectId: text('provider_object_id'),
+    redirectUrl: text('redirect_url'),
+    state: text('state').notNull().default('prepared'),
+    cancellationRequestedAt: timestamp('cancellation_requested_at', { withTimezone: true }),
+    cancellationConfirmedAt: timestamp('cancellation_confirmed_at', { withTimezone: true }),
+    noChargeEvidence: jsonb('no_charge_evidence').$type<NoChargeEvidence>(),
+    terminalEvidence: jsonb('terminal_evidence').$type<
+      | CheckoutExpiryEvidence
+      | SubscriptionCancellationEvidence
+      | SubscriptionCheckoutExpiryEvidence
+      | PaymentCheckoutExpiryEvidence
+      | RequestRejectedEvidence
+    >(),
+    errorCode: text('error_code'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.customerBindingId],
+      foreignColumns: [billingStripeCustomer.accountId, billingStripeCustomer.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.purchaseId],
+      foreignColumns: [billingPurchase.accountId, billingPurchase.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.subscriptionId],
+      foreignColumns: [subscription.accountId, subscription.id],
+    }).onDelete('restrict'),
+    unique('billing_provider_request').on(table.accountId, table.kind, table.requestId),
+    uniqueIndex('billing_provider_object')
+      .on(table.customerBindingId, table.kind, table.providerObjectId)
+      .where(sql`${table.kind} NOT IN ('subscription_update','subscription_cancel')`),
+    foreignKey({
+      columns: [table.accountId, table.reloadConsentId],
+      foreignColumns: [billingReloadConsent.accountId, billingReloadConsent.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.subscriptionOfferId],
+      foreignColumns: [billingSubscriptionOffer.accountId, billingSubscriptionOffer.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.closureId],
+      foreignColumns: [billingAccountClosure.accountId, billingAccountClosure.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_provider_active_purchase')
+      .on(table.purchaseId)
+      .where(sql`${table.state} <> 'no_charge' AND ${table.kind} IN ('payment_intent','checkout_payment')`),
+    check('billing_provider_redirect_bound', sql`${table.redirectUrl} IS NULL OR length(${table.redirectUrl}) <= 4096`),
+    check(
+      'billing_provider_leg_kind',
+      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent','tax_transaction') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL)`,
+    ),
+    check(
+      'billing_provider_no_charge',
+      sql`${table.state} <> 'no_charge' OR ${table.dispatchStartedAt} IS NULL OR ((${table.kind} = 'payment_intent' AND (${table.noChargeEvidence} IS NOT NULL OR ${table.terminalEvidence}->>'version' = 'stripe-request-rejected-v1') OR ${table.kind} = 'subscription_cancel' AND ${table.terminalEvidence} IS NOT NULL) AND ${table.cancellationConfirmedAt} IS NOT NULL)`,
+    ),
+    check(
+      'billing_provider_expired',
+      sql`${table.state} <> 'expired' OR (${table.kind} IN ('checkout_setup','checkout_subscription','checkout_payment') AND ${table.terminalEvidence} IS NOT NULL AND ${table.expirationRequestedAt} IS NOT NULL)`,
+    ),
+    check('billing_provider_known', sql`${table.state} <> 'known' OR ${table.providerObjectId} IS NOT NULL`),
+    check(
+      'billing_provider_dispatch',
+      sql`(${table.state} = 'prepared' AND ${table.dispatchStartedAt} IS NULL) OR ${table.state} = 'no_charge' OR (${table.state} IN ('dispatched','known','attention','expired') AND ${table.dispatchStartedAt} IS NOT NULL)`,
+    ),
+    check(
+      'billing_provider_leg_state',
+      sql`${table.state} IN ('prepared','dispatched','known','attention','no_charge','expired') AND (${table.cancellationConfirmedAt} IS NULL OR ${table.cancellationRequestedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Signed delivery evidence is retained independently of reconciliation success. */
+export const stripeEventInbox = billing.table(
+  'stripe_event_inbox',
+  {
+    id: text('id').primaryKey(),
+    eventId: text('event_id').notNull(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    apiVersion: text('api_version').notNull(),
+    eventType: text('event_type').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    eventCreatedAt: timestamp('event_created_at', { withTimezone: true }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    payloadDigest: text('payload_digest').notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+    state: text('state').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    errorCode: text('error_code'),
+    claimGeneration: bigint('claim_generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  },
+  (table) => [
+    unique('stripe_event_delivery').on(table.environment, table.stripeAccountId, table.livemode, table.eventId),
+    index('stripe_event_due')
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.state} <> 'done'`),
+    check(
+      'stripe_event_state',
+      sql`${table.state} IN ('pending','processing','done') AND ${table.attempts} >= 0 AND ${table.claimGeneration} >= 0`,
+    ),
+  ],
+);
+
+/** Local generation fence serializes a source object's fetch and application. */
+export const billingStripeSource = billing.table(
+  'billing_stripe_source',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    state: text('state').notNull().default('pending'),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    errorCode: text('error_code'),
+  },
+  (table) => [
+    unique('billing_stripe_source_identity').on(
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+      table.sourceType,
+      table.sourceId,
+    ),
+    index('billing_stripe_source_due')
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.state} <> 'done'`),
+    check(
+      'billing_stripe_source_state',
+      sql`${table.state} IN ('pending','processing','done') AND ${table.generation} >= 0`,
+    ),
+  ],
+);
+
+export const billingPromotionIssuance = billing.table(
+  'billing_promotion_issuance',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    promotionProgramId: text('promotion_program_id').notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    budgetId: text('budget_id')
+      .notNull()
+      .references(() => billingBudget.id, { onDelete: 'restrict' }),
+    atoms: bigint('atoms', { mode: 'bigint' }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.budgetId],
+      foreignColumns: [billingBudget.environment, billingBudget.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_promotion_entitlement').on(
+      table.accountId,
+      table.promotionProgramId,
+      table.periodStart,
+      table.periodEnd,
+    ),
+    unique('billing_promotion_account_id').on(table.accountId, table.id),
+    check('billing_promotion_amount', sql`${table.atoms} > 0 AND ${table.periodEnd} > ${table.periodStart}`),
+  ],
+);
+
+export const billingReversalCase = billing.table(
+  'billing_reversal_case',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    purchaseId: text('purchase_id'),
+    periodId: text('period_id'),
+    originalAtoms: bigint('original_atoms', { mode: 'bigint' }).notNull(),
+    source: text('source').notNull(),
+    environment: text('environment'),
+    stripeAccountId: text('stripe_account_id'),
+    livemode: boolean('livemode'),
+    currency: text('currency'),
+    customerBindingId: text('customer_binding_id'),
+    paymentIntentId: text('payment_intent_id'),
+    chargeId: text('charge_id'),
+    canonicalReceiptId: text('canonical_receipt_id'),
+    originalPrincipalMinor: bigint('original_principal_minor', { mode: 'bigint' }),
+    originalTaxMinor: bigint('original_tax_minor', { mode: 'bigint' }),
+    originalGrossMinor: bigint('original_gross_minor', { mode: 'bigint' }),
+    initialIssuedAtoms: bigint('initial_issued_atoms', { mode: 'bigint' }),
+    withheldAtoms: bigint('withheld_atoms', { mode: 'bigint' }),
+    deferredIssuedAtoms: bigint('deferred_issued_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    cumulativePrincipalLossMinor: bigint('cumulative_principal_loss_minor', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    cumulativeTaxLossMinor: bigint('cumulative_tax_loss_minor', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    cumulativeGrossLossMinor: bigint('cumulative_gross_loss_minor', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    projectionDigest: text('projection_digest'),
+    projectionSourceId: text('projection_source_id'),
+    projectionSourceGeneration: bigint('projection_source_generation', { mode: 'bigint' }),
+    projectionObservedAt: timestamp('projection_observed_at', { withTimezone: true }),
+    projectionEvidence: jsonb('projection_evidence').$type<Record<string, unknown>>(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    netAppliedAtoms: bigint('net_applied_atoms', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    unique('billing_reversal_account_id').on(table.accountId, table.id),
+    unique('billing_reversal_charge').on(table.stripeAccountId, table.livemode, table.chargeId),
+    unique('billing_reversal_payment').on(table.stripeAccountId, table.livemode, table.paymentIntentId),
+    check(
+      'billing_reversal_issuance',
+      sql`${table.deferredIssuedAtoms} >= 0 AND (${table.initialIssuedAtoms} IS NULL OR (${table.initialIssuedAtoms} >= 0 AND ${table.withheldAtoms} >= 0 AND ${table.initialIssuedAtoms} + ${table.withheldAtoms} = ${table.originalAtoms} AND ${table.deferredIssuedAtoms} <= ${table.withheldAtoms}))`,
+    ),
+    check(
+      'billing_reversal_cash',
+      sql`(${table.originalPrincipalMinor} IS NULL AND ${table.initialIssuedAtoms} IS NULL) OR (${table.originalPrincipalMinor} IS NOT NULL AND ${table.originalTaxMinor} IS NOT NULL AND ${table.originalGrossMinor} IS NOT NULL AND ${table.environment} IS NOT NULL AND ${table.customerBindingId} IS NOT NULL AND ${table.canonicalReceiptId} IS NOT NULL AND ${table.projectionDigest} IS NOT NULL AND ${table.projectionSourceId} IS NOT NULL AND ${table.projectionSourceGeneration} IS NOT NULL AND ${table.projectionObservedAt} IS NOT NULL AND ${table.projectionEvidence} IS NOT NULL AND ${table.originalPrincipalMinor} > 0 AND ${table.originalTaxMinor} >= 0 AND ${table.originalGrossMinor}::numeric = ${table.originalPrincipalMinor}::numeric + ${table.originalTaxMinor} AND ${table.cumulativePrincipalLossMinor} BETWEEN 0 AND ${table.originalPrincipalMinor} AND ${table.cumulativeTaxLossMinor} BETWEEN 0 AND ${table.originalTaxMinor} AND ${table.cumulativeGrossLossMinor} BETWEEN 0 AND ${table.originalGrossMinor} AND ${table.initialIssuedAtoms} IS NOT NULL AND ${table.withheldAtoms} IS NOT NULL AND ${table.currency} IS NOT NULL AND ${table.stripeAccountId} IS NOT NULL AND ${table.livemode} IS NOT NULL AND ${table.chargeId} IS NOT NULL AND ${table.paymentIntentId} IS NOT NULL)`,
+    ),
+    uniqueIndex('billing_reversal_purchase').on(table.purchaseId),
+    uniqueIndex('billing_reversal_period').on(table.periodId),
+    foreignKey({
+      columns: [table.accountId, table.purchaseId],
+      foreignColumns: [billingPurchase.accountId, billingPurchase.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.periodId],
+      foreignColumns: [billingPeriod.accountId, billingPeriod.id],
+    }).onDelete('restrict'),
+    check(
+      'billing_reversal_bounds',
+      sql`${table.originalAtoms} >= 0 AND ${table.netAppliedAtoms} BETWEEN 0 AND coalesce(${table.initialIssuedAtoms},${table.originalAtoms}) + ${table.deferredIssuedAtoms} AND num_nonnulls(${table.purchaseId}, ${table.periodId}) = 1 AND ${table.source} IN ('plan','purchased')`,
+    ),
+  ],
+);
+
+export const creditTransaction = billing.table(
+  'credit_transaction',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    revision: bigint('revision', { mode: 'bigint' }).notNull(),
+    kind: text('kind').notNull(),
+    operationId: text('operation_id'),
+    purchaseId: text('purchase_id'),
+    periodId: text('period_id'),
+    stripeAccountId: text('stripe_account_id'),
+    livemode: boolean('livemode'),
+    paymentIntentId: text('payment_intent_id'),
+    chargeId: text('charge_id'),
+    reversalCaseId: text('reversal_case_id'),
+    promotionIssuanceId: text('promotion_issuance_id'),
+    correctionOf: text('correction_of'),
+    cashEvidence: jsonb('cash_evidence').$type<Record<string, unknown>>(),
+    promoDeltaAtoms: bigint('promo_delta_atoms', { mode: 'bigint' }).notNull(),
+    planDeltaAtoms: bigint('plan_delta_atoms', { mode: 'bigint' }).notNull(),
+    purchasedDeltaAtoms: bigint('purchased_delta_atoms', { mode: 'bigint' }).notNull(),
+    debtDeltaAtoms: bigint('debt_delta_atoms', { mode: 'bigint' }).notNull(),
+    accountDeltaAtoms: bigint('account_delta_atoms', { mode: 'bigint' }).notNull(),
+    balanceAfterAtoms: bigint('balance_after_atoms', { mode: 'bigint' }).notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    foreignKey({
+      columns: [table.accountId, table.correctionOf],
+      foreignColumns: [table.accountId, table.id],
+    }).onDelete('restrict'),
+    unique('credit_transaction_operation_id').on(table.accountId, table.operationId, table.id),
+    uniqueIndex('credit_transaction_payment_intent').on(table.stripeAccountId, table.livemode, table.paymentIntentId),
+    uniqueIndex('credit_transaction_charge').on(table.stripeAccountId, table.livemode, table.chargeId),
+    check(
+      'credit_transaction_collected_source',
+      sql`num_nonnulls(${table.stripeAccountId}, ${table.livemode}, ${table.paymentIntentId}, ${table.chargeId}) = 0 OR (${table.kind} IN ('purchase_grant', 'period_grant') AND num_nonnulls(${table.stripeAccountId}, ${table.livemode}, ${table.paymentIntentId}, ${table.chargeId}) = 4)`,
+    ),
+    uniqueIndex('credit_transaction_revision').on(table.accountId, table.revision),
+    index('credit_transaction_corrections')
+      .on(table.accountId, table.correctionOf, table.revision, table.id)
+      .where(sql`${table.kind} = 'compensation'`),
+    unique('credit_transaction_account_id').on(table.accountId, table.id),
+    unique('credit_transaction_purchase_receipt').on(table.accountId, table.purchaseId, table.id),
+    unique('credit_transaction_period_receipt').on(table.accountId, table.periodId, table.id),
+    uniqueIndex('credit_transaction_resolution')
+      .on(table.operationId)
+      .where(sql`${table.kind} = 'operation_resolution'`),
+    uniqueIndex('credit_transaction_purchase')
+      .on(table.purchaseId)
+      .where(sql`${table.kind} = 'purchase_grant'`),
+    uniqueIndex('credit_transaction_period')
+      .on(table.periodId)
+      .where(sql`${table.kind} = 'period_grant'`),
+    uniqueIndex('credit_transaction_promotion').on(table.promotionIssuanceId),
+    foreignKey({
+      columns: [table.accountId, table.operationId],
+      foreignColumns: [creditOperation.accountId, creditOperation.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.purchaseId],
+      foreignColumns: [billingPurchase.accountId, billingPurchase.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.periodId],
+      foreignColumns: [billingPeriod.accountId, billingPeriod.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.reversalCaseId],
+      foreignColumns: [billingReversalCase.accountId, billingReversalCase.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.accountId, table.promotionIssuanceId],
+      foreignColumns: [billingPromotionIssuance.accountId, billingPromotionIssuance.id],
+    }).onDelete('restrict'),
+    check(
+      'credit_transaction_sum',
+      sql`${table.accountDeltaAtoms}::numeric = ${table.promoDeltaAtoms}::numeric + ${table.planDeltaAtoms} + ${table.purchasedDeltaAtoms} - ${table.debtDeltaAtoms} AND ${table.revision} > 0`,
+    ),
+    check(
+      'credit_transaction_cause',
+      sql`(${table.kind} = 'operation_resolution' AND ${table.operationId} IS NOT NULL AND num_nonnulls(${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'purchase_grant' AND ${table.purchaseId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'period_grant' AND ${table.periodId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'promotion_grant' AND ${table.promotionIssuanceId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.correctionOf}) = 0) OR (${table.kind} = 'reversal' AND ${table.reversalCaseId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'deferred_grant' AND ${table.reversalCaseId} IS NOT NULL AND ${table.correctionOf} IS NOT NULL AND ${table.cashEvidence} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.promotionIssuanceId}) = 0) OR (${table.kind} = 'compensation' AND ${table.correctionOf} IS NOT NULL AND num_nonnulls(${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId}) = 0) OR (${table.kind} = 'plan_expiry' AND ${table.periodId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0)`,
+    ),
+  ],
+);
+
+/** Retired supplier store: retained for historical export, never written by current admission. */
+export const supplierCostEvidence = billing.table(
+  'supplier_cost_evidence',
+  {
+    id: text('id').primaryKey(),
+    operationId: text('operation_id').references(() => creditOperation.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    provider: text('provider').notNull(),
+    credentialAccount: text('credential_account').notNull(),
+    sourceObjectId: text('source_object_id').notNull(),
+    sourceRevision: text('source_revision').notNull(),
+    payloadDigest: text('payload_digest').notNull(),
+    numerator: numeric('numerator', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    denominator: numeric('denominator', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    currency: text('currency').notNull(),
+    completeness: text('completeness').notNull(),
+    finality: text('finality').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('supplier_evidence_source').on(
+      table.environment,
+      table.provider,
+      table.credentialAccount,
+      table.sourceObjectId,
+      table.sourceRevision,
+    ),
+    check(
+      'supplier_evidence_values',
+      sql`${table.numerator} >= 0 AND ${table.denominator} > 0 AND ${table.completeness} IN ('partial','complete') AND ${table.finality} IN ('preliminary','final')`,
+    ),
+  ],
+);
+
+/** Versioned customer permission; accepted terms never change with current policy. */
+export const billingReloadConsent = billing.table(
+  'billing_reload_consent',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    version: integer('version').notNull(),
+    requestId: text('request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    returnPath: text('return_path').notNull(),
+    customerBindingId: text('customer_binding_id').notNull(),
+    policyId: text('policy_id').notNull(),
+    termsDigest: text('terms_digest').notNull(),
+    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>().notNull(),
+    taxEvidence: jsonb('tax_evidence').$type<Record<string, unknown>>().notNull(),
+    currency: text('currency').notNull(),
+    principalMinor: bigint('principal_minor', { mode: 'bigint' }).notNull(),
+    quotedTaxMinor: bigint('quoted_tax_minor', { mode: 'bigint' }).notNull(),
+    grossCeilingMinor: bigint('gross_ceiling_minor', { mode: 'bigint' }).notNull(),
+    thresholdAtoms: bigint('threshold_atoms', { mode: 'bigint' }).notNull(),
+    monthlyGrossCapMinor: bigint('monthly_gross_cap_minor', { mode: 'bigint' }).notNull(),
+    minimumCadenceSeconds: integer('minimum_cadence_seconds').notNull(),
+    terminalFailureLimit: integer('terminal_failure_limit').notNull(),
+    checkoutSessionId: text('checkout_session_id'),
+    setupIntentId: text('setup_intent_id'),
+    paymentMethodId: text('payment_method_id'),
+    paymentMethod: jsonb('payment_method').$type<PaymentOfferSnapshot['paymentMethod']>(),
+    consentedAt: timestamp('consented_at', { withTimezone: true }),
+    state: text('state').notNull().default('pending_setup'),
+    consecutiveTerminalFailures: integer('consecutive_terminal_failures').notNull().default(0),
+    lastAutomaticStartedAt: timestamp('last_automatic_started_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_reload_consent_owner').on(table.accountId, table.id),
+    unique('billing_reload_consent_version').on(table.accountId, table.version),
+    unique('billing_reload_consent_request').on(table.accountId, table.requestId),
+    foreignKey({
+      columns: [table.accountId, table.customerBindingId],
+      foreignColumns: [billingStripeCustomer.accountId, billingStripeCustomer.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    uniqueIndex('billing_reload_consent_active')
+      .on(table.accountId)
+      .where(sql`${table.state} IN ('pending_setup','enabled')`),
+    check(
+      'billing_reload_consent_limits',
+      sql`${table.version} > 0 AND ${table.principalMinor} > 0 AND ${table.quotedTaxMinor} >= 0 AND ${table.grossCeilingMinor}::numeric >= ${table.principalMinor}::numeric + ${table.quotedTaxMinor} AND ${table.monthlyGrossCapMinor} >= ${table.grossCeilingMinor} AND ${table.thresholdAtoms} > 0 AND ${table.minimumCadenceSeconds} >= 3600 AND ${table.terminalFailureLimit} BETWEEN 1 AND 2 AND ${table.consecutiveTerminalFailures} >= 0 AND ${table.currency} = 'usd'`,
+    ),
+    check(
+      'billing_reload_consent_state',
+      sql`${table.state} IN ('pending_setup','enabled','paused_terms','disabled_failures','revoked') AND (${table.state} <> 'enabled' OR (${table.checkoutSessionId} IS NOT NULL AND ${table.setupIntentId} IS NOT NULL AND ${table.paymentMethodId} IS NOT NULL AND ${table.paymentMethod} IS NOT NULL AND ${table.consentedAt} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** A recent funded-work signal is not authority to create a payment. */
+export const billingReloadWork = billing.table(
+  'billing_reload_work',
+  {
+    accountId: text('account_id')
+      .primaryKey()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    reasonKind: text('reason_kind').notNull(),
+    reasonOperationId: text('reason_operation_id'),
+    reasonAttemptKey: text('reason_attempt_key'),
+    reasonRequestDigest: text('reason_request_digest'),
+    observedAccountRevision: bigint('observed_account_revision', { mode: 'bigint' }).notNull(),
+    state: text('state').notNull().default('pending'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    index('billing_reload_work_due')
+      .on(table.nextAttemptAt, table.accountId)
+      .where(sql`${table.state} <> 'done'`),
+    check(
+      'billing_reload_work_state',
+      sql`${table.state} IN ('pending','processing','done') AND ${table.generation} >= 0 AND ${table.observedAccountRevision} >= 0 AND ${table.reasonKind} IN ('admission','settlement','insufficient_funds')`,
+    ),
+  ],
+);
+
+/** Future disclosed renewal terms; the initial subscription snapshot stays historical. */
+export const billingSubscriptionOffer = billing.table(
+  'billing_subscription_offer',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    subscriptionId: text('subscription_id').notNull(),
+    effectivePeriodStart: timestamp('effective_period_start', { withTimezone: true }).notNull(),
+    disclosedAt: timestamp('disclosed_at', { withTimezone: true }).notNull(),
+    policyId: text('policy_id').notNull(),
+    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>().notNull(),
+    termsDigest: text('terms_digest').notNull(),
+    stripePriceId: text('stripe_price_id').notNull(),
+    stripeProductId: text('stripe_product_id').notNull(),
+    stripeSubscriptionItemId: text('stripe_subscription_item_id').notNull(),
+    stripeScheduleId: text('stripe_schedule_id'),
+    sourceEvidence: jsonb('source_evidence').$type<Record<string, unknown>>().notNull(),
+    scheduleEvidence: jsonb('schedule_evidence').$type<Record<string, unknown>>(),
+    state: text('state').notNull().default('prepared'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_subscription_offer_owner').on(table.accountId, table.id),
+    unique('billing_subscription_offer_period').on(table.subscriptionId, table.effectivePeriodStart),
+    foreignKey({
+      columns: [table.accountId, table.subscriptionId],
+      foreignColumns: [subscription.accountId, subscription.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    check(
+      'billing_subscription_offer_state',
+      sql`${table.state} IN ('prepared','dispatched','confirmed','attention') AND ${table.disclosedAt} <= ${table.effectivePeriodStart} AND (${table.state} <> 'confirmed' OR (${table.stripeScheduleId} IS NOT NULL AND ${table.scheduleEvidence} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Minimal retained closure identity, including unknown external creation obligations. */
+export const billingAccountClosure = billing.table(
+  'billing_account_closure',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull().unique(),
+    bindingId: text('binding_id')
+      .notNull()
+      .references(() => billingOwnerBinding.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    requestId: text('request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    state: text('state').notNull().default('closing'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    bindingRevokedAt: timestamp('binding_revoked_at', { withTimezone: true }).notNull(),
+    obligationsFrozenAt: timestamp('obligations_frozen_at', { withTimezone: true }).notNull(),
+    authDeletedAt: timestamp('auth_deleted_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    attentionCode: text('attention_code'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('billing_account_closure_generation', sql`${table.generation} >= 0 AND ${table.attemptCount} >= 0`),
+    index('billing_account_closure_due')
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.state} IN ('closing','cancellation_pending','attention')`),
+    unique('billing_account_closure_owner').on(table.accountId, table.id),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
+    check(
+      'billing_account_closure_state',
+      sql`${table.state} IN ('closing','cancellation_pending','ready_for_auth_deletion','closed','attention') AND (${table.state} <> 'closed' OR ${table.closedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Complete independent period inventory; a page limit cannot claim coverage. */
+export const billingCashScan = billing.table(
+  'billing_cash_scan',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    currency: text('currency').notNull(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    windowEnd: timestamp('window_end', { withTimezone: true }).notNull(),
+    lookbackStart: timestamp('lookback_start', { withTimezone: true }).notNull(),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }).notNull().defaultNow(),
+    balanceCursor: text('balance_cursor'),
+    paymentIntentCursor: text('payment_intent_cursor'),
+    chargeCursor: text('charge_cursor'),
+    refundCursor: text('refund_cursor'),
+    balanceDone: boolean('balance_done').notNull().default(false),
+    paymentIntentDone: boolean('payment_intent_done').notNull().default(false),
+    chargeDone: boolean('charge_done').notNull().default(false),
+    refundDone: boolean('refund_done').notNull().default(false),
+    journalCursor: text('journal_cursor'),
+    factCursor: text('fact_cursor'),
+    journalDone: boolean('journal_done').notNull().default(false),
+    factDone: boolean('fact_done').notNull().default(false),
+    state: text('state').notNull().default('pending'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    errorCode: text('error_code'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('billing_cash_scan_window').on(
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+      table.currency,
+      table.windowStart,
+      table.windowEnd,
+    ),
+    index('billing_cash_scan_due')
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.state} <> 'complete'`),
+    check(
+      'billing_cash_scan_bounds',
+      sql`${table.lookbackStart} <= ${table.windowStart} AND ${table.windowStart} < ${table.windowEnd} AND ${table.generation} >= 0 AND ${table.attempts} >= 0`,
+    ),
+    check(
+      'billing_cash_scan_state',
+      sql`${table.state} IN ('pending','running','incomplete','complete','attention') AND (${table.state} <> 'complete' OR (${table.balanceDone} AND ${table.paymentIntentDone} AND ${table.chargeDone} AND ${table.refundDone} AND ${table.journalDone} AND ${table.factDone} AND ${table.completedAt} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Immutable external observations survive internally consistent missing ledger effects. */
+export const billingCashFact = billing.table(
+  'billing_cash_fact',
+  {
+    id: text('id').primaryKey(),
+    scanId: text('scan_id').references(() => billingCashScan.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceCreatedAt: timestamp('source_created_at', { withTimezone: true }).notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+    currency: text('currency'),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }),
+    feeMinor: bigint('fee_minor', { mode: 'bigint' }),
+    netMinor: bigint('net_minor', { mode: 'bigint' }),
+    customerId: text('customer_id'),
+    paymentIntentId: text('payment_intent_id'),
+    chargeId: text('charge_id'),
+    refundId: text('refund_id'),
+    disputeId: text('dispute_id'),
+    balanceTransactionId: text('balance_transaction_id'),
+    objectDigest: text('object_digest').notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+  },
+  (table) => [
+    unique('billing_cash_fact_identity').on(
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+      table.sourceType,
+      table.sourceId,
+      table.objectDigest,
+    ),
+    index('billing_cash_fact_source').on(table.stripeAccountId, table.livemode, table.sourceType, table.sourceId),
+  ],
+);
+
+/** Coverage links reuse immutable source facts across overlapping independent scans. */
+export const billingCashScanFact = billing.table(
+  'billing_cash_scan_fact',
+  {
+    scanId: text('scan_id')
+      .notNull()
+      .references(() => billingCashScan.id, { onDelete: 'restrict' }),
+    factId: text('fact_id')
+      .notNull()
+      .references(() => billingCashFact.id, { onDelete: 'restrict' }),
+  },
+  (table) => [primaryKey({ columns: [table.scanId, table.factId] })],
+);
+
+/** Typed operational exceptions; no cash or credit authority follows from opening a case. */
+export const billingFinancialCase = billing.table(
+  'billing_financial_case',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    kind: text('kind').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    accountId: text('account_id').references(() => creditAccount.id, { onDelete: 'restrict' }),
+    sourceType: text('source_type'),
+    sourceId: text('source_id'),
+    currency: text('currency'),
+    knownAmountMinor: bigint('known_amount_minor', { mode: 'bigint' }),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+    owner: text('owner').notNull(),
+    nextStep: text('next_step').notNull(),
+    state: text('state').notNull().default('open'),
+    firstEffectiveAt: timestamp('first_effective_at', { withTimezone: true }).notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolutionEvidence: jsonb('resolution_evidence').$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    unique('billing_financial_case_identity').on(
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+      table.kind,
+      table.dedupeKey,
+    ),
+    check(
+      'billing_financial_case_state',
+      sql`${table.state} IN ('open','attention','resolved') AND (${table.state} <> 'resolved' OR (${table.resolvedAt} IS NOT NULL AND ${table.resolutionEvidence} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/**
+ * Durable account-journal reconciliation cursors, one row per financial scope.
+ *
+ * The incremental keyset covers journal change markers and the sweep keyset covers accounts;
+ * both advance only inside the transaction that commits the batch's own case effects, so a
+ * crash re-reads the same batch instead of skipping it.
+ */
+export const billingJournalCheckpoint = billing.table(
+  'billing_journal_checkpoint',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    /** Journal change marker `(occurred_at, id)` verified by the incremental pass. */
+    incrementalOccurredAt: timestamp('incremental_occurred_at', { withTimezone: true }),
+    incrementalTransactionId: text('incremental_transaction_id'),
+    /** Keyset over `credit_account.id`; null restarts the bounded full sweep. */
+    sweepAccountId: text('sweep_account_id'),
+    sweepCycles: bigint('sweep_cycles', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    lastCompletedAt: timestamp('last_completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('billing_journal_checkpoint_scope').on(table.environment, table.stripeAccountId, table.livemode),
+    check(
+      'billing_journal_checkpoint_bounds',
+      sql`${table.generation} >= 0 AND ${table.sweepCycles} >= 0 AND num_nonnulls(${table.incrementalOccurredAt}, ${table.incrementalTransactionId}) <> 1`,
+    ),
+  ],
+);
+
+/** Complete tax observations form a source-fenced immutable correction chain. */
+export const billingTaxFact = billing.table(
+  'billing_tax_fact',
+  {
+    id: text('id').primaryKey(),
+    environment: text('environment').notNull(),
+    stripeAccountId: text('stripe_account_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    accountId: text('account_id').references(() => creditAccount.id, { onDelete: 'restrict' }),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceClaimId: text('source_claim_id')
+      .notNull()
+      .references(() => billingStripeSource.id, { onDelete: 'restrict' }),
+    sourceGeneration: bigint('source_generation', { mode: 'bigint' }).notNull(),
+    sourceDigest: text('source_digest').notNull(),
+    supersedesFactId: text('supersedes_fact_id').references((): AnyPgColumn => billingTaxFact.id, {
+      onDelete: 'restrict',
+    }),
+    effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+    classification: text('classification').notNull(),
+    reportingRevenueMinor: bigint('reporting_revenue_minor', { mode: 'bigint' }),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+  },
+  (table) => [
+    unique('billing_tax_fact_source').on(
+      table.environment,
+      table.stripeAccountId,
+      table.livemode,
+      table.sourceType,
+      table.sourceId,
+      table.sourceDigest,
+    ),
+    unique('billing_tax_fact_successor').on(table.supersedesFactId),
+    index('billing_tax_fact_monitor').on(table.environment, table.stripeAccountId, table.livemode, table.effectiveAt),
+    check(
+      'billing_tax_fact_classification',
+      sql`${table.classification} IN ('eu_b2c','uk_b2c','enterprise_vat_invoice','outside_monitor','unknown') AND ${table.sourceGeneration} > 0 AND (${table.reportingRevenueMinor} IS NULL OR ${table.reportingRevenueMinor} >= 0) AND (${table.classification} <> 'unknown' OR ${table.reportingRevenueMinor} IS NULL)`,
+    ),
+  ],
+);
+
+/** Deduplicated recovery delivery remains pending until transport confirms it. */
+export const billingRecoveryNotice = billing.table(
+  'billing_recovery_notice',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => creditAccount.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    kind: text('kind').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    subscriptionId: text('subscription_id'),
+    purchaseId: text('purchase_id'),
+    invoiceId: text('invoice_id'),
+    consentId: text('consent_id'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    state: text('state').notNull().default('pending'),
+    generation: bigint('generation', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    errorCode: text('error_code'),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    deliveryReceipt: text('delivery_receipt'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('billing_recovery_notice_identity').on(table.environment, table.dedupeKey),
+    index('billing_recovery_notice_due')
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.state} <> 'delivered'`),
+    check(
+      'billing_recovery_notice_state',
+      sql`${table.kind} IN ('renewal_failed','authentication_required','consent_disabled') AND ${table.state} IN ('pending','processing','delivered') AND ${table.generation} >= 0 AND ${table.attemptCount} >= 0 AND (${table.state} <> 'delivered' OR (${table.deliveredAt} IS NOT NULL AND ${table.deliveryReceipt} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/* oxlint-enable @typescript-eslint/no-unsafe-return -- see file-leading disable */

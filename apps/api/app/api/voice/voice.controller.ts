@@ -16,9 +16,8 @@ import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { dictationMaxAudioBytes } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { OptionalAuth, OptionalUser, User } from '#auth/decorators/auth.decorator.js';
-import { invocationSignal } from '#api/llm/llm-gateway.headers.js';
+import { AuthGuard, OptionalAuth, OptionalUser, User } from '@taucad/api-auth';
+import { invocationSignal } from '@taucad/api-llm-gateway';
 import { VoiceService } from '#api/voice/voice.service.js';
 
 const audioContentType = 'audio/wav';

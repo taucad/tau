@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { applyBatchWithPrimitives } from '#backend/batch.js';
 import type { BatchEntry } from '#changeset.js';
+import { inHandBytes } from '#changeset.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { ImportRefusedError, importLimits } from '#importer/limits.js';
 import { readZipDirectory, blobRangeSource } from '#importer/zip.js';
@@ -161,7 +162,7 @@ const port = (provider: MemoryProvider): ImportStagingPort & { writes: () => num
       for (const entry of entries) {
         if (entry.op === 'write' && entry.path.includes('/tree/')) {
           writes += 1;
-          writtenBytes += entry.data instanceof Blob ? entry.data.size : entry.data.byteLength;
+          writtenBytes += inHandBytes(entry);
         }
       }
       return applyBatchWithPrimitives(provider, entries);
@@ -921,7 +922,7 @@ describe('stageImport', () => {
         const receipts = await staging.apply(entries);
         for (const entry of entries) {
           if (entry.op === 'write' && entry.path.includes('/tree/')) {
-            live -= entry.data instanceof Blob ? entry.data.size : entry.data.byteLength;
+            live -= inHandBytes(entry);
           }
         }
         return receipts;

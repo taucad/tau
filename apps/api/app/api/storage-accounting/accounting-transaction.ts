@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 
 export type AccountingTransaction = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 

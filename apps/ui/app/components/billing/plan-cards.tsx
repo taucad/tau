@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Check, Sparkles } from 'lucide-react';
 import { Link } from 'react-router';
-import type { BillingTier, PlanCatalogEntry } from '@taucad/billing';
+import type { BillingTier, PlanCatalogEntry, WirePaymentAction } from '@taucad/billing';
 import { tauPlanCatalog } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
@@ -13,12 +13,30 @@ import {
   createSubscriptionAction,
   followPaymentRedirect,
 } from '#lib/billing-payment-client.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { cn } from '@taucad/ui/utils/cn';
 
 const enterpriseMailto = 'mailto:enterprise@tau.new';
+
+/** Why a subscription answered without a Checkout to open. */
+const subscriptionNotOpenMessage = (action: WirePaymentAction): string => {
+  switch (action.state) {
+    case 'processing':
+    case 'funds_received':
+    case 'fulfilled': {
+      return 'Your payment is being confirmed. Your plan updates in a moment.';
+    }
+    case 'attention_required': {
+      return 'Your subscription needs attention. Contact support@tau.new.';
+    }
+    default: {
+      return 'Checkout is still being prepared. Try again in a minute.';
+    }
+  }
+};
 
 function SubscribeButton({ label }: { readonly label: string }): React.JSX.Element {
   const { apiBaseUrl, environment, userId } = useBillingSession();
@@ -39,6 +57,19 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
   const stateIsCurrent = stateGenerationRef.current === scopeRef.current.value;
   /* oxlint-enable react/refs */
 
+  /** Follows an open Checkout, or says why there is none to follow instead of leaving the button stuck. */
+  const settle = (action: WirePaymentAction): void => {
+    if (followPaymentRedirect(action)) {
+      // In the desktop app Checkout opens in the browser, so the button stays usable to open it again.
+      setIsPending(!isDesktopTarget());
+      return;
+    }
+    // A retry asks again rather than replaying this answer.
+    requestIdRef.current = undefined;
+    setIsPending(false);
+    setErrorMessage(subscriptionNotOpenMessage(action));
+  };
+
   const start = async (): Promise<void> => {
     if (binding === undefined) {
       setErrorMessage('Billing checkout is unavailable.');
@@ -57,13 +88,13 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
       if (scopeRef.current.value !== startedGeneration) {
         return;
       }
-      setIsPending(!followPaymentRedirect(action));
+      settle(action);
     } catch (error) {
       if (scopeRef.current.value !== startedGeneration) {
         return;
       }
       if (error instanceof BillingPaymentConflict && error.action) {
-        setIsPending(!followPaymentRedirect(error.action));
+        settle(error.action);
         return;
       }
       requestIdRef.current = undefined;

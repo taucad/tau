@@ -2,7 +2,7 @@ import { Agent, request as httpRequest } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 import { HttpException, Logger, ServiceUnavailableException } from '@nestjs/common';
-import type { GitForwardErrorReason, GitSpillReason, MetricsService } from '#telemetry/metrics.js';
+import type { GitForwardErrorReason, GitSpillReason, MetricsService } from '@taucad/api-observability/metrics';
 import {
   framingHeader,
   outcomeHeader,

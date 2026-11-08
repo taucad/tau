@@ -922,7 +922,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   // so provider-aware wire gating sees genuine provider ids without a live API.
   const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
     // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
-    await import('../../../api/app/api/models/model.constants.js');
+    await import('../../../libs/api-llm-gateway/src/models/model.constants.js');
   const catalog = Object.values(modelList)
     .flatMap((entries) => Object.values(entries))
     .filter((entry) => isModelListEntryEnabled(entry))

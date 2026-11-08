@@ -1,8 +1,7 @@
 /* oxlint-disable new-cap -- NestJS parameter decorators */
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ZodSerializerDto } from 'nestjs-zod';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { AuthGuard, UseAuth, User } from '@taucad/api-auth';
 import { ProjectShareEnvelopeDto } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
 

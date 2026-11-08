@@ -3,11 +3,11 @@ import process from 'node:process';
 import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import type { Environment } from '#config/environment.config.js';
-import { assertSchemaCompatibility } from '#database/database-migration.js';
-import * as schema from '#database/schema.js';
+import type { Environment } from '@taucad/api-core';
+import { assertSchemaCompatibility } from '@taucad/api-database/migration';
+import * as schema from '@taucad/api-database/schema';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { readMirrorEnvironment } from '#api/git/mirror/config.js';
 import type { MirrorEnvironment } from '#api/git/mirror/config.js';
@@ -23,7 +23,7 @@ import { runRetentionSweep } from '#api/git/mirror/retention.js';
 import { R2MirrorSource } from '#api/git/mirror/source.js';
 import { PostgresMirrorLedger } from '#api/git/mirror/watermark.js';
 import { exportBacklog, runMirrorWorker } from '#api/git/mirror/worker.js';
-import { applicationNameOf } from '#database/application-name.js';
+import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
  * `tau-mirror`: the B2 second copy's copier (W13 DM1, B3a). It runs in its own
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
 
   const environment = readMirrorEnvironment(process.env);
   // Started before any instrument is created, as in billing-command; the worker's metrics port opens here.
-  const { sdk } = await import('#telemetry/otel.js');
+  const { sdk } = await import('@taucad/api-observability/otel');
   /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL connection options */
   const client = postgres(environment.DATABASE_URL, {
     max: 4,

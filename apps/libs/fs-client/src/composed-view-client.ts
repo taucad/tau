@@ -1,5 +1,5 @@
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
@@ -14,6 +14,9 @@ import { resolveAuthorityPath } from '@taucad/utils/path';
 import { rootedPathOf } from '#rooted-content-client.js';
 import { isGlobalNodeModulesPath } from '#workspace-path-resolver.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
+
+/** One file's bytes and the authority's SHA-256 of exactly those bytes, from one read (charter D17). @public */
+export type FileWithDigest = Readonly<{ data: Uint8Array<ArrayBuffer>; sha256: string }>;
 
 /**
  * The rooted half of a filesystem bridge proxy opened as a composed view.
@@ -44,7 +47,9 @@ export type ComposedViewProxy = {
    * port comes back to this client as somebody else's edit.
    */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
-  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  /** One read's bytes and the authority's SHA-256 of them (charter D17); absent on a peer that predates it. */
+  readFileWithDigest?(path: string): Promise<FileWithDigest>;
   deleteFileChecked(input: {
     path: string;
     preconditions: readonly FileWritePrecondition[];
@@ -74,6 +79,13 @@ export type ComposedViewProxy = {
 export type ComposedViewClient = FileSystemClient & {
   /** Exact one-level listing for agent RPCs; never served from the UI tree cache. */
   readDirectoryExact(path: string): Promise<DirectoryStatRow[]>;
+  /**
+   * One file's bytes and the authority's SHA-256 of those same bytes, from one
+   * read on the authority (charter D17): what a checked write names as its
+   * digest precondition, so this thread never hashes. Optional for clients
+   * that serve no rooted view.
+   */
+  readFileWithDigest?(absolutePath: string): Promise<FileWithDigest>;
   /**
    * Copy one file inside the view, mask-checked by it (charter D4).
    *
@@ -525,9 +537,18 @@ export const createComposedViewClient = (input: {
     }
   };
 
+  const readFileWithDigest = async (absolutePath: string): Promise<FileWithDigest> => {
+    const { proxy, path } = servedBy(absolutePath);
+    if (proxy.readFileWithDigest === undefined) {
+      throw Object.assign(new Error(`ENOTSUP: no digested read serves ${absolutePath}`), { code: 'ENOTSUP' });
+    }
+    return proxy.readFileWithDigest(path);
+  };
+
   const overrides: Record<string, unknown> = {
     overrideUnit,
     readFile,
+    readFileWithDigest,
     readdir: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.readdir(path);

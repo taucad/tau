@@ -1034,7 +1034,19 @@
         "apps/api/**/*.provider.ts",
         "apps/api/**/*.resolver.ts",
         "apps/api/**/*.middleware.ts",
-        "apps/api/**/testing/*.ts"
+        "apps/api/**/testing/*.ts",
+        "apps/libs/api-*/**/*.service.ts",
+        "apps/libs/api-*/**/*.controller.ts",
+        "apps/libs/api-*/**/*.module.ts",
+        "apps/libs/api-*/**/*.guard.ts",
+        "apps/libs/api-*/**/*.gateway.ts",
+        "apps/libs/api-*/**/*.interceptor.ts",
+        "apps/libs/api-*/**/*.filter.ts",
+        "apps/libs/api-*/**/*.pipe.ts",
+        "apps/libs/api-*/**/*.provider.ts",
+        "apps/libs/api-*/**/*.resolver.ts",
+        "apps/libs/api-*/**/*.middleware.ts",
+        "apps/libs/api-*/**/testing/*.ts"
       ],
       "rules": {
         "@typescript-eslint/consistent-type-imports": "off",

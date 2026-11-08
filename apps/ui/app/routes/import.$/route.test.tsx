@@ -1,5 +1,5 @@
 import { createProjectFixture } from '#lib/project.fixture.js';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -33,7 +33,15 @@ const getRepository = vi.hoisted(() =>
 );
 const listFiles = vi.hoisted(() => vi.fn(async (): Promise<Array<{ path: string; size: number }>> => []));
 /* The file-manager worker's import channel: what the route asked it to plan. */
-const importChannel = vi.hoisted(() => ({ plan: vi.fn() }));
+const importChannel = vi.hoisted(() => ({
+  plan: vi.fn(),
+  stage: vi.fn(async (_operationId: string, _scope: unknown, options: { target: string }) => ({
+    files: 1,
+    bytes: 1,
+    inPlace: false,
+    target: options.target,
+  })),
+}));
 const listBranches = vi.hoisted(() =>
   vi.fn<GitHubApiClient['listBranches']>(async () => ({ branches: [], hasMore: false, endCursor: undefined })),
 );
@@ -76,13 +84,31 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 vi.mock('#machines/import-staging.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ImportStagingModule>()),
-  openImportSession: () => ({ plan: importChannel.plan, close: () => undefined }),
+  openImportSession: () => ({
+    plan: importChannel.plan,
+    stage: importChannel.stage,
+    handOff: async () => undefined,
+    release: async () => undefined,
+    discard: async () => undefined,
+    sweep: async () => [],
+    close: () => undefined,
+  }),
 }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({ projects: [...slugs.byId.keys()].map((id) => ({ id })) }),
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ createProject: projects.create, getProjects: async () => [] }),
+  useProjectManager: () => ({
+    createProject: projects.create,
+    getProjects: async () => [],
+    prepareImportStaging: async () => ({
+      location: { kind: 'home' },
+      scope: { backend: 'opfs' },
+      providerBasePath: 'part',
+      owned: [],
+    }),
+    ownsImportStaging: async () => false,
+  }),
 }));
 vi.mock('#hooks/use-project-creation-location-error.js', () => ({ useProjectCreationLocationError: () => vi.fn() }));
 vi.mock('#hooks/use-project-slug-route.js', () => ({
@@ -164,6 +190,8 @@ const selection = {
   ],
   manifest,
 } satisfies GithubRepositorySelection;
+/* What the page hands the worker for a linked import: plain data, no bytes of the repository. */
+const linkedRequest = { name: 'octo/part', targetBranch: 'main' };
 const picked: { selection: GithubRepositorySelection } = { selection };
 
 const renderImport = async (url = '/import'): Promise<void> => {
@@ -636,7 +664,7 @@ describe('ImportRoute GitHub card', () => {
       manifest: legacyBytes,
       connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
     };
-    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
     projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
       id,
       slugs: { workspaceSlug: 'home', projectSlug: 'part' },
@@ -662,7 +690,7 @@ describe('ImportRoute GitHub card', () => {
       ...selection,
       connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
     };
-    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
     projects.create.mockImplementationOnce(async ({ id }: { id: string }) => {
       /* Discovery lists the new project before the route has left the review. */
       slugs.byId.set(id, { workspaceSlug: 'home', projectSlug: 'part' });
@@ -681,5 +709,204 @@ describe('ImportRoute GitHub card', () => {
     });
     expect(await screen.findByRole('button', { name: 'Importing and linking…' })).toBeDisabled();
     expect(screen.queryByText('This repository is already a project on this device.')).not.toBeInTheDocument();
+  });
+
+  it('should have the worker fetch and stage a linked repository, creating the project from that staging (D12, I6)', async () => {
+    const user = userEvent.setup();
+    picked.selection = {
+      ...selection,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    expect(importChannel.stage.mock.calls[0]?.[2]).toMatchObject({ target: 'part', linked: linkedRequest });
+    const created = projects.create.mock.calls[0]?.[0] as {
+      files: Record<string, unknown>;
+      staging?: { operationId: string; providerBasePath: string };
+    };
+    /* The page hands over no file, and no `.git`: the commit takes them from the staging. */
+    expect(created.files).toEqual({});
+    expect(created.staging).toMatchObject({
+      operationId: importChannel.stage.mock.calls[0]?.[0],
+      providerBasePath: 'part',
+    });
+  });
+
+  it("should headline a taken branch the worker's fetch refused over the import channel (R4)", async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    importChannel.stage.mockRejectedValueOnce(
+      new ImportChannelError(
+        'Remote branch audit-g1 already names another revision.',
+        undefined,
+        'REMOTE_REF_CONFLICT',
+      ),
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    const branch = screen.getByRole('textbox', { name: 'Local and sync branch' });
+    await user.clear(branch);
+    await user.type(branch, 'audit-g1');
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    expect(await screen.findByRole('alert', { name: 'This branch name is taken on GitHub' })).toBeInTheDocument();
+    expect(projects.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      title: 'GitHub connection needs renewing',
+      message: 'GitHub did not accept this account’s access to octo/part. Connect GitHub again, then choose it.',
+      action: 'Connect GitHub again',
+      connects: true,
+    },
+    {
+      code: 'REMOTE_FORBIDDEN',
+      title: 'GitHub refused this repository',
+      message: 'The connected account can no longer read octo/part. Check its access on GitHub, then choose it again.',
+      action: 'Choose repository again',
+      connects: false,
+    },
+    {
+      code: 'REMOTE_NOT_FOUND',
+      title: 'Repository not found on GitHub',
+      message: 'octo/part was removed, renamed or is no longer shared with this account. Choose the repository again.',
+      action: 'Choose repository again',
+      connects: false,
+    },
+  ])(
+    "should offer the fix when the worker's fetch was answered $code, rather than another Import and link",
+    async ({ code, title, message, action, connects }) => {
+      const user = userEvent.setup();
+      linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+      importChannel.stage.mockRejectedValueOnce(new ImportChannelError('The remote refused.', undefined, code));
+      await renderImport();
+      await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+      await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+      expect(await screen.findByRole('alert', { name: title })).toBeInTheDocument();
+      expect(screen.getByText(message)).toBeVisible();
+      expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+      expect(projects.create).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: action }));
+
+      expect(screen.getByRole('button', { name: 'Pick linked repository' })).toBeInTheDocument();
+      expect(screen.queryByText('GitHub connect started') !== null).toBe(connects);
+    },
+  );
+
+  it("should stop the worker's stage, and its fetch, when the route leaves mid-import", async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    const staged = Promise.withResolvers<AbortSignal | undefined>();
+    importChannel.stage.mockImplementationOnce(
+      async (_operationId: string, _scope: unknown, options: { target: string; signal?: AbortSignal }) => {
+        staged.resolve(options.signal);
+        /* As the worker answers once it has stopped: a refusal, which lets the import's lock go. */
+        const stopped = Promise.withResolvers<never>();
+        options.signal?.addEventListener('abort', () => {
+          stopped.reject(new ImportChannelError('The import was cancelled.'));
+        });
+        return stopped.promise;
+      },
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+    const signal = await staged.promise;
+    expect(signal?.aborted).toBe(false);
+
+    cleanup();
+
+    expect(signal?.aborted).toBe(true);
+    expect(projects.create).not.toHaveBeenCalled();
+  });
+
+  /* The fixture's declaration, spelled differently: four-space indent, keys reordered, no trailing newline, a default spelled out. */
+  const respelled = (): Uint8Array<ArrayBuffer> => {
+    const { $schema, ...rest } = JSON.parse(new TextDecoder().decode(manifest)) as Record<string, unknown>;
+    return new TextEncoder().encode(JSON.stringify({ ...rest, syncChats: true, $schema }, undefined, 4));
+  };
+
+  it.each([
+    { held: 'canonical', bytes: () => manifest },
+    { held: 'respelled but equal', bytes: respelled },
+  ])('should commit a $held repository tau.json as authored, with no setup change rewriting it', async ({ bytes }) => {
+    const user = userEvent.setup();
+    const authored = bytes();
+    picked.selection = {
+      ...selection,
+      manifest: authored,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    /* The review says what the setup revision writes. */
+    expect(screen.queryByText(/Add or update/u)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    const created = projects.create.mock.calls[0]?.[0] as { staging: { manifestBytes?: Uint8Array<ArrayBuffer> } };
+    const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    /* The setup revision is handed the repository's own bytes (so it writes none), and the create commits them. */
+    expect(new TextDecoder().decode(prepared.manifest)).toBe(new TextDecoder().decode(authored));
+    expect(new TextDecoder().decode(created.staging.manifestBytes)).toBe(new TextDecoder().decode(authored));
+  });
+
+  it('should write the canonical tau.json in the setup revision and commit it when the declaration changes', async () => {
+    const user = userEvent.setup();
+    picked.selection = {
+      ...selection,
+      manifest: respelled(),
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    /* Turning chat sync off is a change to the declaration. */
+    await user.click(screen.getByRole('checkbox', { name: 'Sync project chats with this repository' }));
+    expect(screen.getByText(/Add or update/u)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    const created = projects.create.mock.calls[0]?.[0] as {
+      project: Parameters<typeof projectToManifest>[0];
+      staging: { manifestBytes?: Uint8Array<ArrayBuffer> };
+    };
+    const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    const canonical = new TextDecoder().decode(serializeProjectManifest(projectToManifest(created.project)));
+    expect(created.project.syncChats).toBe(false);
+    expect(new TextDecoder().decode(prepared.manifest)).toBe(canonical);
+    expect(new TextDecoder().decode(created.staging.manifestBytes)).toBe(canonical);
   });
 });

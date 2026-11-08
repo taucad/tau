@@ -379,6 +379,8 @@ export type RemoteTransportContext = Readonly<{
   stderr?: string;
   /** A 429's `Retry-After` header, on the leg that can read it. */
   retryAfter?: string;
+  /** A 401's or 403's `WWW-Authenticate` header, on the leg that can read it. */
+  authenticate?: string;
 }>;
 
 /**
@@ -584,7 +586,9 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
       return 'Syncing files to Tau Cloud is a paid plan feature.';
     }
     case 'REMOTE_FORBIDDEN': {
-      return 'This remote refused this device.';
+      return remote?.startsWith('github-')
+        ? 'GitHub refused access to this repository for the connected account.'
+        : 'This remote refused this device.';
     }
     case 'REMOTE_NOT_FOUND': {
       return 'This remote has no repository at this address for your account.';
@@ -606,6 +610,12 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
     }
   }
 };
+
+/* Whether a refusal says its credential expired: in a `WWW-Authenticate` challenge, a reconnect code, or its own words. */
+const tokenExpired = (answered: RemoteRefusal, authenticate: string | undefined): boolean =>
+  (authenticate !== undefined && /invalid_token|expired/iu.test(authenticate)) ||
+  answered.code === 'GITHUB_RECONNECT_REQUIRED' ||
+  (answered.message !== undefined && /expired|bad credentials/iu.test(answered.message));
 
 /**
  * One remote refusal, classified — the single place either leg turns what a
@@ -705,6 +715,11 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
   /* A remote that is not Tau's own is credited by a token the person granted to
    * *it*, so refusing that token is something they can grant again (W12). */
   const proxied = context.remote !== undefined && remoteKindOf(context.remote) === 'git';
+  /* GitHub answers a token it no longer honours with 401; its 403 to a live
+   * token is this repository's access withdrawn, which no reconnect restores,
+   * unless the answer itself says the token expired. */
+  const githubAccessWithdrawn =
+    status === 403 && context.remote?.startsWith('github-') === true && !tokenExpired(answered, context.authenticate);
   const code: RevisionPortErrorCode =
     status === 401
       ? proxied
@@ -713,7 +728,7 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
       : status === 403
         ? answered.code === 'GIT_SYNC_NOT_ENTITLED'
           ? 'REMOTE_NOT_ENTITLED'
-          : proxied
+          : proxied && !githubAccessWithdrawn
             ? 'REMOTE_REAUTHORIZATION_REQUIRED'
             : 'REMOTE_FORBIDDEN'
         : status === 404 || status === 410

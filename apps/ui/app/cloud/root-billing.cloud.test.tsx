@@ -14,7 +14,9 @@ import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-bill
 const getPaymentAction = vi.hoisted(() => vi.fn());
 const recoverPaymentAction = vi.hoisted(() => vi.fn());
 const followPaymentRedirect = vi.hoisted(() => vi.fn());
+const cancelPaymentAction = vi.hoisted(() => vi.fn());
 vi.mock('#lib/billing-payment-client.js', () => ({
+  cancelPaymentAction,
   getPaymentAction,
   followPaymentRedirect,
   recoverPaymentAction,
@@ -45,14 +47,18 @@ vi.mock('#providers/financial-session-provider.js', async (loadOriginal) => {
 });
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }) }));
 
-const returnFromCheckout = (queryClient = new QueryClient()): void => {
+const returnTo = (url: string, queryClient = new QueryClient()): void => {
   renderHook(useCloudPaymentActionReturn, {
     wrapper: ({ children }) => (
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/?payment_action=action_1']}>{children}</MemoryRouter>
+        <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
       </QueryClientProvider>
     ),
   });
+};
+
+const returnFromCheckout = (queryClient = new QueryClient()): void => {
+  returnTo('/?payment_action=action_1', queryClient);
 };
 
 const checkoutAction = (state: string, receipt: unknown = null) => ({
@@ -91,17 +97,126 @@ const warningButton = (): ToastButton => {
 
 const expectResumeOffer = async (): Promise<void> => {
   await waitFor(() => {
-    expect(toast.warning).toHaveBeenCalledWith(
-      'Checkout is ready to continue.',
-      expect.objectContaining({ action: expect.objectContaining({ label: 'Resume Checkout' }) as unknown }),
+    expect(toast).toHaveBeenCalledWith(
+      'Checkout was not finished.',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'Resume Checkout' }) as unknown,
+        cancel: expect.objectContaining({ label: 'Cancel payment' }) as unknown,
+      }),
     );
   });
   expect(recoverPaymentAction).toHaveBeenCalledOnce();
+  // Coming back without paying is the customer's choice, not something to warn about.
+  expect(toast.warning).not.toHaveBeenCalled();
+};
+
+/** The given button on the latest neutral toast; the mocked toast never renders it. */
+const toastButton = (kind: 'action' | 'cancel'): ToastButton => {
+  const options: unknown = vi.mocked(toast).mock.lastCall?.[1];
+  const offer: unknown =
+    typeof options === 'object' && options !== null ? (options as Record<string, unknown>)[kind] : undefined;
+  if (!isToastButton(offer)) {
+    throw new TypeError(`Expected the toast to offer a ${kind} button`);
+  }
+  return offer;
 };
 
 describe('useCloudPaymentActionReturn', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+  });
+
+  it('should say billing was updated after a portal visit, refresh billing for a while, and read no payment', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let search = '';
+      const queryClient = new QueryClient();
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+      const Probe = (): undefined => {
+        useCloudPaymentActionReturn();
+        search = useLocation().search;
+        return undefined;
+      };
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/?settings=billing&billing_return=portal']}>
+            <Probe />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Billing updated.');
+      });
+      expect(search).toBe('?settings=billing');
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing'] });
+      await vi.advanceTimersByTimeAsync(20_000);
+      // Stripe's webhook can land after the page loads, so the plan is re-read until it has had time to.
+      expect(invalidate).toHaveBeenCalledTimes(5);
+      expect(getPaymentAction).not.toHaveBeenCalled();
+      expect(toast.warning).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should treat a returned portal action as a billing update, never as a Checkout to resume', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      getPaymentAction.mockResolvedValue({
+        ...checkoutAction('completed'),
+        purpose: 'billing_portal',
+      });
+      returnFromCheckout();
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Billing updated.');
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(getPaymentAction).toHaveBeenCalledOnce();
+      expect(recoverPaymentAction).not.toHaveBeenCalled();
+      expect(toast.warning).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should say a returned payment belongs to another account when this one cannot see it', async () => {
+    getPaymentAction.mockRejectedValue(new Error('Billing payment request failed with 404'));
+    returnFromCheckout();
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'This payment belongs to a different account. Sign in to that account to see it.',
+      );
+    });
+  });
+
+  it('should cancel an unfinished Checkout from its return toast', async () => {
+    getPaymentAction.mockResolvedValue(checkoutAction('redirect_required'));
+    recoverPaymentAction.mockResolvedValue(checkoutAction('redirect_required'));
+    cancelPaymentAction.mockResolvedValue(checkoutAction('canceled'));
+    returnFromCheckout();
+    await expectResumeOffer();
+    await toastButton('cancel').onClick();
+    expect(cancelPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'account-a' }), 'action_1');
+    expect(toast).toHaveBeenCalledWith('Payment canceled.');
+  });
+
+  it('should refresh billing on any returned action, even one still open', async () => {
+    getPaymentAction.mockResolvedValue(checkoutAction('redirect_required'));
+    recoverPaymentAction.mockResolvedValue(checkoutAction('redirect_required'));
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    returnFromCheckout(queryClient);
+    await expectResumeOffer();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing'] });
+  });
+
+  it('should never offer a paid subscription still awaiting its first invoice a Checkout to resume', async () => {
+    getPaymentAction.mockResolvedValue({ ...checkoutAction('processing'), purpose: 'subscription_checkout' });
+    returnFromCheckout();
+    await waitFor(() => {
+      expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+    });
+    expect(toast).not.toHaveBeenCalledWith('Checkout was not finished.', expect.anything());
   });
 
   it.each(['completed', 'fulfilled'])('refreshes billing data when the returned action is %s', async (state) => {
@@ -172,21 +287,29 @@ describe('useCloudPaymentActionReturn', () => {
     await expectResumeOffer();
   });
 
-  it('should not recover a reload-setup Checkout, which has nothing to settle', async () => {
-    getPaymentAction.mockResolvedValue(cardSetup('redirect_required'));
+  it('should tell a card setup the customer left from one billing is still confirming', async () => {
+    const setup = cardSetup('redirect_required');
+    getPaymentAction.mockResolvedValue(setup);
+    recoverPaymentAction.mockResolvedValue(setup);
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Card setup for automatic reload was not finished.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Continue setup' }) as unknown }),
+      );
     });
-    expect(recoverPaymentAction).not.toHaveBeenCalled();
-    // A finished setup reads the same until billing confirms it, so continuing is not offered yet.
-    expect(toast.warning).not.toHaveBeenCalled();
+    // Recovery read the Session as open: only the customer can finish it, so it is not re-read.
+    expect(recoverPaymentAction).toHaveBeenCalledOnce();
+    expect(toast).not.toHaveBeenCalledWith('Confirming your card for automatic reload.');
+    warningButton().onClick();
+    expect(followPaymentRedirect).toHaveBeenCalledWith(setup);
   });
 
   it('should say automatic reload is on once billing confirms the card setup', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      getPaymentAction.mockResolvedValueOnce(cardSetup('redirect_required')).mockResolvedValue(cardSetup('completed'));
+      getPaymentAction.mockResolvedValue(cardSetup('redirect_required'));
+      recoverPaymentAction.mockResolvedValueOnce(cardSetup('processing')).mockResolvedValue(cardSetup('completed'));
       vi.mocked(toast).mockReturnValueOnce('confirming');
       const queryClient = new QueryClient();
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
@@ -208,11 +331,11 @@ describe('useCloudPaymentActionReturn', () => {
     }
   });
 
-  it('should offer to continue a card setup that billing has not confirmed once the re-check runs out', async () => {
+  it('should say billing is still confirming a finished card setup once the re-check runs out', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const setup = cardSetup('redirect_required');
-      getPaymentAction.mockResolvedValue(setup);
+      getPaymentAction.mockResolvedValue(cardSetup('redirect_required'));
+      recoverPaymentAction.mockResolvedValue(cardSetup('processing'));
       vi.mocked(toast).mockReturnValueOnce('confirming');
       returnFromCheckout();
       await waitFor(() => {
@@ -225,15 +348,13 @@ describe('useCloudPaymentActionReturn', () => {
 
       await waitFor(() => {
         expect(toast.warning).toHaveBeenCalledWith(
-          'Automatic reload is waiting for card setup.',
-          expect.objectContaining({ action: expect.objectContaining({ label: 'Continue setup' }) as unknown }),
+          'Automatic reload is still confirming your card. Check back in a few minutes.',
         );
       });
-      expect(getPaymentAction).toHaveBeenCalledTimes(11);
+      expect(recoverPaymentAction).toHaveBeenCalledTimes(11);
       expect(toast.dismiss).toHaveBeenCalledWith('confirming');
+      // The customer finished in Checkout, so nothing offers to send them back there.
       expect(followPaymentRedirect).not.toHaveBeenCalled();
-      warningButton().onClick();
-      expect(followPaymentRedirect).toHaveBeenCalledWith(setup);
     } finally {
       vi.useRealTimers();
     }

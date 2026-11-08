@@ -87,7 +87,8 @@ try {
     join(bin, 'aws'),
     `#!/usr/bin/env node
 const fs = require('node:fs'); const path = require('node:path');
-const args = process.argv.slice(2); const op = args[3];
+const args = process.argv.slice(2); const op = args[args.indexOf('s3api') + 1];
+if (!args.includes('--cli-read-timeout') || process.env.AWS_RETRY_MODE !== 'standard' || process.env.AWS_MAX_ATTEMPTS !== '5') { throw Error('aws called without retry settings'); }
 const value = (key) => args[args.indexOf(key) + 1];
 const key = value('--key'); const target = path.join(process.env.TEST_S3_ROOT, key);
 fs.appendFileSync(process.env.TEST_S3_LOG, op + ' ' + key + '\\n');
@@ -102,6 +103,9 @@ if (op === 'get-object') {
     { mode: 0o755 },
   );
   const environment = {
+    // Unset both so the stub sees the publisher's defaults, whatever the runner sets.
+    AWS_RETRY_MODE: undefined,
+    AWS_MAX_ATTEMPTS: undefined,
     PATH: `${bin}:${process.env['PATH'] ?? ''}`,
     TEST_S3_ROOT: store,
     TEST_S3_LOG: log,

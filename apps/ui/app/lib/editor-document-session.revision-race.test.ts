@@ -8,6 +8,7 @@ import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client'
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { sha256BytesSync } from '@taucad/utils/hash';
 
 /*
  * RV-W5b F4 / RV-W5b2 N1–N3: an auto-applied revision (D12) writes a file the
@@ -54,6 +55,11 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       return options === 'utf8' || options?.encoding === 'utf8' ? new TextDecoder().decode(data) : new Uint8Array(data);
     }
     const proxy = mock<ComposedViewClient>({ readFile });
+    /* The authority's digested read (D17): the fake hashes on its own side of the wire. */
+    proxy.readFileWithDigest = vi.fn(async (filepath: string) => {
+      const data = await readFile(filepath);
+      return { data, sha256: sha256BytesSync(data) };
+    });
     proxy.writeFile.mockImplementation(async (filepath, data) => {
       await inFlight();
       disk.set(filepath, typeof data === 'string' ? encode(data) : new Uint8Array(data));
@@ -68,18 +74,27 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
         throw error;
       }
       const actual = disk.get(target) ?? null;
-      const expected = preconditions[0]?.expected;
-      const wanted = typeof expected === 'string' ? encode(expected) : expected;
-      const matches =
-        actual === null || wanted === null || wanted === undefined
-          ? actual === wanted
-          : decode(actual) === decode(wanted);
+      const precondition = preconditions[0];
+      let matches: boolean;
+      if (precondition !== undefined && 'expectedSha256' in precondition) {
+        matches = actual !== null && sha256BytesSync(actual) === precondition.expectedSha256;
+      } else {
+        const expected = precondition?.expected;
+        const wanted = typeof expected === 'string' ? encode(expected) : expected;
+        matches =
+          actual === null || wanted === null || wanted === undefined
+            ? actual === wanted
+            : decode(actual) === decode(wanted);
+      }
       if (!matches) {
-        return { status: 'conflict', conflicts: [{ path: target, actual }] };
+        return {
+          status: 'conflict',
+          conflicts: [{ path: target, actual, ...(actual === null ? {} : { sha256: sha256BytesSync(actual) }) }],
+        };
       }
       const content = typeof data === 'string' ? encode(data) : new Uint8Array(data);
       disk.set(target, content);
-      return { status: 'applied', content };
+      return { status: 'applied', content, sha256: sha256BytesSync(content) };
     });
     /* The revision client's record: every edit it was handed, held while `recordGate` is. */
     const records: EditorConflictInput[] = [];

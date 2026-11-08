@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useNavigate } from 'react-router';
+import * as Cookies from 'es-cookie';
+import { MemoryRouter, RouterProvider, createMemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -17,6 +18,7 @@ vi.mock('#hooks/use-cookie.js', async () => {
 });
 
 const { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } = await import('#components/ui/sidebar.js');
+const { sidebarOpenCookieName } = await import('#lib/shell-request-hints.js');
 
 const Navigate = () => {
   const navigate = useNavigate();
@@ -207,5 +209,47 @@ describe('SidebarTrigger', () => {
 
     expect(document.activeElement).not.toBe(trigger);
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+});
+
+describe('SidebarProvider shell hints', () => {
+  const renderWithRootData = (shellHints: { readonly isSidebarOpen: boolean; readonly platform: 'mac' | 'other' }) => {
+    const router = createMemoryRouter(
+      [
+        {
+          id: 'root',
+          path: '/',
+          element: (
+            <KeyboardProvider>
+              <TooltipProvider>
+                <SidebarProvider>
+                  <SidebarTrigger />
+                </SidebarProvider>
+              </TooltipProvider>
+            </KeyboardProvider>
+          ),
+        },
+      ],
+      { hydrationData: { loaderData: { root: { shellHints } } } },
+    );
+    return render(<RouterProvider router={router} />);
+  };
+
+  beforeEach(() => {
+    mobile.value = false;
+    Cookies.remove(sidebarOpenCookieName, { path: '/' });
+  });
+
+  it('opens with the state the request carried and mirrors it back into the cookie', async () => {
+    renderWithRootData({ isSidebarOpen: false, platform: 'other' });
+
+    const trigger = screen.getByRole('button', { name: 'Toggle Sidebar' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(Cookies.get(sidebarOpenCookieName)).toBe('0');
+
+    await userEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(Cookies.get(sidebarOpenCookieName)).toBe('1');
   });
 });

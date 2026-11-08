@@ -6,7 +6,7 @@ import { inflateSync } from 'node:zlib';
 import { MessageChannel } from 'node:worker_threads';
 import type { Transferable as NodeTransferable } from 'node:worker_threads';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   connectComputeWorker,
   createInlineCompute,
@@ -162,6 +162,21 @@ describe('the compute worker seam', () => {
     const packIndex = readPackIndex(await remote.indexPack(new Uint8Array(built.pack)));
     expect(packIndex.packChecksum).toBe(built.checksum);
     expect(packIndex.offsetOf(built.entries[0]!.oid)).toBe(12);
+  });
+
+  it('indexes a pack in a realm with no Buffer global, as a browser worker is', async () => {
+    const inline = createInlineCompute();
+    const body = encoder.encode('board();\n'.repeat(32));
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body]));
+    const built = await buildPack([{ oid, type: 'blob', data: body }], inline);
+    /* A fresh worker realm: the file-manager realm's polyfill is not here. */
+    vi.stubGlobal('Buffer', undefined);
+    try {
+      const packIndex = readPackIndex(await inline.indexPack(new Uint8Array(built.pack)));
+      expect(packIndex.packChecksum).toBe(built.checksum);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('decodes an import entry from the Blob it is handed, CRC-checked and hashed by nothing (W7)', async () => {

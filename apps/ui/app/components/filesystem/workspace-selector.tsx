@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Check, ChevronDown, FolderOpen, House, Plus, Settings, ShieldAlert, Unplug } from 'lucide-react';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
@@ -16,6 +16,8 @@ import {
 } from '#utils/project-creation-location.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type WorkspaceSelectorProperties = Omit<React.HTMLAttributes<HTMLDivElement>, 'onSelect'> & {
   readonly state: ProjectCreationLocationState;
@@ -29,6 +31,36 @@ const locationValue = (location: ProjectCreationLocation): string =>
 
 const optionValue = (option: ProjectCreationLocationOption): string =>
   `${locationValue(option.location)} ${option.label} ${option.detail}`;
+
+/** What the location chip last read, kept so the next load can draw it before the locations are probed (R8). */
+export type RememberedProjectLocation = {
+  readonly kind: ProjectCreationLocation['kind'];
+  readonly label: string;
+};
+
+const homeLocation: RememberedProjectLocation = { kind: 'home', label: 'Home' };
+
+const isRememberedLocation = (value: unknown): value is RememberedProjectLocation =>
+  typeof value === 'object' &&
+  value !== null &&
+  'kind' in value &&
+  (value.kind === 'home' || value.kind === 'workspace') &&
+  'label' in value &&
+  typeof value.label === 'string' &&
+  value.label !== '';
+
+/**
+ * The location the chip last showed, Home until one has been shown.
+ *
+ * @returns The remembered location, and its setter.
+ */
+export const useRememberedProjectLocation = (): readonly [
+  RememberedProjectLocation,
+  (location: RememberedProjectLocation) => void,
+] => {
+  const [stored, setStored] = useCookie<unknown>(cookieName.projectLocation, homeLocation);
+  return [isRememberedLocation(stored) ? stored : homeLocation, setStored] as const;
+};
 
 const isReadyOption = (option: ProjectCreationLocationOption | undefined): boolean =>
   option?.status === 'ready' || option?.status === 'connected';
@@ -53,6 +85,58 @@ const triggerStyles = {
   },
 } as const;
 
+type WorkspaceLocationTriggerProperties = Omit<React.ComponentProps<typeof Button>, 'variant'> & {
+  readonly location: RememberedProjectLocation;
+  readonly variant: 'toolbar' | 'field';
+};
+
+/** The chip itself: the location's glyph, its name and a chevron, in the toolbar's or the field's finish. */
+export function WorkspaceLocationTrigger({
+  location,
+  variant,
+  className,
+  ...properties
+}: WorkspaceLocationTriggerProperties): React.JSX.Element {
+  const styles = triggerStyles[variant];
+  const LocationIcon = location.kind === 'home' ? House : FolderOpen;
+  return (
+    <Button
+      type='button'
+      variant={styles.variant}
+      size='sm'
+      className={cn('min-w-0', styles.button, className)}
+      aria-label={projectCreationLocationAccessibleName(location)}
+      {...properties}
+    >
+      <LocationIcon className={styles.icon} />
+      <span className={cn('truncate', styles.label)}>{location.label}</span>
+      <ChevronDown className={styles.chevron} />
+    </Button>
+  );
+}
+
+/** The box the chip sits in, the same while the locations load and once they are known. */
+const selectorClassName = (variant: 'toolbar' | 'field'): string =>
+  cn('flex min-w-0 items-center gap-1', variant === 'field' && 'w-full');
+
+/**
+ * The chip for the location the person last saw, drawn before the locations are probed. It is inert:
+ * there is nothing to choose from yet, and it reads the same once there is, so arriving data does
+ * not move the bar (R8).
+ */
+export function WorkspaceSelectorPlaceholder({
+  variant,
+}: {
+  readonly variant: 'toolbar' | 'field';
+}): React.JSX.Element {
+  const [remembered] = useRememberedProjectLocation();
+  return (
+    <div inert className={selectorClassName(variant)}>
+      <WorkspaceLocationTrigger location={remembered} variant={variant} />
+    </div>
+  );
+}
+
 export function WorkspaceSelector({
   state,
   variant,
@@ -63,28 +147,24 @@ export function WorkspaceSelector({
 }: WorkspaceSelectorProperties): React.JSX.Element | undefined {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const [, setRemembered] = useRememberedProjectLocation();
+  /* What the chip reads once the locations are known, remembered for the next load's first paint. */
+  const shownKind = state.phase === 'ready' && state.shouldShowPicker ? state.value.kind : undefined;
+  const shownLabel = state.phase === 'ready' && state.shouldShowPicker ? state.selectedOption.label : undefined;
+  /* Written when this chip's own reading changes, never in answer to the stored value: two selectors that read
+   * different locations (a connect lands in one first) would otherwise overwrite each other without end. */
+  useEffect(() => {
+    if (shownKind !== undefined && shownLabel !== undefined) {
+      setRemembered({ kind: shownKind, label: shownLabel });
+    }
+  }, [setRemembered, shownKind, shownLabel]);
 
   if (!state.shouldShowPicker) {
     return undefined;
   }
 
   if (state.phase === 'loading') {
-    return (
-      <Button
-        type='button'
-        variant={variant === 'field' ? 'outline' : 'ghost'}
-        size='sm'
-        className={cn(
-          variant === 'toolbar' && 'h-7 max-w-48 rounded-full',
-          variant === 'field' && 'h-auto w-full justify-start py-2',
-        )}
-        disabled
-        aria-label='Loading project locations'
-      >
-        <FolderOpen className='size-3.5' />
-        Loading locations…
-      </Button>
-    );
+    return <WorkspaceSelectorPlaceholder variant={variant} />;
   }
 
   const tooltipCopy =
@@ -134,20 +214,12 @@ export function WorkspaceSelector({
     completeAction();
   };
 
-  const styles = triggerStyles[variant];
-  const LocationIcon = state.value.kind === 'home' ? House : FolderOpen;
   const trigger = (
-    <Button
-      type='button'
-      variant={styles.variant}
-      size='sm'
-      className={cn('min-w-0', styles.button)}
+    <WorkspaceLocationTrigger
+      location={{ kind: state.value.kind, label: state.selectedOption.label }}
+      variant={variant}
       aria-label={projectCreationLocationAccessibleName(state.selectedOption)}
-    >
-      <LocationIcon className={styles.icon} />
-      <span className={cn('truncate', styles.label)}>{state.selectedOption.label}</span>
-      <ChevronDown className={styles.chevron} />
-    </Button>
+    />
   );
 
   const picker = (
@@ -234,7 +306,7 @@ export function WorkspaceSelector({
   );
 
   return (
-    <div className={cn('flex min-w-0 items-center gap-1', variant === 'field' && 'w-full')}>
+    <div className={selectorClassName(variant)}>
       {variant === 'toolbar' ? (
         <Tooltip>
           {picker}

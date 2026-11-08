@@ -255,6 +255,8 @@ type DataTableSearchProps<Data> = {
   readonly placeholder?: string;
   readonly className?: string;
   readonly containerClassName?: string;
+  /** Keep the field in place but inert, as when there is nothing to search yet. */
+  readonly isDisabled?: boolean;
 };
 
 export function DataTableSearch<Data>({
@@ -262,6 +264,7 @@ export function DataTableSearch<Data>({
   placeholder = 'Search…',
   className,
   containerClassName,
+  isDisabled = false,
 }: DataTableSearchProps<Data>): ReactNode {
   // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
   'use no memo';
@@ -275,6 +278,7 @@ export function DataTableSearch<Data>({
       placeholder={placeholder}
       value={globalFilter}
       containerClassName={containerClassName}
+      disabled={isDisabled}
       onChange={(event) => {
         table.setGlobalFilter(event.target.value);
       }}
@@ -475,9 +479,11 @@ export function DataTableColumnHeader<Data, Value>({
 
 type DataTableSortingDropdownProps<Data> = {
   readonly table: TanstackTable<Data>;
+  /** Filters that belong with the sort, listed after the sort fields. */
+  readonly children?: ReactNode;
 };
 
-export function DataTableSortingDropdown<Data>({ table }: DataTableSortingDropdownProps<Data>): ReactNode {
+export function DataTableSortingDropdown<Data>({ table, children }: DataTableSortingDropdownProps<Data>): ReactNode {
   // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
   'use no memo';
   const sortingState = table.getState().sorting[0];
@@ -534,6 +540,7 @@ export function DataTableSortingDropdown<Data>({ table }: DataTableSortingDropdo
             {renderSortIndicator(field.id)}
           </DropdownMenuItem>
         ))}
+        {children}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -35,6 +35,36 @@
       "path": "./packages/units"
     },
     {
+      "path": "./apps/libs/api-auth"
+    },
+    {
+      "path": "./apps/libs/api-billing"
+    },
+    {
+      "path": "./apps/libs/api-core"
+    },
+    {
+      "path": "./apps/libs/api-database"
+    },
+    {
+      "path": "./apps/libs/api-email"
+    },
+    {
+      "path": "./apps/libs/api-hosts"
+    },
+    {
+      "path": "./apps/libs/api-lifecycle"
+    },
+    {
+      "path": "./apps/libs/api-llm-gateway"
+    },
+    {
+      "path": "./apps/libs/api-observability"
+    },
+    {
+      "path": "./apps/libs/api-redis"
+    },
+    {
       "path": "./apps/libs/billing"
     },
     {

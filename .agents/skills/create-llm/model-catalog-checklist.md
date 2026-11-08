@@ -4,22 +4,22 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 
 ## File Map
 
-| Concern                            | Primary files                                                    |
-| ---------------------------------- | ---------------------------------------------------------------- |
-| Model catalog rows                 | `apps/api/app/api/models/model.constants.ts`                     |
-| Model schema                       | `apps/api/app/api/models/model.schema.ts`                        |
-| Catalog cap/shape tests            | `apps/api/app/api/models/model.service.test.ts`                  |
-| Gateway routes, wires, credentials | `apps/api/app/api/providers/provider-gateway.ts`                 |
-| Strict gateway request boundary    | `apps/api/app/api/billing/billable-model-request.ts`             |
-| Provider/family enums (chat wire)  | `libs/chat/src/schemas/provider.schema.ts`                       |
-| Tool-schema contract test          | `libs/chat/src/schemas/provider-tool-schema-compat.test.ts`      |
-| Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`   |
-| Vertex response/request shim       | `packages/agent-host/src/transport/vertex-completions-shim.ts`   |
-| UI reasoning derivation            | `apps/ui/app/chat-clients/_internal/turn-body.ts`                |
-| Self-host helper path (LangChain)  | `apps/api/app/api/providers/provider.service.ts`                 |
-| Helper invocation                  | `apps/api/app/api/llm/direct-model-invocation.service.ts`        |
-| Environment config                 | `apps/api/app/config/environment.config.ts`                      |
-| Live gateway suite (gateway URL)   | `packages/agent-host/tests/live/provider-streaming.live.test.ts` |
+| Concern                            | Primary files                                                      |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Model catalog rows                 | `apps/libs/api-llm-gateway/src/models/model.constants.ts`          |
+| Model schema                       | `apps/libs/api-llm-gateway/src/models/model.schema.ts`             |
+| Catalog cap/shape tests            | `apps/libs/api-llm-gateway/src/models/model.service.test.ts`       |
+| Gateway routes, wires, credentials | `apps/libs/api-llm-gateway/src/providers/provider-gateway.ts`      |
+| Strict gateway request boundary    | `apps/libs/api-llm-gateway/src/billable-model-request.ts`          |
+| Provider/family enums (chat wire)  | `libs/chat/src/schemas/provider.schema.ts`                         |
+| Tool-schema contract test          | `libs/chat/src/schemas/provider-tool-schema-compat.test.ts`        |
+| Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`     |
+| Vertex response/request shim       | `packages/agent-host/src/transport/vertex-completions-shim.ts`     |
+| UI reasoning derivation            | `apps/ui/app/chat-clients/_internal/turn-body.ts`                  |
+| Self-host helper path (LangChain)  | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`      |
+| Helper invocation                  | `apps/libs/api-llm-gateway/src/direct-model-invocation.service.ts` |
+| Environment config                 | `apps/api/app/config/environment.config.ts`                        |
+| Live gateway suite (gateway URL)   | `packages/agent-host/tests/live/provider-streaming.live.test.ts`   |
 
 ## Research Checklist
 
@@ -153,8 +153,8 @@ Hidden rows are still useful for staging, but `enabled: false` also removes the 
 Focused unit checks first:
 
 ```bash
-pnpm nx lint api --files="app/api/models/model.constants.ts"
-pnpm nx test api --watch=false app/api/models/model.service.test.ts
+pnpm nx lint api-llm-gateway --files="src/models/model.constants.ts"
+pnpm nx test api-llm-gateway --watch=false src/models/model.service.test.ts
 pnpm nx typecheck api
 ```
 

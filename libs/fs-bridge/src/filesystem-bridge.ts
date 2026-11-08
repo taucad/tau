@@ -4,6 +4,7 @@
 
 import {
   getEventOrigin,
+  isDigestPrecondition,
   isEventGloballyVisible,
   isWorkspaceMutationError,
   policyAtRoot,
@@ -19,7 +20,7 @@ import type {
   ChangeSet,
   ChangeSetWatchRequest,
   FileStat,
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   MkdirOptions,
   PathPolicy,
@@ -231,7 +232,12 @@ const splitLongCall = (method: string, args: readonly unknown[]): { args: unknow
   const slot = fileSystemLongCalls[method];
   const bag = slot === undefined ? undefined : args[slot];
   if (slot === undefined || bag === null || typeof bag !== 'object') {
-    return { args: [...args] };
+    /* An options argument passed as `undefined` is no argument: the wire schema counts it. */
+    const wireArgs = [...args];
+    if (slot !== undefined && wireArgs.length === slot + 1 && wireArgs[slot] === undefined) {
+      wireArgs.pop();
+    }
+    return { args: wireArgs };
   }
   /* Stripped even when absent: a call's options may be nothing but its
    * controls, and an empty bag is not a wire argument the schema admits. */
@@ -468,15 +474,19 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
     args[0] !== null &&
     typeof args[0] === 'object'
   ) {
-    const input = args[0] as CheckedFileWrite;
+    const input = args[0] as AuthorityCheckedFileWrite;
     return [
       {
         path: input.path,
         ...(method === 'writeFileChecked' ? { data: cloneWritePayloadForTransfer(input.data) } : {}),
-        preconditions: input.preconditions.map((precondition) => ({
-          path: precondition.path,
-          expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
-        })),
+        preconditions: input.preconditions.map((precondition) =>
+          isDigestPrecondition(precondition)
+            ? { path: precondition.path, expectedSha256: precondition.expectedSha256 }
+            : {
+                path: precondition.path,
+                expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
+              },
+        ),
       },
     ];
   }

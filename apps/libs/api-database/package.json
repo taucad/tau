@@ -1,0 +1,65 @@
+{
+  "name": "@taucad/api-database",
+  "version": "0.1.0-beta.0",
+  "description": "API database module, Drizzle schema and migrations",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-database"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-database#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./application-name": "./src/application-name.ts",
+    "./billing-protections": "./src/billing-protections.ts",
+    "./migration": "./src/database-migration.ts",
+    "./owner-lock": "./src/owner-lock.ts",
+    "./project-lifecycle": "./src/project-lifecycle.ts",
+    "./schema": "./src/schema/index.ts",
+    "./schema/billing-payment.types": "./src/schema/billing-payment.types.ts",
+    "./schema/billing.types": "./src/schema/billing.types.ts",
+    "./schema/telemetry-purpose.types": "./src/schema/telemetry-purpose.types.ts",
+    "./service-roles": "./src/service-roles.ts",
+    "./testing/database-reachable": "./src/testing/database-reachable.ts",
+    "./testing/scratch-database": "./src/testing/scratch-database.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "nestjs-pino": "^4.6.1",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "@taucad/utils": "workspace:*",
+    "dotenv": "catalog:",
+    "drizzle-kit": "^0.31.10",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

@@ -24,9 +24,8 @@ import { ConfigService } from '@nestjs/config';
 import { pipeline, Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
-import { hostDeviceOf } from '#auth/auth.guard.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import type { Environment } from '@taucad/api-core';
+import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
 import {
   ceilingRefusalMarker,
   gitRequestWindowSeconds,
@@ -45,16 +44,16 @@ import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filt
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { gitExecutionKey } from '#api/git/forwarding/git-execution.js';
 import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import { AttributeKey, TauMetrics } from '@taucad/telemetry';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import type {
   SyncOperationAttributes,
   SyncOperationDurationAttributes,
   SyncRefusalAttributes,
-} from '#telemetry/metrics.js';
+} from '@taucad/api-observability/metrics';
 
 type SyncOperation = SyncOperationAttributes['tau.sync.operation'];
 type SyncOutcome = SyncOperationAttributes['outcome'];

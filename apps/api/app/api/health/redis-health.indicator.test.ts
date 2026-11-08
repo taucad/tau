@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 
 describe('RedisHealthIndicator', () => {
   let indicator: RedisHealthIndicator;

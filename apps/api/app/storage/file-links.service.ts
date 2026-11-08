@@ -10,7 +10,7 @@ import {
   signFileLink,
 } from '@taucad/file-links';
 import type { FileLinkKey } from '@taucad/file-links';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageTier } from '#storage/object-storage.service.js';

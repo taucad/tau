@@ -124,7 +124,7 @@ export type BillingSettings = {
   readonly addCredits: () => Promise<void>;
   readonly manageSubscription: () => Locator;
   readonly subscribe: () => Locator;
-  /** "Pro until <date> — reactivate any time from Manage Subscription." */
+  /** "Pro until <date> — reactivate any time from Manage subscription." */
   readonly cancellationBanner: () => Locator;
   readonly closure: {
     readonly confirm: () => Promise<void>;
@@ -158,9 +158,9 @@ export const billingSettings = (page: Page): BillingSettings => ({
     page.getByText('Loading plan…', { exact: true }).waitFor({ state: 'hidden', timeout: 30_000 }),
   balance: () => page.getByTestId('credit-balance'),
   addCredits: async () => page.getByRole('button', { name: 'Add credits' }).first().click(),
-  manageSubscription: () => page.getByRole('button', { name: /Manage Subscription/u }),
+  manageSubscription: () => page.getByRole('button', { name: /Manage subscription/iu }),
   subscribe: () => page.getByRole('button', { name: /Subscribe Now/u }),
-  cancellationBanner: () => page.getByText(/^Pro until .+ reactivate any time from Manage Subscription\.$/u),
+  cancellationBanner: () => page.getByText(/^Pro until .+ reactivate any time from Manage subscription\.$/u),
   closure: {
     // Closure lives in Settings → Data controls, behind a confirmation dialog.
     async confirm(): Promise<void> {
@@ -480,7 +480,7 @@ export type StripePortal = {
   readonly cancelAtPeriodEnd: () => Promise<void>;
   readonly renew: () => Promise<void>;
   /** Back to the app through the portal's own return link, or straight to Settings → Billing when it has none. */
-  readonly returnToApp: () => Promise<'link' | 'direct'>;
+  readonly returnToApp: () => Promise<'link' | 'redirect'>;
 };
 
 /** The customer portal open in `page`. */
@@ -535,19 +535,21 @@ export const stripePortal = (page: Page): StripePortal => ({
       15_000,
     ).catch(() => -1);
   },
-  async returnToApp(): Promise<'link' | 'direct'> {
-    const clicked = await clickFirstVisible(
+  async returnToApp(): Promise<'link' | 'redirect'> {
+    // A portal flow with an after-completion redirect brings the customer back by itself.
+    if (new URL(page.url()).origin === baseUrl) {
+      return 'redirect';
+    }
+    // The return must go through Stripe's own link, so the row sees the URL Stripe sends the customer back to;
+    // navigating straight to the settings would skip exactly what a customer meets on the way back.
+    await clickFirstVisible(
       [
         page.locator('[data-test="return-to-business-link"]'),
         page.getByRole('link', { name: /^Return to /iu }),
         page.getByRole('link', { name: /Back|Return/iu }),
       ],
       15_000,
-    ).catch(() => -1);
-    if (clicked === -1) {
-      await page.goto(`${baseUrl}/?settings=billing`);
-      return 'direct';
-    }
+    );
     await page.waitForURL((url) => url.origin === baseUrl, { timeout: 60_000 });
     return 'link';
   },

@@ -3,15 +3,16 @@ import type { DynamicModule, MiddlewareConsumer, NestModule } from '@nestjs/comm
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { StorageModule } from '#storage/storage.module.js';
-import { AuthModule } from '#auth/auth.module.js';
-import type { Environment } from '#config/environment.config.js';
+import { AuthModule } from '@taucad/api-auth/module';
+import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
+import type { Environment } from '@taucad/api-core';
 import { ApiModule } from '#api/api.module.js';
-import { LoggerModule } from '#logger/logger.module.js';
-import { RedisModule } from '#redis/redis.module.js';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
-import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
+import { LoggerModule } from '@taucad/api-observability/logger-module';
+import { RedisModule } from '@taucad/api-redis';
+import { TelemetryModule } from '@taucad/api-observability';
+import { LifecycleModule } from '@taucad/api-lifecycle';
 import { RequestIdMiddleware } from '#middlewares/request-id.middleware.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
@@ -43,6 +44,7 @@ export class AppModule implements NestModule {
         TelemetryModule,
         LifecycleModule,
         RedisModule,
+        AuthExtensionsModule.forRoot(mode),
         AuthModule.forRootAsync(mode),
         ApiModule.forRoot(mode),
         StorageModule,

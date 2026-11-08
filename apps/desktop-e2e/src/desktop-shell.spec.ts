@@ -202,7 +202,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf stale > project-replay.txt');
     /* Leaving the project the session belongs to stops it without asking (T15), on the route a person takes. */
-    await page.getByRole('link', { name: 'Projects', exact: true }).click();
+    await page.getByRole('link', { name: 'All projects', exact: true }).click();
     await page.locator('[data-slot="new-project-link"]').first().click();
     await page.getByLabel('Project Name *').fill('Other shell project');
     await page.getByRole('button', { name: /^Create Project/u }).click();

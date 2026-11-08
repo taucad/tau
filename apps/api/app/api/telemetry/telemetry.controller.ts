@@ -9,9 +9,8 @@ import {
 } from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolicyAnswer } from '@taucad/telemetry';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { OptionalAuth, OptionalUser } from '#auth/decorators/auth.decorator.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { AuthGuard, OptionalAuth, OptionalUser } from '@taucad/api-auth';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
@@ -85,6 +84,7 @@ export class TelemetryController {
       entries: runtime,
       principal: userId,
       ip: request.ip,
+      requestId: request.id,
       bodyBytes: Number.isFinite(declared) ? declared : Buffer.byteLength(JSON.stringify(body)),
       now: new Date(),
     });

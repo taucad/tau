@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
-import { environmentSchema } from '#config/environment.config.js';
+import { environmentSchema } from '@taucad/api-core';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys */
 
@@ -303,33 +303,6 @@ describe('environmentSchema', () => {
       expect(
         failedPaths(cloud({ ...test, BILLING_ENVIRONMENT: 'staging', BILLING_LIVE_COLLECTION_ENABLED: 'true' })),
       ).toContain('BILLING_LIVE_COLLECTION_ENABLED');
-    });
-
-    it('should accept an optional restricted refund key of the deployment mode', () => {
-      expect(cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us' }).success).toBe(true);
-      const result = cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us', STRIPE_REFUND_SECRET_KEY: 'rk_live_refund' });
-      expect(result.success && result.data.STRIPE_REFUND_SECRET_KEY).toBe('rk_live_refund');
-      expect(
-        cloud({ ...test, BILLING_ENVIRONMENT: 'staging', STRIPE_REFUND_SECRET_KEY: 'rk_test_refund' }).success,
-      ).toBe(true);
-    });
-
-    it('should reject a refund key of the other mode, a full key, or one shared with the create or read key', () => {
-      const production = { ...live, BILLING_ENVIRONMENT: 'prod-us' };
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: 'rk_test_refund' }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: 'sk_live_full_account' }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: live.STRIPE_SECRET_KEY }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(
-        failedPaths(
-          cloud({ ...test, BILLING_ENVIRONMENT: 'staging', STRIPE_REFUND_SECRET_KEY: test.STRIPE_READ_SECRET_KEY }),
-        ),
-      ).toContain('STRIPE_REFUND_SECRET_KEY');
     });
   });
 

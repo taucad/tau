@@ -11,9 +11,9 @@ import {
   RequestTimeoutException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { GitCommitAttemptAttributes, HotProjectRank } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { GitCommitAttemptAttributes, HotProjectRank } from '@taucad/api-observability/metrics';
 import { isRemovableRef, negotiationInputLimitBytes, quotaOverrunSlackBytes } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService } from '#api/git/git.constants.js';
 import { pushQuarantineBound } from '#api/git/admission/reservation.js';

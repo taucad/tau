@@ -26,6 +26,35 @@ export type DetectedPlatform = 'mac' | 'other';
  */
 export const serverPlatform: DetectedPlatform = 'mac';
 
+const macPlatformPattern = /mac|iphone|ipad|ipod/i;
+
+/**
+ * Detect the platform a document request came from, so a server render can label shortcuts
+ * the way the browser will. Reads the `Sec-CH-UA-Platform` client hint, which Chromium sends
+ * on every secure request without opting in, and falls back to the `User-Agent` string for
+ * Firefox and Safari. A request that names neither gets {@link serverPlatform}.
+ *
+ * @param headers - Carries `Sec-CH-UA-Platform` and `User-Agent`.
+ * @returns `'mac'` for macOS and iOS clients, `'other'` for the rest.
+ * @public
+ *
+ * @example <caption>Pass the request platform to the render</caption>
+ * ```typescript
+ * import { detectRequestPlatform } from '@taucad/ui/utils/platform';
+ *
+ * export const loader = ({ request }: { request: Request }) => ({
+ *   platform: detectRequestPlatform(request.headers),
+ * });
+ * ```
+ */
+export function detectRequestPlatform(headers: Headers): DetectedPlatform {
+  const platform = headers.get('Sec-CH-UA-Platform') ?? headers.get('User-Agent');
+  if (!platform) {
+    return serverPlatform;
+  }
+  return macPlatformPattern.test(platform) ? 'mac' : 'other';
+}
+
 /**
  * Extended Navigator type that includes the experimental `userAgentData` property.
  * This property is available in Chromium-based browsers (Chrome 90+, Edge 90+)
@@ -68,5 +97,5 @@ export function detectPlatform(): DetectedPlatform {
   // oxlint-disable-next-line @typescript-eslint/no-deprecated -- Required fallback for Firefox/Safari
   const platform = userAgentData?.platform ?? navigator.platform;
 
-  return /mac|iphone|ipad|ipod/i.test(platform) ? 'mac' : 'other';
+  return macPlatformPattern.test(platform) ? 'mac' : 'other';
 }

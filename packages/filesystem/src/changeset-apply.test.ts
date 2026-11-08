@@ -163,3 +163,42 @@ describe('apply', () => {
     await expect(context.service.exists('/scope/dir')).resolves.toBe(true);
   });
 });
+
+/* EQ13: a write that names a large object by its id reaches only a provider that declares it can resolve one. */
+describe('apply of a large-object source', () => {
+  const source = { largeObject: 'a'.repeat(64), size: 3 } as const;
+
+  it('should refuse it before any I/O where the provider cannot resolve one', async () => {
+    const context = await createWorkspaceFileService();
+    const rooted = context.service.createRootedFileSystem('/');
+    const applyBatch = vi.spyOn(context.provider, 'applyBatch');
+
+    await expect(
+      applyOf(rooted)({ entries: [{ op: 'write', path: 'part.step', data: source }] }),
+    ).rejects.toMatchObject({ code: 'EINVAL' });
+    expect(applyBatch).not.toHaveBeenCalled();
+    await expect(rooted.exists('part.step')).resolves.toBe(false);
+    context.service.dispose();
+  });
+
+  it('should hand it to a provider that declares the capability and carry the verified id back', async () => {
+    const context = await createWorkspaceFileService();
+    const provider = context.provider as MemoryProvider;
+    Object.defineProperty(provider, 'capabilities', {
+      value: { ...provider.capabilities, largeObjectSources: true },
+    });
+    vi.spyOn(provider, 'applyBatch').mockImplementation(async (entries) => {
+      await provider.writeFile('part.step', new TextEncoder().encode('abc'));
+      return entries.map(() => ({ outcome: 'applied', kind: 'file', largeObject: source }) as const);
+    });
+    const rooted = context.service.createRootedFileSystem('/');
+
+    const receipt = await applyOf(rooted)({ entries: [{ op: 'write', path: 'part.step', data: source }] });
+
+    expect(receipt.state).toBe('applied');
+    expect(receipt.entries[0]?.largeObject).toStrictEqual(source);
+    const stat = await rooted.stat('part.step');
+    expect(stat.size).toBe(3);
+    context.service.dispose();
+  });
+});

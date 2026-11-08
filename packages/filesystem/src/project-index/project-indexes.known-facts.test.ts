@@ -102,6 +102,29 @@ describe('facts the index already holds (D12: a first revision from recorded oid
     expect(facts.has('measured.txt')).toBe(false);
   });
 
+  it('should answer an import record once per path, then neither trust nor stat it again', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    vi.setSystemTime(1_020_000);
+    const indexes = indexesOver(provider);
+    await indexes.ready('/project');
+    const asked = { digests: ['blobOid'], measure: false, recorded: 'import' } as const;
+    const first = await indexes.facts('/project', ['kept.txt'], asked);
+    expect(first.get('kept.txt')?.blobOid).toBe('a'.repeat(40));
+    const stats = vi.spyOn(provider, 'stat');
+
+    const second = await indexes.facts('/project', ['kept.txt'], asked);
+
+    expect(second.has('kept.txt')).toBe(false);
+    expect(stats).not.toHaveBeenCalled();
+  });
+
   it('should measure what it does not hold when measuring is allowed', async () => {
     const { provider } = await durableRoot();
     vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });

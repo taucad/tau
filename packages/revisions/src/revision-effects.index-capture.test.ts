@@ -543,6 +543,29 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(blobOidOf(changed));
   });
 
+  it("should hash a later capture's file however it was rewritten: a record answers only the first capture after it", async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    const recorded = 'e'.repeat(40);
+    await writeImportRecord(at, 'dir1/f1.txt', recorded);
+    at.reload();
+    const first = await cut(at.actors);
+    /* Rewritten at its size, and its mtime put back: nothing a stat can tell apart from the recorded file. */
+    const before = await stat(outside(at, 'dir1/f1.txt'));
+    const changed = 'FILE 1\n';
+    expect(Buffer.byteLength(changed)).toBe(before.size);
+    await writeFile(outside(at, 'dir1/f1.txt'), changed);
+    await utimes(outside(at, 'dir1/f1.txt'), before.atime, before.mtime);
+    const after = await stat(outside(at, 'dir1/f1.txt'));
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+
+    /* A capture with no memo of its own (another checkout's) reads every file, this one with it. */
+    const second = await walkedTreeId(at.walking);
+
+    /* Pinned to the record, the file would leave the tree as the first capture's; hashed, it does not. */
+    expect(second).not.toBe(first.treeId);
+  });
+
   it('should take no fact the index measured itself, only those an import recorded', async () => {
     const initial = files(10);
     const at = await fixture(initial);

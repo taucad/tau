@@ -89,7 +89,8 @@ export type IndexFactsOptions = ContentFactsOptions &
      * provider stat at exactly the size and mtime the record holds, so a
      * change the index has not observed yet is never answered with the
      * record's ids. A file placed within the racy window of the record (EQ7)
-     * is not trusted, so it is measured again by its caller.
+     * is not trusted, so it is measured again by its caller. Each recorded
+     * path is answered once, taken or refused; asked again, it is not.
      */
     recorded?: 'import';
   }>;
@@ -176,7 +177,11 @@ export class ProjectIndexes {
   /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
   private readonly _importFactsTaken = new Set<string>();
 
-  /** What each root's import record seeded, at the size and mtime it holds: what `recorded: 'import'` may answer. */
+  /**
+   * What each root's import record seeded, at the size and mtime it holds:
+   * what `recorded: 'import'` may answer, once per path. A path leaves once
+   * asked (the first capture after the import), so no later walk trusts it.
+   */
   private readonly _importSeeded = new Map<string, Map<string, Readonly<{ size: number; mtimeMs: number }>>>();
 
   /**
@@ -319,7 +324,13 @@ export class ProjectIndexes {
     };
     /* An import record's facts, answered only while the file the provider holds now is the one it recorded. */
     const importRecorded = async (path: string, known: ContentFacts | undefined): Promise<ContentFacts | undefined> => {
-      const at = this._importSeeded.get(key)?.get(path);
+      const seeded = this._importSeeded.get(key);
+      const at = seeded?.get(path);
+      /* A record answers each path once, taken or refused: a later walk measures, and stats no seeded path again. */
+      seeded?.delete(path);
+      if (seeded?.size === 0) {
+        this._importSeeded.delete(key);
+      }
       if (at === undefined || !answers(path, known)) {
         return undefined;
       }

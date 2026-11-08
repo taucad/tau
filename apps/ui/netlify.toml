@@ -30,8 +30,10 @@
 command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/retain-previous-assets.mts"
 publish = "build/client"
 
-# The last step keeps the previous two deploys' `/assets/*` in this one, so a page
-# loaded just before a deploy can still lazy-load its chunks (TAU-UI-6). It runs
+# The last step keeps the previous deploys' `/assets/*` in this one, so a page
+# loaded just before a deploy can still lazy-load its chunks (TAU-UI-6), and the
+# content-addressed runtime bundles (`/picogk-browser/<sha256>/`,
+# `/csharp-language/<sha256>/`), so it can still start PicoGK or the C# service. It runs
 # after source-map injection, reads the live deploy's `tau-served-assets.json`
 # from `TAU_RETAIN_ASSETS_FROM` (set by `deploy-ui.yml`), verifies every byte
 # against it, and writes this deploy's index. Unset, it writes the index only.

@@ -15,6 +15,15 @@
  * next deploy reads in turn. Netlify stores files by content, so a retained
  * asset is not uploaded again.
  *
+ * Besides `/assets/*`, it keeps the content-addressed runtime bundles a page starts later: the PicoGK
+ * browser host (`picogk-browser/<sha256>/`) and the C# language service (`csharp-language/<sha256>/`).
+ * A tab loaded before a deploy that changed one fetches the old bundle by the address its build named,
+ * so dropping it would fail PicoGK or the C# service in that tab. These bundles are large (PicoGK is about
+ * 150 MB per generation) and rarely change, so they are not downloaded again each deploy: with
+ * `TAU_RETAIN_ASSETS_STORE` set, the deploy reads them from that directory (a CI cache `deploy-ui.yml`
+ * restores) when their integrity matches, and leaves in it exactly the runtime bundle files this deploy
+ * serves, its own included, for the next deploy.
+ *
  * Generations age per distinct build: a redeploy of the build the live deploy
  * already serves keeps every asset at the age the live index lists.
  *
@@ -31,13 +40,16 @@
  *                            (`deploy-ui.yml`), never the public host. Unset: only the new deploy's index is written.
  *   TAU_RETAIN_ASSETS_SKIP   `1` retains nothing and asks the live deploy nothing, with a warning: the emergency
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
+ *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
+ *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
  *
  * Usage: node scripts/retain-previous-assets.mts   (from apps/ui, after the client build)
  * Exit codes: 0 success, 1 a malformed or unreadable index, or an asset that cannot be retained.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { pipeline } from 'node:stream/promises';
@@ -83,9 +95,33 @@ export type ServedAssetsIndex = {
 const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
 
 /**
- * Whether a path can be published by one deploy and read back by the next: under `assets/`,
- * every segment a real name, nothing a URL or a file system would read differently. This is
- * the one check both sides apply, so no build can publish a name its successor refuses.
+ * Roots of the content-addressed runtime bundles a deploy serves beside `/assets/*`, each under a
+ * `<sha256>/` directory: the PicoGK browser host and the C# language service (their Vite plugins).
+ */
+export const runtimeBundleRoots = ['picogk-browser', 'csharp-language'] as const;
+
+const contentAddress = /^[a-f\d]{64}$/u;
+
+/**
+ * Whether a path belongs to a content-addressed runtime bundle: `<root>/<sha256>/<file>`.
+ *
+ * @param path - A path relative to the client root, with `/` separators.
+ * @returns `true` for a runtime bundle file.
+ */
+export const isRuntimeBundlePath = (path: string): boolean => {
+  const [root, address, ...rest] = path.split('/');
+  return (
+    (runtimeBundleRoots as readonly string[]).includes(root ?? '') &&
+    contentAddress.test(address ?? '') &&
+    rest.length > 0
+  );
+};
+
+/**
+ * Whether a path can be published by one deploy and read back by the next: under `assets/` or
+ * a runtime bundle's content address, every segment a real name, nothing a URL or a file system
+ * would read differently. This is the one check both sides apply, so no build can publish a name
+ * its successor refuses.
  *
  * @param path - A path relative to the client root, with `/` separators.
  * @returns `true` when the path is safe to publish and to retain.
@@ -93,8 +129,7 @@ const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
 export const isServableAssetPath = (path: string): boolean => {
   const segments = path.split('/');
   return (
-    segments[0] === 'assets' &&
-    segments.length > 1 &&
+    ((segments[0] === 'assets' && segments.length > 1) || isRuntimeBundlePath(path)) &&
     !forbiddenPathCharacter.test(path) &&
     segments.slice(1).every((segment) => segment !== '' && segment !== '.' && segment !== '..')
   );
@@ -276,9 +311,29 @@ const integrityOfFile = async (path: string): Promise<string> => {
   return `sha384-${hash.digest('base64')}`;
 };
 
+/** Every file under a runtime bundle root, or none when this build has no such bundle. */
+const listRuntimeBundleEntries = async (clientDirectory: string): Promise<Dirent[]> => {
+  const listed = await Promise.all(
+    runtimeBundleRoots.map(async (root) => {
+      try {
+        return await readdir(join(clientDirectory, root), { recursive: true, withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return [];
+        }
+        throw error;
+      }
+    }),
+  );
+  return listed.flat();
+};
+
 const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
   // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
-  const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
+  const entries = [
+    ...(await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true })),
+    ...(await listRuntimeBundleEntries(clientDirectory)),
+  ];
   const files = entries.filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
   const paths = files.map((entry) => {
     const absolute = join(entry.parentPath, entry.name);
@@ -394,9 +449,56 @@ const readLiveIndex = async (origin: string, transport: Transport): Promise<Serv
   return parseServedAssetsIndex(parsed, `${origin}/${servedAssetsIndexFileName}`);
 };
 
-type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };
+type Download = {
+  readonly origin: string;
+  readonly clientDirectory: string;
+  readonly transport: Transport;
+  readonly store: string | undefined;
+};
 
-const downloadAsset = async ({ origin, clientDirectory, transport }: Download, asset: ServedAsset): Promise<number> => {
+/** A store file's name: its SRI integrity, made safe as a file name. */
+const storeFileName = (integrity: string): string => integrity.replaceAll('/', '_').replaceAll('+', '-');
+
+/** A runtime bundle file's bytes from the store, when it holds them unchanged. */
+const readFromStore = async (
+  store: string | undefined,
+  asset: ServedAsset,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  if (store === undefined || !isRuntimeBundlePath(asset.path)) {
+    return undefined;
+  }
+  const file = join(store, storeFileName(asset.integrity));
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = Uint8Array.from(await readFile(file));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+  if (sri(bytes) === asset.integrity) {
+    return bytes;
+  }
+  // A cache is not trusted: a changed file is dropped, fetched from the live deploy, and stored again.
+  await rm(file, { force: true });
+  return undefined;
+};
+
+/** Where one retained asset's bytes came from. */
+type Retained = { readonly bytes: number; readonly fromStore: boolean };
+
+const downloadAsset = async (
+  { origin, clientDirectory, transport, store }: Download,
+  asset: ServedAsset,
+): Promise<Retained> => {
+  const destination = join(clientDirectory, asset.path);
+  const stored = await readFromStore(store, asset);
+  if (stored !== undefined) {
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, stored);
+    return { bytes: stored.byteLength, fromStore: true };
+  }
   const response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
   if (response.status !== 200) {
     throw new Error(
@@ -407,10 +509,33 @@ const downloadAsset = async ({ origin, clientDirectory, transport }: Download, a
   if (sri(bytes) !== asset.integrity) {
     throw new Error(`${asset.path} does not match its integrity in the live index; refusing to publish it.`);
   }
-  const destination = join(clientDirectory, asset.path);
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, bytes);
-  return bytes.byteLength;
+  return { bytes: bytes.byteLength, fromStore: false };
+};
+
+/**
+ * Leave in the store exactly the runtime bundle files this deploy serves, its own and those it kept,
+ * so the next deploy reads them from it rather than downloading them again.
+ *
+ * @param store - The store directory.
+ * @param clientDirectory - The new client build, which now holds every served file.
+ * @param served - The new deploy's index entries.
+ */
+const refreshStore = async (store: string, clientDirectory: string, served: readonly ServedAsset[]): Promise<void> => {
+  const wanted = new Map(
+    served.filter((asset) => isRuntimeBundlePath(asset.path)).map((asset) => [storeFileName(asset.integrity), asset]),
+  );
+  await mkdir(store, { recursive: true });
+  const present = new Set(await readdir(store));
+  await Promise.all(
+    [...present].filter((name) => !wanted.has(name)).map(async (name) => rm(join(store, name), { recursive: true })),
+  );
+  await mapWithConcurrency(
+    [...wanted].filter(([name]) => !present.has(name)),
+    hashConcurrency,
+    async ([name, asset]) => copyFile(join(clientDirectory, asset.path), join(store, name)),
+  );
 };
 
 /**
@@ -430,7 +555,15 @@ export const retainPreviousAssets = async (options: {
   readonly skip?: boolean;
   /** This deploy's time in milliseconds since the epoch; replaceable in tests. */
   readonly now?: number;
-}): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
+  /** Directory of runtime bundle files kept between deploys (`TAU_RETAIN_ASSETS_STORE`); none: download them all. */
+  readonly store?: string;
+}): Promise<{
+  readonly retained: number;
+  readonly bytes: number;
+  /** Of `bytes`, those read from the store rather than downloaded. */
+  readonly storedBytes: number;
+  readonly index: ServedAssetsIndex;
+}> => {
   const transport: Transport = {
     requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
     wait: options.wait ?? (async (milliseconds) => setTimeout(milliseconds)),
@@ -446,16 +579,25 @@ export const retainPreviousAssets = async (options: {
           shouldAge: !isSameBuild(previous, own),
         });
 
-  const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
-  const sizes = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));
-  const bytes = sizes.reduce((total, size) => total + size, 0);
+  const download: Download = {
+    origin: origin ?? '',
+    clientDirectory: options.clientDirectory,
+    transport,
+    store: options.store,
+  };
+  const results = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));
+  const bytes = results.reduce((total, result) => total + result.bytes, 0);
+  const storedBytes = results.reduce((total, result) => total + (result.fromStore ? result.bytes : 0), 0);
 
   const index: ServedAssetsIndex = {
     schema: servedAssetsIndexSchema,
     assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
   };
   await writeFile(join(options.clientDirectory, servedAssetsIndexFileName), `${JSON.stringify(index)}\n`);
-  return { retained: kept.length, bytes, index };
+  if (options.store !== undefined) {
+    await refreshStore(options.store, options.clientDirectory, index.assets);
+  }
+  return { retained: kept.length, bytes, storedBytes, index };
 };
 
 const main = async (): Promise<void> => {
@@ -468,13 +610,16 @@ const main = async (): Promise<void> => {
         'may fail their next lazy import until they reload. Use only to ship a fix while the live origin is down.',
     );
   }
-  const { retained, bytes, index } = await retainPreviousAssets({
+  const configuredStore = process.env['TAU_RETAIN_ASSETS_STORE']?.trim();
+  const store = configuredStore === undefined || configuredStore === '' ? undefined : resolve(configuredStore);
+  const { retained, bytes, storedBytes, index } = await retainPreviousAssets({
     clientDirectory: resolve(import.meta.dirname, '../build/client'),
     origin,
     skip,
+    store,
   });
   console.log(
-    `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,
+    `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB, ${String(Math.round(storedBytes / 1024))} KiB of it from the store) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,
   );
 };
 

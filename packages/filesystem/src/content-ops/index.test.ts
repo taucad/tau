@@ -357,6 +357,15 @@ describe('withReadContentOps over a view carrying a system-skills overlay', () =
     ]);
   });
 
+  it('should refuse an archive past the ceiling its caller passes', async () => {
+    const { view } = await exportView();
+
+    await expect(view.archive('', { versionedOnly: true, maxBytes: 1 })).rejects.toMatchObject({
+      code: 'ARCHIVE_TOO_LARGE',
+    });
+    await expect(view.archive('', { versionedOnly: true })).resolves.toBeInstanceOf(Blob);
+  });
+
   it('should keep a project-authored skill the checkout holds beside the overlay', async () => {
     const { view } = await exportView();
     const files = await view.contents('', { versionedOnly: true });

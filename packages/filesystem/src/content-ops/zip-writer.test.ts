@@ -192,6 +192,12 @@ describe('zipStream', () => {
     expect(finished).toHaveBeenCalledOnce();
   });
 
+  it('should refuse an entry name longer than a ZIP name field holds', async () => {
+    await expect(bytesOf(zipStream(each([source('é'.repeat(32_768), encoder.encode('x'))])))).rejects.toThrow(
+      /65536 UTF-8 bytes; a ZIP name holds at most 65535/u,
+    );
+  });
+
   it('should error with a walk failure', async () => {
     const failure = new Error('walk failed');
     // oxlint-disable-next-line require-yield -- A walk that fails before its first entry.
@@ -282,13 +288,19 @@ describe('ZIP64 records', () => {
     ...overrides,
   });
 
-  it('should write a 32-bit descriptor until a size reaches 4 GiB, then a 64-bit one', () => {
+  it('should write a 32-bit descriptor unless the local header announced ZIP64', () => {
     expect(dataDescriptor(entry({})).byteLength).toBe(16);
+    expect(dataDescriptor(entry({ zip64: true })).byteLength).toBe(24);
 
-    const wide = view(dataDescriptor(entry({ compressed: 2 ** 32 + 5, size: 2 ** 33 })));
+    const wide = view(dataDescriptor(entry({ compressed: 2 ** 32 + 5, size: 2 ** 33, zip64: true })));
     expect(wide.byteLength).toBe(24);
     expect(wide.getBigUint64(8, true)).toBe(BigInt(2 ** 32 + 5));
     expect(wide.getBigUint64(16, true)).toBe(BigInt(2 ** 33));
+  });
+
+  it('should refuse an entry declared under 4 GiB that read 4 GiB or more', () => {
+    expect(() => dataDescriptor(entry({ size: 2 ** 32 }))).toThrow(/'a\.bin' read 4 GiB or more/u);
+    expect(() => dataDescriptor(entry({ compressed: 2 ** 32 }))).toThrow(/declared smaller/u);
   });
 
   it('should put only the overflowing fields in the central ZIP64 extra, in order', () => {

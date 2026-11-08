@@ -145,9 +145,17 @@ export const localHeader = (name: Uint8Array<ArrayBuffer>, zip64: boolean): Uint
 
 /** @internal */
 export const dataDescriptor = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
-  const wide = entry.zip64 || entry.compressed >= zip32Maximum || entry.size >= zip32Maximum;
-  const record = new Record(wide ? 24 : 16).u32(0x08_07_4b_50).u32(entry.crc);
-  return (wide ? record.u64(entry.compressed).u64(entry.size) : record.u32(entry.compressed).u32(entry.size)).bytes;
+  /* The local header fixed the descriptor's width (APPNOTE 4.3.9.2): 8-byte
+     sizes only after a ZIP64 extra there. An entry declared under the threshold
+     that read 4 GiB or more cannot be described, so it is refused. */
+  if (!entry.zip64 && (entry.compressed >= zip32Maximum || entry.size >= zip32Maximum)) {
+    throw new Error(
+      `'${new TextDecoder().decode(entry.name)}' read 4 GiB or more after it was declared smaller; archive it again.`,
+    );
+  }
+  const record = new Record(entry.zip64 ? 24 : 16).u32(0x08_07_4b_50).u32(entry.crc);
+  return (entry.zip64 ? record.u64(entry.compressed).u64(entry.size) : record.u32(entry.compressed).u32(entry.size))
+    .bytes;
 };
 
 /** @internal */
@@ -247,6 +255,12 @@ export const zipStream = (
 
   const open = async (source: ZipSource): Promise<Uint8Array<ArrayBuffer>> => {
     const name = encoder.encode(source.name);
+    /* A name's length is a 16-bit field. */
+    if (name.byteLength > 0xff_ff) {
+      throw new Error(
+        `An archive entry name is ${String(name.byteLength)} UTF-8 bytes; a ZIP name holds at most 65535.`,
+      );
+    }
     const zip64 = (source.size ?? 0) >= zip64Declared;
     const header = localHeader(name, zip64);
     const tally = { crc: 0, size: 0 };

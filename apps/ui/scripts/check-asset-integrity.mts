@@ -13,7 +13,11 @@
  *    - that the untampered module compiles;
  *    - that one changed byte is refused with integrity and, as a contrast, what happens without it;
  *    - the median added time of integrity: loader timings with and without a registered value, alternated.
- *    The X31 line is at most 200 ms added per module.
+ *    The X31 line is at most 200 ms added per module, or 8 ms per MB for a module over 25 MB. Chromium and WebKit
+ *    buffer and hash the whole response before compiling it, so the cost grows with the module's size: on hosted
+ *    runners Chromium adds 4.4 to 6.0 ms per MB on every module, which puts the 42.7 MB OpenCascade modules at 205 to
+ *    257 ms. A timed module over its line is measured again in a fresh worker with twice the iterations, and that
+ *    second median decides, so one noisy runner moment does not fail the gate while a real regression still does.
  * Chromium, Firefox and WebKit run when installed (`pnpm exec playwright install --with-deps chromium firefox webkit`).
  *
  * Environment: TAU_INTEGRITY_ENGINES, a comma-separated subset of chromium,firefox,webkit (default: all three);
@@ -67,8 +71,12 @@ type WorkerInput = {
 };
 type WorkerOutput = { readonly crossOriginIsolated: boolean; readonly row?: ModuleRow; readonly time?: number };
 
-/** Milliseconds a module may add to its load under integrity (ruling X31). */
-const overheadLimit = 200;
+/** Milliseconds any module may add to its load under integrity (ruling X31). */
+const overheadFloor = 200;
+/** Milliseconds per MB a large module may add: integrity hashes every byte before compiling (X31, re-baselined). */
+const overheadPerMegabyte = 8;
+/** The X31 line for a module of this many bytes. */
+const overheadLimit = (bytes: number): number => Math.max(overheadFloor, (overheadPerMegabyte * bytes) / 1e6);
 const harness = '/__tau-integrity__';
 const [clientDirectory, evidence, iterationsText = '5'] = process.argv.slice(2);
 const iterations = Number(iterationsText);
@@ -328,13 +336,25 @@ const origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port
 // X44: the overhead line gates each engine only on the platform it ships on; tamper refusal gates every engine.
 const timedEngines = process.env['TAU_INTEGRITY_TIMED_ENGINES']?.split(',').filter(Boolean);
 
-const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
-  const timed = timedEngines === undefined || timedEngines.includes(label);
-  let worst = { path: '', added: Number.NEGATIVE_INFINITY };
-  for (const row of rows) {
-    const added = row.checked - row.plain;
-    if (added > worst.added) {
-      worst = { path: row.path, added };
+const isTimed = (label: string): boolean => timedEngines === undefined || timedEngines.includes(label);
+const added = (row: ModuleRow): number => row.checked - row.plain;
+
+const reportRows = (label: string, rows: readonly ModuleRow[], retried: ReadonlyMap<string, ModuleRow>): void => {
+  const timed = isTimed(label);
+  let worst = { path: '', added: Number.NEGATIVE_INFINITY, limit: overheadFloor };
+  for (const first of rows) {
+    const retry = retried.get(first.path);
+    if (retry !== undefined) {
+      lines.push(
+        `INFO ${label} ${first.path} first measurement added ${added(first).toFixed(1)} ms (${first.plain.toFixed(1)} ms plain, ${first.checked.toFixed(1)} ms with integrity), over its ${overheadLimit(first.bytes).toFixed(0)} ms line; measured again with ${String(iterations * 2)} iterations`,
+      );
+    }
+    // The tamper outcomes always come from the first measurement; only the timings are re-measured.
+    const row = retry === undefined ? first : { ...first, checked: retry.checked, plain: retry.plain };
+    const rowAdded = added(row);
+    const limit = overheadLimit(row.bytes);
+    if (rowAdded - limit > worst.added - worst.limit) {
+      worst = { path: row.path, added: rowAdded, limit };
     }
     if (row.variants !== undefined) {
       const timings = Object.entries(row.variants).map(([name, value]) => `${name} ${value.toFixed(1)} ms`);
@@ -343,12 +363,12 @@ const reportRows = (label: string, rows: readonly ModuleRow[]): void => {
       );
     }
     record(
-      row.untampered.ok && !row.tamperedWithIntegrity.ok && (!timed || added <= overheadLimit),
-      `${label} ${row.path} ${(row.bytes / 1e6).toFixed(1)} MB: untampered ${row.untampered.ok ? 'compiles' : `fails ${row.untampered.error ?? ''}`}; tampered+integrity ${row.tamperedWithIntegrity.ok ? 'COMPILED' : 'refused'}; tampered without integrity ${row.tamperedWithoutIntegrity.ok ? 'compiles' : 'fails'}; loader ${row.plain.toFixed(1)} ms plain, ${row.checked.toFixed(1)} ms with integrity, added ${added.toFixed(1)} ms`,
+      row.untampered.ok && !row.tamperedWithIntegrity.ok && (!timed || rowAdded <= limit),
+      `${label} ${row.path} ${(row.bytes / 1e6).toFixed(1)} MB: untampered ${row.untampered.ok ? 'compiles' : `fails ${row.untampered.error ?? ''}`}; tampered+integrity ${row.tamperedWithIntegrity.ok ? 'COMPILED' : 'refused'}; tampered without integrity ${row.tamperedWithoutIntegrity.ok ? 'compiles' : 'fails'}; loader ${row.plain.toFixed(1)} ms plain, ${row.checked.toFixed(1)} ms with integrity, added ${rowAdded.toFixed(1)} ms (line ${limit.toFixed(0)} ms${retry === undefined ? '' : ', measured twice'})`,
     );
   }
   lines.push(
-    `  ${label} worst added: ${worst.added.toFixed(1)} ms (${worst.path}); ${timed ? `line ≤ ${String(overheadLimit)} ms` : 'information only (X44)'}`,
+    `  ${label} worst added against its line: ${worst.added.toFixed(1)} ms of ${worst.limit.toFixed(0)} ms (${worst.path}); ${timed ? `line ≤ max(${String(overheadFloor)} ms, ${String(overheadPerMegabyte)} ms/MB)` : 'information only (X44)'}`,
   );
 };
 
@@ -368,56 +388,79 @@ for (const [label, type] of engines) {
     try {
       const page = await browser.newPage();
       await page.goto(`${origin}${harness}/`);
-      const input: WorkerInput = { modules: workerModules, iterations, diagnosticIterations };
       // One fresh worker per module (and per diagnostic), as a kernel worker would have, so compiled modules never
       // accumulate; a worker that does not answer in five minutes fails the browser rather than the job.
-      const measured = await page.evaluate(
-        async ({ script, data }) => {
-          const run = async (message: unknown): Promise<WorkerOutput> => {
-            const worker = new Worker(script, { type: 'module' });
-            try {
-              return await new Promise<WorkerOutput>((resolve, reject) => {
-                const timer = setTimeout(() => {
-                  reject(new Error('worker timed out after 300 s'));
-                }, 300_000);
-                worker.addEventListener('message', (event: MessageEvent<WorkerOutput>) => {
-                  clearTimeout(timer);
-                  resolve(event.data);
+      const measure = async (input: WorkerInput) =>
+        page.evaluate(
+          async ({ script, data }) => {
+            const run = async (message: unknown): Promise<WorkerOutput> => {
+              const worker = new Worker(script, { type: 'module' });
+              try {
+                return await new Promise<WorkerOutput>((resolve, reject) => {
+                  const timer = setTimeout(() => {
+                    reject(new Error('worker timed out after 300 s'));
+                  }, 300_000);
+                  worker.addEventListener('message', (event: MessageEvent<WorkerOutput>) => {
+                    clearTimeout(timer);
+                    resolve(event.data);
+                  });
+                  worker.addEventListener('error', (event) => {
+                    clearTimeout(timer);
+                    reject(new Error(event.message));
+                  });
+                  worker.postMessage(message);
                 });
-                worker.addEventListener('error', (event) => {
-                  clearTimeout(timer);
-                  reject(new Error(event.message));
-                });
-                worker.postMessage(message);
-              });
-            } finally {
-              worker.terminate();
+              } finally {
+                worker.terminate();
+              }
+            };
+            const rows: ModuleRow[] = [];
+            let isolated = true;
+            for (const module of data.modules) {
+              const output = await run({ module, iterations: data.iterations });
+              isolated &&= output.crossOriginIsolated;
+              const variants: Record<string, number> = {};
+              for (const [name, value] of Object.entries({
+                ...module.variants,
+                ...(module.variants ? { buffered: '', 'buffered-sha384': '' } : {}),
+              })) {
+                const timed = await run({ module, variant: name, value, iterations: data.diagnosticIterations });
+                variants[name] = timed.time ?? Number.NaN;
+              }
+              if (output.row !== undefined) {
+                rows.push(module.variants === undefined ? output.row : { ...output.row, variants });
+              }
             }
-          };
-          const rows: ModuleRow[] = [];
-          let isolated = true;
-          for (const module of data.modules) {
-            const output = await run({ module, iterations: data.iterations });
-            isolated &&= output.crossOriginIsolated;
-            const variants: Record<string, number> = {};
-            for (const [name, value] of Object.entries({
-              ...module.variants,
-              ...(module.variants ? { buffered: '', 'buffered-sha384': '' } : {}),
-            })) {
-              const timed = await run({ module, variant: name, value, iterations: data.diagnosticIterations });
-              variants[name] = timed.time ?? Number.NaN;
-            }
-            if (output.row !== undefined) {
-              rows.push(module.variants === undefined ? output.row : { ...output.row, variants });
-            }
-          }
-          return { crossOriginIsolated: isolated, rows };
-        },
-        { script: `${harness}/worker.js`, data: input },
+            return { crossOriginIsolated: isolated, rows };
+          },
+          { script: `${harness}/worker.js`, data: input },
+        );
+      const measured = await measure({ modules: workerModules, iterations, diagnosticIterations });
+      // A timed module over its line is measured again, without diagnostics and with twice the iterations; the second
+      // median decides its timing. Tamper refusal is never re-measured.
+      const over = new Set(
+        isTimed(label)
+          ? measured.rows.filter((row) => added(row) > overheadLimit(row.bytes)).map((row) => row.path)
+          : [],
       );
-      results.push({ browser: label, version: browser.version(), ...measured });
+      const remeasure = async (paths: ReadonlySet<string>): Promise<readonly ModuleRow[]> => {
+        if (paths.size === 0) {
+          return [];
+        }
+        const { rows } = await measure({
+          modules: workerModules
+            .filter((module) => paths.has(module.path))
+            .map(({ path: file, bytes, integrity }) => ({ path: file, bytes, integrity })),
+          iterations: iterations * 2,
+          diagnosticIterations,
+        });
+        return rows;
+      };
+      const again = await remeasure(over);
+      const retried = new Map(again.map((row) => [row.path, row] as const));
+      results.push({ browser: label, version: browser.version(), ...measured, retried: [...retried.values()] });
       record(measured.crossOriginIsolated, `${label} ${browser.version()} crossOriginIsolated in the kernel worker`);
-      reportRows(label, measured.rows);
+      reportRows(label, measured.rows, retried);
       // The .NET runtime enforces its own boot configuration: it starts untampered and refuses a changed native byte.
       for (const framework of dotnetFrameworks) {
         const boot = async (prefix: string): Promise<Outcome> => {

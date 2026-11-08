@@ -415,6 +415,23 @@ const WebTitlebarControls = ({
   </div>
 );
 
+/**
+ * The shell's first-paint geometry. Allotment sizes its panes from a measurement after
+ * hydration, so the server markup's panes had no position or width and the first paint
+ * could lay the content out at the window's left edge (Finding 5). These classes place
+ * both panes where Allotment will put them, from the same `--sidebar-panel-width` and
+ * open state; once Allotment lays out, its inline `left` and `width` take over with the
+ * same values, so nothing moves. Below `md` the sidebar is a sheet and the content is
+ * full width.
+ */
+const shellPaneClasses = {
+  sidebar: 'left-0 w-(--sidebar-panel-width) max-md:hidden group-data-[sidebar-open=false]/app-shell:hidden',
+  content: cn(
+    'left-(--sidebar-panel-width) w-[calc(100%-var(--sidebar-panel-width))]',
+    'max-md:left-0 max-md:w-full group-data-[sidebar-open=false]/app-shell:left-0 group-data-[sidebar-open=false]/app-shell:w-full',
+  ),
+} as const;
+
 const ApplicationShell = ({
   children,
   isDesktopTarget,
@@ -485,6 +502,8 @@ const ApplicationShell = ({
       )}
       <Allotment
         paneLabels={['Sidebar', 'Content']}
+        // The shell has no slow data, so nothing in it may stream as a fallback (R10).
+        hasPaneSuspense={false}
         id='application-allotment'
         ref={allotmentRef}
         proportionalLayout={false}
@@ -501,6 +520,7 @@ const ApplicationShell = ({
       >
         <Allotment.Pane
           key='app-sidebar'
+          className={shellPaneClasses.sidebar}
           minSize={sidebarMinimumWidth}
           preferredSize={sidebarPreferredWidth}
           maxSize={sidebarMaximumWidth}
@@ -509,7 +529,7 @@ const ApplicationShell = ({
         >
           <AppSidebar />
         </Allotment.Pane>
-        <Allotment.Pane key='app-main' priority={LayoutPriority.High}>
+        <Allotment.Pane key='app-main' className={shellPaneClasses.content} priority={LayoutPriority.High}>
           {children}
         </Allotment.Pane>
       </Allotment>

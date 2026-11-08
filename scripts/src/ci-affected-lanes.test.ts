@@ -124,9 +124,9 @@ describe('ci.yml affected-only lanes', () => {
 });
 
 describe('staging.yml skipped-lane rule', () => {
-  const wait = staging.jobs['ci']?.steps?.find((step) => step.id === 'wait');
-  const script = wait?.run ?? '';
-  const planned = JSON.parse(wait?.env?.['PLANNED_LANES'] ?? '[]') as string[];
+  const check = staging.jobs['ci']?.steps?.find((step) => step.id === 'check');
+  const script = check?.run ?? '';
+  const planned = JSON.parse(check?.env?.['PLANNED_LANES'] ?? '[]') as string[];
 
   it('should read the lane plan that the same CI run uploaded', () => {
     const planStep = ci.jobs['plan']?.steps?.find((step) => step.id === 'plan')?.run ?? '';

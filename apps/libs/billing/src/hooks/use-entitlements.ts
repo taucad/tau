@@ -16,7 +16,8 @@ export const useEntitlements = (): Entitlements & { readonly isResolved: boolean
   const { data } = useQuery({
     queryKey: ['billing', 'entitlements', apiBaseUrl, userId],
     enabled: userId !== undefined && apiBaseUrl !== undefined,
-    staleTime: 5 * 60 * 1000,
+    // Short enough that a plan change made in another tab or in the Stripe portal shows on the next focus.
+    staleTime: 60 * 1000,
     queryFn: async ({ signal }): Promise<Entitlements> => {
       const response = await fetch(`${apiBaseUrl}/v1/billing/entitlements`, { credentials: 'include', signal });
       if (!response.ok) {

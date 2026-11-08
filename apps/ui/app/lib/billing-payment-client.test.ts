@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getUnresolvedPaymentActions, prepareTopup } from './billing-payment-client.js';
+import { followPaymentRedirect, getUnresolvedPaymentActions, prepareTopup } from './billing-payment-client.js';
+import type { WirePaymentAction } from '@taucad/billing';
 
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -8,6 +9,7 @@ vi.mock('#environment.config.js', () => ({
 }));
 vi.mock('@taucad/utils/id', () => ({ randomUuid: () => 'request_1' }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
+vi.mock('sonner', () => ({ toast: vi.fn() }));
 
 const action = {
   version: 'payment-action-v1',
@@ -253,5 +255,40 @@ describe('billing payment client', () => {
     isCurrent = false;
     release(action);
     await expect(pending).rejects.toThrow('Financial session changed');
+  });
+});
+
+describe('followPaymentRedirect', () => {
+  const open = {
+    ...action,
+    state: 'redirect_required',
+    redirectUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
+  } as unknown as WirePaymentAction;
+
+  it('should navigate the page to Stripe on the web', () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    try {
+      expect(followPaymentRedirect(open)).toBe(true);
+      expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_1');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('should open Stripe in the browser from the desktop app, whose window never leaves the app', () => {
+    const assign = vi.fn();
+    const openWindow = vi.fn();
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    vi.stubGlobal('location', { assign });
+    vi.stubGlobal('open', openWindow);
+    try {
+      expect(followPaymentRedirect(open)).toBe(true);
+      expect(openWindow).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_1', '_blank', 'noopener');
+      expect(assign).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });

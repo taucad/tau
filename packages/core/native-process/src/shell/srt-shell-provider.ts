@@ -1063,7 +1063,8 @@ const refusedSetup = async (
   const diagnostic = announcement.preamble().slice(-setupDiagnosticCharacters);
   return {
     status: 'sandbox-unavailable',
-    message: `the sandbox could not be set up, so nothing ran${diagnostic === '' ? '.' : `: ${diagnostic}`}`,
+    message: 'the sandbox could not be set up, so nothing ran.',
+    ...(diagnostic === '' ? {} : { diagnostic }),
     retryable: true,
   };
 };

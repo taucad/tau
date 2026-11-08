@@ -357,12 +357,20 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
   });
 
   it('retries a sandbox setup failure at most once, and never one that was not proven harmless', async () => {
-    const twice = harness(() => ({ status: 'sandbox-unavailable', message: 'bwrap: setup failed', retryable: true }));
-    await expect(twice.service.run(call({ command: 'ls' }))).resolves.toMatchObject({
+    const twice = harness(() => ({
+      status: 'sandbox-unavailable',
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp",
+      retryable: true,
+    }));
+    const refused = await twice.service.run(call({ command: 'ls' }));
+    expect(refused).toMatchObject({
       status: 'not-started',
       code: 'shell-unavailable',
-      message: expect.stringContaining('bwrap: setup failed') as unknown as string,
+      message: expect.stringContaining('could not be set up') as unknown as string,
     });
+    /* The sandbox's own output names paths: it reaches the host log, never the person or the model. */
+    expect(JSON.stringify(refused)).not.toContain('thumbnail.webp');
     expect(twice.provider.launches).toHaveLength(2);
 
     const plain = harness(() => ({ status: 'sandbox-unavailable', message: 'socat is missing' }));

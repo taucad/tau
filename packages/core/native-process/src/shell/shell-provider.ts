@@ -178,7 +178,13 @@ export type ShellProcess = ShellPipesProcess | ShellTerminalProcess;
 export type ShellLaunchOutcome =
   | Readonly<{ status: 'started'; process: ShellProcess }>
   | Readonly<{ status: 'unsupported'; requirement: ShellRequirement; message: string }>
-  | Readonly<{ status: 'sandbox-unavailable'; message: string; retryable?: true | undefined }>;
+  | Readonly<{
+      status: 'sandbox-unavailable';
+      message: string;
+      retryable?: true | undefined;
+      /** What the sandbox printed before it failed, for the host log only; it can name paths. */
+      diagnostic?: string | undefined;
+    }>;
 
 /**
  * The replaceable boundary: one implementation per platform family plus a deterministic test fake.

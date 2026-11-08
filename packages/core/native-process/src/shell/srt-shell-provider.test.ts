@@ -289,8 +289,8 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody
 
     expect(outcome).toStrictEqual({
       status: 'sandbox-unavailable',
-      message:
-        "the sandbox could not be set up, so nothing ran: bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory",
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory",
       retryable: true,
     });
     expect(existsSync(sentinel)).toBe(false);
@@ -309,7 +309,9 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody
     );
 
     expect(outcome).toMatchObject({ status: 'sandbox-unavailable', retryable: true });
-    expect(outcome.status === 'sandbox-unavailable' ? outcome.message : '').toContain("bwrap: Can't find source path");
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.diagnostic : '').toContain(
+      "bwrap: Can't find source path",
+    );
   }, 20_000);
 
   it('should report the exit of a workload that prints a bwrap error and a forged marker, never a retry', async () => {

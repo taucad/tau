@@ -348,6 +348,7 @@ const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' 
         process.platform === 'linux'
           ? "Install your distribution's socat package, or reinstall Tau from its .deb or .rpm package to restore its sandbox."
           : 'Reinstall Tau to restore its sandbox components.',
+      ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
     };
   }
   switch (outcome.requirement) {

@@ -2554,7 +2554,7 @@ describe('billing payments PostgreSQL foundation', () => {
         .innerJoin(billingProviderLeg, eq(billingProviderLeg.subscriptionId, subscription.id))
         .innerJoin(billingStripeCustomer, eq(billingStripeCustomer.id, billingProviderLeg.customerBindingId))
         .where(and(eq(subscription.slotState, 'pending'), eq(billingProviderLeg.state, 'dispatched')))
-        .orderBy(sql`${subscription.createdAt} desc`)
+        .orderBy(sql`${subscription.updatedAt} desc`)
         .limit(1);
       const actionId = owned?.id ?? '';
       await expect(payments.getAction(userId, actionId)).resolves.toMatchObject({ state: 'creating' });

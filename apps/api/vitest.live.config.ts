@@ -10,7 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // authoritative; `.env.test` only fills the values `getEnvironment()` requires
 // to boot (dotenv never overwrites an already-set variable).
 config({ path: path.resolve(__dirname, '.env') });
+const setBeforeTestDefaults = new Set(Object.keys(process.env));
 config({ path: path.resolve(__dirname, '.env.test') });
+// Names only `.env.test` filled carry placeholders, never a real credential, so
+// `hasLiveCredential` skips a suite on them instead of failing it with a 401.
+const testDefaulted = Object.keys(process.env).filter((key) => !setBeforeTestDefaults.has(key));
 
 // Vitest 4 isolates `test.env` and does not inherit `process.env`, which would
 // leave `ConfigModule.forRoot` without the values the environment schema
@@ -46,6 +50,8 @@ export default defineConfig({
     },
     env: {
       ...forwardedEnv,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_LIVE_TEST_DEFAULTED: testDefaulted.join(','),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
       NODE_ENV: 'test',
     },

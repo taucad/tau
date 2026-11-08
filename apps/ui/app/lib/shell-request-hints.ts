@@ -61,12 +61,12 @@ export const writeSidebarOpenCookie = (isOpen: boolean): void => {
     return;
   }
   try {
-    Cookies.set(sidebarOpenCookieName, isOpen ? '1' : '0', {
-      path: '/',
-      sameSite: 'lax',
-      expires: 365,
-      secure: globalThis.location.protocol === 'https:',
-    });
+    const value = isOpen ? '1' : '0';
+    if (globalThis.location.protocol === 'https:') {
+      Cookies.set(sidebarOpenCookieName, value, { path: '/', sameSite: 'lax', expires: 365, secure: true });
+    } else {
+      Cookies.set(sidebarOpenCookieName, value, { path: '/', sameSite: 'lax', expires: 365 });
+    }
   } catch {
     // The mirror is best-effort; without it the next server render uses the default.
   }

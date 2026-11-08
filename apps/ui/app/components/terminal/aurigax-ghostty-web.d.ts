@@ -50,6 +50,10 @@ export type TerminalOptions = {
   readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
   /** Tau's patch: exponent on glyph coverage in the WebGL renderer; above 1 thins text. */
   readonly textWeight?: number;
+  /** Tau's patch: keep the font's advance as the cell width instead of flooring it to device pixels. */
+  readonly exactCellWidth?: boolean;
+  /** Tau's patch: line pitch in CSS pixels, overriding lineHeight. */
+  readonly cellHeight?: number;
   readonly macOptionIsMeta?: boolean;
   readonly smoothScrollDuration?: number;
   readonly linkHandler?: { activate(event: MouseEvent, uri: string): void };

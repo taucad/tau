@@ -66,9 +66,10 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-/* The code editor's font (`--font-mono`, 14px), so the Terminal and the editor set code the same way. */
+/* The code editor's font (`--font-mono`, 14px, line-height 1.5), so the Terminal and the editor set code the same way. */
 const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
 const fontSize = 14;
+const lineHeight = fontSize * 1.5;
 /**
  * The editor's monospace family, read from the `--font-mono` token the code editor uses.
  *
@@ -357,6 +358,7 @@ export function TerminalPane({
         host,
         fontFamily: readEditorFontFamily(host),
         fontSize,
+        lineHeight,
         theme,
         ...terminalTextRendering(theme),
         scrollback: scrollbackLines,

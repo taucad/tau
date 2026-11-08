@@ -1,8 +1,8 @@
 diff --git a/lib/interfaces.ts b/lib/interfaces.ts
-index 547762a53e4eead02e82fe79f6e70a9ce468ebe1..75f5b487372f49de6214bb162b9e042df7eb7dea 100644
+index 547762a53e4eead02e82fe79f6e70a9ce468ebe1..c2122b5e5d21245f7b802ad1659c5cd3142691f5 100644
 --- a/lib/interfaces.ts
 +++ b/lib/interfaces.ts
-@@ -20,6 +20,18 @@ export interface ITerminalOptions {
+@@ -20,6 +20,25 @@ export interface ITerminalOptions {
    scrollSensitivity?: number; // Multiplies wheel scrolling. Default: 1
    /** Foreground colors are adjusted to at least this contrast ratio with their background (1 to 21). Default: 1 */
    minimumContrastRatio?: number;
@@ -18,10 +18,17 @@ index 547762a53e4eead02e82fe79f6e70a9ce468ebe1..75f5b487372f49de6214bb162b9e042d
 +   * below 1 thickens it. The canvas renderer ignores it. Default: 1
 +   */
 +  textWeight?: number;
++  /**
++   * Keep the font's own advance as the cell width instead of flooring it to device pixels, so the grid
++   * spaces characters as DOM text in the same font does. Read when the terminal opens. Default: false
++   */
++  exactCellWidth?: boolean;
++  /** Line pitch in CSS pixels, overriding lineHeight, as a code editor's line-height sets it. Read when the terminal opens. */
++  cellHeight?: number;
    /** On macOS, Option acts as Meta instead of composing characters. Default: false */
    macOptionIsMeta?: boolean;
    /**
-@@ -51,6 +63,8 @@ export interface ITerminalOptions {
+@@ -51,6 +70,8 @@ export interface ITerminalOptions {
  
  export type FontWeight = 'normal' | 'bold' | number;
  
@@ -31,7 +38,7 @@ index 547762a53e4eead02e82fe79f6e70a9ce468ebe1..75f5b487372f49de6214bb162b9e042d
  export interface ILinkHandler {
    activate(event: MouseEvent, text: string, range: IBufferRange): void;
 diff --git a/lib/renderer.ts b/lib/renderer.ts
-index 2f6c1affc504f99bc27deec5dcfc5c32dc7a8f7d..ce07e8569ef5cb43cd32c73e518771040ccfa59b 100644
+index 2f6c1affc504f99bc27deec5dcfc5c32dc7a8f7d..4d70eeac571cfc749f903b1db488977149cda99b 100644
 --- a/lib/renderer.ts
 +++ b/lib/renderer.ts
 @@ -9,7 +9,7 @@
@@ -43,34 +50,95 @@ index 2f6c1affc504f99bc27deec5dcfc5c32dc7a8f7d..ce07e8569ef5cb43cd32c73e51877104
  import type { SelectionManager } from './selection-manager';
  import type { GhosttyCell } from './types';
  import { CellFlags } from './types';
-@@ -64,6 +64,8 @@ export interface RendererOptions {
+@@ -64,6 +64,10 @@ export interface RendererOptions {
    fontWeightBold?: FontWeight; // Default: 'bold'
    lineHeight?: number; // Default: 1
    minimumContrastRatio?: number; // Default: 1 (off)
 +  textBlending?: TextBlending; // WebGL only. Default: 'native'
 +  textWeight?: number; // WebGL only. Default: 1
++  exactCellWidth?: boolean; // Default: false (floor to device pixels, as xterm.js does)
++  cellHeight?: number; // Line pitch in CSS pixels; overrides lineHeight when set
  }
  
  export interface FontOptions {
+@@ -158,17 +162,22 @@ export function measureCell(
+   fontFamily: string,
+   fontWeight: FontWeight = 'normal',
+   lineHeight = 1,
+-  dpr = 1
++  dpr = 1,
++  exactWidth = false,
++  cellHeight?: number
+ ): FontMetrics {
+   const canvas = document.createElement('canvas');
+   const ctx = canvas.getContext('2d')!;
+   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+   const m = ctx.measureText('W');
+-  const width = Math.max(1, Math.floor(m.width * dpr)) / dpr;
++  const width = exactWidth ? Math.max(1 / dpr, m.width) : Math.max(1, Math.floor(m.width * dpr)) / dpr;
+   const ascent = m.fontBoundingBoxAscent || m.actualBoundingBoxAscent || fontSize * 0.8;
+   const descent = m.fontBoundingBoxDescent || m.actualBoundingBoxDescent || fontSize * 0.2;
+   const charHeight = Math.ceil((ascent + descent) * dpr) / dpr;
+-  const height = Math.max(charHeight, Math.floor(charHeight * lineHeight * dpr) / dpr);
++  const height =
++    cellHeight !== undefined && cellHeight > 0
++      ? Math.max(1, Math.round(cellHeight * dpr)) / dpr
++      : Math.max(charHeight, Math.floor(charHeight * lineHeight * dpr) / dpr);
+   const baseline = Math.round(((height - charHeight) / 2 + ascent) * dpr) / dpr;
+   return { width, height, baseline };
+ }
+@@ -235,6 +244,8 @@ export abstract class TerminalRenderer {
+   protected fontWeightBold: FontWeight;
+   protected lineHeight: number;
+   protected minimumContrastRatio: number;
++  private readonly exactCellWidth: boolean;
++  private readonly cellHeight: number | undefined;
+   private readonly contrastCache = new Map<number, number>();
+   private themeBackgroundRgb: [number, number, number] = [0, 0, 0];
+ 
+@@ -288,6 +299,8 @@ export abstract class TerminalRenderer {
+     this.fontWeightBold = options.fontWeightBold ?? 'bold';
+     this.lineHeight = options.lineHeight ?? 1;
+     this.minimumContrastRatio = options.minimumContrastRatio ?? 1;
++    this.exactCellWidth = options.exactCellWidth ?? false;
++    this.cellHeight = options.cellHeight;
+     this.themeBackgroundRgb = cssRgb(this.theme.background);
+     this.metrics = this.measure();
+     if (this.cursorBlink && this.focused) this.startCursorBlink();
+@@ -574,7 +587,9 @@ export abstract class TerminalRenderer {
+       this.fontFamily,
+       this.fontWeight,
+       this.lineHeight,
+-      this.devicePixelRatio
++      this.devicePixelRatio,
++      this.exactCellWidth,
++      this.cellHeight
+     );
+   }
+ 
 diff --git a/lib/terminal.ts b/lib/terminal.ts
-index 8ec71461583c369e617fb2417f642c0490f60b94..5d8f7dc35ca46650e7e9f9b3f2211a0381236c0f 100644
+index 8ec71461583c369e617fb2417f642c0490f60b94..6887bdcec459b207fb3a83b3b96334f3ac5b828a 100644
 --- a/lib/terminal.ts
 +++ b/lib/terminal.ts
-@@ -217,6 +217,8 @@ export class Terminal implements ITerminalCore {
+@@ -217,6 +217,10 @@ export class Terminal implements ITerminalCore {
        lineHeight: options.lineHeight ?? 1,
        scrollSensitivity: options.scrollSensitivity ?? 1,
        minimumContrastRatio: options.minimumContrastRatio ?? 1,
 +      textBlending: options.textBlending ?? 'native',
 +      textWeight: options.textWeight ?? 1,
++      exactCellWidth: options.exactCellWidth ?? false,
++      cellHeight: options.cellHeight ?? 0,
        macOptionIsMeta: options.macOptionIsMeta ?? false,
      };
  
-@@ -625,6 +627,8 @@ export class Terminal implements ITerminalCore {
+@@ -625,6 +629,10 @@ export class Terminal implements ITerminalCore {
      return {
        ...this.fontOptions(),
        minimumContrastRatio: this.options.minimumContrastRatio,
 +      textBlending: this.options.textBlending,
 +      textWeight: this.options.textWeight,
++      exactCellWidth: this.options.exactCellWidth,
++      cellHeight: this.options.cellHeight > 0 ? this.options.cellHeight : undefined,
        fontSize: this.options.fontSize,
        fontFamily: this.options.fontFamily,
        cursorStyle: this.options.cursorStyle,

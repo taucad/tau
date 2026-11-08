@@ -35,6 +35,7 @@ const create = async (overrides: Partial<TerminalRendererOptions> = {}): Promise
     host,
     fontFamily: 'monospace',
     fontSize: 13,
+    lineHeight: 17,
     theme,
     scrollback: 1000,
     screenReaderMode: true,

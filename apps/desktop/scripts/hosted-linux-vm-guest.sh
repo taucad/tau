@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Validate distro/kernel, systemd timer and a real Xorg/Openbox desktop in a disposable guest.
 # Called over authenticated loopback SSH by hosted-linux-vm.sh, never on the host.
-# Required env: none. Usage: bash hosted-linux-vm-guest.sh ubuntu|ubuntu2604|debian
+# Required env: none. Usage: bash hosted-linux-vm-guest.sh ubuntu|ubuntu2604|debian [dummy|nvidia]
+#   dummy (default): QEMU guest with the Xorg dummy driver and Mesa. nvidia: a Google Cloud T4 host whose Xorg
+#   drives the real GPU, so stock-graphics qualification renders on hardware.
 # Exit codes: 0 assertions passed; 1 assertion or guest setup failed.
 set -euo pipefail
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
@@ -12,12 +14,36 @@ source /etc/os-release
 case "$1:$ID:$VERSION_ID" in ubuntu:ubuntu:24.04|ubuntu2604:ubuntu:26.04|debian:debian:13) ;; *) exit 1 ;; esac
 printf 'Guest: %s\n' "$PRETTY_NAME"
 uname -a
-systemd-detect-virt | grep -x kvm
+graphics="${2:-dummy}"
+case "$graphics" in
+  dummy) systemd-detect-virt | grep -x kvm ;;
+  # Google Cloud reports its own hypervisor name on current systemd and kvm on older ones.
+  nvidia) systemd-detect-virt | grep -xE 'kvm|google' ;;
+  *) exit 1 ;;
+esac
+if [[ "$graphics" == nvidia && "$ID" == debian ]]; then
+  # Debian ships the NVIDIA driver in non-free; the cloud image enables main only.
+  sudo sed -i -E 's/^Components: main$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+fi
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-apps x11-xserver-utils xclip \
   dbus-x11 apparmor apparmor-utils libfuse2t64 fuse3 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-utils
 command -v fusermount
+if [[ "$graphics" == nvidia ]]; then
+  # The distribution's own packaged driver, as a user of that release installs it (secure boot is off on these hosts).
+  if [[ "$ID" == ubuntu ]]; then
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ubuntu-drivers-common
+    sudo env DEBIAN_FRONTEND=noninteractive ubuntu-drivers install
+  else
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "linux-headers-$(uname -r)" nvidia-driver firmware-misc-nonfree
+  fi
+  sudo modprobe nvidia
+  sudo modprobe nvidia-drm modeset=1 || true
+  nvidia-smi
+  dpkg-query -W -f='${Package} ${Version}\n' | grep -E '^(nvidia-driver|xserver-xorg-video-nvidia|libnvidia-gl)' || true
+fi
 sudo aa-status
 [[ "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]
 sudo grep -E '^CONFIG_(SECCOMP|SECCOMP_FILTER|USER_NS)=y$' "/boot/config-$(uname -r)"
@@ -34,7 +60,29 @@ sudo systemd-run --unit=tau-proof-timer --on-active=2s --timer-property=Accuracy
 for _attempt in $(seq 1 30); do [[ -f /tmp/tau-timer-fired ]] && break; sleep 1; done
 [[ -f /tmp/tau-timer-fired ]]
 sudo journalctl -u tau-proof-timer.service --no-pager
-sudo tee /tmp/tau-xorg.conf >/dev/null <<'XORG'
+if [[ "$graphics" == nvidia ]]; then
+  # nvidia-smi reports a hexadecimal domain:bus:device.function; Xorg wants decimal PCI:bus:device:function.
+  IFS=':.' read -r _domain bus device function <<< "$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1)"
+  bus_id="PCI:$((16#$bus)):$((16#$device)):$((16#$function))"
+  sudo tee /tmp/tau-xorg.conf >/dev/null <<XORG
+Section "Device"
+  Identifier "GPU"
+  Driver "nvidia"
+  BusID "$bus_id"
+  Option "AllowEmptyInitialConfiguration" "True"
+EndSection
+Section "Screen"
+  Identifier "Screen"
+  Device "GPU"
+  DefaultDepth 24
+  SubSection "Display"
+    Depth 24
+    Virtual 1280 800
+  EndSubSection
+EndSection
+XORG
+else
+  sudo tee /tmp/tau-xorg.conf >/dev/null <<'XORG'
 Section "Device"
   Identifier "Dummy"
   Driver "dummy"
@@ -57,6 +105,7 @@ Section "Screen"
   EndSubSection
 EndSection
 XORG
+fi
 export DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority"
 touch "$XAUTHORITY"
 xauth add :0 . "$(mcookie)"
@@ -76,6 +125,8 @@ xdpyinfo >/dev/null
 glxinfo_output="$(glxinfo -B)"
 printf '%s\n' "$glxinfo_output"
 grep -q 'OpenGL renderer string:' <<< "$glxinfo_output"
+# A GPU host must render on the GPU, never fall back to llvmpipe.
+if [[ "$graphics" == nvidia ]]; then grep -q 'OpenGL renderer string: .*NVIDIA\|OpenGL vendor string: NVIDIA' <<< "$glxinfo_output"; fi
 # The window manager runs as the ordinary guest user, with D-Bus, not as root.
 systemd-run --user --unit=tau-proof-desktop --setenv=DISPLAY=:0 --setenv="XAUTHORITY=$XAUTHORITY" dbus-run-session openbox
 for _attempt in $(seq 1 30); do xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id' && break; sleep 1; done

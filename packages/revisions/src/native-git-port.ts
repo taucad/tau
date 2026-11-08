@@ -1918,10 +1918,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * `adopted` is a repository the person made: Tau creates its setup files
    * before `git init`, so a store it created carries one of its blocks. An
-   * adopted repository's files and config are left alone, and only its ignore
-   * rules (`ignoredPaths`) and the adoption refusals depend on it: which paths
-   * are pointers is the tree's own attributes on every repository (D16,
-   * revisions policy rules 5 and 13).
+   * adopted repository's files and config are left alone, and only the
+   * adoption refusals and the LFS filter install depend on it: which paths are
+   * pointers is the tree's own attributes, and which untracked paths a cut
+   * leaves out its own ignore rules, on every repository (D16, revisions
+   * policy rules 5 and 13).
    *
    * Every session reaches the same answer for the same folder: before the
    * store exists the answer is what `init` will leave behind (a folder whose
@@ -2108,12 +2109,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
 
     ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
-      if (!(await isAdopted())) {
-        return undefined;
-      }
-      /* Git's own answer, so every ignore source the person's Git reads — nested
-       * ignore files, `info/exclude`, their global excludes — decides here too. */
-      const args = ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'];
+      /* Git's own answer, on every repository: the checkout's nested ignore
+       * files and the store's `info/exclude`. Never `core.excludesFile`,
+       * which is per device and which the browser leg cannot read, so both
+       * legs leave the same untracked paths out of a cut (I5). */
+      const args = [
+        '-c',
+        'core.excludesFile=',
+        'ls-files',
+        '-z',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ];
       const listed =
         root === undefined
           ? await output(args)

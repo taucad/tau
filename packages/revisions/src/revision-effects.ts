@@ -1459,7 +1459,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       memos: CheckoutMemos;
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      /** Paths the person's own Git ignores, in an adopted repository. */
+      /** Untracked paths the checkout's own Git ignore rules exclude. */
       ignored?: ReadonlySet<string> | undefined;
       /** A comparison a newer write has made stale: the walk stops rather than finish for nobody. */
       signal?: AbortSignal | undefined;
@@ -1467,11 +1467,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<ImmutableRevisionTree> => {
     const { memos, bypassMemo, changed, ignored, signal } = captureOptions;
     const started = ++captureSequence;
-    /* Git lists an ignored directory once, with its trailing `/`; capture never
-     * descends into an excluded directory, so the directory is enough. */
-    const exclude = (path: string): boolean =>
-      !policy.classify(path).versioned || ignored?.has(path) === true || ignored?.has(`${path}/`) === true;
-    const ignoredKey = ignored === undefined ? '' : [...ignored].toSorted().join('\n');
+    /* Git lists an ignored directory with its trailing `/`. A walk never
+     * descends into one, but the index names a changed path by itself, so a
+     * path under a listed directory is left out too. */
+    const isIgnored = (path: string): boolean => {
+      if (ignored === undefined || ignored.size === 0) {
+        return false;
+      }
+      if (ignored.has(path) || ignored.has(`${path}/`)) {
+        return true;
+      }
+      for (let slash = path.indexOf('/'); slash !== -1; slash = path.indexOf('/', slash + 1)) {
+        if (ignored.has(path.slice(0, slash + 1))) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const exclude = (path: string): boolean => !policy.classify(path).versioned || isIgnored(path);
+    /* Only an entry that changes what is captured moves the key: a file the
+     * registry never versions is left out whether Git ignores it or not, so a
+     * new generated output still lets the next capture start from `last`. */
+    const ignoredKey =
+      ignored === undefined
+        ? ''
+        : [...ignored]
+            .filter((path) => path.endsWith('/') || policy.classify(path).versioned)
+            .toSorted()
+            .join('\n');
     let cursor: CheckoutMemos['cursor'];
     const walk = async (): Promise<ImmutableRevisionTree> => {
       /* Where the index stands, read before anything else, so a write this walk races is named next time.

@@ -73,6 +73,7 @@ import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
+import { ignoredUntrackedPaths } from '#git-ignore.js';
 import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
 import type { LargeObjectBasis, LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -605,6 +606,20 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const paths = new Map<string, Readonly<{ oid: string; mode: string }>>();
     await walkTree(oid, '', paths);
     return paths;
+  };
+
+  /* The paths one revision tracks, for the ignore walk: one tree at a time, since every capture asks of the same head. */
+  let trackedHeld: Readonly<{ tree: string; paths: ReadonlySet<string> }> | undefined;
+  const trackedPaths = async (head: string | undefined): Promise<ReadonlySet<string>> => {
+    const commit = head === undefined ? undefined : await commitOf(revisionId(head));
+    if (commit === undefined) {
+      return new Set();
+    }
+    if (trackedHeld?.tree !== commit.tree) {
+      const listing = await flatTree(commit.tree);
+      trackedHeld = { tree: commit.tree, paths: new Set(listing.keys()) };
+    }
+    return trackedHeld.paths;
   };
 
   /*
@@ -2709,6 +2724,47 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             trees: commit.conflictedTrees,
             labels: commit.conflictLabels ?? Object.freeze([]),
           });
+    },
+
+    /*
+     * The untracked paths this checkout's own Git rules ignore — its
+     * `.gitignore` files and the store's `info/exclude` — read as Git reads
+     * them (`git-ignore.ts`), so a browser cut leaves out what a native one
+     * does (I5). A path the checkout's head tracks is never ignored.
+     */
+    ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
+      let files: FileSystemProvider = filesystem;
+      let head: string | undefined;
+      if (root === undefined) {
+        const live = await port.readHead();
+        head = live?.head;
+      } else {
+        const records = await listCheckoutRecords();
+        const record = records.find((checkout) => checkout.root === root);
+        if (record === undefined) {
+          throw new RevisionPortError('CHECKOUT_CONFLICT', 'Those files are not open in this project.');
+        }
+        files = await requireCheckouts().root(record.id);
+        head = record.baseRevisionId ?? (record.branch === undefined ? undefined : await port.readRef(record.branch));
+      }
+      const excludePath = `${gitdir}/info/exclude`;
+      const exclude = (await gitFiles.exists(excludePath)) ? await gitFiles.readFile(excludePath, 'utf8') : undefined;
+      return ignoredUntrackedPaths(
+        {
+          readdir: async (path) => files.readdir(path),
+          isDirectory: async (path) => {
+            const stat = await files.lstat(path);
+            return stat.type === 'dir';
+          },
+          readText: async (path) => ((await files.exists(path)) ? files.readFile(path, 'utf8') : undefined),
+        },
+        {
+          tracked: await trackedPaths(head),
+          exclude,
+          /* The store's own directory is never the checkout's. */
+          skip: (path) => path === gitdir || path === defaultGitDirectory,
+        },
+      );
     },
 
     listCheckouts: async (): Promise<readonly Checkout[]> => {

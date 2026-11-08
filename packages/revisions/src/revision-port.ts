@@ -724,17 +724,19 @@ export type RevisionPort = Readonly<{
   /** Every place this project's files are, live checkout first. */
   listCheckouts?(): Promise<readonly Checkout[]>;
   /**
-   * The untracked paths Git itself ignores in one checkout of an adopted repository.
+   * The untracked paths one checkout's own Git ignore rules exclude.
    *
-   * Capture versions what the path registry admits. In a repository the person
-   * made, their own ignore rules decide too, or a revision records their build
-   * output and secrets and commits them to their branch. A store Tau created
-   * answers `undefined`: its ignore file is derived from the registry, so the
-   * registry alone decides on every host.
+   * Capture versions what the path registry admits, and the tree's own ignore
+   * rules decide too, or a revision records a person's build output and
+   * secrets and commits them to their branch. The sources are the checkout's
+   * `.gitignore` files, nested, and the store's `info/exclude` (Tau's derived
+   * ignores); never `core.excludesFile`, which is per device. Both legs answer
+   * for every repository with Git's semantics, so a cut excludes the same
+   * paths on each (I5). A path the checkout tracks is never listed.
    *
    * @param root - A linked checkout's root, or `undefined` for the live checkout.
    * @returns Paths relative to that root, a directory with a trailing `/`, or
-   *   `undefined` when the registry alone decides.
+   *   `undefined` when the registry alone decides (a port that does not read ignore rules).
    */
   ignoredPaths?(root?: string): Promise<readonly string[] | undefined>;
   /** Add one linked checkout on its own branch. */

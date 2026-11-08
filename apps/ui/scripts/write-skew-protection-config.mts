@@ -2,7 +2,9 @@
  * Declare Netlify skew protection for this deploy (TAU-UI-S), production only.
  *
  * Writes `.netlify/v1/skew-protection.json` (Netlify Frameworks API): requests for the hashed
- * assets, React Router's `.data` and `/__manifest` that carry the deploy token cookie are
+ * assets, the content-addressed PicoGK and C# runtimes (`/picogk-browser/<sha>/`,
+ * `/csharp-language/<sha>/`, which a worker fetches long after the page loaded), React Router's
+ * `.data` and `/__manifest` that carry the deploy token cookie are
  * answered by the deploy that issued it. The server sets the cookie on documents
  * (`app/lib/skew-protection.server.ts`). Netlify honours it on production deploys only; an
  * alias deploy (staging) or a preview ignores it.
@@ -17,7 +19,13 @@ import { skewProtectionCookieName } from '../app/lib/skew-protection.server.ts';
 
 /** The Frameworks API configuration: which paths are pinned, and where the token is read from. */
 export const skewProtectionConfig = {
-  patterns: [String.raw`^/assets/.*`, String.raw`.*\.data$`, String.raw`^/__manifest$`],
+  patterns: [
+    String.raw`^/assets/.*`,
+    String.raw`^/picogk-browser/.*`,
+    String.raw`^/csharp-language/.*`,
+    String.raw`.*\.data$`,
+    String.raw`^/__manifest$`,
+  ],
   sources: [{ type: 'cookie', name: skewProtectionCookieName }],
 } as const;
 

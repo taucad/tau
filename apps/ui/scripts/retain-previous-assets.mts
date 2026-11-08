@@ -2,7 +2,9 @@
  * Keep the previous deploys' hashed assets in a new UI deploy (TAU-UI-6).
  *
  * A deploy publishes only its own `/assets/*`, so a page loaded from the build
- * before it fails its next lazy import the moment the new one goes live. This
+ * before it fails its next lazy import the moment the new one goes live. The
+ * content-addressed runtimes (`/picogk-browser/<sha>/`, `/csharp-language/<sha>/`)
+ * are kept the same way in their own index (`tau-served-runtimes.json`). This
  * runs last in the Netlify build command, after source-map injection has given
  * every chunk its final bytes. It reads the live deploy's index of served
  * assets, downloads each asset the new build lacks from the live origin, checks
@@ -37,6 +39,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
@@ -46,6 +49,21 @@ import { sri } from '#scripts/subresource-integrity.mts';
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
 export const servedAssetsIndexFileName = 'tau-served-assets.json';
+
+/** The roots {@link servedAssetsIndexFileName} lists: Vite's hashed chunks. */
+export const assetRoots = ['assets'] as const;
+
+/**
+ * File listing the content-addressed runtimes a deploy serves (`picogk-browser/<sha>/`,
+ * `csharp-language/<sha>/`). A worker fetches them long after its page loaded, so a tab from the
+ * previous build needs them kept like its chunks. They have their own index because a build from
+ * before them refuses any path outside `assets/` in {@link servedAssetsIndexFileName}, and a rollback
+ * to one must still deploy.
+ */
+export const servedRuntimesIndexFileName = 'tau-served-runtimes.json';
+
+/** The roots {@link servedRuntimesIndexFileName} lists; each is optional in a build. */
+export const runtimeRoots = ['picogk-browser', 'csharp-language'] as const;
 
 /** `schema` of {@link ServedAssetsIndex}. */
 export const servedAssetsIndexSchema = 'tau-ui-served-assets-v1';
@@ -83,17 +101,18 @@ export type ServedAssetsIndex = {
 const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
 
 /**
- * Whether a path can be published by one deploy and read back by the next: under `assets/`,
+ * Whether a path can be published by one deploy and read back by the next: under one of `roots`,
  * every segment a real name, nothing a URL or a file system would read differently. This is
  * the one check both sides apply, so no build can publish a name its successor refuses.
  *
  * @param path - A path relative to the client root, with `/` separators.
+ * @param roots - The top-level directories the index covers; `assets/` by default.
  * @returns `true` when the path is safe to publish and to retain.
  */
-export const isServableAssetPath = (path: string): boolean => {
+export const isServableAssetPath = (path: string, roots: readonly string[] = assetRoots): boolean => {
   const segments = path.split('/');
   return (
-    segments[0] === 'assets' &&
+    roots.includes(segments[0] ?? '') &&
     segments.length > 1 &&
     !forbiddenPathCharacter.test(path) &&
     segments.slice(1).every((segment) => segment !== '' && segment !== '.' && segment !== '..')
@@ -130,7 +149,7 @@ type Transport = {
 };
 
 /** Check one live index entry, which arrives as untrusted JSON. */
-const assertServedAsset = (entry: unknown): ServedAsset => {
+const assertServedAsset = (entry: unknown, roots: readonly string[]): ServedAsset => {
   if (typeof entry !== 'object' || entry === null) {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
@@ -138,7 +157,7 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
   if (typeof path !== 'string' || typeof integrity !== 'string' || typeof generation !== 'number') {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
-  if (!isServableAssetPath(path)) {
+  if (!isServableAssetPath(path, roots)) {
     throw refusePath(path, 'live asset index');
   }
   if (!sha384Integrity.test(integrity) || !Number.isInteger(generation) || generation < 0) {
@@ -159,10 +178,15 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
  *
  * @param value - The parsed JSON.
  * @param source - Where it came from, for the error.
+ * @param roots - The top-level directories the index covers; `assets/` by default.
  * @returns The index with checked entries.
  * @throws When the schema, an entry or a path is not one this script publishes.
  */
-export const parseServedAssetsIndex = (value: unknown, source: string): ServedAssetsIndex => {
+export const parseServedAssetsIndex = (
+  value: unknown,
+  source: string,
+  roots: readonly string[] = assetRoots,
+): ServedAssetsIndex => {
   const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
     Record<'schema' | 'assets', unknown>
   >;
@@ -171,7 +195,7 @@ export const parseServedAssetsIndex = (value: unknown, source: string): ServedAs
   }
   const youngest = new Map<string, ServedAsset>();
   for (const entry of index.assets as readonly unknown[]) {
-    const asset = assertServedAsset(entry);
+    const asset = assertServedAsset(entry, roots);
     const known = youngest.get(asset.path);
     if (known === undefined || asset.generation < known.generation) {
       youngest.set(asset.path, asset);
@@ -276,14 +300,35 @@ const integrityOfFile = async (path: string): Promise<string> => {
   return `sha384-${hash.digest('base64')}`;
 };
 
-const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
+const listRoot = async (directory: string): Promise<Dirent[]> =>
+  readdir(directory, { recursive: true, withFileTypes: true });
+
+/** A root a build may lack: the UI ships without a runtime whose bundle its build did not embed. */
+const listRootIfPresent = async (directory: string): Promise<Dirent[]> => {
+  try {
+    return await listRoot(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+};
+
+const listOwnAssets = async (
+  clientDirectory: string,
+  roots: readonly string[],
+  optional: boolean,
+): Promise<readonly ServedAsset[]> => {
   // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
-  const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
-  const files = entries.filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
+  const listed = await Promise.all(
+    roots.map(async (root) => (optional ? listRootIfPresent : listRoot)(join(clientDirectory, root))),
+  );
+  const files = listed.flat().filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
   const paths = files.map((entry) => {
     const absolute = join(entry.parentPath, entry.name);
     const path = relative(clientDirectory, absolute).split(sep).join(posix.sep);
-    if (!isServableAssetPath(path)) {
+    if (!isServableAssetPath(path, roots)) {
       // Published, it would fail every later deploy that reads this index.
       throw refusePath(path, 'new build');
     }
@@ -357,41 +402,51 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
 export const skipRetentionVariable = 'TAU_RETAIN_ASSETS_SKIP';
 
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
-const unreadableIndex = (origin: string, reason: string): Error =>
+const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
   new Error(
-    `Retention could not read the live asset index at ${origin}/${servedAssetsIndexFileName} (${reason}). ` +
+    `Retention could not read the live asset index at ${origin}/${fileName} (${reason}). ` +
       `Publishing now would drop every retained asset. Re-run once the live deploy answers, or set ` +
       `${skipRetentionVariable}=1 to ship this deploy without retention.`,
   );
 
-const readLiveIndex = async (origin: string, transport: Transport): Promise<ServedAssetsIndex | undefined> => {
+type IndexKind = { readonly fileName: string; readonly roots: readonly string[] };
+
+const readLiveIndex = async (
+  origin: string,
+  transport: Transport,
+  { fileName, roots }: IndexKind,
+): Promise<ServedAssetsIndex | undefined> => {
   let response: Fetched;
   try {
-    response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`, transport);
+    response = await fetchWithRetry(`${origin}/${fileName}`, transport);
   } catch (error) {
     // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
-    throw unreadableIndex(origin, String(error));
+    throw unreadableIndex(origin, fileName, String(error));
   }
   // No index yet: only a 404. The first deploy that runs this on a site whose catch-all answers 200 skips once.
   if (response.status === 404) {
-    console.log(`→ ${origin} publishes no ${servedAssetsIndexFileName} yet; nothing to retain.`);
+    console.log(`→ ${origin} publishes no ${fileName} yet; nothing to retain.`);
     return undefined;
   }
   if (response.status !== 200) {
-    throw unreadableIndex(origin, `answered ${String(response.status)}`);
+    throw unreadableIndex(origin, fileName, `answered ${String(response.status)}`);
   }
   /* A 200 that is not the index (an SPA catch-all, a maintenance page, a rollback to a deploy from
    * before retention) may stand in front of assets pages still load: it fails rather than keep none. */
   if (!response.contentType.includes('application/json')) {
-    throw unreadableIndex(origin, `answered 200 ${response.contentType || 'without a content type'}, not the index`);
+    throw unreadableIndex(
+      origin,
+      fileName,
+      `answered 200 ${response.contentType || 'without a content type'}, not the index`,
+    );
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(response.body));
   } catch (error) {
-    throw unreadableIndex(origin, `answered JSON that does not parse (${String(error)})`);
+    throw unreadableIndex(origin, fileName, `answered JSON that does not parse (${String(error)})`);
   }
-  return parseServedAssetsIndex(parsed, `${origin}/${servedAssetsIndexFileName}`);
+  return parseServedAssetsIndex(parsed, `${origin}/${fileName}`, roots);
 };
 
 type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };
@@ -430,14 +485,24 @@ export const retainPreviousAssets = async (options: {
   readonly skip?: boolean;
   /** This deploy's time in milliseconds since the epoch; replaceable in tests. */
   readonly now?: number;
+  /**
+   * Which index: the hashed chunks (default, `assets/` required in the build), or the runtimes
+   * (`runtimes`: {@link runtimeRoots} in {@link servedRuntimesIndexFileName}, each optional).
+   */
+  readonly kind?: 'assets' | 'runtimes';
 }): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
+  const runtimes = options.kind === 'runtimes';
+  const kind: IndexKind = runtimes
+    ? { fileName: servedRuntimesIndexFileName, roots: runtimeRoots }
+    : { fileName: servedAssetsIndexFileName, roots: assetRoots };
   const transport: Transport = {
     requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
     wait: options.wait ?? (async (milliseconds) => setTimeout(milliseconds)),
   };
-  const own = await listOwnAssets(options.clientDirectory);
+  const own = await listOwnAssets(options.clientDirectory, kind.roots, runtimes);
   const origin = options.origin?.replace(/\/+$/u, '');
-  const previous = origin === undefined || options.skip === true ? undefined : await readLiveIndex(origin, transport);
+  const previous =
+    origin === undefined || options.skip === true ? undefined : await readLiveIndex(origin, transport, kind);
   const kept =
     previous === undefined
       ? []
@@ -454,7 +519,7 @@ export const retainPreviousAssets = async (options: {
     schema: servedAssetsIndexSchema,
     assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
   };
-  await writeFile(join(options.clientDirectory, servedAssetsIndexFileName), `${JSON.stringify(index)}\n`);
+  await writeFile(join(options.clientDirectory, kind.fileName), `${JSON.stringify(index)}\n`);
   return { retained: kept.length, bytes, index };
 };
 
@@ -468,14 +533,18 @@ const main = async (): Promise<void> => {
         'may fail their next lazy import until they reload. Use only to ship a fix while the live origin is down.',
     );
   }
-  const { retained, bytes, index } = await retainPreviousAssets({
-    clientDirectory: resolve(import.meta.dirname, '../build/client'),
-    origin,
-    skip,
-  });
-  console.log(
-    `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,
-  );
+  for (const kind of ['assets', 'runtimes'] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- One index at a time keeps the download concurrency bounded.
+    const { retained, bytes, index } = await retainPreviousAssets({
+      clientDirectory: resolve(import.meta.dirname, '../build/client'),
+      origin,
+      skip,
+      kind,
+    });
+    console.log(
+      `✓ ${String(retained)} ${kind} files (${String(Math.round(bytes / 1024))} KiB) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,
+    );
+  }
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {

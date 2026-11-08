@@ -15,6 +15,7 @@ import {
   retentionWindow,
   servedAssetsIndexFileName,
   servedAssetsIndexSchema,
+  servedRuntimesIndexFileName,
 } from '#scripts/retain-previous-assets.mts';
 import type { ServedAsset, ServedAssetsIndex } from '#scripts/retain-previous-assets.mts';
 
@@ -75,6 +76,10 @@ const startLiveDeploy = async (
     }
     if (path === servedAssetsIndexFileName && index) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(index));
+      return;
+    }
+    if (path === servedRuntimesIndexFileName && files[path] !== undefined) {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(files[path]);
       return;
     }
     const body = files[path];
@@ -568,5 +573,67 @@ describe('retainPreviousAssets', () => {
     expect(await readIndex(client)).toStrictEqual(
       indexOf([{ path: 'assets/nested/worker-NEW1.js', integrity: integrityOf('worker'), generation: 0 }]),
     );
+  });
+});
+
+describe('retainPreviousAssets for the runtimes', () => {
+  const oldRuntime = 'picogk-browser/OLD/_framework/dotnet.js';
+  const readRuntimes = async (clientDirectory: string): Promise<ServedAssetsIndex> =>
+    JSON.parse(await readFile(join(clientDirectory, servedRuntimesIndexFileName), 'utf8')) as ServedAssetsIndex;
+
+  it('should keep the previous build’s PicoGK runtime beside the new one in their own index', async () => {
+    const live = await startLiveDeploy(
+      {
+        [oldRuntime]: 'old',
+        [servedRuntimesIndexFileName]: JSON.stringify(
+          indexOf([{ path: oldRuntime, integrity: integrityOf('old'), generation: 0 }]),
+        ),
+      },
+      undefined,
+    );
+    const client = await createClient({
+      'assets/route-NEW1.js': 'new1',
+      'picogk-browser/NEW/_framework/dotnet.js': 'new',
+      'csharp-language/SAME/_framework/dotnet.js': 'cs',
+    });
+
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now, kind: 'runtimes' });
+
+    expect(result.retained).toBe(1);
+    expect(await readFile(join(client, oldRuntime), 'utf8')).toBe('old');
+    expect(await readRuntimes(client)).toStrictEqual(
+      indexOf([
+        { path: 'csharp-language/SAME/_framework/dotnet.js', integrity: integrityOf('cs'), generation: 0 },
+        { path: 'picogk-browser/NEW/_framework/dotnet.js', integrity: integrityOf('new'), generation: 0 },
+        { path: oldRuntime, integrity: integrityOf('old'), generation: 1, retiredAt: now },
+      ]),
+    );
+    // The chunk index is untouched by the runtimes pass.
+    await expect(readFile(join(client, servedAssetsIndexFileName), 'utf8')).rejects.toThrow('ENOENT');
+  });
+
+  it('should publish an empty runtimes index for a build that embedded no runtime', async () => {
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: undefined, kind: 'runtimes' });
+
+    expect(await readRuntimes(client)).toStrictEqual(indexOf([]));
+  });
+
+  it('should keep runtime paths out of the chunk index, which a build from before them refuses', async () => {
+    const client = await createClient({
+      'assets/route-NEW1.js': 'new1',
+      'picogk-browser/NEW/_framework/dotnet.js': 'new',
+    });
+
+    const { index } = await retainPreviousAssets({ clientDirectory: client, origin: undefined });
+
+    expect(index.assets.map((asset) => asset.path)).toStrictEqual(['assets/route-NEW1.js']);
+    expect(() =>
+      parseServedAssetsIndex(
+        indexOf([{ path: 'picogk-browser/NEW/_framework/dotnet.js', integrity: integrityOf('new'), generation: 0 }]),
+        'test',
+      ),
+    ).toThrow(/refuses the path/u);
   });
 });

@@ -35,6 +35,9 @@ publish = "build/client"
 # after source-map injection, reads the live deploy's `tau-served-assets.json`
 # from `TAU_RETAIN_ASSETS_FROM` (set by `deploy-ui.yml`), verifies every byte
 # against it, and writes this deploy's index. Unset, it writes the index only.
+# It keeps `/picogk-browser/<sha>/` and `/csharp-language/<sha>/` the same way, in
+# their own `tau-served-runtimes.json`, so a tab from the previous build can still
+# start PicoGK or the C# language service.
 
 [build.environment]
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.

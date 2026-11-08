@@ -13,6 +13,7 @@
       "id": "S19.compute-worker",
       "limit": 0,
       "atHead": {
+        "chromium-full": 1501,
         "chromium-small": 77
       }
     }

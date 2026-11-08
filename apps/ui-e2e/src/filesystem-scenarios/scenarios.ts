@@ -474,7 +474,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S19',
     title: 'Grep while saving and reading',
     model:
-      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return), authorityCalls and authorityReads (what the port served) are recorded for information and never gated.",
+      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return) and authorityCalls (what the port served) are recorded for information and never gated; authorityReads (the reads the port served) is gated by S19.compute-worker.",
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },

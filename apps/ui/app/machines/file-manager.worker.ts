@@ -774,12 +774,13 @@ self.addEventListener(
         stageLinked: async (input) =>
           stageLinkedImport({
             ...input,
-            revisions: linkedImportPort({
-              provider: input.port.provider,
-              operationId: input.operationId,
-              request: input.request,
-              compute: revisionCompute,
-            }),
+            revisions: (gitDirectory) =>
+              linkedImportPort({
+                provider: input.port.provider,
+                gitDirectory,
+                request: input.request,
+                compute: revisionCompute,
+              }),
           }),
       });
       return;

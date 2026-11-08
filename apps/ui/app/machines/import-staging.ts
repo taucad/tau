@@ -130,7 +130,10 @@ export type ImportSession = Readonly<{
   /**
    * Stage the planned source on a durable storage root, resuming a staging of
    * the same source. `target` is the project directory the create will
-   * commit, written into directly where the root's rename copies.
+   * commit, written into directly where the root's rename copies. Aborting
+   * `signal` stops the stage in the worker (a linked repository's fetch with
+   * it); the call still waits for the worker to stop, so nothing writes into
+   * the staging once it settles, and then rejects.
    */
   stage: (
     operationId: string,
@@ -138,6 +141,7 @@ export type ImportSession = Readonly<{
     options: Readonly<{
       target: string;
       onProgress?: (progress: ImportStagingProgress) => void;
+      signal?: AbortSignal;
       /**
        * A linked repository to fetch and stage instead of the plan: the
        * worker's revisions authority fetches it into the staging, so neither
@@ -181,7 +185,7 @@ type Request =
   | Readonly<{ id: number; type: 'preview'; paths: readonly string[]; maximumBytes: number }>
   | Readonly<{ id: number; type: 'discard'; operationId: string; scope: StorageRootConfig }>
   | Readonly<{ id: number; type: 'sweep'; scope: StorageRootConfig; owned: readonly string[] }>
-  | Readonly<{ id: number; type: 'cancel'; close?: boolean; plan?: number }>;
+  | Readonly<{ id: number; type: 'cancel'; close?: boolean; plan?: number; stage?: number }>;
 
 type Answer = Readonly<{
   id: number;
@@ -500,6 +504,8 @@ export const serveImportChannel = (
   /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
   let latestPlan: number | undefined;
   const planning = new Map<number, AbortController>();
+  /* Each stage still running, by request: the page cancels one without ending the session. */
+  const staging = new Map<number, AbortController>();
   let abort = new AbortController();
   /* What this session staged and still leases; `kept` once handed off, so closing leaves it for its create. */
   const owned = new Map<string, { scope: StorageRootConfig; release: () => Promise<void>; kept: boolean }>();
@@ -556,29 +562,22 @@ export const serveImportChannel = (
       latestPlan = undefined;
     }
   };
-  /* Stage the plan, or a linked repository the worker fetches instead (I6). */
-  const stage = async (request: Extract<Request, { type: 'stage' }>): Promise<void> => {
+  const stageUnder = async (request: Extract<Request, { type: 'stage' }>, signal: AbortSignal): Promise<void> => {
     const { linked } = request;
     const { stageLinked } = dependencies;
-    if (linked === undefined && plan === undefined) {
-      throw new Error('Nothing is planned to stage.');
-    }
-    if (linked !== undefined && stageLinked === undefined) {
-      throw new Error('This worker cannot fetch a linked repository.');
-    }
-    const staging = await dependencies.importStaging(request.scope);
+    const root = await dependencies.importStaging(request.scope);
     if (!owned.has(request.operationId)) {
       const { operationId } = request;
-      const lease = await holdLease(operationId, async () => touchStagedImport(staging, operationId));
+      const lease = await holdLease(operationId, async () => touchStagedImport(root, operationId));
       owned.set(operationId, { scope: request.scope, release: lease, kept: false });
     }
     const common = {
-      port: staging,
+      port: root,
       operationId: request.operationId,
       decode: dependencies.decode,
       ...measuring,
       target: request.target,
-      signal: abort.signal,
+      signal,
       onProgress: (progress: ImportStagingProgress): void => {
         answer({ id: request.id, progress });
       },
@@ -600,6 +599,24 @@ export const serveImportChannel = (
         target: staged.target ?? request.target,
       } satisfies ImportStaged,
     });
+  };
+  /* Stage the plan, or a linked repository the worker fetches instead (I6). */
+  const stage = async (request: Extract<Request, { type: 'stage' }>): Promise<void> => {
+    const { linked } = request;
+    const { stageLinked } = dependencies;
+    if (linked === undefined && plan === undefined) {
+      throw new Error('Nothing is planned to stage.');
+    }
+    if (linked !== undefined && stageLinked === undefined) {
+      throw new Error('This worker cannot fetch a linked repository.');
+    }
+    const own = new AbortController();
+    staging.set(request.id, own);
+    try {
+      await stageUnder(request, AbortSignal.any([abort.signal, own.signal]));
+    } finally {
+      staging.delete(request.id);
+    }
   };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
@@ -676,6 +693,11 @@ export const serveImportChannel = (
           answer({ id: request.id, result: undefined });
           return;
         }
+        if (request.stage !== undefined) {
+          /* The stage answers its own refusal once it has stopped. */
+          staging.get(request.stage)?.abort(new Error('The import was cancelled.'));
+          return;
+        }
         latestPlan = undefined;
         abort.abort(new Error('The import was cancelled.'));
         abort = new AbortController();
@@ -708,12 +730,9 @@ export const serveImportChannel = (
         const message = error instanceof Error ? error.message : String(error);
         const reason = isImportRefusal(error) ? (error as { reason?: ImportRefusalReason }).reason : undefined;
         /* A linked import's revisions refusal keeps its code, so the review can say which (a taken branch, a moved one). */
-        const code =
-          error instanceof Error &&
-          error.name === 'RevisionPortError' &&
-          typeof (error as { code?: unknown }).code === 'string'
-            ? (error as { code: string }).code
-            : undefined;
+        const held: unknown =
+          error instanceof Error && error.name === 'RevisionPortError' ? Reflect.get(error, 'code') : undefined;
+        const code = typeof held === 'string' ? held : undefined;
         answer({
           id: request.id,
           error: { message, ...(reason === undefined ? {} : { reason }), ...(code === undefined ? {} : { code }) },
@@ -751,7 +770,7 @@ export type ImportCreationTarget<Location> = Readonly<{
  *
  * @param input - The session, the resolved target, a fresh operation id, the
  *   create (given the staging locator), whether the journal owns a staging,
- *   and a progress callback.
+ *   a progress callback, and a signal that stops the stage.
  * @returns What the create returned.
  * @public
  */
@@ -765,6 +784,8 @@ export const createFromStagedImport = async <Location, Created>(
     onProgress?: (progress: ImportStagingProgress) => void;
     /** A linked repository the worker fetches and stages instead of the session's plan. */
     linked?: LinkedImportRequest;
+    /** Stops the stage in the worker (a linked repository's fetch with it); the staging is then discarded. */
+    signal?: AbortSignal;
   }>,
 ): Promise<Created> => {
   const { session, target, operationId } = input;
@@ -775,7 +796,9 @@ export const createFromStagedImport = async <Location, Created>(
       target: target.providerBasePath,
       ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
       ...(input.linked === undefined ? {} : { linked: input.linked }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
+    input.signal?.throwIfAborted();
     await session.handOff(operationId);
   } catch (error) {
     await session.discard(operationId, target.scope).catch(() => undefined);
@@ -880,11 +903,31 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
         signal.removeEventListener('abort', cancel);
       }
     },
-    stage: async (operationId, scope, { target, onProgress, linked }) =>
-      ask<ImportStaged>(
+    stage: async (operationId, scope, { target, onProgress, linked, signal }) => {
+      if (signal?.aborted === true) {
+        throw new ImportChannelError('The import was cancelled.');
+      }
+      const id = next;
+      const staged = ask<ImportStaged>(
         { type: 'stage', operationId, scope, target, ...(linked === undefined ? {} : { linked }) },
         onProgress === undefined ? {} : { onProgress },
-      ),
+      );
+      if (signal === undefined) {
+        return staged;
+      }
+      /* The worker stops the stage (and its fetch); its answer, once it has stopped, settles the call. */
+      const cancel = (): void => {
+        if (!closed && waiting.has(id)) {
+          port.postMessage({ type: 'cancel', stage: id, id: -1 });
+        }
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        return await staged;
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
+    },
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),
     release: async (operationId) => ask<undefined>({ type: 'release', operationId }),
     preview: async (paths, maximumBytes) =>

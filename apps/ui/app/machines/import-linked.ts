@@ -7,14 +7,17 @@
  * here, under the authority, and no byte of it reaches the page:
  *
  * 1. the staging is claimed with the source's pin (the reviewed commit);
- * 2. the revisions authority fetches the pinned branch into the staging's
- *    control directory ({@link importControlDirectory}) and records the
+ * 2. the revisions authority fetches the pinned branch into the import's
+ *    control directory ({@link stagedControlDirectory}: the staging's own
+ *    where a rename moves, the in-place folder's `.git` where a rename would
+ *    copy, so no pack is copied) and records the
  *    reviewed setup there ({@link bootstrapRemoteRevisionStore}), so `.git` is
  *    written once, by the authority, and never through the mutation pipeline;
  * 3. the fetched tree is staged like any import: each file written once, read
  *    back and measured once on the compute worker (EQ6), into the ledger;
- * 4. the commit moves the control directory into the project as `.git` and
- *    the staged files beside it, and writes `tau.json` last.
+ * 4. the commit moves the control directory (staged to move) into the
+ *    project as `.git` and the staged files beside it, and writes `tau.json`
+ *    last.
  *
  * A failure anywhere leaves a staging the session discards (or a sweep
  * removes), `.git` with it.
@@ -22,7 +25,7 @@
  * @module
  */
 
-import { importControlDirectory, planImport, stageImport } from '@taucad/filesystem/importer';
+import { planImport, stageImport, stagedControlDirectory } from '@taucad/filesystem/importer';
 import type {
   ImportDecoder,
   ImportMeasurer,
@@ -129,17 +132,17 @@ export const revisionTreeImportSource = (
 
 /**
  * The revisions port a linked import fetches through: over the storage
- * root's own provider, its store in the staging's control directory, with a
+ * root's own provider, its store in the import's control directory, with a
  * transport that carries the remote's credential to that remote alone.
  *
- * @param input - The provider, the operation, the request, and the compute worker.
+ * @param input - The provider, the control directory, the request, and the compute worker.
  * @returns The port.
  * @public
  */
 export const linkedImportPort = (
   input: Readonly<{
     provider: FileSystemProvider;
-    operationId: string;
+    gitDirectory: string;
     request: LinkedImportRequest;
     compute?: ComputeWorker;
   }>,
@@ -153,7 +156,7 @@ export const linkedImportPort = (
   } as const;
   return createIsomorphicGitRevisionPort({
     filesystem: input.provider,
-    gitDirectory: importControlDirectory(input.operationId),
+    gitDirectory: input.gitDirectory,
     ...(input.compute === undefined ? {} : { compute: input.compute }),
     http: createRevisionHttpClient({
       credentials: 'include',
@@ -178,7 +181,8 @@ const emptyPlan = (pin: ImportSourcePin): ImportPlan => ({
  *
  * @param input - The staging port, the operation, the request, the project
  *   directory asked for, the decode and read-back measure, the path policy,
- *   the revisions port to fetch through, and a signal and progress callback.
+ *   the revisions port to fetch through (given the control directory the
+ *   claimed staging names), and a signal and progress callback.
  * @returns The staged import.
  * @public
  */
@@ -191,7 +195,7 @@ export const stageLinkedImport = async (
     decode: ImportDecoder;
     measure?: ImportMeasurer;
     policy: PathPolicy;
-    revisions: RevisionPort;
+    revisions: (gitDirectory: string) => RevisionPort;
     bootstrap?: typeof bootstrapRemoteRevisionStore;
     signal?: AbortSignal;
     onProgress?: (progress: ImportStagingProgress) => void;
@@ -208,10 +212,10 @@ export const stageLinkedImport = async (
     ...(signal === undefined ? {} : { signal }),
   };
   /* The staging (and its in-place folder, where a move would copy) is claimed under the pin before the fetch writes into it. */
-  await stageImport({ ...staging, plan: emptyPlan(pin) });
+  const claimed = await stageImport({ ...staging, plan: emptyPlan(pin) });
   const bootstrap = input.bootstrap ?? bootstrapRemoteRevisionStore;
   const { tree } = await bootstrap({
-    port: input.revisions,
+    port: input.revisions(stagedControlDirectory(claimed)),
     remote: request.remote,
     ...(request.sourceRef === undefined || request.sourceHead === undefined
       ? {}

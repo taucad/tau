@@ -1,5 +1,5 @@
 import { createProjectFixture } from '#lib/project.fixture.js';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -764,4 +764,118 @@ describe('ImportRoute GitHub card', () => {
     expect(await screen.findByRole('alert', { name: 'This branch name is taken on GitHub' })).toBeInTheDocument();
     expect(projects.create).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      title: 'GitHub connection needs renewing',
+      message: 'GitHub did not accept this account’s access to octo/part. Connect GitHub again, then choose it.',
+      action: 'Connect GitHub again',
+      connects: true,
+    },
+    {
+      code: 'REMOTE_FORBIDDEN',
+      title: 'GitHub refused this repository',
+      message: 'The connected account can no longer read octo/part. Check its access on GitHub, then choose it again.',
+      action: 'Choose repository again',
+      connects: false,
+    },
+    {
+      code: 'REMOTE_NOT_FOUND',
+      title: 'Repository not found on GitHub',
+      message: 'octo/part was removed, renamed or is no longer shared with this account. Choose the repository again.',
+      action: 'Choose repository again',
+      connects: false,
+    },
+  ])(
+    "should offer the fix when the worker's fetch was answered $code, rather than another Import and link",
+    async ({ code, title, message, action, connects }) => {
+      const user = userEvent.setup();
+      linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+      importChannel.stage.mockRejectedValueOnce(new ImportChannelError('The remote refused.', undefined, code));
+      await renderImport();
+      await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+      await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+      expect(await screen.findByRole('alert', { name: title })).toBeInTheDocument();
+      expect(screen.getByText(message)).toBeVisible();
+      expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+      expect(projects.create).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: action }));
+
+      expect(screen.getByRole('button', { name: 'Pick linked repository' })).toBeInTheDocument();
+      expect(screen.queryByText('GitHub connect started') !== null).toBe(connects);
+    },
+  );
+
+  it("should stop the worker's stage, and its fetch, when the route leaves mid-import", async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    const staged = Promise.withResolvers<AbortSignal | undefined>();
+    importChannel.stage.mockImplementationOnce(
+      async (_operationId: string, _scope: unknown, options: { target: string; signal?: AbortSignal }) => {
+        staged.resolve(options.signal);
+        /* As the worker answers once it has stopped: a refusal, which lets the import's lock go. */
+        const stopped = Promise.withResolvers<never>();
+        options.signal?.addEventListener('abort', () => {
+          stopped.reject(new ImportChannelError('The import was cancelled.'));
+        });
+        return stopped.promise;
+      },
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+    const signal = await staged.promise;
+    expect(signal?.aborted).toBe(false);
+
+    cleanup();
+
+    expect(signal?.aborted).toBe(true);
+    expect(projects.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { held: 'canonical', bytes: (canonical: Uint8Array<ArrayBuffer>) => canonical, changes: false },
+    {
+      held: 'differently formatted',
+      bytes: (canonical: Uint8Array<ArrayBuffer>) =>
+        new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(canonical)), undefined, 4)),
+      changes: true,
+    },
+  ])(
+    'should record in the setup revision the very tau.json the create commits, from a $held repository manifest',
+    async ({ bytes, changes }) => {
+      const user = userEvent.setup();
+      picked.selection = {
+        ...selection,
+        manifest: bytes(manifest),
+        connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+      };
+      linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+      projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+        id,
+        slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+      }));
+      await renderImport();
+      await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+      /* The review says what the setup revision writes. */
+      expect(screen.queryByText(/Add or update/u) !== null).toBe(changes);
+
+      await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+      await waitFor(() => {
+        expect(projects.create).toHaveBeenCalled();
+      });
+      const created = projects.create.mock.calls[0]?.[0] as { project: Parameters<typeof projectToManifest>[0] };
+      const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+      /* `tau.json` as the commit writes it (`serializeProjectManifest` of the journaled manifest), so nothing opens dirty. */
+      expect(new TextDecoder().decode(prepared.manifest)).toBe(
+        new TextDecoder().decode(serializeProjectManifest(projectToManifest(created.project))),
+      );
+      expect(new TextDecoder().decode(prepared.manifest)).toBe(new TextDecoder().decode(manifest));
+    },
+  );
 });

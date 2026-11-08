@@ -1,5 +1,10 @@
-import { convertLegacyProjectManifestBytes, parseProjectManifestBytes } from '@taucad/types';
-import type { ProjectManifestParseResult } from '@taucad/types';
+import {
+  convertLegacyProjectManifestBytes,
+  parseProjectManifestBytes,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseResult } from '@taucad/types';
 import { largeObjectThresholdBytes } from '@taucad/revisions';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { ENV } from '#environment.config.js';
@@ -11,6 +16,9 @@ import type { LinkedImportRequest } from '#machines/import-linked.js';
 /* The largest worktree a linked import materializes; the worker's own bound for every answer but the pack. */
 const maximumMaterializedBytes = 256 * 1024 * 1024;
 
+const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
 /** Read a declaration for a new Git import; legacy identity never becomes the new local binding. */
 export const readLinkedGithubManifest = (bytes: Uint8Array<ArrayBuffer>): ProjectManifestParseResult => {
   const parsed = parseProjectManifestBytes(bytes);
@@ -20,6 +28,68 @@ export const readLinkedGithubManifest = (bytes: Uint8Array<ArrayBuffer>): Projec
   const converted = convertLegacyProjectManifestBytes(bytes);
   return converted.success ? { success: true, data: converted.data.manifest } : parsed;
 };
+
+/**
+ * The project a linked import creates: the repository's own declaration
+ * where it has a readable one, with the review's main file and chat sync.
+ *
+ * @param input - The reviewed selection, the main file and whether chats sync.
+ * @returns The project data the create journals.
+ * @public
+ */
+export const linkedProjectData = ({
+  selection,
+  mainFile,
+  syncChats,
+}: Readonly<{
+  selection: GithubRepositorySelection;
+  mainFile: string;
+  syncChats: boolean;
+}>): Omit<ProjectManifest, '$schema'> => {
+  const parsed = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
+  const imported = parsed?.success === true ? parsed.data : undefined;
+  return imported === undefined
+    ? {
+        name: selection.repository.fullName,
+        description: selection.repository.description ?? `Imported from ${selection.repository.htmlUrl}`,
+        tags: [],
+        assets: { main: { entryPath: mainFile } },
+        ...(syncChats ? {} : { syncChats: false }),
+      }
+    : {
+        name: imported.name,
+        description: imported.description,
+        tags: imported.tags,
+        assets: { ...imported.assets, main: { ...imported.assets.main, entryPath: mainFile } },
+        ...(syncChats ? {} : { syncChats: false }),
+        ...(imported.syncLargeExports === undefined ? {} : { syncLargeExports: imported.syncLargeExports }),
+      };
+};
+
+/**
+ * The `tau.json` a linked import's create commits, byte for byte: what its
+ * setup revision must record, so the project opens with nothing to save.
+ *
+ * @param data - The project data, from {@link linkedProjectData}.
+ * @returns The manifest's bytes.
+ * @public
+ */
+export const linkedManifestBytes = (data: Omit<ProjectManifest, '$schema'>): Uint8Array<ArrayBuffer> =>
+  serializeProjectManifest(projectToManifest(data));
+
+/**
+ * Whether a linked import changes the repository's `tau.json`: it has none,
+ * or its bytes are not those the create commits.
+ *
+ * @param selection - The reviewed selection.
+ * @param manifest - The bytes the create commits.
+ * @returns `true` when the setup revision writes `tau.json`.
+ * @public
+ */
+export const linkedManifestChanges = (
+  selection: Pick<GithubRepositorySelection, 'manifest'>,
+  manifest: Uint8Array<ArrayBuffer>,
+): boolean => selection.manifest === undefined || !sameBytes(selection.manifest, manifest);
 
 /** A linked import as the page hands it to the worker: the request, and the credential generation the binding records. */
 export type LinkedGithubImport = Readonly<{
@@ -33,9 +103,6 @@ type LinkedGithubImportOptions = Readonly<{
   manifest: Uint8Array<ArrayBuffer>;
   mainFile: string;
 }>;
-
-const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 
 /**
  * The reviewed GitHub branch as a linked import request (charter D12, I6):
@@ -71,7 +138,7 @@ export async function prepareLinkedGithubImport({
     content: Uint8Array<ArrayBuffer>;
     mode: '100644';
   }> = [];
-  if (selection.manifest === undefined || !sameBytes(selection.manifest, manifest)) {
+  if (linkedManifestChanges(selection, manifest)) {
     setupFiles.push({ path: 'tau.json', content: manifest, mode: '100644' });
   }
   if (selection.branch.head === undefined) {

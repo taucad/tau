@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createInlineImportDecoder,
+  discardStagedImport,
   importControlDirectory,
   importStagingDirectory,
   readStagedImport,
@@ -112,7 +113,7 @@ const gitBlobOid = (content: string): string =>
 
 const stage = async (provider: MemoryProvider) => {
   const port = portOf(provider);
-  const revisions = linkedImportPort({ provider, operationId, request });
+  const opened: Array<ReturnType<typeof linkedImportPort>> = [];
   const staged = await stageLinkedImport({
     port,
     operationId,
@@ -120,15 +121,29 @@ const stage = async (provider: MemoryProvider) => {
     target: 'design',
     decode: createInlineImportDecoder(),
     policy: tauPathPolicy,
-    revisions,
+    revisions: (gitDirectory) => {
+      const revisions = linkedImportPort({ provider, gitDirectory, request });
+      opened.push(revisions);
+      return revisions;
+    },
     bootstrap: offlineBootstrap,
   });
-  return { staged, revisions };
+  return { staged, revisions: opened[0]! };
 };
+
+const rootThat = (movesInPlace: boolean): MemoryProvider => {
+  const provider = new MemoryProvider();
+  Object.defineProperty(provider, 'capabilities', { value: { ...provider.capabilities, movesInPlace } });
+  return provider;
+};
+/* A root where a rename is a metadata operation (OPFS, Node): an import stages to move there. */
+const movingRoot = (): MemoryProvider => rootThat(true);
+/* A root where a rename copies (a picked folder, IndexedDB): an import writes in place there. */
+const copyingRoot = (): MemoryProvider => rootThat(false);
 
 describe('a linked import in the worker (D12, I6)', () => {
   it("should write the repository's store into the staging's control directory, never the project or the page", async () => {
-    const provider = new MemoryProvider();
+    const provider = movingRoot();
 
     const { revisions } = await stage(provider);
 
@@ -145,7 +160,7 @@ describe('a linked import in the worker (D12, I6)', () => {
   });
 
   it('should stage the fetched tree with its modes and facts measured from the read-back, leaving tau.json to the commit', async () => {
-    const provider = new MemoryProvider();
+    const provider = movingRoot();
 
     const { staged } = await stage(provider);
 
@@ -164,6 +179,30 @@ describe('a linked import in the worker (D12, I6)', () => {
     expect(await provider.exists(`${importControlDirectory(operationId)}/HEAD`)).toBe(true);
     const recorded = await readStagedImport(provider, operationId);
     expect(recorded?.entries).toHaveLength(3);
+  });
+
+  it("should fetch straight into the in-place folder's .git where a rename would copy, so no pack is copied", async () => {
+    const provider = copyingRoot();
+
+    const { staged, revisions } = await stage(provider);
+
+    expect(staged.inPlace).toBe('design');
+    expect(new TextDecoder().decode(await provider.readFile('design/.git/HEAD'))).toBe('ref: refs/heads/main\n');
+    expect(await provider.exists(importControlDirectory(operationId))).toBe(false);
+    expect(await revisions.readRef('main')).toBeDefined();
+    /* The folder's files are the import's, beside the store, and the ledger does not name `.git`. */
+    expect(new TextDecoder().decode(await provider.readFile('design/main.scad'))).toBe('cube(1);');
+    expect(staged.entries.some(({ path }) => path.startsWith('.git'))).toBe(false);
+  });
+
+  it('should take an in-place .git with the folder when the staging is discarded', async () => {
+    const provider = copyingRoot();
+    await stage(provider);
+
+    await discardStagedImport(portOf(provider), operationId);
+
+    expect(await provider.exists('design')).toBe(false);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
   });
 
   it('should claim the staging under the pin before the fetch writes into it', async () => {
@@ -201,7 +240,7 @@ describe('a linked import over the import channel', () => {
     const session = connect(provider, async (input) =>
       stageLinkedImport({
         ...input,
-        revisions: linkedImportPort({ provider: input.port.provider, operationId: input.operationId, request }),
+        revisions: (gitDirectory) => linkedImportPort({ provider: input.port.provider, gitDirectory, request }),
         bootstrap: offlineBootstrap,
       }),
     );
@@ -228,6 +267,71 @@ describe('a linked import over the import channel', () => {
       message: 'Remote branch main already names another revision.',
       code: 'REMOTE_REF_CONFLICT',
     });
+  });
+
+  /* The real fetch path: the worker's revisions port, its HTTP client and remote transport, to a network that answers. */
+  const fetchingWith = (fetch: typeof globalThis.fetch): Parameters<typeof serveImportChannel>[1]['stageLinked'] => {
+    vi.stubGlobal('fetch', fetch);
+    return async (input) =>
+      stageLinkedImport({
+        ...input,
+        revisions: (gitDirectory) =>
+          linkedImportPort({ provider: input.port.provider, gitDirectory, request: input.request }),
+      });
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { status: 401, code: 'REMOTE_REAUTHORIZATION_REQUIRED' },
+    { status: 403, code: 'REMOTE_REAUTHORIZATION_REQUIRED' },
+    { status: 404, code: 'REMOTE_NOT_FOUND' },
+  ])('should carry a remote that answered $status to the page as $code', async ({ status, code }) => {
+    const provider = movingRoot();
+    const fetch = vi.fn(async () => new Response('refused', { status }));
+    const session = connect(provider, fetchingWith(fetch));
+
+    const failure = await session
+      .stage(operationId, { backend: 'indexeddb' }, { target: 'design', linked: request })
+      .catch((error: unknown) => error);
+    session.close();
+
+    expect(fetch).toHaveBeenCalled();
+    expect(failure).toBeInstanceOf(ImportChannelError);
+    expect(failure).toMatchObject({ code });
+  });
+
+  it("should stop the worker's fetch when the page aborts the stage, and settle once it has stopped", async () => {
+    const provider = movingRoot();
+    const fetched = Promise.withResolvers<AbortSignal | undefined>();
+    const fetch = vi.fn(
+      async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          fetched.resolve(init?.signal ?? undefined);
+          init?.signal?.addEventListener('abort', () => {
+            reject(new Error('The fetch was aborted.', { cause: init.signal?.reason }));
+          });
+        }),
+    );
+    const session = connect(provider, fetchingWith(fetch));
+    const aborting = new AbortController();
+
+    const staging = session.stage(
+      operationId,
+      { backend: 'indexeddb' },
+      { target: 'design', linked: request, signal: aborting.signal },
+    );
+    const signal = await fetched.promise;
+    aborting.abort();
+
+    await expect(staging).rejects.toBeInstanceOf(ImportChannelError);
+    expect(signal?.aborted).toBe(true);
+    /* The session lives on: a stage the page cancels is not the session closing. */
+    await session.discard(operationId, { backend: 'indexeddb' });
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+    session.close();
   });
 
   it('should refuse a linked stage in a worker that cannot fetch one', async () => {

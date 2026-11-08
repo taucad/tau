@@ -13,6 +13,7 @@ import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-brid
 import { fileSystemBridgeSchemas, maxReadManyBytes } from '#filesystem-bridge-protocol.js';
 import type { GrepResult, IndexStats, ReadManyWireRows } from '#filesystem-bridge-protocol.js';
 import { nodeGrepMatcherWorker } from '#filesystem-bridge-rooted.test-fixture.js';
+import { sha256Bytes } from '@taucad/utils/hash';
 
 const encoder = new TextEncoder();
 
@@ -37,6 +38,44 @@ const served = (handlers: StringKeyedObject): Derived =>
   withHostContentCalls(handlers, { grepMatcherWorker: nodeGrepMatcherWorker }) as unknown as Derived;
 
 const codedError = (code: string): Error => Object.assign(new Error(code), { code });
+
+describe('derived digested read (D17)', () => {
+  it("should answer one read's bytes and the SHA-256 of those same bytes", async () => {
+    const readFile = vi.fn(async () => encoder.encode('loaded'));
+    const handlers = withHostContentCalls({ readFile }) as unknown as {
+      readFileWithDigest(path: string): Promise<{ data: Uint8Array<ArrayBuffer>; sha256: string }>;
+    };
+
+    const answered = await handlers.readFileWithDigest('a.ts');
+
+    expect(readFile).toHaveBeenCalledOnce();
+    expect(new TextDecoder().decode(answered.data)).toBe('loaded');
+    expect(answered.sha256).toBe(await sha256Bytes(encoder.encode('loaded')));
+  });
+
+  it("should serve a handler set's own digested read", async () => {
+    const own = vi.fn(async () => ({ data: new Uint8Array(0), sha256: 'b'.repeat(64) }));
+    const readFile = vi.fn();
+    const handlers = withHostContentCalls({ readFile, readFileWithDigest: own }) as unknown as {
+      readFileWithDigest(path: string): Promise<unknown>;
+    };
+
+    await handlers.readFileWithDigest('a.ts');
+
+    expect(own).toHaveBeenCalledWith('a.ts');
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('should pass a missing file through as the read refused it', async () => {
+    const handlers = withHostContentCalls({
+      readFile: async () => {
+        throw codedError('ENOENT');
+      },
+    }) as unknown as { readFileWithDigest(path: string): Promise<unknown> };
+
+    await expect(handlers.readFileWithDigest('gone.ts')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
 
 describe('derived index calls', () => {
   it('count and match file rows only, should the index answer a directory row', async () => {
@@ -318,6 +357,14 @@ describe('caller-side calls', () => {
     await expect(prepareApplyCall([{ entries: [], lifecycle: true }])).resolves.toEqual({
       args: [{ entries: [], lifecycle: true }],
     });
+  });
+
+  it('refuses a large-object source before it crosses (W11.3)', async () => {
+    await expect(
+      prepareApplyCall([
+        { entries: [{ op: 'write', path: 'part.step', data: { largeObject: 'a'.repeat(64), size: 3 } }] },
+      ]),
+    ).rejects.toMatchObject({ code: 'EINVAL' });
   });
 
   it('stands an entry error without a code back up as a plain Error', () => {

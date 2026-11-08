@@ -3,10 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Inject, Injectable } from '@nestjs/common';
 import type { NestMiddleware } from '@nestjs/common';
 import type { FastifyInstance } from 'fastify';
-import { attachHostDevice } from '#auth/auth.guard.js';
-import { DatabaseService } from '#database/database.service.js';
+import { attachHostDevice } from '@taucad/api-auth';
+import { DatabaseService } from '@taucad/api-database';
 import { projectIdFromRepository } from '#api/git/git.constants.js';
-import { hostGitCredentialPrefix, resolveHostGitCredential } from '#api/hosts/host-git-credential.js';
+import { hostGitCredentialPrefix, resolveHostGitCredential } from '@taucad/api-hosts';
 
 /**
  * Content types that stock git POSTs. Fastify refuses a body it has no parser for,

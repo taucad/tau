@@ -53,11 +53,14 @@ jobs:
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
+      billing: ${{ steps.plan.outputs.billing }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
+      standalone: ${{ steps.plan.outputs.standalone }}
+      reused: ${{ steps.queue.outputs.run-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -67,8 +70,18 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # A push to `main` whose identical commit passed the merge queue reuses that
+      # verdict: the lanes below report the queue's result instead of running again.
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
       - name: Compute affected lanes
         id: plan
+        env:
+          REUSED: ${{ steps.queue.outputs.run-id }}
         run: |
           # `pipefail` so a failing `nx show projects` fails the step instead of
           # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
@@ -76,45 +89,88 @@ jobs:
           set -o pipefail
           apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
+          # Billing contracts: the project that owns them (`api-billing`) or one it depends on changed.
+          billing=$(pnpm nx show projects --affected --with-target test:billing-foundation --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
           browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
+          # `tag:ci:standalone` marks the projects whose source the standalone oracles execute
+          # (`check-standalone-project.ts` runs the CLI from source and imports the UI's project
+          # factory); Nx marks each affected when any dependency of it changes.
+          standalone=$(pnpm nx show projects --affected --projects tag:ci:standalone --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
+          echo "Affected with a test:billing-foundation target: $billing"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
+          echo "Affected standalone-oracle projects: $standalone"
+          # The queue run already ran the formal, browser and GeoSpec lanes on this tree.
+          if [ -n "$REUSED" ]; then
+            formal='[]'
+            browser='[]'
+            geospec_examples='[]'
+            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip."
+          fi
           {
             echo "browser-projects=$browser"
             echo "apps<<EOF"
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples"; do
+          for lane in "api=$api" "billing=$billing" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples" "standalone=$standalone"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
               echo "${lane%%=*}=true" >> "$GITHUB_OUTPUT"
             fi
           done
+          # `staging.yml` reads which service lanes this run selected: a lane it skipped is
+          # acceptable to a deploy only when this plan found nothing of it affected.
+          mkdir -p out/ci-plan
+          jq -n --arg api "$([ "$api" = '[]' ] && echo false || echo true)" \
+            --arg billing "$([ "$billing" = '[]' ] && echo false || echo true)" \
+            '{api: $api, "billing-e2e": $billing}' > out/ci-plan/lanes.json
+          cat out/ci-plan/lanes.json
+
+      - name: Upload the lane plan
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-plan
+          path: out/ci-plan/lanes.json
+          if-no-files-found: error
+          retention-days: 7
 
   # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
   # is the wildcard umbrella over all of them (frontmatter, workspace root,
   # project names and tags, tsgo runtime references, quickstart budget, license
   # partitions, formatting, dead code, license deps, workflows). A new validator
   # joins by adding the target — this job never changes.
+  # A push to `main` whose identical commit passed the merge queue passes on that
+  # verdict (`queue-verdict`); it still reports, so `staging.yml` reads it.
   workspace:
     name: Validate workspace
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
       - name: Setup Nx Environment
+        if: steps.queue.outputs.run-id == ''
         uses: ./.github/actions/setup-nx
 
       - name: Run workspace validators
+        if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
@@ -127,7 +183,8 @@ jobs:
     needs: [plan]
     # Not `always()`: that also ignores a cancel, so a superseded run kept this job
     # going for its full length and held the next run in the concurrency queue.
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    # A push whose commit passed the merge queue reuses that run's lanes (`plan.outputs.reused`).
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reused == '' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -302,82 +359,16 @@ jobs:
           path: out/reports/
           retention-days: 14
 
-  # Standalone-project oracles (native dependency charter W23, D34, I14; go-live row PRJ-1): every
-  # template Tau creates runs outside Tau with its ecosystem's own toolchain, from the files in the
-  # project folder, and produces the geometry Tau exports for the same project.
-  # `scripts/src/check-standalone-project.ts` creates each project with the UI's factory and its
-  # fixture (`libs/tau-examples/src/standalone/<kernel>/`), copies it to a bare directory outside the
-  # checkout, installs it with the native tool only (`npm ci --ignore-scripts`, `uv sync --locked`,
-  # `dotnet restore --locked-mode`; nothing for OpenSCAD and KCL), runs it with the native runner and
-  # compares the volume with `tau export` of the same project (1e-6 relative). One job per ecosystem;
-  # a row that diverges fails its job with both measurements in the step summary. Not required
-  # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs on macOS
-  # when the native projects are affected and on every push to `main`, as the native-darwin row does.
+  # Standalone-project oracles, in `standalone-projects.yml` (also nightly). Only when the plan
+  # finds a project they execute affected, and on every push to `main`.
   standalone:
-    name: Standalone projects (${{ matrix.ecosystem }})${{ matrix.ecosystem == 'kcl' && ' [quarantined]' || '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        ecosystem: [npm, pypi, none, kcl]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      # KCL: Tau's export reaches Zoo through Tau Cloud's proxy, never the local API this workflow sets.
-      TAU_API_URL: ${{ matrix.ecosystem != 'kcl' && 'http://localhost:4000' || '' }}
-      TAU_WEBSOCKET_URL: ${{ matrix.ecosystem != 'kcl' && 'ws://localhost:4001' || '' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      - name: Install uv
-        if: matrix.ecosystem == 'pypi'
-        run: |
-          pipx install uv==0.12.20
-          uv --version
-
-      - name: Install OpenSCAD
-        if: matrix.ecosystem == 'none'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
-          openscad --version
-
-      # Restore the Zoo CLI setup and KCL execution once renewable CI credentials are provisioned.
-      - name: Report Zoo KCL quarantine
-        if: matrix.ecosystem == 'kcl'
-        run: |
-          echo '::notice title=Zoo/KCL quarantined::Skipped pending Zoo credentials and renewable Tau Pro CI authentication.'
-          echo 'Zoo/KCL standalone comparison is quarantined, not qualified. Restore execution after CI authentication is provisioned.' >> "$GITHUB_STEP_SUMMARY"
-
-      # `tau prepare build123d` seals the closure inside the native sandbox, as on a user's machine.
-      - name: Setup Linux sandbox prerequisites
-        if: matrix.ecosystem == 'pypi'
-        uses: ./.github/actions/setup-linux-sandbox
-
-      - name: Check every template outside Tau
-        if: matrix.ecosystem != 'kcl'
-        env:
-          ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
-          TAU_AUTH_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
-        run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
-
-      # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`
-      # unmodified and installs and bundles the same tree.
-      - name: Check package-lock.json parity with npm ci
-        if: ${{ !cancelled() && matrix.ecosystem == 'npm' }}
-        env:
-          TAU_NPM_LIVE_TESTS: 'true'
-        run: |
-          set -o pipefail
-          pnpm exec vitest run --root apps/runtime-e2e src/package-lock-parity.test.ts | tee "$RUNNER_TEMP/parity.log"
-          grep -q '"parity":"npm-ci"' "$RUNNER_TEMP/parity.log"
+    name: Standalone projects
+    needs: [plan]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.standalone == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    uses: ./.github/workflows/standalone-projects.yml
+    secrets: inherit
 
   # The required check. It passes only when the plan and every affected lane passed, and the
   # browser and GeoSpec example-contract lanes too when this run needed them.
@@ -395,8 +386,13 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          REUSED: ${{ needs.plan.outputs.reused }}
         run: |
           test "$PLAN_RESULT" = success
+          if [ -n "$REUSED" ]; then
+            echo "Merge-queue run $REUSED passed every affected lane on this commit."
+            exit 0
+          fi
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
@@ -681,14 +677,12 @@ jobs:
           file: apps/api/Dockerfile
           load: true
           tags: tau-api:smoke
-          # Read-through both caches so the smoke test benefits from the
-          # production deploy's registry cache when available. Cache-to
-          # writes only to GHA — PRs from forks can't push to registry.fly.io
-          # and we don't want to invalidate the production cache from a PR.
-          cache-from: |
-            type=gha
-            type=registry,ref=registry.fly.io/tau-api-staging:buildcache
-          cache-to: type=gha,mode=max
+          # Read-only: `api-docker-cache` below writes the dependency layers from
+          # `main`, which every PR can read. A PR writing its own cache spent about
+          # 4 minutes exporting layers that its own branch scope then rarely reused
+          # (job 128576364405: 247 s of a 14-minute build). The Fly registry cache
+          # needs a Fly login a PR does not have, so it is not read here.
+          cache-from: type=gha,scope=api-deps
           # Secret may be unset for fork PRs. The Dockerfile tolerates a
           # missing nx_cloud_token secret (Nx falls back to local cache).
           secrets: |
@@ -700,10 +694,9 @@ jobs:
           context: .
           file: packages/host/Dockerfile
           target: deps
-          cache-from: |
-            type=gha,scope=host-deps
-            type=gha
-          cache-to: type=gha,scope=host-deps,mode=max
+          # Read-only, written from `main` by `api-docker-cache`; its export alone
+          # took about 4 minutes per PR run.
+          cache-from: type=gha,scope=host-deps
 
       - name: Migrate the smoke database
         run: |
@@ -766,15 +759,70 @@ jobs:
   # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
   # the `affected` lane above excludes the tag rather than trying to guess which
   # files reach a service — plus the service-backed targets (`test:models`,
-  # `test:server-modes`, `test:git`). Billing contracts have their own job. Always runs on `main`
-  # pushes so the deploy gate in `staging.yml` is never green off a stale service check.
+  # `test:server-modes`, `test:git`) and the API's billing composition suites. Billing contracts
+  # have their own job. Like every lane here it runs only when the plan finds it affected, on
+  # `main` pushes too; `staging.yml` accepts a skipped lane only when this run's plan says so.
+  # Writes the dependency layers the PR-only `api-docker-smoke` job reads: the GHA cache
+  # a branch writes is readable by pull requests into it, so one `main` writer replaces a
+  # cold cache and a 4-minute export on every PR run. It rebuilds only when an input of
+  # the `deps` stages, or this workflow, changed since the previous `main` commit, so most
+  # pushes skip it.
+  api-docker-cache:
+    name: API Docker dependency cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check whether the dependency stages changed
+        id: inputs
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BEFORE"
+          git cat-file -e "$base^{commit}" 2>/dev/null || base=HEAD~1
+          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml pnpm-workspace.yaml '*package.json' tools/pnpm apps/api/Dockerfile packages/host/Dockerfile .github/workflows/ci.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo 'Dependency inputs unchanged; the cache from an earlier main commit still applies.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Cache API dependency layers
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: deps
+          cache-from: type=gha,scope=api-deps
+          cache-to: type=gha,scope=api-deps,mode=max,ignore-error=true
+
+      - name: Cache host dependency layers
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: packages/host/Dockerfile
+          target: deps
+          cache-from: type=gha,scope=host-deps
+          cache-to: type=gha,scope=host-deps,mode=max,ignore-error=true
+
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
     needs: [plan]
-    if: >-
-      !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -826,6 +874,14 @@ jobs:
 
       # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
       # deterministic edit qualification is the Tier-D edit bench.
+      # The two billing foundation suites that compose billing with the app's chat and
+      # agent-observability code, on the launcher's own disposable PostgreSQL 17.
+      - name: Pull the billing foundation PostgreSQL image
+        run: docker pull postgres:17-alpine
+
+      - name: Run the API's billing composition contracts
+        run: pnpm nx run-many -t test:billing-composition
+
       - name: Run deterministic file-edit qualification (edit bench)
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
@@ -858,16 +914,16 @@ jobs:
         if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
-  # Credential-free database and Stripe adapter contracts, including fork PRs.
+  # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
+  # `api-billing` or a project it depends on is affected, on pull requests, in the merge
+  # queue and on `main` pushes alike; a change under `apps/api/app/**` alone skips it.
   # Keep the job name stable: `staging.yml` gates the API deploy on its result.
   billing-e2e:
     name: Billing contracts (no Stripe credentials)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [plan]
-    if: >-
-      !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

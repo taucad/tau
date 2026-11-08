@@ -4,7 +4,7 @@ import { hostname } from 'node:os';
 import process from 'node:process';
 import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import type { GitOperation, MetricsService } from '#telemetry/metrics.js';
+import type { GitOperation, MetricsService } from '@taucad/api-observability/metrics';
 
 /**
  * The per-owner in-flight cap at the API's git admission (Hosted Remote

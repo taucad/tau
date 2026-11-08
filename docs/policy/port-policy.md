@@ -22,28 +22,28 @@ Tau runs multiple services concurrently in development: a UI dev server, an API 
 
 All port assignments must match the table below. Never introduce a new port without adding it here first.
 
-| Port  | Service                           | Context  | Configured In                                                      |
-| ----- | --------------------------------- | -------- | ------------------------------------------------------------------ |
-| 443   | Portless HTTPS localhost proxy    | Dev      | Portless default; interactive privileged startup                   |
-| 1355  | Portless unprivileged HTTPS proxy | Dev      | `pnpm exec portless proxy start --port 1355 --https`               |
-| 3000  | UI Vite dev server                | Dev      | `apps/ui/vite.config.ts`                                           |
-| 3000  | API (Fly.io internal)             | Prod     | `apps/api/fly.prod.toml`, `apps/api/fly.staging.toml`              |
-| 3000  | API (test env)                    | Test     | `apps/api/.env.test`                                               |
-| 3100  | Loki                              | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 3200  | Tempo                             | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 4000  | API (NestJS dev server)           | Dev      | `apps/api/.env`                                                    |
-| 4001  | Dev WebSocket server (Socket.IO)  | Dev      | `apps/api/app/api/websocket/dev-websocket.service.ts` (`PORT + 1`) |
-| 4040  | Pyroscope                         | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 4317  | OTLP gRPC receiver                | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 4318  | OTLP HTTP receiver                | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 5432  | PostgreSQL                        | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 6100  | Grafana UI (otel-lgtm)            | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 6379  | Redis                             | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 9000  | MinIO API                         | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 9001  | MinIO console                     | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml` (loopback)                              |
-| 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/api/app/telemetry/otel.ts`, `apps/api/fly.prod.toml`         |
-| 11434 | Ollama (local LLM)                | Dev      | `apps/api/app/api/providers/provider.service.ts`                   |
+| Port  | Service                           | Context  | Configured In                                                                 |
+| ----- | --------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| 443   | Portless HTTPS localhost proxy    | Dev      | Portless default; interactive privileged startup                              |
+| 1355  | Portless unprivileged HTTPS proxy | Dev      | `pnpm exec portless proxy start --port 1355 --https`                          |
+| 3000  | UI Vite dev server                | Dev      | `apps/ui/vite.config.ts`                                                      |
+| 3000  | API (Fly.io internal)             | Prod     | `apps/api/fly.prod.toml`, `apps/api/fly.staging.toml`                         |
+| 3000  | API (test env)                    | Test     | `apps/api/.env.test`                                                          |
+| 3100  | Loki                              | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 3200  | Tempo                             | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 4000  | API (NestJS dev server)           | Dev      | `apps/api/.env`                                                               |
+| 4001  | Dev WebSocket server (Socket.IO)  | Dev      | `apps/libs/api-lifecycle/src/websocket/dev-websocket.service.ts` (`PORT + 1`) |
+| 4040  | Pyroscope                         | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 4317  | OTLP gRPC receiver                | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 4318  | OTLP HTTP receiver                | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 5432  | PostgreSQL                        | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 6100  | Grafana UI (otel-lgtm)            | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 6379  | Redis                             | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 9000  | MinIO API                         | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 9001  | MinIO console                     | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml` (loopback)                                         |
+| 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/libs/api-observability/src/otel.ts`, `apps/api/fly.prod.toml`           |
+| 11434 | Ollama (local LLM)                | Dev      | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`                 |
 
 Named localhost previews share the Portless proxy. Their backend ports are allocated by
 Portless from 4000–4999 and passed through `PORT`; do not reserve a fixed port per guide.

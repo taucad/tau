@@ -23,10 +23,9 @@ import { PublicationsController } from '#api/publications/publications.controlle
 import { PublicationsService } from '#api/publications/publications.service.js';
 import { ViewerIdentityInterceptor } from '#api/publications/viewer-identity.interceptor.js';
 import { ViewerIdentityService } from '#api/publications/viewer-identity.service.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { isOptionalAuth } from '#constants/auth.constant.js';
+import { AuthGuard, isOptionalAuth } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()

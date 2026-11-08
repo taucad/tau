@@ -400,6 +400,18 @@ jobs:
           mode: record
           app: ${{ inputs.app }}
 
+      # The API reports `<Fly app>:<commit>` (the image tag; `getSentryRelease` in
+      # apps/api/app/telemetry/sentry.ts), so the release name is known here.
+      - name: Attach this deploy's commits to its Sentry release
+        if: inputs.app == 'api' && steps.superseded.outputs.superseded != 'true'
+        continue-on-error: true
+        uses: ./.github/actions/sentry-release-commits
+        with:
+          release: ${{ steps.targets.outputs.fly_app }}:${{ github.sha }}
+          project: tau-api
+          environment: ${{ inputs.environment }}
+          auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
       # Post-deploy CORS smoke test (R13). Catches regressions like the
       # 4-month-undetected api.taucad.dev cert/app misalignment described in
       # `docs/research/staging-cors-coep-safari-rendering-audit.md` Finding

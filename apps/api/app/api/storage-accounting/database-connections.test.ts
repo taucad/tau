@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- pg_stat_activity column names, as PostgreSQL returns them */
 import { describe, expect, it, vi } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import {
   connectionsQuery,
   databaseConnectionFigures,

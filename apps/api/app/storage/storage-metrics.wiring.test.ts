@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
+import { TelemetryModule } from '@taucad/api-observability';
 
 /**
  * `MetricsService` is optional in `ObjectStorageService`, so a wiring regression would drop every

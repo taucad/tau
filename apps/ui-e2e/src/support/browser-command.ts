@@ -734,7 +734,7 @@ const writeScriptedTurn = async (options: {
 const realModelCatalog = async (contextWindow?: number): Promise<unknown[]> => {
   const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
     // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
-    await import('../../../api/app/api/models/model.constants.js');
+    await import('../../../libs/api-llm-gateway/src/models/model.constants.js');
   return (
     Object.values(modelList)
       .flatMap((entries) => Object.values(entries))

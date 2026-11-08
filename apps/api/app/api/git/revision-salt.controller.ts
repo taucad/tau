@@ -2,8 +2,8 @@
 import { createHmac } from 'node:crypto';
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import type { Environment } from '@taucad/api-core';
+import { UseAuth, User } from '@taucad/api-auth';
 
 /** Domain separation, so this HMAC never equals another use of the same secret. */
 const saltLabel = 'tau-revision-pseudonym-salt/v1';

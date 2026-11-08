@@ -1,0 +1,7 @@
+{
+  "name": "api-redis",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-redis",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:data-access", "api:redis"]
+}

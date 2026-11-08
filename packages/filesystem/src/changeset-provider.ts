@@ -19,7 +19,13 @@ import type {
   ChangesetEntryReceipt,
   ChangesetReceipt,
 } from '#changeset.js';
-import { changesetReceipt, isBoundedChangeset, maximumChangesetBytes, maximumChangesetEntries } from '#changeset.js';
+import {
+  changesetReceipt,
+  isBoundedChangeset,
+  isLargeObjectSource,
+  maximumChangesetBytes,
+  maximumChangesetEntries,
+} from '#changeset.js';
 import { PhaseAdmission } from '#changeset-admission.js';
 import type { Occupancy } from '#changeset-admission.js';
 import { applyBatchWithPrimitives } from '#backend/batch.js';
@@ -176,6 +182,13 @@ export const applyChangesetToProvider = async (
       entry.op === 'move' ? entry.from : entry.path,
       entry.op === 'move' ? entry.to : undefined,
     );
+    if (
+      batch.op === 'write' &&
+      isLargeObjectSource(batch.data) &&
+      (provider as Partial<Pick<FileSystemProvider, 'capabilities'>>).capabilities?.largeObjectSources !== true
+    ) {
+      throw errnoError('EINVAL', `'${batch.path}' cannot be written from a large-object store here`);
+    }
     const phase = entry.phase ?? 0;
     let admission = phases.get(phase);
     if (admission === undefined) {
@@ -221,6 +234,7 @@ export const applyChangesetToProvider = async (
         outcome: result.outcome,
         ...(result.error === undefined ? {} : { error: result.error }),
         ...(result.kind === undefined ? {} : { kind: result.kind }),
+        ...(result.largeObject === undefined ? {} : { largeObject: result.largeObject }),
       };
     }
     halted = indexes.some((index) => receipts[index]!.outcome !== 'applied');

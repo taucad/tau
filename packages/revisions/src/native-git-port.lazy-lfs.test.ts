@@ -8,7 +8,7 @@
  * store's own copy is re-made whenever a cut finds it gone.
  */
 
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,10 +19,18 @@ import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import type { NativeGitRemoteCredential } from '#native-git-port.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
-import { largeObjectThresholdBytes } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  largeObjectThresholdBytes,
+} from '#workspace-config.js';
+
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { GitHttpBackendFixture, GitHttpBackendOptions } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+
+/* Tau's block, so a cut adds a line for each file over the threshold (D16). */
+const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
 
 const author = { name: 'Lazy fill', email: 'lazy@example.com' };
 const cleanups: Array<() => Promise<void>> = [];
@@ -65,14 +73,11 @@ const fetchedProject = async (
   await source.init({ author });
   /* An older revision's object, which the head no longer names: what an undo would write back. */
   const older = new Uint8Array(largeObjectThresholdBytes + 2048).fill(17);
-  const first = await mint(source, new ImmutableRevisionTree([['older.bin', older]]));
+  const first = await mint(source, new ImmutableRevisionTree([tauAttributes, ['older.bin', older]]));
   const bytes = new Uint8Array(largeObjectThresholdBytes + 1024).fill(91);
   const head = await mint(
     source,
-    new ImmutableRevisionTree([
-      ['large.bin', bytes],
-      ['small.txt', 'small\n'],
-    ]),
+    new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes], ['small.txt', 'small\n']]),
     first,
   );
   await source.updateRef({ name: 'main', expectedHead: undefined, head });
@@ -337,13 +342,33 @@ process.exit(result.status ?? 1);
 });
 
 describe.runIf(gitToolchainOnPath)('native large-object store', () => {
+  it('answers a stored read with the pointer of each object it holds whole, and refuses a short one (W11.3)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-lfs-stored-'));
+    cleanups.push(async () => rm(root, { recursive: true, force: true }));
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+    await port.init({ author });
+    const bytes = new Uint8Array(largeObjectThresholdBytes + 9).fill(4);
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(bytes);
+    const head = await mint(
+      port,
+      new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes], ['small.txt', 'small\n']]),
+    );
+
+    const stored = await port.readTree(head, { largeObjects: 'stored' });
+    expect(stored?.get('large.bin')).toStrictEqual(pointerBytes);
+    expect(new TextDecoder().decode(stored?.get('small.txt'))).toBe('small\n');
+
+    await writeFile(join(root, '.git', lfsObjectPath(pointer.oid)), bytes.subarray(1));
+    await expect(port.readTree(head, { largeObjects: 'stored' })).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+  });
+
   it('stores a pruned object again and sweeps an abandoned partial write', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-lfs-store-'));
     cleanups.push(async () => rm(root, { recursive: true, force: true }));
     const port = createNativeGitRevisionPort({ repositoryPath: root });
     await port.init({ author });
     const bytes = new Uint8Array(largeObjectThresholdBytes + 7).fill(5);
-    const tree = new ImmutableRevisionTree([['large.bin', bytes]]);
+    const tree = new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes]]);
     const { oid } = lfsPointerFor(bytes).pointer;
     const stored = join(root, '.git', lfsObjectPath(oid));
     await mint(port, tree);
@@ -369,4 +394,35 @@ describe.runIf(gitToolchainOnPath)('native large-object store', () => {
     await mint(fresh, tree);
     expect(await readdir(join(stored, '..'))).toContain(oid);
   }, 60_000);
+
+  /* D9 on the native leg: a read and a store of the repository's own LFS store, never routed through a fetch. */
+  it('reads and stores one large object in place, by its pointer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-lfs-store-'));
+    cleanups.push(async () => rm(root, { recursive: true, force: true }));
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+    await port.init({ author });
+    const bytes = new Uint8Array(4096).fill(8);
+    const { pointer } = lfsPointerFor(bytes);
+    const stored = join(root, '.git', lfsObjectPath(pointer.oid));
+
+    expect(await port.readLargeObject!(pointer)).toBeUndefined();
+    await port.storeLargeObject!(pointer, bytes);
+    expect(await port.readLargeObject!(pointer)).toStrictEqual(bytes);
+    const names = await readdir(join(stored, '..'));
+    expect(names.filter((name) => name.endsWith('.partial'))).toStrictEqual([]);
+
+    /* A repeat writes nothing; a file of the wrong size at the name is no object, and a store replaces it. */
+    const first = await stat(stored);
+    await port.storeLargeObject!(pointer, bytes);
+    const again = await stat(stored);
+    expect(again.mtimeMs).toBe(first.mtimeMs);
+    await writeFile(stored, 'torn');
+    expect(await port.readLargeObject!(pointer)).toBeUndefined();
+    await port.storeLargeObject!(pointer, bytes);
+    expect(await port.readLargeObject!(pointer)).toStrictEqual(bytes);
+
+    await expect(port.storeLargeObject!(pointer, bytes.subarray(1))).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+    const descriptor = await port.describe();
+    expect(descriptor.keepsLargeObjectFiles).toBe(true);
+  });
 });

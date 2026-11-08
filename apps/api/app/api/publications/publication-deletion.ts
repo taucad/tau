@@ -1,8 +1,8 @@
 import { addAbortSignal } from 'node:stream';
 import { and, asc, eq, gte, isNull, sql } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
-import { blobRef, projectDeletionManifest, publication } from '#database/schema.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import { blobRef, projectDeletionManifest, publication } from '@taucad/api-database/schema';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
 import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';

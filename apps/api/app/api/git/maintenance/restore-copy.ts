@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { eq, lt } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
-import { projectGit, storageTombstone } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
+import { projectGit, storageTombstone } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { lfsObjectLocations, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { writeSpilledPushLog } from '#api/git/store/commit.js';

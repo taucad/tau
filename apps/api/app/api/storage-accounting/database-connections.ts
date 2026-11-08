@@ -1,7 +1,7 @@
 import { TauMetrics } from '@taucad/telemetry';
 import { sql } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { databaseApplicationNames } from '#database/application-name.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { databaseApplicationNames } from '@taucad/api-database/application-name';
 import type { AccountingFigures, AccountingObservation } from '#api/storage-accounting/accounting-figures.js';
 import { withAccountingTimeout } from '#api/storage-accounting/accounting-transaction.js';
 

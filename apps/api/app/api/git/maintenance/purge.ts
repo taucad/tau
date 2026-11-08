@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { projectDeletion, projectDeletionManifest, storageTombstone, user } from '#database/schema.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { projectDeletion, projectDeletionManifest, storageTombstone, user } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
 import { commitTombstone } from '#api/git/store/commit.js';

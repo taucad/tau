@@ -3,14 +3,17 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { creditOperation, user } from '#database/schema.js';
-import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
-import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { QualifiedAdmissionInput } from '#api/billing/credit-ledger.types.js';
-import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
-import { fulfillPaidFixture, seedPaidPurchase } from '#testing/billing-payment.fixture.js';
+import * as schema from '@taucad/api-database/schema';
+import { creditOperation, user } from '@taucad/api-database/schema';
+import {
+  BillingPolicyService,
+  CreditLedgerService,
+  qualifiedMeterContracts,
+  validateCommercialPolicy,
+} from '@taucad/api-billing';
+import type { QualifiedAdmissionInput } from '@taucad/api-billing';
+import { seedBillingFixturePolicy } from '@taucad/api-billing/testing/billing-policy.fixture';
+import { fulfillPaidFixture, seedPaidPurchase } from '@taucad/api-billing/testing/billing-payment.fixture';
 import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
 import { langfuseObservation, pseudonymKey } from '#api/agent-observability/langfuse-observation.js';
 import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';

@@ -121,6 +121,11 @@ export class ObservationService<T> {
     };
   }
 
+  /** Whether {@link ObservationService.dispose} retired this owner, so a `closed` snapshot is final. */
+  public get isDisposed(): boolean {
+    return this.disposed;
+  }
+
   /** Bounded content-free counters for tests and existing diagnostic owners. */
   public get diagnostics(): {
     reads: number;

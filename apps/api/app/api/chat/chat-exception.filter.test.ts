@@ -4,7 +4,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ArgumentsHost } from '@nestjs/common';
 import type { ChatError } from '@taucad/types';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { LlmGatewayError } from '@taucad/api-llm-gateway';
 
 function createMockArgumentsHost() {
   const response = {

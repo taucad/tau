@@ -59,6 +59,17 @@ const tableTimeout = 5000;
  */
 export const tableObservationTimeout = 2 * tableTimeout;
 
+/**
+ * How long one termination may take before survivors are reported: room for two full observations. A deadline below
+ * one observation budget clipped every read to it, so a loaded macOS runner whose `ps` took more than half the
+ * deadline left cleanup unconfirmed and settled the call `interrupted` (MAC-X S03, run 42089275712, with the 5000 ms
+ * deadline that predated {@link tableObservationTimeout}). A normal cleanup still returns as soon as nothing is left.
+ * Milliseconds.
+ *
+ * @public
+ */
+export const terminationDeadline = 2 * tableObservationTimeout;
+
 const darwinTable = async (): Promise<readonly ProcessRow[]> =>
   new Promise((resolve, reject) => {
     execFile(

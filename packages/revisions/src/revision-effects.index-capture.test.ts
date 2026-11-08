@@ -51,7 +51,13 @@ type Overrides = Partial<Pick<RevisionFileSystem, 'changedSince' | 'compareIndex
 /* One root on disk (or in memory) behind a real WorkspaceFileService, so the rooted view carries its Project Index. */
 const fixture = async (
   initial: Readonly<Record<string, string>>,
-  options?: Readonly<{ backend?: 'node' | 'memory' }>,
+  options?: Readonly<{
+    backend?: 'node' | 'memory';
+    /* `port`: the checkout's own ignore rules, as the port reads them, rather than a listing the test sets;
+     * `bare`: a listing from a port that reports no ignore context, so it is listed whole at every capture;
+     * `failing`: the port's own rules, but a question about named paths fails. */
+    ignoreRules?: 'listing' | 'bare' | 'port' | 'failing';
+  }>,
 ) => {
   const backend = options?.backend ?? 'node';
   const root = await mkdtemp(join(tmpdir(), 'tau-index-capture-'));
@@ -113,7 +119,16 @@ const fixture = async (
       }) satisfies NonNullable<RevisionFileSystem['changedSince']>,
     });
   let ignored: readonly string[] = [];
-  const base: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: rooted });
+  /* Every directory the port lists: its ignore rules' walk. */
+  const listed: string[] = [];
+  const portFiles = Object.assign(Object.create(rooted) as RevisionFileSystem, {
+    readdir: (async (path: string, ...rest: readonly unknown[]) => {
+      listed.push(path);
+      // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
+      return (rooted.readdir as (...arguments_: any[]) => Promise<unknown>)(path, ...rest);
+    }) as RevisionFileSystem['readdir'],
+  });
+  const base: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: portFiles });
   await base.init({ author });
   if (backend === 'node') {
     /* What init wrote is as settled as the fixture's own files, and the index is told by its compare. */
@@ -123,7 +138,38 @@ const fixture = async (
     }
     await rooted.compareIndex?.();
   }
-  const port: RevisionPort = { ...base, ignoredPaths: async () => ignored };
+  const { ignoreContext: _context, ...bare } = base;
+  const listing: RevisionPort = {
+    ...bare,
+    ignoredPaths: async () => ignored,
+  };
+  const failing: RevisionPort = {
+    ...base,
+    ignoredPaths: async (root, paths) => {
+      if (paths !== undefined) {
+        throw new Error('directory entry not superset of prefix');
+      }
+      return base.ignoredPaths?.(root);
+    },
+  };
+  const port: RevisionPort =
+    options?.ignoreRules === 'port'
+      ? base
+      : options?.ignoreRules === 'failing'
+        ? failing
+        : options?.ignoreRules === 'bare'
+          ? listing
+          : {
+              ...listing,
+              /* The test's listing is the whole of its rules: named paths are answered from it. */
+              ignoredPaths: async (_root, paths) =>
+                paths === undefined
+                  ? ignored
+                  : ignored.filter((entry) =>
+                      paths.some((path) => path === entry || (entry.endsWith('/') && path.startsWith(entry))),
+                    ),
+              ignoreContext: async () => JSON.stringify(ignored),
+            };
   /* Memory stamps its files now and cannot be told otherwise: the captures read a clock a minute on,
    * so only what a test writes after a capture is racy at the next. */
   const clock =
@@ -152,6 +198,7 @@ const fixture = async (
     actors,
     walking,
     reads,
+    listed,
     overrides,
     /** Whether the capture since `count` walked the whole tree. */
     walked: () => asked.includes(Number.MAX_SAFE_INTEGER),
@@ -168,6 +215,7 @@ const fixture = async (
     count: () => {
       reads.length = 0;
       asked.length = 0;
+      listed.length = 0;
     },
   };
 };
@@ -318,6 +366,23 @@ describe('a cut driven by a real Project Index (S10)', () => {
     await mint(at);
     at.ignore(['dir4/']);
 
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(true);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should walk when the ignored paths changed, from a port that reports no ignore context', async () => {
+    const at = await fixture(files(20), { ignoreRules: 'bare' });
+    await mint(at);
+    await at.rooted.writeFile('dir2/f7.txt', 'edited\n');
+
+    at.count();
+    await cut(at.actors);
+    expect(at.walked()).toBe(false);
+
+    at.ignore(['dir4/']);
     at.count();
     const { treeId } = await cut(at.actors);
 
@@ -610,5 +675,117 @@ describe('a first revision built from recorded blob ids (D12)', () => {
 
     expect(asked.length).toBeGreaterThan(0);
     expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+});
+
+/*
+ * The checkout's own Git ignore rules, as the port reads them: an incremental
+ * cut asks them only about the paths it reads, and walks only when a rule's
+ * source changed (S10, I5).
+ */
+describe("a cut under the checkout's own Git ignore rules (S10)", () => {
+  const ignoring = { '.gitignore': '*.log\nbuild/\n', 'kept.log': 'ignored from the start\n' };
+
+  it('should ask only about the paths it reads, never walking the checkout for its rules', async () => {
+    const at = await fixture({ ...files(50), ...ignoring }, { ignoreRules: 'port' });
+    await mint(at);
+    await at.rooted.writeFile('dir2/f7.txt', 'edited\n');
+    await at.rooted.writeFile('dir1/new.log', 'ignored\n');
+    await at.rooted.writeFile('build/out.stl', 'solid\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(at.listed).toStrictEqual([]);
+    expect(at.reads).toStrictEqual(['dir2/f7.txt']);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should walk when a `.gitignore` changes, and take what it no longer ignores', async () => {
+    const at = await fixture({ ...files(20), ...ignoring }, { ignoreRules: 'port' });
+    await mint(at);
+    await at.rooted.writeFile('.gitignore', 'build/\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(true);
+    expect(at.reads).toContain('kept.log');
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it("should walk when the store's info/exclude changes", async () => {
+    const at = await fixture({ ...files(20), ...ignoring }, { ignoreRules: 'port' });
+    await mint(at);
+    await writeFile(outside(at, '.git/info/exclude'), 'dir3/\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(true);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should take a file a head move tracks inside a directory Git listed whole', async () => {
+    const at = await fixture({ ...files(10), ...ignoring, 'build/old.stl': 'solid\n' }, { ignoreRules: 'port' });
+    await mint(at);
+    const head = await at.port.readTree(revisionId((await at.port.readRef('main'))!));
+    const kept = await Promise.all(
+      (head?.entries() ?? []).map(async ({ path }) => [path, await readFile(outside(at, path), 'utf8')] as const),
+    );
+    /* A pull that brings a file tracked inside `build/`, which Git listed whole until now. */
+    await moveHead(at, [...kept, ['build/tracked.stl', 'tracked now\n']]);
+    await at.rooted.writeFile('build/tracked.stl', 'tracked now\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(at.reads).toStrictEqual(['build/tracked.stl']);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should walk, not fail, when the port cannot answer for the paths a cut reads', async () => {
+    const at = await fixture({ ...files(20), ...ignoring }, { ignoreRules: 'failing' });
+    await mint(at);
+    await at.rooted.writeFile('build/deep/o.js', 'rebuilt\n');
+    await at.rooted.writeFile('dir2/f7.txt', 'edited\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(true);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should take a file an outside commit starts or stops tracking, its bytes untouched, without walking', async () => {
+    const at = await fixture({ ...files(10), ...ignoring }, { ignoreRules: 'port' });
+    await mint(at);
+    const tracked = async () => {
+      const head = await at.port.readTree(revisionId((await at.port.readRef('main'))!));
+      return Promise.all(
+        (head?.entries() ?? []).map(async ({ path }) => [path, await readFile(outside(at, path), 'utf8')] as const),
+      );
+    };
+    const before = await tracked();
+    /* `git add -f kept.log` and a commit, elsewhere: the ignored file is tracked now. */
+    await moveHead(at, [...before, ['kept.log', 'ignored from the start\n']]);
+
+    at.count();
+    const adopted = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(at.reads).toStrictEqual(['kept.log']);
+    expect(adopted.treeId).toBe(await walkedTreeId(at.walking));
+
+    /* `git rm --cached kept.log` and a commit: untracked again, so ignored again. */
+    await moveHead(at, before);
+    at.count();
+    const dropped = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(dropped.treeId).toBe(await walkedTreeId(at.walking));
+    expect(dropped.treeId).not.toBe(adopted.treeId);
   });
 });

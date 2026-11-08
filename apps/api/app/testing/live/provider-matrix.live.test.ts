@@ -14,7 +14,7 @@ import type {
 } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import { applyParameterOperationInputSchema } from '@taucad/chat/schemas';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, modelList } from '@taucad/api-llm-gateway';
 import {
   createLiveSession,
   createLiveToolRegistry,

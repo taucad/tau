@@ -7,8 +7,8 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { getMaintenanceEnvironment } from '#config/maintenance-environment.config.js';
 import type { MaintenanceEnvironment } from '#config/maintenance-environment.config.js';
-import * as schema from '#database/schema.js';
-import { project, projectGitLfsObject, storageTombstone } from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
+import { project, projectGitLfsObject, storageTombstone } from '@taucad/api-database/schema';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { StorageAccount } from '#storage/object-storage.service.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
@@ -16,7 +16,7 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { liveOwnerIds, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
-import { assertProjectActive } from '#database/project-lifecycle.js';
+import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { purgeDeletedProject, purgeDeletedProjects } from '#api/git/maintenance/project-purge.js';
 import { recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintenance/worker.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
@@ -28,7 +28,7 @@ import { freezeEverything, parseFreezeSeconds, thawEverything } from '#api/git/r
 import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
 import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.js';
 import { holdInStandby } from '#api/git/maintenance/standby.js';
-import { applicationNameOf } from '#database/application-name.js';
+import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen

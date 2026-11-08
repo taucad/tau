@@ -9,11 +9,11 @@ import { ProjectPreviewController } from '#api/projects/project-preview.controll
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { Database } from '#database/owner-lock.js';
-import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
-import * as schema from '#database/schema.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
+import type { DatabaseService } from '@taucad/api-database';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import * as schema from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
 

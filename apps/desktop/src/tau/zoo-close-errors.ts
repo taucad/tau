@@ -4,7 +4,7 @@
  *
  * Must match the web app's build-selected copy (`apps/ui/app/cloud/zoo-close-errors.cloud.ts`
  * and `.self-host.ts`, whose exact billing messages the upgrade banner matches) and the
- * API's `zooCloseCodes` (`apps/api/app/api/billing/billing.constants.ts`). The desktop
+ * API's `zooCloseCodes` (`apps/libs/api-billing/src/billing.constants.ts`). The desktop
  * cannot import UI source (ruling D3), so the copy is repeated here; `tauCloudBuildEnabled`
  * keeps billing copy out of a self-host build exactly as the UI's cloud boundary does.
  */

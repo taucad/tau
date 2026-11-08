@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import { drainInFlight } from '#api/git/routing/in-flight.js';
 import type { InFlightRegistry } from '#api/git/routing/in-flight.js';
 import { routeCacheTtlMilliseconds } from '#api/git/routing/route.js';

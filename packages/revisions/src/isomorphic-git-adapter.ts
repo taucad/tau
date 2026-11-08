@@ -62,6 +62,7 @@ import {
   readUploadPackPack,
   receivePack,
 } from '#adapter-transport/adapter-transport.js';
+import { installBufferGlobal } from '#buffer-global.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { settleBounded } from '#chat-projection-pool.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
@@ -73,8 +74,10 @@ import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
-import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
-import type { LfsPointer } from '#lfs.js';
+import { ignoredAmong, ignoredUntrackedPaths } from '#git-ignore.js';
+import type { IgnoreWalkFiles } from '#git-ignore.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LargeObjectBasis, LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
@@ -131,31 +134,18 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  hasGeneratedBlock,
 } from '#workspace-config.js';
 
 /*
- * `isomorphic-git` reads the Node `Buffer` *global*, and a browser has none.
- *
- * Not a style choice of the library's: `GitTree.toObject`, `GitIndex` and its
- * `BufferCursor` all call `Buffer.from`/`alloc`/`concat` directly
- * (`isomorphic-git@1.38.5/index.js` :422, :663, :2577), so the first object a
- * browser host *writes* throws `Buffer is not defined` — which is what a fresh
- * project's first turn hit, as a failed base cut it could not report (W19-b).
- * Reading never touched it, which is why the port looked healthy until a mint.
- *
- * Here rather than in a host: this module is the only thing in Tau that calls
- * `isomorphic-git`, so one assignment covers every browser host of the package
- * instead of one per host that forgets. `node:`-less on purpose — Node resolves
- * the bare specifier to its own builtin and `??=` then keeps it, while a
- * bundler resolves the `buffer` package, which is the whole point.
+ * `isomorphic-git` reads the Node `Buffer` *global*, and a browser has none:
+ * the first object a browser host *writes* threw `Buffer is not defined`, which
+ * is what a fresh project's first turn hit as a failed base cut (W19-b). This
+ * module is the only thing in Tau that calls `isomorphic-git` from the
+ * file-manager realm, so one call here covers every browser host of the port;
+ * the compute worker's realm installs its own (`#buffer-global.js`).
  */
-// oxlint-disable-next-line node-js/prefer-global/buffer, unicorn/prefer-node-protocol -- The global is exactly what is missing, and `node:buffer` has no browser build.
-import { Buffer as BufferPolyfill } from 'buffer';
-
-/* `@types/node` types the global as always present; in a browser it is not,
- * which is the whole reason for the line below. */
-const hostGlobals: { Buffer?: typeof BufferPolyfill } = globalThis;
-hostGlobals.Buffer ??= BufferPolyfill;
+installBufferGlobal();
 
 /**
  * Where one linked checkout's files are, and which project they belong to.
@@ -604,6 +594,74 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const paths = new Map<string, Readonly<{ oid: string; mode: string }>>();
     await walkTree(oid, '', paths);
     return paths;
+  };
+
+  /* The paths one revision tracks, for the ignore walk: one tree at a time, since every capture asks of the same head. */
+  let trackedHeld: Readonly<{ tree: string; paths: ReadonlySet<string> }> | undefined;
+  const trackedPaths = async (head: string | undefined): Promise<ReadonlySet<string>> => {
+    const commit = head === undefined ? undefined : await commitOf(revisionId(head));
+    if (commit === undefined) {
+      return new Set();
+    }
+    if (trackedHeld?.tree !== commit.tree) {
+      const listing = await flatTree(commit.tree);
+      trackedHeld = { tree: commit.tree, paths: new Set(listing.keys()) };
+    }
+    return trackedHeld.paths;
+  };
+
+  /* The store's `info/exclude`, which holds Tau's derived ignores. */
+  const readExclude = async (): Promise<string | undefined> => {
+    const excludePath = `${gitdir}/info/exclude`;
+    return (await gitFiles.exists(excludePath)) ? gitFiles.readFile(excludePath, 'utf8') : undefined;
+  };
+
+  /* The store's own `core.ignoreCase` (its `config`, never a device's): how its ignore rules match. */
+  const storeIgnoresCase = async (): Promise<boolean> => {
+    try {
+      const values: unknown = await getConfigAll({ fs, gitdir, path: 'core.ignorecase' });
+      const last: unknown = Array.isArray(values) ? values.at(-1) : undefined;
+      return last === true || (typeof last === 'string' && ['true', 'yes', 'on', '1'].includes(last.toLowerCase()));
+    } catch {
+      return false;
+    }
+  };
+
+  /* One checkout's files and head, for its ignore rules. */
+  const ignoreCheckout = async (
+    root: string | undefined,
+  ): Promise<Readonly<{ files: FileSystemProvider; head: string | undefined }>> => {
+    if (root === undefined) {
+      const live = await port.readHead();
+      return { files: filesystem, head: live?.head };
+    }
+    const records = await listCheckoutRecords();
+    const record = records.find((checkout) => checkout.root === root);
+    if (record === undefined) {
+      throw new RevisionPortError('CHECKOUT_CONFLICT', 'Those files are not open in this project.');
+    }
+    return {
+      files: await requireCheckouts().root(record.id),
+      head: record.baseRevisionId ?? (record.branch === undefined ? undefined : await port.readRef(record.branch)),
+    };
+  };
+
+  /*
+   * The parents' entries, which unchanged content keeps the representation of
+   * (rule 13) — blob ids only, no blob is read. A browser host is
+   * case-sensitive, so its cut never folds case.
+   */
+  const largeObjectBasisFor = async (parents: readonly RevisionId[]): Promise<LargeObjectBasis | undefined> => {
+    const read = await Promise.all(parents.map(async (parent) => commitOf(parent)));
+    const commits = read.filter((commit): commit is DecodedCommit => commit !== undefined);
+    if (commits.length === 0) {
+      return undefined;
+    }
+    const listings = await Promise.all(commits.map(async (commit) => flatTree(commit.tree)));
+    return largeObjectBasisOf(
+      objectFormat,
+      ...listings.map((listing) => [...listing].map(([path, { oid }]) => ({ path, oid }))),
+    );
   };
 
   /**
@@ -1787,47 +1845,50 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * Also the open seam: `revision-effects.ensureStore` calls this once per
      * authority, before the first question is asked of the store, and
      * `isomorphic-git`'s own `init` returns early when the config is already
-     * there. So a project created by an older build reaches this with a stale
-     * generated block, and the merge below is its migration (G0-9) — written only
-     * when the merged bytes differ, so a current project's working copy is not
-     * touched on every open and a rewrite cannot repeat.
+     * there. The setup files are created, never merged into (D16), exactly as
+     * the disk leg does (`native-git-port.ts`): a file that exists is the
+     * person's, or already Tau's, and the cut regenerates Tau's own block in
+     * it from the tree (`lfs.ts`), so both legs record one tree (I4/I5).
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
+      const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
       if (input.createSetupFiles !== false) {
-        const ignorePath = generatedIgnorePath;
-        const existing = (await filesystem.exists(ignorePath))
-          ? await filesystem.readFile(ignorePath, 'utf8')
-          : undefined;
-        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-        if (ignore !== existing) {
-          await filesystem.writeFile(ignorePath, ignore);
+        const readText = async (path: string): Promise<string | undefined> =>
+          (await filesystem.exists(path)) ? filesystem.readFile(path, 'utf8') : undefined;
+        const [ignore, attributes] = await Promise.all([
+          readText(generatedIgnorePath),
+          readText(generatedGitattributesPath),
+        ]);
+        /* Both generated files are in the recorded tree, so a leg that wrote
+         * only one of them named a different tree for the same edits
+         * (W22 DEF-W22-1); a brand-new project gets both, versioned (D24). */
+        if (brandNew && ignore === undefined) {
+          await filesystem.writeFile(
+            generatedIgnorePath,
+            generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+          );
         }
-        /*
-         * Beside the ignore file and versioned like it (D24), exactly as the disk
-         * leg writes it (`native-git-port.ts`).
-         *
-         * Both generated files are in the recorded tree, so a leg that wrote only
-         * one of them named a different tree — and therefore a different revision
-         * — for the same edits, which is I4's whole claim (W22 DEF-W22-1). The
-         * bytes come from the one pure `#workspace-config.js` block both legs
-         * already share; only the writer is per-adapter, which is what that
-         * module's own contract says. And `lfs.ts` appends a tracked path to this
-         * file at cut time (P15), so a browser-created project had nowhere for
-         * that line to land and a stock clone of it had no attributes to resolve
-         * its pointers with (S49).
-         */
-        const attributesPath = generatedGitattributesPath;
-        const attributes = (await filesystem.exists(attributesPath))
-          ? await filesystem.readFile(attributesPath, 'utf8')
-          : undefined;
-        const merged = generatedGitattributesContent(attributes);
-        if (merged !== attributes) {
-          await filesystem.writeFile(attributesPath, merged);
+        /* A project an older build created carries Tau's ignore block and no
+         * attributes file (DEF-W22-1); the file it gets here is what keeps its
+         * large files pointers once the cut reads the rule from the tree. */
+        if (attributes === undefined && (brandNew || hasGeneratedBlock(ignore))) {
+          await filesystem.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
         }
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       await init({ fs, dir: '', gitdir, defaultBranch });
+      /* Tau's derived-content ignores, where stock Git reads them and no
+       * revision records them: the store's own file, never versioned. */
+      const excludePath = `${gitdir}/info/exclude`;
+      const existingExclude = (await gitFiles.exists(excludePath))
+        ? await gitFiles.readFile(excludePath, 'utf8')
+        : undefined;
+      const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+      if (exclude !== existingExclude) {
+        await gitFiles.mkdir(`${gitdir}/info`, { recursive: true });
+        await gitFiles.writeFile(excludePath, exclude);
+      }
       /* Every project an older build recorded has no index at all, so this open
        * heals it. An existing index is left alone: in a repository Tau adopted
        * it may hold the person's own staged work. */
@@ -1921,7 +1982,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const recorded =
         input.largeObjects === false
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
-          : cleanLargeObjects(input.tree);
+          : cleanLargeObjects(input.tree, { basis: await largeObjectBasisFor(input.parents) });
       await Promise.all(
         [...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content.byteLength, content)),
       );
@@ -2687,6 +2748,50 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             trees: commit.conflictedTrees,
             labels: commit.conflictLabels ?? Object.freeze([]),
           });
+    },
+
+    /*
+     * The untracked paths this checkout's own Git rules ignore — its
+     * `.gitignore` files and the store's `info/exclude`, with the store's own
+     * `core.ignoreCase` — read as Git reads them (`git-ignore.ts`), so a
+     * browser cut leaves out what a native one does (I5). A path the
+     * checkout's head tracks is never ignored. Named paths are answered alone,
+     * reading only their own directories.
+     */
+    ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
+      const { files, head } = await ignoreCheckout(root);
+      const walkFiles: IgnoreWalkFiles = {
+        readdir: async (path) => files.readdir(path),
+        kind: async (path) => {
+          try {
+            const stat = await files.lstat(path);
+            return stat.type === 'dir' ? 'directory' : 'file';
+          } catch {
+            return undefined;
+          }
+        },
+        readText: async (path) => {
+          try {
+            return await files.readFile(path, 'utf8');
+          } catch {
+            return undefined;
+          }
+        },
+      };
+      const [exclude, ignoreCase, tracked] = await Promise.all([readExclude(), storeIgnoresCase(), trackedPaths(head)]);
+      /* The store's own directory is never the checkout's. */
+      const inputs = {
+        tracked,
+        exclude,
+        ignoreCase,
+        skip: (path: string) => path === gitdir || path === defaultGitDirectory,
+      };
+      return paths === undefined ? ignoredUntrackedPaths(walkFiles, inputs) : ignoredAmong(walkFiles, inputs, paths);
+    },
+
+    ignoreContext: async (): Promise<string> => {
+      const [exclude, ignoreCase] = await Promise.all([readExclude(), storeIgnoresCase()]);
+      return JSON.stringify([exclude ?? null, ignoreCase]);
     },
 
     listCheckouts: async (): Promise<readonly Checkout[]> => {

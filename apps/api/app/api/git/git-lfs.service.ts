@@ -3,10 +3,10 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Optional } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import { projectGitLfsObject } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { projectGitLfsObject } from '@taucad/api-database/schema';
 import { FileLinksService } from '#storage/file-links.service.js';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import type { LfsObjectLocation } from '#api/git/lfs-keys.js';

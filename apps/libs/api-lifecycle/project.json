@@ -1,0 +1,7 @@
+{
+  "name": "api-lifecycle",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-lifecycle",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:util", "api:lifecycle"]
+}

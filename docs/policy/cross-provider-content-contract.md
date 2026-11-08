@@ -15,7 +15,7 @@ related:
 
 # Cross-Provider Content Contract Policy
 
-Tau stores portable agent events and projects them to a provider's native wire format only at the model boundary. CAD execution runs in `packages/agent-host`; `apps/api/app/api/llm` authenticates and proxies model requests without becoming the owner of assistant-message conversion.
+Tau stores portable agent events and projects them to a provider's native wire format only at the model boundary. CAD execution runs in `packages/agent-host`; `apps/libs/api-llm-gateway` authenticates and proxies model requests without becoming the owner of assistant-message conversion.
 
 ## Rationale
 
@@ -68,7 +68,7 @@ Interrupted or incomplete pairs follow [Interrupted Tool-Call Contract Policy](i
 
 ### 6. Keep the API gateway byte-transparent
 
-`apps/api/app/api/llm` may authenticate, authorize, meter, select an allowed upstream, and validate the response media type. It must pass the selected provider request and SSE response without performing CAD transcript conversion or rewriting content blocks. Request-shape validation (`apps/api/app/api/billing/billable-model-request.ts`) admits exactly the content blocks the codecs emit. That includes the three document blocks, each strict, with base64 PDF data bounded to 16 MiB and an optional `cache_control` on the Anthropic block. Images are bounded to 4 MiB, other strings to 4,000,000 characters, and the serialized request to 32,000,000 bytes. The transport keeps the newest attachments within 24,000,000 base64 characters per request (`fitAttachmentBudget` in `packages/agent-host/src/transport/document-payload.ts`) and replaces older ones with `[attachment omitted: <name>]`, so a chat whose history holds more attachment bytes than one request can carry keeps working.
+`apps/libs/api-llm-gateway` may authenticate, authorize, meter, select an allowed upstream, and validate the response media type. It must pass the selected provider request and SSE response without performing CAD transcript conversion or rewriting content blocks. Request-shape validation (`apps/api/app/api/billing/billable-model-request.ts`) admits exactly the content blocks the codecs emit. That includes the three document blocks, each strict, with base64 PDF data bounded to 16 MiB and an optional `cache_control` on the Anthropic block. Images are bounded to 4 MiB, other strings to 4,000,000 characters, and the serialized request to 32,000,000 bytes. The transport keeps the newest attachments within 24,000,000 base64 characters per request (`fitAttachmentBudget` in `packages/agent-host/src/transport/document-payload.ts`) and replaces older ones with `[attachment omitted: <name>]`, so a chat whose history holds more attachment bytes than one request can carry keeps working.
 
 Strip SDK-only, browser-only, authentication, cookie, and hop-by-hop headers at the browser-host gateway boundary. Never forward user credentials to a model provider.
 
@@ -95,4 +95,4 @@ Use fixture structure assertions and captured wire requests; snapshots alone are
 - Provider selection and codecs: `packages/agent-host/src/transport/gateway-model-transport.ts`
 - Document rewrite and Vertex response shim: `packages/agent-host/src/transport/document-payload.ts`, `packages/agent-host/src/transport/vertex-completions-shim.ts`
 - Normalized model stream port: `packages/agent-host/src/waist/ports.ts`
-- Authenticated byte proxy: `apps/api/app/api/llm`
+- Authenticated byte proxy: `apps/libs/api-llm-gateway`

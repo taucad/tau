@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { GoneException } from '@nestjs/common';
 import { mock } from 'vitest-mock-extended';
-import type { Database } from '#database/owner-lock.js';
+import type { Database } from '@taucad/api-database/owner-lock';
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -14,9 +14,9 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getEnvironment } from '#config/environment.config.js';
-import { project, projectGit, projectGitLfsObject, user } from '#database/schema.js';
-import * as schema from '#database/schema.js';
+import { getEnvironment } from '@taucad/api-core';
+import { project, projectGit, projectGitLfsObject, user } from '@taucad/api-database/schema';
+import * as schema from '@taucad/api-database/schema';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
@@ -27,7 +27,7 @@ import type { RepositoryLocator } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { markLfsReachability } from '#api/git/lfs-reachability.js';
 import { referencedLfsOids } from '#api/git/lfs-references.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 /**
  * D6/D18 at push time: the objects a repository still reaches lose their

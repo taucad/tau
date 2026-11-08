@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpException } from '@nestjs/common';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { outcomeHeader, refusedOutcome } from '#api/git/forwarding/contract/framing.js';
 import { forwardIdleTimeoutMilliseconds } from '#api/git/forwarding/contract/hop.js';

@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import type { MetricsService, StorageAccountingTask } from '#telemetry/metrics.js';
+import type { MetricsService, StorageAccountingTask } from '@taucad/api-observability/metrics';
 import { accountingGauges } from '#api/storage-accounting/accounting-figures.js';
 import type {
   AccountingFigures,

@@ -1,0 +1,78 @@
+# Starts the staging deploys of a commit once its `ci.yml` push run on `main` completes.
+#
+# `staging.yml` runs on the push itself, plans, and reads the gating checks of the
+# commit's CI run once. When they are still running it skips every deploy and ends
+# (`Defer the deploys until CI completes`). This workflow wakes when that CI run
+# completes and reruns the deferred staging run. A rerun keeps the `push` event,
+# `github.sha` and the run id, so the reusable deploys build, tag and record the same
+# commit, and `staging-deploy-superseded` compares the same runs as before. The plan
+# diffs each app against the commit staging last recorded, so a rerun after a newer
+# commit deployed, or after this one already did, publishes nothing.
+#
+# A re-run of a CI run that ended green reruns the staging run too, so a commit whose
+# first CI attempt failed still reaches staging without a manual dispatch.
+#
+# Until 2026-11-08 `staging.yml` polled for up to 340 minutes instead and held a
+# runner per push while `ci.yml` ran (Brain research/ci-throughput-review.md, R-D).
+name: Staging gate
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  rerun:
+    name: Rerun the deferred staging deploy
+    if: github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: staging-gate-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: write
+    steps:
+      - name: Rerun the staging run of this commit when its deploys were deferred
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DEFER_STEP: Defer the deploys until CI completes
+        run: |
+          set -euo pipefail
+          # The staging run starts with the push, so it exists by now; it may still be
+          # planning when a short CI run completes, and only a completed run reruns.
+          deadline=$(( $(date +%s) + 25 * 60 ))
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/staging.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status)"')
+            if [ -z "$run" ]; then
+              echo "No staging.yml push run on $SHA; nothing to rerun."
+              exit 0
+            fi
+            read -r run_id status <<< "$run"
+            [ "$status" != completed ] || break
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Staging run $run_id on $SHA is still $status; rerun it once it ends."
+              exit 1
+            fi
+            echo "Waiting for staging run $run_id ($status) to end"
+            sleep 30
+          done
+          deferred=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+            --jq '.jobs[].steps[]? | {name, conclusion}' \
+            | jq -s --arg step "$DEFER_STEP" 'any(.[]; .name == $step and .conclusion == "success")')
+          if [ "$deferred" = true ]; then
+            echo "Staging run $run_id deferred its deploys until CI completed; rerunning it."
+          elif [ "$CI_ATTEMPT" -gt 1 ] && [ "$CI_CONCLUSION" = success ]; then
+            echo "CI on $SHA passed on attempt $CI_ATTEMPT; rerunning staging run $run_id so the commit deploys."
+          else
+            echo "Staging run $run_id did not defer its deploys; nothing to rerun."
+            exit 0
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/rerun" --silent

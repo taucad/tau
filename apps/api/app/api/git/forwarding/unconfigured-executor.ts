@@ -1,5 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 
 /**

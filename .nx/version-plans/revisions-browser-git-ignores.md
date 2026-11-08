@@ -1,0 +1,5 @@
+---
+revisions: minor
+---
+
+Honour the checkout's own Git ignore rules on every repository and on both legs: the browser reads its nested `.gitignore` files and the store's `info/exclude` as `git check-ignore` does (Git's wildmatch, byte for byte, so a malformed line matches nothing rather than failing a cut), and native lists them for every repository, so a cut leaves out the same untracked paths on each leg. Both legs fold case exactly when the store's own `core.ignoreCase` says so. A tracked path is never left out, `core.excludesFile` is never read, a `.gitignore` that is a symbolic link is not read, and an untracked repository inside the checkout is not looked into. `RevisionPort.ignoredPaths` takes the paths to answer for, and the new `ignoreContext` reports what the rules read besides `.gitignore` files, so an incremental cut asks only about the paths it reads and walks only when an ignore source changes. `coveredByIgnoreListing` tells whether a listing leaves a path out, a path under a listed directory included.

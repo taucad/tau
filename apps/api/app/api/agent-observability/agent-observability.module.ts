@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
-import { DatabaseModule } from '#database/database.module.js';
-import { HostsModule } from '#api/hosts/hosts.module.js';
+import { DatabaseModule } from '@taucad/api-database';
+import { HostsModule } from '@taucad/api-hosts';
 import { EvidenceIngressController } from '#api/agent-observability/evidence-ingress.controller.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { EvidenceDeliveryService } from '#api/agent-observability/evidence-delivery.service.js';

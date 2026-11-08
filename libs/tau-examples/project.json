@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/tau-examples",
   "projectType": "library",
-  "tags": ["scope:shared", "type:example"],
+  "tags": ["scope:shared", "type:example", "ci:standalone"],
   "targets": {
     "generate-manifest": {
       "command": "tsx scripts/generate-manifest.mts",

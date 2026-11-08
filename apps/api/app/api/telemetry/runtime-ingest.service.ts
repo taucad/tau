@@ -9,7 +9,7 @@ import { isIPv4, isIPv6 } from 'node:net';
 import { Injectable } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { PinoLogger } from 'nestjs-pino';
 import {
   RuntimeEntryName,
   absentLabel,
@@ -41,9 +41,8 @@ import type {
   RuntimeViewerRecord,
   TelemetryPolicyAnswer,
 } from '@taucad/telemetry';
-import type { Environment } from '#config/environment.config.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import { RedisService } from '#redis/redis.service.js';
+import type { Environment } from '@taucad/api-core';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { RuntimeMetricsService } from '#api/telemetry/runtime-metrics.service.js';
 
 type Population = 'signed-in' | 'signed-out';
@@ -69,6 +68,8 @@ export type RuntimeIngestRequest = Readonly<{
   entries: readonly unknown[];
   principal: string | undefined;
   ip: string;
+  /** The request's id, the event's `request_id` (package §1.6). */
+  requestId: string;
   bodyBytes: number;
   now: Date;
 }>;
@@ -148,14 +149,13 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
   private eventsWindow = 0;
   private gaugeTimer: ReturnType<typeof setInterval> | undefined;
   private releaseTimer: ReturnType<typeof setInterval> | undefined;
+  private eventLog: PinoLogger['logger'] | undefined;
 
   public constructor(
     private readonly configService: ConfigService<Environment, true>,
     private readonly redisService: RedisService,
     private readonly rateLimiter: PublicationRateLimiterService,
     private readonly runtimeMetrics: RuntimeMetricsService,
-    // oxlint-disable-next-line new-cap -- @InjectPinoLogger is a Nest decorator factory, not a constructor
-    @InjectPinoLogger(RuntimeIngestService.name) private readonly logger: PinoLogger,
   ) {
     this.mode = parseRuntimeTelemetryMode(this.configService.get('TAU_RUNTIME_TELEMETRY', { infer: true }));
     this.maxAge = this.configService.get('TAU_RUNTIME_TELEMETRY_MAX_AGE', { infer: true });
@@ -277,7 +277,15 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       const releases = await this.admittedReleases(valid, input.now);
       const members = new Map<string, Set<string>>();
       for (const entry of valid) {
-        this.recordEntry(entry, { population, releases, members, principal: input.principal, key, now: input.now });
+        this.recordEntry(entry, {
+          population,
+          releases,
+          members,
+          principal: input.principal,
+          key,
+          requestId: input.requestId,
+          now: input.now,
+        });
         recordedAny = true;
       }
       this.countEntries('recorded', valid.length, population);
@@ -558,7 +566,15 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       }
     }
     if (outcome !== 'succeeded') {
-      this.logOperation(entry, { cause, kernel, population, release, key: context.key, now: context.now });
+      this.logOperation(entry, {
+        cause,
+        kernel,
+        population,
+        release,
+        key: context.key,
+        requestId: context.requestId,
+        now: context.now,
+      });
     }
   }
 
@@ -801,7 +817,23 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * The Loki event of a non-success attempt: closed values only, at most 60 per abuse key per minute.
+   * The event logger: a child of the root pino logger, so the redaction and destination apply but no request is bound.
+   * nestjs-pino's request-scoped logger would add pino-http's serialized request (address, URL and headers, the
+   * client IP among them) to every event, which package §1.6 and §4.1 forbid. The root exists once `LoggerModule`
+   * has configured its middleware, so it is read on first use.
+   *
+   * @returns The logger, or `undefined` where no `LoggerModule` is configured.
+   */
+  private get eventLogger(): PinoLogger['logger'] | undefined {
+    this.eventLog ??= (PinoLogger.root as PinoLogger['logger'] | undefined)?.child({
+      context: RuntimeIngestService.name,
+    });
+    return this.eventLog;
+  }
+
+  /**
+   * The Loki event of a non-success attempt: closed values and the request id, nothing else from the request, at most
+   * 60 per abuse key per minute.
    */
   private logOperation(
     entry: RuntimeOperationRecord,
@@ -811,6 +843,7 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       population: Population;
       release: string;
       key: string;
+      requestId: string;
       now: Date;
     }>,
   ): void {
@@ -837,11 +870,13 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       caller: detail.caller,
       population: context.population,
       release: context.release,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the event field name package §1.6 enumerates
+      request_id: context.requestId,
     };
     if (context.cause === 'cancelled') {
-      this.logger.info(fields, 'runtime.operation');
+      this.eventLogger?.info(fields, 'runtime.operation');
     } else {
-      this.logger.warn(fields, 'runtime.operation');
+      this.eventLogger?.warn(fields, 'runtime.operation');
     }
   }
 
@@ -875,6 +910,7 @@ type RecordContext = Readonly<{
   members: Map<string, Set<string>>;
   principal: string | undefined;
   key: string;
+  requestId: string;
   now: Date;
 }>;
 type RuntimeOperationKernel = (typeof runtimeKernelIds)[number] | typeof otherValue | typeof absentLabel;

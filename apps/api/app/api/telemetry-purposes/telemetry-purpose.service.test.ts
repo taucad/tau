@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { BadRequestException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
-import type { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
+import type {
+  project,
+  projectDeletion,
+  projectInvitation,
+  telemetryPurposeDecision,
+} from '@taucad/api-database/schema';
 import { TelemetryPurposeService, grantAt } from '#api/telemetry-purposes/telemetry-purpose.service.js';
-import type { TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
 
 const notice = 'observability-notice-2026-10-29';
 

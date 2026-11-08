@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { buffer } from 'node:stream/consumers';
 import { and, eq } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
-import { project, projectGitLfsObject } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
+import { project, projectGitLfsObject } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
 

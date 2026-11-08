@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryLocator } from '#api/git/store/locator.js';

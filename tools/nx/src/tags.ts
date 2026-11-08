@@ -3,7 +3,10 @@
  * bundle eligibility, license partition) and the staging deploys
  * (`deploy:staging`, which `ci.yml`'s plan selects), so the allowed values live
  * in one place that the `validate-project-tags` gate and the eslint boundary
- * constraints both read.
+ * constraints both read. `api:<name>` names each private API server library
+ * (`apps/libs/api-<name>`, `scope:api type:app-lib`); `eslint.config.mjs` gives
+ * each one the libraries it may depend on, so the dependency direction between
+ * them is enforced even where their `layer:` tags are equal.
  *
  * @public
  */
@@ -14,4 +17,5 @@ export const projectTagVocabulary = {
   release: ['app'],
   deploy: ['staging'],
   layer: ['feature', 'ui', 'data-access', 'util'],
+  api: ['core', 'observability', 'lifecycle', 'database', 'redis', 'email', 'auth', 'hosts', 'llm-gateway', 'billing'],
 } as const;

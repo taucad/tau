@@ -29,7 +29,8 @@ const frameObject = (type: 'blob' | 'tree', body: Uint8Array<ArrayBuffer>): Uint
  * holds any more has no id worth keeping.
  */
 const blobOids = new WeakMap<Uint8Array<ArrayBuffer>, Partial<Record<ObjectFormat, string>>>();
-const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string => {
+/** One blob's object id, memoised on the bytes a tree holds (E3). @internal */
+export const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string => {
   const held = blobOids.get(content) ?? {};
   held[format] ??= bytesToHex(digest(format, frameObject('blob', content)));
   blobOids.set(content, held);

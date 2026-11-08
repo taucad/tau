@@ -727,7 +727,7 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       }, receipt.benchmarkChat);
       await page.reload();
       await connectPickedFolder(session);
-      await page.getByRole('link', { name: 'Projects', exact: true }).click();
+      await page.getByRole('link', { name: 'All projects', exact: true }).click();
       await page.waitForURL((url) => url.pathname === '/projects', { timeout: 60_000 });
       const readsBeforeCard = await page.evaluate(
         () =>

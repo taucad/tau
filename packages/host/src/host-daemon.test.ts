@@ -2573,6 +2573,52 @@ describe('startHostDaemon runtime child per root and session', () => {
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
   }, 30_000);
 
+  it("admits a checkout's large-object store only when it is the workspace repository's own (W11.3, I6)", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-store-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    projectHostSpy.mockClear();
+    const agent = await agentOptionsIn(temporaryDirectory);
+    await mkdir(join(agent.workspaceRoot, '.git'), { recursive: true });
+    const elsewhere = join(temporaryDirectory, 'elsewhere', '.git', 'lfs', 'objects');
+    await mkdir(elsewhere, { recursive: true });
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      agent,
+      zooProxy: { url: zooProxyUrl, apiUrl: 'https://zoo.example.test' },
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const checkout = join(temporaryDirectory, 'checkout');
+      await mkdir(checkout);
+
+      expect(() => options.fileSystem.admit(checkout, { largeObjectStore: elsewhere })).toThrow(
+        expect.objectContaining({ code: 'EINVAL' }),
+      );
+      expect(() =>
+        options.fileSystem.admit(checkout, { largeObjectStore: join(agent.workspaceRoot, 'models') }),
+      ).toThrow(expect.objectContaining({ code: 'EINVAL' }));
+      const release = options.fileSystem.admit(checkout, {
+        largeObjectStore: join(agent.workspaceRoot, '.git', 'lfs', 'objects'),
+      });
+      release();
+    } finally {
+      await daemon.close();
+    }
+  }, 30_000);
+
   it('offers prepare_kernel with the kernels its children report, and keeps each root child once a kernel is ready (D37)', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-native-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;

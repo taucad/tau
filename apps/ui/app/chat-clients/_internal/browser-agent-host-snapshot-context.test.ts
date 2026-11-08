@@ -33,6 +33,7 @@ const resolvedModel = {
   family: 'gpt',
   provider: { id: 'openai', name: 'OpenAI' },
   isResolved: true,
+  isNamePending: false,
   model: {
     id: 'openai-gpt-5.5',
     providerKind: 'tau-hosted',

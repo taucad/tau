@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { processTable } from '#shell/process-tree.js';
+import { processTable, terminationDeadline } from '#shell/process-tree.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
@@ -280,6 +280,56 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody
     expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
   });
 
+  it('should report a sandbox that failed to set up as not started, never as the workload exiting 1', async () => {
+    const fixture = custodial();
+    const sentinel = join(fixtureRoot(), 'ran');
+    const outcome = await fixture.launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', `touch ${sentinel} # TAU_FIXTURE_SETUP_FAILS`] }),
+    );
+
+    expect(outcome).toStrictEqual({
+      status: 'sandbox-unavailable',
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory",
+      retryable: true,
+    });
+    expect(existsSync(sentinel)).toBe(false);
+    // The launch settled before it answered: its supervisor is gone, so the owner's claim is immediate.
+    expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
+  });
+
+  it('should report a terminal whose sandbox failed to set up as not started', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(
+      launchOf({
+        arguments: ['--noprofile', '--norc', '-i', '-c', 'true # TAU_FIXTURE_SETUP_FAILS'],
+        environment: { PATH: '/usr/bin:/bin', TERM: 'dumb' },
+        stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
+      }),
+    );
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable', retryable: true });
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.diagnostic : '').toContain(
+      "bwrap: Can't find source path",
+    );
+  }, 20_000);
+
+  it('should report the exit of a workload that prints a bwrap error and a forged marker, never a retry', async () => {
+    const forged = String.raw`printf '\033]7771;tau-launch;00000000000000000000000000000000\007' >&2`;
+    const bwrap = `echo "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory" >&2`;
+    const shell = pipesOf(
+      await started(launchOf({ arguments: ['--noprofile', '--norc', '-c', `${forged}; ${bwrap}; exit 1`] })),
+    );
+
+    const [stderr, exit] = await Promise.all([text(shell.stderr), shell.exited]);
+
+    expect({ stderr, exit }).toStrictEqual({
+      stderr:
+        "\u001B]7771;tau-launch;00000000000000000000000000000000\u0007bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory\n",
+      exit: { exitCode: 1 },
+    });
+  });
+
   it('should never pass the custody lock to the workload', async () => {
     const shell = pipesOf(await started(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'ls -l /proc/$$/fd'] })));
     const listing = await text(shell.stdout);
@@ -467,26 +517,31 @@ describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
     expect(await output).toBe('done\n');
   });
 
-  it('should reject settlement when an owned process survives termination', async () => {
-    const root = { pid: 0 };
-    const lying = await custodial({
-      processTable: async () => {
-        const rows = await processTable();
-        return [
-          ...rows.filter((row) => row.pid !== root.pid),
-          { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
-        ];
-      },
-    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
-    if (lying.status !== 'started') {
-      throw new Error('expected a started launch');
-    }
-    const pipes = pipesOf(lying.process);
-    const printed = await text(pipes.stdout);
-    root.pid = Number(printed.trim());
+  it(
+    'should reject settlement when an owned process survives termination',
+    async () => {
+      const root = { pid: 0 };
+      const lying = await custodial({
+        processTable: async () => {
+          const rows = await processTable();
+          return [
+            ...rows.filter((row) => row.pid !== root.pid),
+            { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
+          ];
+        },
+      }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
+      if (lying.status !== 'started') {
+        throw new Error('expected a started launch');
+      }
+      const pipes = pipesOf(lying.process);
+      const printed = await text(pipes.stdout);
+      root.pid = Number(printed.trim());
 
-    await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
-  }, 20_000);
+      await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
+      /* A survivor is reported only once the whole termination deadline has passed. */
+    },
+    terminationDeadline + 15_000,
+  );
 });
 
 describe.runIf(process.platform === 'linux')('createSandboxShellProvider terminal', () => {
@@ -710,6 +765,22 @@ describe('shellSandboxCommand', () => {
 
     expect(command).toBe(
       String.raw`HOME='/srv/it'\''s' exec '/bin/bash' '--noprofile' '--norc' '-c' 'echo '\''a'\'' $(b) ` + "`c`'",
+    );
+  });
+
+  it('should run the workload only once its announcement succeeded', () => {
+    const command = shellSandboxCommand(
+      {
+        executablePath: '/bin/bash',
+        arguments: ['-c', 'true'],
+        environment: { HOME: '/srv' },
+        stdio: { kind: 'pipes' },
+      },
+      String.raw`printf '\033]7771;tau-launch;n\007' >&2`,
+    );
+
+    expect(command).toBe(
+      String.raw`printf '\033]7771;tau-launch;n\007' >&2 && HOME='/srv' exec '/bin/bash' '-c' 'true'`,
     );
   });
 });

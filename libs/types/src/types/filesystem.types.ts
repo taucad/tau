@@ -28,13 +28,51 @@ export type CheckedFileWrite = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Result of a checked whole-file replacement. @public */
+/**
+ * One digest precondition for a checked whole-file replacement (charter D17):
+ * the file must exist and its bytes must hash to `sha256`. The authority reads
+ * and hashes the file under the write's locks, so the request carries 64
+ * characters where a byte precondition carries the whole file.
+ *
+ * @public
+ */
+export type FileDigestPrecondition = Readonly<{
+  path: string;
+  /** Lowercase hexadecimal SHA-256 of the bytes the caller's change was made from. */
+  expectedSha256: string;
+}>;
+
+/** A precondition the authority checks before a checked write: bytes, absence or a digest. @public */
+export type CheckedWritePrecondition = FileWritePrecondition | FileDigestPrecondition;
+
+/**
+ * A checked whole-file replacement as the authority takes it: its preconditions
+ * may name a digest. A provider's own checked write takes bytes only
+ * ({@link CheckedFileWrite}); the authority reads a digest's bytes first.
+ *
+ * @public
+ */
+export type AuthorityCheckedFileWrite = Readonly<
+  Omit<CheckedFileWrite, 'preconditions'> & { preconditions: readonly CheckedWritePrecondition[] }
+>;
+
+/**
+ * Result of a checked whole-file replacement.
+ *
+ * `sha256` is the authority's digest of `content`, present when a digest
+ * precondition asked for one: what the caller checks its next write against.
+ * A conflict's `sha256` is the digest of its `actual` bytes, likewise.
+ *
+ * @public
+ */
 export type CheckedFileWriteResult =
-  | Readonly<{ status: 'applied' | 'unchanged'; content: Uint8Array<ArrayBuffer> }>
+  | Readonly<{ status: 'applied' | 'unchanged'; content: Uint8Array<ArrayBuffer>; sha256?: string }>
   | Readonly<{
       status: 'conflict';
-      // oxlint-disable-next-line typescript/no-restricted-types -- `null` distinguishes an absent file from empty bytes.
-      conflicts: ReadonlyArray<Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null }>>;
+      conflicts: ReadonlyArray<
+        // oxlint-disable-next-line typescript/no-restricted-types -- `null` distinguishes an absent file from empty bytes.
+        Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null; sha256?: string }>
+      >;
     }>;
 
 /**

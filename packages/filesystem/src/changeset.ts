@@ -33,8 +33,47 @@ export const maximumChangesetBytes = 32 * 1024 * 1024;
  */
 export type ChangesetPhase = 0 | 1 | 2;
 
-/** Bytes a write entry carries: in hand, a `Blob`, or a stream the pipeline stages before locking (I11). @public */
-export type ChangesetWriteData = Uint8Array<ArrayBuffer> | Blob | ReadableStream<Uint8Array<ArrayBuffer>> | string;
+/**
+ * A large object the authority writes from its own repository store, by its
+ * id, instead of bytes the caller carries (EQ13, W11.3).
+ *
+ * No path names the store: the authority resolves `largeObject` against the
+ * store it was given for the root, so `.git/**` never enters the mutation
+ * vocabulary (I6). Only a provider whose capabilities declare
+ * `largeObjectSources` accepts one; everywhere else it is refused before any
+ * I/O. The provider clones the object into the write's temp sibling where the
+ * file system can (APFS, btrfs, XFS), otherwise copies it, and verifies what
+ * landed by its SHA-256 and size.
+ *
+ * @public
+ */
+export type LargeObjectWriteSource = Readonly<{
+  /** Lowercase hexadecimal SHA-256 of the object, as its LFS pointer names it. */
+  largeObject: string;
+  /** The object's size in bytes. */
+  size: number;
+}>;
+
+/**
+ * Whether write data is a {@link LargeObjectWriteSource}.
+ *
+ * @param data - A write entry's data.
+ * @returns `true` for a store-resolved large object.
+ * @public
+ */
+export const isLargeObjectSource = (data: unknown): data is LargeObjectWriteSource =>
+  typeof data === 'object' &&
+  data !== null &&
+  typeof (data as { largeObject?: unknown }).largeObject === 'string' &&
+  typeof (data as { size?: unknown }).size === 'number';
+
+/** Bytes a write entry carries: in hand, a `Blob`, a stream the pipeline stages before locking (I11), or a large object the authority resolves. @public */
+export type ChangesetWriteData =
+  | Uint8Array<ArrayBuffer>
+  | Blob
+  | ReadableStream<Uint8Array<ArrayBuffer>>
+  | string
+  | LargeObjectWriteSource;
 
 /**
  * The condition a record-log append is applied under (charter D23).
@@ -125,6 +164,8 @@ export type ChangesetEntryReceipt = Readonly<{
   kind?: 'file' | 'dir';
   /** For an applied append: the provider's declared durability class, when it declares one. */
   durability?: AppendDurability;
+  /** For an applied {@link LargeObjectWriteSource} write: the SHA-256 and size of what landed, read back once. */
+  largeObject?: LargeObjectWriteSource;
 }>;
 
 /** Everything one changeset did. @public */
@@ -144,7 +185,13 @@ export type ChangesetReceipt = Readonly<{
  * @public
  */
 export type BatchEntry =
-  | Readonly<{ op: 'write'; path: string; data: Uint8Array<ArrayBuffer> | Blob; mode?: FileMode; create?: boolean }>
+  | Readonly<{
+      op: 'write';
+      path: string;
+      data: Uint8Array<ArrayBuffer> | Blob | LargeObjectWriteSource;
+      mode?: FileMode;
+      create?: boolean;
+    }>
   | Readonly<{ op: 'append'; path: string; data: Uint8Array<ArrayBuffer> }>
   | Readonly<{ op: 'delete'; path: string; kind?: 'file' | 'dir'; recursive?: boolean }>
   | Readonly<{ op: 'move'; from: string; to: string; replace?: boolean }>
@@ -162,6 +209,8 @@ export type BatchReceipt = Readonly<{
   kind?: 'file' | 'dir';
   /** Whether a `mkdir` created the directory, or a `write` created the file. */
   created?: boolean;
+  /** For an applied {@link LargeObjectWriteSource} write: the SHA-256 and size of what landed, read back once. */
+  largeObject?: LargeObjectWriteSource;
 }>;
 
 /** Options a provider batch takes. @public */
@@ -203,6 +252,7 @@ export const inHandBytes = (entry: ChangesetEntry | BatchEntry): number => {
   if (data instanceof Uint8Array) {
     return data.byteLength;
   }
+  /* A large object source is resolved by the authority from its store: nothing is in hand. */
   return data instanceof Blob ? data.size : 0;
 };
 

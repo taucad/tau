@@ -9,6 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { downloadBlob } from '@taucad/utils/file';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
@@ -67,7 +68,7 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
     if (!project) {
       return;
     }
-    toast.promise(async () => fileManager.getZippedDirectory('', { versionedOnly: true }), {
+    toast.promise(async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...zipDownloadCeiling() }), {
       loading: 'Creating ZIP archive…',
       success(blob) {
         downloadBlob(blob, `${project.name}.zip`);

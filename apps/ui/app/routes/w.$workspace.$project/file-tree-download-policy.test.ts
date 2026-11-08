@@ -83,13 +83,15 @@ describe('file-tree-download-policy', () => {
       });
 
       expect(getFileTreeDownloadErrorMessage(wire)).toBe(
-        'This folder is larger than this ZIP download can hold. Download a smaller folder instead.',
+        'This folder is larger than the 256.0 MB a ZIP download can hold in this browser. Download a smaller folder instead.',
       );
       expect(
         getFileTreeDownloadErrorMessage(
           createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
         ),
-      ).toBe('This folder is larger than this ZIP download can hold. Download a smaller folder instead.');
+      ).toBe(
+        'This folder is larger than the 256.0 MB a ZIP download can hold in this browser. Download a smaller folder instead.',
+      );
     });
   });
 });

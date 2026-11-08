@@ -214,8 +214,8 @@ const readEffective = async (
 
 /**
  * Derives the tariff for one environment and publishes it only when its content differs from the
- * effective and pending policies. A rate rise is scheduled 30 days out by the notice rule itself, a
- * stale pending activation is cancelled and replaced, and a lost compare-and-swap retries.
+ * effective and pending policies. A third-party price change activates at once; a rise in Tau's own
+ * markup or a retail override is scheduled 30 days out by the notice rule itself, a stale pending activation is cancelled and replaced, and a lost compare-and-swap retries.
  */
 export const syncPolicy = async (
   service: BillingPolicyService,

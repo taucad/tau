@@ -13,6 +13,7 @@ import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { batchBytes } from '#backend/batch.js';
 import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { isLargeObjectSource } from '#changeset.js';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import type {
@@ -294,15 +295,7 @@ export class NodeFsChannel {
  * @public
  */
 export class NodeFsProviderClient extends AbstractFileSystemProvider {
-  public readonly capabilities: ProviderCapabilities = {
-    persistent: true,
-    writable: true,
-    quotaBased: false,
-    durability: 'transactional-rewrite',
-    trustworthyMtime: true,
-    externallyEdited: true,
-    movesInPlace: true,
-  };
+  public readonly capabilities: ProviderCapabilities;
 
   private readonly _channel: NodeFsChannel;
   private readonly _root: string;
@@ -310,11 +303,24 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   /**
    * @param channel - Shared connection to the host.
    * @param root - Absolute host directory this provider is rooted at.
+   * @param options - `largeObjectSources`: the host was given a large-object
+   *   store for this root, so a batch write may name an object by its id (EQ13).
+   *   Only whoever admitted the root knows; the client never names the store.
    */
-  public constructor(channel: NodeFsChannel, root: string) {
+  public constructor(channel: NodeFsChannel, root: string, options?: Readonly<{ largeObjectSources?: boolean }>) {
     super();
     this._channel = channel;
     this._root = root;
+    this.capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: false,
+      durability: 'transactional-rewrite',
+      trustworthyMtime: true,
+      externallyEdited: true,
+      movesInPlace: true,
+      ...(options?.largeObjectSources === true ? { largeObjectSources: true } : {}),
+    };
   }
 
   /**
@@ -355,7 +361,7 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
     }
     const wire = await Promise.all(
       entries.map(async (entry) =>
-        entry.op === 'write' && !(entry.data instanceof Uint8Array)
+        entry.op === 'write' && !(entry.data instanceof Uint8Array) && !isLargeObjectSource(entry.data)
           ? { ...entry, data: await batchBytes(entry.data) }
           : entry,
       ),

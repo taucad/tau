@@ -551,9 +551,14 @@ export type ReadTreeOptions = Readonly<{
    * `local` answers from this store alone: an object that is not here yet
    * stays its pointer, and nothing is fetched. A caller that asks for it
    * either reads only small files or tracks every pointer it got back.
+   * `stored` fetches what the store lacks, as the default does, then answers
+   * each large object as its pointer once the store holds it whole: for a
+   * writer that lands it from the store rather than from bytes in hand
+   * (W11.3). A host whose store a checkout cannot read answers the bytes, as
+   * the default does, so a pointer in the answer always names a stored object.
    * Absent, every pointer is resolved, from the remote if need be.
    */
-  largeObjects?: 'local';
+  largeObjects?: 'local' | 'stored';
   /**
    * Only these project-relative paths are wanted, so a host may read just
    * them instead of every blob in the tree. A host may still answer the whole

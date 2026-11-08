@@ -11,7 +11,7 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -5412,6 +5412,147 @@ describe('opening before large objects arrive', () => {
     });
     expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
   }, 30_000);
+  /* W11.3: a checkout over the host's store clones each object in place of writing bytes it read. */
+  it.runIf(gitToolchainOnPath)(
+    'lands each object from the store when the checkout declares large-object sources',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
+      const gate = Promise.withResolvers<void>();
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-store-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const reads: Array<string | undefined> = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects === 'local') {
+            return real.readTree(id, options);
+          }
+          reads.push(options?.largeObjects);
+          await gate.promise;
+          await writeFile(objectFile, held);
+          return real.readTree(id, options);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+      gate.resolve();
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(reads).toContain('stored');
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      const sourced = batches.mock.calls
+        .flatMap(([entries]) => entries)
+        .filter((entry) => entry.op === 'write' && 'largeObject' in entry.data);
+      expect(sourced).toHaveLength(1);
+      expect(sourced[0]).toMatchObject({ data: { largeObject: pointer.oid, size: part.byteLength } });
+    },
+    60_000,
+  );
+
+  /* W11.3 review: an object gone from the store between the read and the clone is brought as bytes, never a failed fill. */
+  it.runIf(gitToolchainOnPath)(
+    'writes the bytes of an object the store lost before its clone, fetched by its oid',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer } = lfsPointerFor(part);
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-unstored-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const fetched: string[][] = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects !== 'stored') {
+            return real.readTree(id, options);
+          }
+          /* The store holds it when the read answers, and loses it (a prune) before the clone. */
+          await writeFile(objectFile, held);
+          const tree = await real.readTree(id, options);
+          await rm(objectFile);
+          return tree;
+        },
+        fetchLargeObjects: async (pointers) => {
+          fetched.push(pointers.map(({ oid }) => oid));
+          return new Map([[pointer.oid, part]]);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      expect(fetched).toStrictEqual([[pointer.oid]]);
+      const writes = batches.mock.calls.flatMap(([entries]) => entries).filter((entry) => entry.op === 'write');
+      expect(writes.some((entry) => 'largeObject' in entry.data)).toBe(true);
+      expect(
+        writes.some((entry) => entry.data instanceof Uint8Array && entry.data.byteLength === part.byteLength),
+      ).toBe(true);
+      expect(reports.some((report) => report.facet?.error !== undefined)).toBe(false);
+    },
+    60_000,
+  );
+
   /* A project a reload left mid-download: its checkout holds the part's pointer, and the store lacks the bytes. */
   const leftMidDownload = async () => {
     const reports: LargeObjectsReport[] = [];

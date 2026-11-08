@@ -38,6 +38,7 @@ import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/proj
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { revisionTreeId } from '#git-tree-id.js';
+import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
@@ -764,6 +765,82 @@ describe('an apply through the Node provider’s own batch (D16)', () => {
     expect([revisionTreeId(before, 'sha1'), revisionTreeId(target, 'sha1')]).toContain(
       revisionTreeId(await captureRevisionTree(context.tree), 'sha1'),
     );
+  });
+});
+
+describe('landing large objects from the store (W11.3)', () => {
+  const part = new TextEncoder().encode('solid part\n'.repeat(512));
+  const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
+
+  /* A checkout over a store that holds the part, as the native port lays it out. */
+  const storeProject = async (withStore: boolean) => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-apply-store-'));
+    roots.push(root);
+    const store = join(root, 'store');
+    const objectDirectory = join(store, pointer.oid.slice(0, 2), pointer.oid.slice(2, 4));
+    await fs.mkdir(objectDirectory, { recursive: true });
+    await fs.writeFile(join(objectDirectory, pointer.oid), part);
+    await fs.mkdir(join(root, 'project', 'models'), { recursive: true });
+    await fs.writeFile(join(root, 'project', 'models', 'b.step'), 'old bytes\n');
+    const tree = new NodeFsProvider(join(root, 'project'), withStore ? { largeObjectStore: store } : {});
+    const batch = vi.spyOn(tree, 'applyBatch');
+    return { tree, batch, store };
+  };
+  const before = new ImmutableRevisionTree([['models/b.step', 'old bytes\n']]);
+  const target = new ImmutableRevisionTree([
+    ['models/a.step', pointerBytes],
+    ['models/b.step', pointerBytes],
+  ]);
+  const sourced = new Map([
+    ['models/a.step', pointer],
+    ['models/b.step', pointer],
+  ]);
+
+  it('should clone each object, created or replaced, and verify it by its receipt', async () => {
+    const { tree, batch } = await storeProject(true);
+
+    await materializer(tree)(liveCheckout, target, { before, purpose: 'fill', largeObjects: sourced });
+
+    expect(await tree.readFile('models/a.step')).toStrictEqual(part);
+    expect(await tree.readFile('models/b.step')).toStrictEqual(part);
+    const writes = batch.mock.calls.flatMap(([entries]) => entries).filter((entry) => entry.op === 'write');
+    expect(writes.every((entry) => 'largeObject' in entry.data)).toBe(true);
+    expect(litterIn(await filesOf(tree))).toEqual([]);
+  });
+
+  it('should refuse a side map on a checkout that cannot land from a store', async () => {
+    const { tree } = await storeProject(false);
+
+    await expect(
+      materializer(tree)(liveCheckout, target, { before, purpose: 'fill', largeObjects: sourced }),
+    ).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+  });
+
+  it('should name the objects a store lost, before moving any file aside, so the fill brings their bytes', async () => {
+    const { tree, store } = await storeProject(true);
+    await fs.rm(join(store, pointer.oid.slice(0, 2), pointer.oid.slice(2, 4), pointer.oid));
+    const replacedOnly = new ImmutableRevisionTree([['models/b.step', pointerBytes]]);
+
+    const failure = await materializer(tree)(liveCheckout, replacedOnly, {
+      before,
+      purpose: 'fill',
+      largeObjects: sourced,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(UnstoredLargeObjectsError);
+    expect((failure as UnstoredLargeObjectsError).oids).toStrictEqual([pointer.oid]);
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+    expect(litterIn(await filesOf(tree))).toEqual([]);
+  });
+
+  it('should write the bytes of a path whose target is not the mapped pointer', async () => {
+    const { tree } = await storeProject(true);
+    const plain = new ImmutableRevisionTree([['models/b.step', 'new bytes\n']]);
+
+    await materializer(tree)(liveCheckout, plain, { before, purpose: 'fill', largeObjects: sourced });
+
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('new bytes\n');
   });
 });
 

@@ -2,6 +2,7 @@
  * Calls the bridge shapes on the caller's side of the wire: `apply`'s
  * changeset staging and receipt, and `readStream` over `readRange`.
  */
+import { isLargeObjectSource } from '@taucad/filesystem';
 import type { Changeset, ChangesetEntry, ChangesetReceipt } from '@taucad/filesystem';
 import type {
   ApplyOptions,
@@ -51,6 +52,12 @@ const entryForWire = async (entry: ChangesetEntry, owned: boolean): Promise<File
   }
   if (entry.data instanceof Uint8Array) {
     return { ...entry, data: bytesForWire(entry.path, entry.data, owned) };
+  }
+  /* A large-object source names a store the far side may not have; the bridge declares no such capability (W11.3). */
+  if (isLargeObjectSource(entry.data)) {
+    throw Object.assign(new Error(`${entry.path}: a large-object source cannot cross the filesystem bridge.`), {
+      code: 'EINVAL',
+    });
   }
   /* A stream does not cross every transport the bridge rides. The pipeline
    * stages a stream into a `Blob` before it locks anyway (I11), so staging it

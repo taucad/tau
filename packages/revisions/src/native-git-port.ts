@@ -965,6 +965,32 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param content - Bytes as the object store holds them.
    * @returns The real bytes, or the pointer.
    */
+  /**
+   * A pointer whose object this store holds whole, answered as the pointer
+   * (`largeObjects: 'stored'`, W11.3): the size is checked, so a writer that
+   * clones the stored object lands the bytes the pointer names.
+   *
+   * @param content - A blob's bytes.
+   * @returns The same bytes.
+   */
+  const storedPointer = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    const pointer = readLfsPointer(content);
+    if (pointer === undefined) {
+      return content;
+    }
+    const held = await stat(lfsObjectFile(pointer.oid)).catch((error: unknown) => {
+      throw new RevisionPortError(
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MISSING_LARGE_OBJECT' : 'ENGINE_FAILED',
+        'A large object this revision references could not be read on this machine.',
+        { cause: error },
+      );
+    });
+    if (held.size !== pointer.size) {
+      throw new RevisionPortError('ENGINE_FAILED', 'A stored large object does not have the size its pointer names.');
+    }
+    return content;
+  };
+
   const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
     try {
       return await smudged(content);
@@ -2186,13 +2212,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         return pointer === undefined ? [] : [pointer];
       });
       const local = readOptions?.largeObjects === 'local';
+      const stored = readOptions?.largeObjects === 'stored';
       if (!local && pointers.length > 0) {
         await fillLargeObjects(id, pointers, readOptions?.signal);
       }
       const entries = await Promise.all(
         paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
           const content = blobs.get(oid)!;
-          return [path, local ? await smudgedIfHere(content) : await smudged(content), mode];
+          const answer = local
+            ? await smudgedIfHere(content)
+            : stored
+              ? await storedPointer(content)
+              : await smudged(content);
+          return [path, answer, mode];
         }),
       );
       return new ImmutableRevisionTree(entries);

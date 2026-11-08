@@ -16,6 +16,7 @@ export type { ComputeMethod } from '#compute-worker/errors.js';
 export { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
 export type { ComputeCrashReport } from '#compute-worker/supervisor.js';
 export { bootstrapRemoteRevisionStore } from '#remote-bootstrap.js';
+export { coveredByIgnoreListing } from '#git-ignore.js';
 export { revisionBranchName } from '#revision-authority.js';
 export type {
   BranchHeadUpdateResult,

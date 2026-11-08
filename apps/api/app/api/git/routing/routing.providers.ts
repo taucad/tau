@@ -2,7 +2,7 @@
 import { Logger } from '@nestjs/common';
 import type { Provider } from '@nestjs/common';
 import { DatabaseService } from '@taucad/api-database';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
 import { RouteCache } from '#api/git/routing/route-cache.js';

@@ -8,7 +8,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseType } from '@taucad/api-database';
 import { DatabaseService } from '@taucad/api-database';
 import { durableStream, durableStreamEvent } from '@taucad/api-database/schema';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type {

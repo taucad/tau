@@ -3,7 +3,7 @@ import { financialEnvironmentSchema } from '@taucad/billing';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { accountingTasks, r2SourceOf } from '#api/storage-accounting/accounting-tasks.js';
 import {

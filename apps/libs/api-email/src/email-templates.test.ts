@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { EmailTemplate } from '#email/email.types.js';
-import { renderEmailTemplate, specForEmailTemplate, subjectForEmailTemplate } from '#email/email-templates.js';
-import { describeDevice, expiresIn } from '#email/email-copy.js';
-import { dark, light } from '#email/templates/email-palette.generated.js';
+import type { EmailTemplate } from '#email.types.js';
+import { renderEmailTemplate, specForEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
+import { describeDevice, expiresIn } from '#email-copy.js';
+import { dark, light } from '#templates/email-palette.generated.js';
 
 const layout = { siteUrl: 'https://tau.new', assetBase: 'https://tau.new' } as const;
 

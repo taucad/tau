@@ -21,14 +21,15 @@ import type { Environment } from '@taucad/api-core';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 import { emailDomainNotAllowed, isEmailDomainAllowed } from '#auth/email-domain-allowlist.js';
-import type { EmailService } from '#email/email.service.js';
+import type { EmailService } from '@taucad/api-email';
 import {
   buildFrontendForgotPasswordUrl,
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
   buildFrontendVerificationUrl,
-} from '#email/email-link-builder.js';
-import { deviceFromRequest, tokenLifetimeSeconds } from '#email/email-copy.js';
+  deviceFromRequest,
+  tokenLifetimeSeconds,
+} from '@taucad/api-email';
 
 /** D10: thirty days between a deletion and the purge that may follow it. Milliseconds. */
 const storageTombstoneGrace = 30 * 24 * 60 * 60 * 1000;

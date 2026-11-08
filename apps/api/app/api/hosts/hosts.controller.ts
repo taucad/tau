@@ -30,7 +30,7 @@ import {
   UpdateHostDeviceDto,
 } from '#api/hosts/hosts.dto.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /**
  * Pairings one address may start per window. `POST /v1/agents/pairings` is

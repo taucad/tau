@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { RedisService } from '#redis/redis.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { RedisService } from '#redis.service.js';
+import { PublicationRateLimiterService } from '#publication-rate-limiter.service.js';
 
 function createServiceWithEvalReturns(values: number[]): {
   service: PublicationRateLimiterService;

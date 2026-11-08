@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { repositoryStoreKey } from '#api/git/git.constants.js';

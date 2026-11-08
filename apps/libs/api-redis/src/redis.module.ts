@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '#redis.service.js';
 
 @Global() // Make RedisService available app-wide without importing
 @Module({

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';

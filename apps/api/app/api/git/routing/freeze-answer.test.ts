@@ -39,7 +39,7 @@ import { decodeManifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 

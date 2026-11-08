@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 import type { Environment } from '@taucad/api-core';
-import type { EmailMessage } from '#email/email.types.js';
-import { renderEmailTemplate, subjectForEmailTemplate } from '#email/email-templates.js';
-import { assertEmailTemplateUrlAllowed } from '#email/email-link-builder.js';
+import type { EmailMessage } from '#email.types.js';
+import { renderEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
+import { assertEmailTemplateUrlAllowed } from '#email-link-builder.js';
 
 @Injectable()
 export class EmailService {

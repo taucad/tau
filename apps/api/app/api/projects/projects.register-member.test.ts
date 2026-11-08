@@ -12,7 +12,7 @@ import type { DatabaseService } from '@taucad/api-database';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
 /**

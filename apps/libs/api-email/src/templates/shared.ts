@@ -17,7 +17,7 @@ import {
   Section,
   Text,
 } from 'react-email';
-import { dark, fontStack, light, radius } from '#email/templates/email-palette.generated.js';
+import { dark, fontStack, light, radius } from '#templates/email-palette.generated.js';
 
 export type LayoutOptions = {
   /** Origin serving /wordmark.png and /fonts/*.woff2; the frontend origin in production. */

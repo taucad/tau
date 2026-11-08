@@ -32,7 +32,7 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryObjectKey } from '#api/git/store/repository-key.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 const catalogueWindowSeconds = 60;
 

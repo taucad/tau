@@ -22,7 +22,7 @@ import type {
 } from '@taucad/share/repository-target';
 import type { Environment } from '@taucad/api-core';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import type { ArchiveQueryDto, BranchesQueryDto, GithubBranchesResponse } from '#api/repositories/repositories.dto.js';
 
 /** Until the provider answers with headers; a share request also reads its whole body within it. */

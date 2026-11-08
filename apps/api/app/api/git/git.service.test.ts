@@ -26,10 +26,10 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,

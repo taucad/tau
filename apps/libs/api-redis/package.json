@@ -30,5 +30,17 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2"
   }
 }

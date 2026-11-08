@@ -9,7 +9,7 @@ import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import type { Environment } from '@taucad/api-core';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '@taucad/api-database';
-import type { EmailService } from '#email/email.service.js';
+import type { EmailService } from '@taucad/api-email';
 
 /** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
 type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };

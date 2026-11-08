@@ -19,7 +19,7 @@ import { z } from 'zod';
 import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
 import { agentRun, hostDevice, project, user } from '@taucad/api-database/schema';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
 import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';

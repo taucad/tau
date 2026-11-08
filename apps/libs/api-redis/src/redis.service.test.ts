@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 import type { MetricsService } from '@taucad/api-observability/metrics';
-import { parseMemoryUtilization, RedisService } from '#redis/redis.service.js';
+import { parseMemoryUtilization, RedisService } from '#redis.service.js';
 
 const createService = (): RedisService => {
   const configService = { get: () => 'redis://127.0.0.1:6379' } as unknown as ConfigService<Environment, true>;

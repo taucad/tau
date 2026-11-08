@@ -4,7 +4,7 @@ import type { OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
 import { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion, projectGit } from '@taucad/api-database/schema';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { GitRepositoryService } from '#api/git/git.service.js';
 
 /**

@@ -30,5 +30,19 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@taucad/api-core": "workspace:*",
+    "react": "catalog:",
+    "react-email": "catalog:",
+    "resend": "catalog:"
+  },
+  "devDependencies": {
+    "culori": "catalog:",
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:"
   }
 }

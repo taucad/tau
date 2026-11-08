@@ -11,7 +11,7 @@ import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/project-deletion.js';
 import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';

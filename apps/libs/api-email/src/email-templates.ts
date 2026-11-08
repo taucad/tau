@@ -1,18 +1,10 @@
 import { createElement } from 'react';
 import type { ReactElement } from 'react';
 import { render, toPlainText } from 'react-email';
-import type { EmailTemplate, RenderedEmail } from '#email/email.types.js';
-import { expiresIn, footerCopy } from '#email/email-copy.js';
-import {
-  details,
-  inlineLink,
-  note,
-  paragraph,
-  primaryAction,
-  strong,
-  tauEmailLayout,
-} from '#email/templates/shared.js';
-import type { DetailRow, LayoutOptions } from '#email/templates/shared.js';
+import type { EmailTemplate, RenderedEmail } from '#email.types.js';
+import { expiresIn, footerCopy } from '#email-copy.js';
+import { details, inlineLink, note, paragraph, primaryAction, strong, tauEmailLayout } from '#templates/shared.js';
+import type { DetailRow, LayoutOptions } from '#templates/shared.js';
 
 export type EmailSpec = {
   readonly subject: string;

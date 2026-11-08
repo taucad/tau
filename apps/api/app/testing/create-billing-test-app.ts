@@ -7,7 +7,7 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { getEnvironment } from '@taucad/api-core';
 import { TelemetryModule } from '@taucad/api-observability';
-import { RedisModule } from '#redis/redis.module.js';
+import { RedisModule } from '@taucad/api-redis';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { AuthModule } from '#auth/auth.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';

@@ -1,4 +1,4 @@
-import type { EmailTemplate } from '#email/email.types.js';
+import type { EmailTemplate } from '#email.types.js';
 
 const authEmailPaths = {
   'magic-link': '/auth/magic-link/verify',

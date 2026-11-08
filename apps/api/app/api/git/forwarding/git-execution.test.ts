@@ -21,7 +21,7 @@ import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitRepositoryService, receiptVerificationKey } from '#api/git/git.service.js';
 import type { ReceiptVerification } from '#api/git/git.service.js';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 /**

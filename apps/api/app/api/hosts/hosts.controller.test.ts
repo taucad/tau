@@ -5,8 +5,8 @@ import { mock } from 'vitest-mock-extended';
 
 import { HostsController, pairingsPerIpPerWindow } from '#api/hosts/hosts.controller.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { RedisService } from '#redis/redis.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
+import type { RedisService } from '@taucad/api-redis';
 
 /** A rate limiter over an in-memory counter in place of Redis' `INCRBY` script. */
 const createRateLimiter = (): PublicationRateLimiterService => {

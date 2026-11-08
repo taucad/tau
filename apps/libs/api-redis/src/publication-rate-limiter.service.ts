@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '#redis.service.js';
 
 /** Daily publication view PATCH cap per viewer identity (rolling bucket via Redis TTL). */
 const publishViewRateLimitMaxPerDay = 5;

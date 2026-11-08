@@ -22,7 +22,7 @@ import { z } from 'zod';
 import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
 import { githubConnection, githubRepositoryWrite } from '@taucad/api-database/schema';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 
 const apiVersion = '2026-03-10';
 const startTtlSeconds = 600;

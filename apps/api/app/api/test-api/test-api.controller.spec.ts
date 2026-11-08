@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
 import { DatabaseService } from '@taucad/api-database';
 import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { getEnvironment } from '@taucad/api-core';
 
 // Mock DatabaseService for tests that don't need database access

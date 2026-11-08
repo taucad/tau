@@ -21,6 +21,7 @@
     "src/**/*.tsx",
     "src/**/*.js",
     "src/**/*.jsx",
-    "../api-core/src/types/environment.d.ts"
+    "../api-core/src/types/environment.d.ts",
+    "scripts/**/*.mts"
   ]
 }

@@ -29,7 +29,7 @@ import {
   projectRegistrationsPerOwnerPerDay,
   registeredProjectLimitPerOwner,
 } from '#api/git/git.constants.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 
 /**

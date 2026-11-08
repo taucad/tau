@@ -37,7 +37,7 @@ import {
 } from '#api/publications/publication-materializer.js';
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
@@ -47,10 +47,9 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import type { ReadLease } from '#api/git/git.service.js';
 import { DatabaseService } from '@taucad/api-database';
 import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
-import { EmailService } from '#email/email.service.js';
+import { buildPublicationViewUrl, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { RedisService } from '#redis/redis.service.js';
 import * as schema from '@taucad/api-database/schema';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
 import type { StorageTier } from '#storage/object-storage.service.js';
@@ -58,7 +57,6 @@ import type { StorageNamespace } from '#storage/storage.constants.js';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 
 /** The shared placeholder card image every publication starts with. */
 const defaultOgImageKey = 'defaults/og.png';

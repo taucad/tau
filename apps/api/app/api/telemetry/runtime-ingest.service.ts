@@ -42,8 +42,7 @@ import type {
   TelemetryPolicyAnswer,
 } from '@taucad/telemetry';
 import type { Environment } from '@taucad/api-core';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import { RedisService } from '#redis/redis.service.js';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { RuntimeMetricsService } from '#api/telemetry/runtime-metrics.service.js';
 
 type Population = 'signed-in' | 'signed-out';

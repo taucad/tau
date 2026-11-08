@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectPreviewDto } from '#api/projects/project-preview.dto.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { DatabaseService } from '@taucad/api-database';

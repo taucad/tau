@@ -6,7 +6,7 @@ import { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '@taucad/api-database';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import { GithubService } from '#api/github/github.service.js';
 
 const configuration: Partial<Environment> = {

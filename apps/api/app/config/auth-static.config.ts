@@ -2,7 +2,7 @@ import type { BetterAuthOptions } from 'better-auth';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
-import { tokenLifetimeSeconds } from '#email/email-copy.js';
+import { tokenLifetimeSeconds } from '@taucad/api-email';
 
 const accountOptions: NonNullable<BetterAuthOptions['account']> = {
   accountLinking: {

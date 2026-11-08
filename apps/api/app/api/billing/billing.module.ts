@@ -14,8 +14,7 @@ import { BillingPaymentsService } from '#api/billing/billing-payments.service.js
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { resolveBillingCollection } from '#api/billing/billing-collection.js';
-import { EmailModule } from '#email/email.module.js';
-import { EmailService } from '#email/email.service.js';
+import { EmailModule, EmailService } from '@taucad/api-email';
 import { ModelModule } from '#api/models/model.module.js';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';

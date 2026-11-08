@@ -4,7 +4,7 @@ import type { FastifyReply } from 'fastify';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /** Usage reads per caller per window (RV-W8 F8): a Sync region reads on connect and after a push. */
 export const usageReadsPerWindow = 30;

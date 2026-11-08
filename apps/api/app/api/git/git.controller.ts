@@ -45,7 +45,7 @@ import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filt
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { gitExecutionKey } from '#api/git/forwarding/git-execution.js';
 import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import { AttributeKey, TauMetrics } from '@taucad/telemetry';

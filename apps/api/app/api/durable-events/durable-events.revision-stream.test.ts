@@ -8,7 +8,7 @@ import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
 import { project, projectCollaborator, user } from '@taucad/api-database/schema';
 import type { DatabaseService } from '@taucad/api-database';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { DurableEventsController } from '#api/durable-events/durable-events.controller.js';

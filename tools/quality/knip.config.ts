@@ -184,6 +184,9 @@ const config: KnipConfig = {
         'pino-pretty',
       ],
     },
+    'apps/libs/api-email': {
+      entry: ['scripts/*.mts'],
+    },
     'apps/libs/api-database': {
       // Schema, migration job and test helpers are reached by subpath, and `drizzle.config.ts` by drizzle-kit.
       entry: ['src/**/*.ts', 'drizzle.config.ts'],

@@ -4,7 +4,7 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '@taucad/api-database';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import type { githubConnection, githubRepositoryWrite } from '@taucad/api-database/schema';
 import { GithubService } from '#api/github/github.service.js';
 

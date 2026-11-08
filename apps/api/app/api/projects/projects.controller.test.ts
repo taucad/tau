@@ -19,7 +19,7 @@ import type { project } from '@taucad/api-database/schema';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
 type ListedRow = Pick<typeof project.$inferSelect, 'id' | 'ownerId' | 'name' | 'updatedAt'> & {

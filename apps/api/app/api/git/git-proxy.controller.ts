@@ -34,7 +34,7 @@ import type { Environment } from '@taucad/api-core';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { GitProxyQueryDto } from '#api/git/git.dto.js';
-import { RedisService } from '#redis/redis.service.js';
+import { RedisService } from '@taucad/api-redis';
 import { z } from 'zod';
 
 /** Only git's own smart-HTTP endpoints are reachable through the proxy. */

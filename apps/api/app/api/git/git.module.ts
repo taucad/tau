@@ -25,7 +25,7 @@ import { StorageReceiptsController } from '#api/git/forwarding/receipts.controll
 import { repositoryRouteGuardProvider } from '#api/git/routing/routing.providers.js';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 import { UsageController } from '#api/git/usage.controller.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 
 /**

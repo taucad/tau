@@ -14,7 +14,7 @@ import { HostsService } from '#api/hosts/hosts.service.js';
 import { hashHostGitCredential, resolveHostGitCredential } from '#api/hosts/host-git-credential.js';
 import { agentRun, project } from '@taucad/api-database/schema';
 import type { DatabaseService } from '@taucad/api-database';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 

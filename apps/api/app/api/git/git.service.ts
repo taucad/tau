@@ -65,7 +65,7 @@ import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
 /**

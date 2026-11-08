@@ -18,7 +18,7 @@ import { authInstanceKey } from '#constants/auth.constant.js';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import type { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 
 const frontend = 'https://tau.test';
 const configured: Partial<Environment> = {

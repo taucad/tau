@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { BillingRecoveryNoticeTransport } from '#api/billing/billing-payments.service.js';
 import { billingOwnerBinding, user } from '@taucad/api-database/schema';
 import type { DatabaseService } from '@taucad/api-database';
-import type { EmailService } from '#email/email.service.js';
+import type { EmailService } from '@taucad/api-email';
 
 /** The three senders this transport needs from `EmailService`; a test supplies exactly these. */
 export type RecoveryNoticeEmailSender = Pick<

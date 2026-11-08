@@ -9,7 +9,7 @@ import { AuthModule } from '#auth/auth.module.js';
 import type { Environment } from '@taucad/api-core';
 import { ApiModule } from '#api/api.module.js';
 import { LoggerModule } from '@taucad/api-observability/logger-module';
-import { RedisModule } from '#redis/redis.module.js';
+import { RedisModule } from '@taucad/api-redis';
 import { TelemetryModule } from '@taucad/api-observability';
 import { LifecycleModule } from '@taucad/api-lifecycle';
 import { RequestIdMiddleware } from '#middlewares/request-id.middleware.js';

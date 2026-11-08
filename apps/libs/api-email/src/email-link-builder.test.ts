@@ -7,7 +7,7 @@ import {
   buildFrontendVerificationUrl,
   buildPublicationViewUrl,
   sanitizeFrontendRedirectPath,
-} from '#email/email-link-builder.js';
+} from '#email-link-builder.js';
 
 describe('email link builder', () => {
   it('rewrites Better Auth verification links to the frontend verification route', () => {

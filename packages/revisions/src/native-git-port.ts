@@ -83,7 +83,6 @@ import type {
   WriteRevisionInput,
 } from '#revision-port.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
-import type { LargeObjectRule } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import {
@@ -1373,20 +1372,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * the trees on its path to Git, never the project.
    *
    * @param tree - The tree to store.
-   * @param largeObjects - Whose rule the clean step runs; `undefined` stores it verbatim.
+   * @param largeObjects - Whether the clean step runs; `false` stores the tree verbatim.
    * @returns The root tree's object id.
    */
-  const writeTreeObject = async (
-    tree: ImmutableRevisionTree,
-    largeObjects: LargeObjectRule | undefined,
-  ): Promise<string> => {
-    /* The pointer decision is Tau's, made by the host-neutral cut (`lfs.ts`) that the cut's `treeId` is
-     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs.
-     * An adopted repository's own attributes decide which paths it covers (D16). */
-    const recorded =
-      largeObjects === undefined
-        ? { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
-        : cleanLargeObjects(tree, largeObjects);
+  const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
+    /* The pointer decision is the host-neutral cut's (`lfs.ts`), which the cut's `treeId` is computed from,
+     * so the id this engine records is the id the host predicted; Git's clean filter never runs. The tree's
+     * own attributes decide which paths it covers, adopted or not (D16). */
+    const recorded = largeObjects
+      ? cleanLargeObjects(tree)
+      : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
     /* Each asked of the disk, never of a memo: a pruned object is stored again. */
     await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
     const root = treeIds.treeObject(recorded.tree, await format());
@@ -1844,12 +1839,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   /**
    * What was at the project path when this port first looked, asked once.
    *
-   * `adopted` is a repository the person made: Tau writes its ignore block
-   * before `git init`, so a store it created always carries one. An adopted
-   * repository keeps its own ignore and attributes files, its entries keep the
-   * representation its own Git gave them — a pointer exactly where its own
-   * attributes say `filter=lfs` (D16) — and its config is left alone
-   * (revisions policy rules 5 and 13).
+   * `adopted` is a repository the person made: Tau creates its setup files
+   * before `git init`, so a store it created carries one of its blocks. An
+   * adopted repository's files and config are left alone, and only its ignore
+   * rules (`ignoredPaths`) and the adoption refusals depend on it: which paths
+   * are pointers is the tree's own attributes on every repository (D16,
+   * revisions policy rules 5 and 13).
    */
   let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
   const openState = async (): Promise<Readonly<{ owned: boolean; adopted: boolean }>> => {
@@ -1882,9 +1877,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * Every path in `HEAD` must be one the registry versions and a regular file,
    * or the first revision would drop it (rule 4) or record a link as a file
-   * (rule 5). Large-file pointers are carried (D16): an adopted repository's
-   * own attributes decide which paths are pointers (`largeObjectRule:
-   * 'repository'`), so an unchanged entry keeps its representation (rule 13).
+   * (rule 5). Large-file pointers are carried (D16): the tree's own attributes
+   * decide which paths are pointers, on every repository, so an unchanged
+   * entry keeps its representation (rule 13).
    */
   const assertAdoptable = async (): Promise<void> => {
     const refuse = (reason: string): never => {
@@ -1919,30 +1914,27 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const { owned, adopted } = await openState();
     if (adopted) {
       await assertAdoptable();
-      /* The person's ignore file stays theirs. Tau's block goes where stock
-       * Git reads it and no revision records it, so the records Tau keeps
-       * under `.tau/` stay out of their `git status`. */
-      const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
-      const existing = await readFile(excludePath, 'utf8').catch(() => undefined);
-      const exclude = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-      if (exclude !== existing) {
-        await mkdir(dirname(excludePath), { recursive: true });
-        await writeFile(excludePath, exclude);
+    }
+    if (!adopted && input.createSetupFiles !== false) {
+      const [ignore, attributes] = await Promise.all(
+        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
+          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
+        ),
+      );
+      /* Created, never merged into (D16): a file that exists is the person's,
+       * or already Tau's. A brand-new project gets both files, versioned (D24),
+       * so a stock clone reads it the way Tau wrote it. */
+      if (!owned && ignore === undefined) {
+        await writeFile(
+          join(repositoryPath, generatedIgnorePath),
+          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+        );
       }
-    } else if (input.createSetupFiles !== false) {
-      const ignorePath = join(repositoryPath, generatedIgnorePath);
-      const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
-      const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-      if (ignore !== existing) {
-        await writeFile(ignorePath, ignore);
-      }
-      /* Beside the ignore file and versioned like it (D24): the two together are
-       * what a stock clone needs to read this project the way Tau wrote it. */
-      const attributesPath = join(repositoryPath, generatedGitattributesPath);
-      const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
-      const merged = generatedGitattributesContent(attributes);
-      if (merged !== attributes) {
-        await writeFile(attributesPath, merged);
+      /* A project an older build created carries Tau's ignore block and no
+       * attributes file (DEF-W22-1); the file it gets here is what keeps its
+       * large files pointers once the cut reads the rule from the tree. */
+      if (attributes === undefined && (!owned || hasGeneratedBlock(ignore))) {
+        await writeFile(join(repositoryPath, generatedGitattributesPath), generatedGitattributesContent(undefined));
       }
     }
     // Only now: the repository is created after the file that decides what a
@@ -1951,6 +1943,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
       /* The store is ours now: a later `init` must not run `git init` again. */
       opened = Promise.resolve({ owned: true, adopted });
+    }
+    /* Tau's derived-content ignores go where stock Git reads them and no
+     * revision records them, in every store, so the records Tau keeps under
+     * `.tau/` stay out of `git status` without a line in the person's ignore
+     * file. Written once the store exists, and merged: the file is the store's, never versioned. */
+    const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
+    const existingExclude = await readFile(excludePath, 'utf8').catch(() => undefined);
+    const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+    if (exclude !== existingExclude) {
+      await mkdir(dirname(excludePath), { recursive: true });
+      await writeFile(excludePath, exclude);
     }
     /* Pointers are Tau's (they must be identical on every host), but a *stock*
      * checkout of this repository — `git worktree add` for a linked checkout,
@@ -1988,7 +1991,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         nWayMerge: false,
         checkouts: checkouts !== undefined,
         largeObjects: true,
-        ...((await isAdopted()) ? ({ largeObjectRule: 'repository' } as const) : {}),
         keepsLargeObjectFiles: true,
       });
     },
@@ -2130,10 +2132,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(
-        input.tree,
-        input.largeObjects === false ? undefined : (await isAdopted()) ? 'repository' : 'generated',
-      );
+      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false);
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

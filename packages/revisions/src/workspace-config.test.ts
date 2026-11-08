@@ -312,6 +312,28 @@ describe('generated attributes file', () => {
   });
 });
 
+describe('the one pointer rule (D16)', () => {
+  it('tracks a path only when the attributes say so, never by its family alone', () => {
+    expect(isTrackedLargeObjectPath('models/part.step', undefined)).toBe(false);
+    expect(isTrackedLargeObjectPath('models/part.step', '* text=auto\n')).toBe(false);
+    expect(isTrackedLargeObjectPath('models/part.step', '*.step filter=lfs\n')).toBe(true);
+    /* Git matches case-sensitively; a cut gives a case variant a line of its own instead. */
+    expect(isTrackedLargeObjectPath('PART.STEP', generatedGitattributesContent(undefined))).toBe(false);
+    expect(
+      isTrackedLargeObjectPath('kept.step', `${generatedGitattributesContent(undefined)}kept.step -filter\n`),
+    ).toBe(false);
+  });
+
+  it('replaces the block in place, so a later hand-written line still overrides it', () => {
+    const block = generatedGitattributesContent(undefined);
+    const authored = `* text=auto\n${block}kept.step -filter\n`;
+    const regenerated = generatedGitattributesContent(authored, ['big.bin']);
+    expect(regenerated.startsWith('* text=auto\n# BEGIN Tau generated')).toBe(true);
+    expect(regenerated.endsWith('# END Tau generated\nkept.step -filter\n')).toBe(true);
+    expect(regenerated).toContain('/big.bin filter=lfs');
+  });
+});
+
 describe("a repository's own large-file attributes (D16)", () => {
   const matcher = (files: Readonly<Record<string, string>>) =>
     repositoryLargeObjectMatcher(new Map(Object.entries(files)));

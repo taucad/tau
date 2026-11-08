@@ -90,7 +90,7 @@ export {
   writeChatRef,
 } from '#chat-ref.js';
 export { cleanLargeObjects, lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
-export type { LargeObjectRule, LfsPointer } from '#lfs.js';
+export type { LfsPointer } from '#lfs.js';
 /* `remoteMachine` and `selectRemoteFacet` are deliberately absent: one subpath
  * per machine (P8), which is why `./remote-machine` exists and why no other
  * machine is here either. Keeping them would put `xstate` in the graph of every

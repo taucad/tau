@@ -33,7 +33,7 @@ import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
-import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import {
@@ -5359,6 +5359,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
@@ -5421,6 +5422,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),

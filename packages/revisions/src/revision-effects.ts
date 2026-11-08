@@ -1189,7 +1189,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const recordedTree = async (tree: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
     const descriptor = await describePort();
-    return descriptor.largeObjects ? cleanLargeObjects(tree, descriptor.largeObjectRule).tree : tree;
+    return descriptor.largeObjects ? cleanLargeObjects(tree).tree : tree;
   };
 
   /*

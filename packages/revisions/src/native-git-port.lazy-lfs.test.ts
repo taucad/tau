@@ -19,10 +19,18 @@ import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import type { NativeGitRemoteCredential } from '#native-git-port.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
-import { largeObjectThresholdBytes } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  largeObjectThresholdBytes,
+} from '#workspace-config.js';
+
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { GitHttpBackendFixture, GitHttpBackendOptions } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+
+/* Tau's block, so a cut adds a line for each file over the threshold (D16). */
+const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
 
 const author = { name: 'Lazy fill', email: 'lazy@example.com' };
 const cleanups: Array<() => Promise<void>> = [];
@@ -65,14 +73,11 @@ const fetchedProject = async (
   await source.init({ author });
   /* An older revision's object, which the head no longer names: what an undo would write back. */
   const older = new Uint8Array(largeObjectThresholdBytes + 2048).fill(17);
-  const first = await mint(source, new ImmutableRevisionTree([['older.bin', older]]));
+  const first = await mint(source, new ImmutableRevisionTree([tauAttributes, ['older.bin', older]]));
   const bytes = new Uint8Array(largeObjectThresholdBytes + 1024).fill(91);
   const head = await mint(
     source,
-    new ImmutableRevisionTree([
-      ['large.bin', bytes],
-      ['small.txt', 'small\n'],
-    ]),
+    new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes], ['small.txt', 'small\n']]),
     first,
   );
   await source.updateRef({ name: 'main', expectedHead: undefined, head });
@@ -343,7 +348,7 @@ describe.runIf(gitToolchainOnPath)('native large-object store', () => {
     const port = createNativeGitRevisionPort({ repositoryPath: root });
     await port.init({ author });
     const bytes = new Uint8Array(largeObjectThresholdBytes + 7).fill(5);
-    const tree = new ImmutableRevisionTree([['large.bin', bytes]]);
+    const tree = new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes]]);
     const { oid } = lfsPointerFor(bytes).pointer;
     const stored = join(root, '.git', lfsObjectPath(oid));
     await mint(port, tree);

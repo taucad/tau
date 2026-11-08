@@ -93,8 +93,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
       summary: { generated: 'Adopted' },
     });
 
-    const descriptor = await port.describe();
-    expect(descriptor.largeObjectRule).toBe('repository');
+    /* No attributes file names them, so they are blobs: the tree's own rule (D16). */
     expect(git(project, ['rev-parse', `${receipt.commitId}:photo.png`])).toBe(
       git(project, ['rev-parse', 'HEAD:photo.png']),
     );
@@ -123,8 +122,10 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     expect(await port.ignoredPaths?.()).toBeUndefined();
     const descriptor = await port.describe();
     expect(descriptor.largeObjects).toBe(true);
-    expect(descriptor.largeObjectRule).toBeUndefined();
+    expect(descriptor).not.toHaveProperty('largeObjectRule');
     expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(await readFile(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('# BEGIN Tau generated');
   });
 
   describe('refusal', () => {
@@ -181,7 +182,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
       expect(await readdir(project)).not.toContain(generatedGitattributesPath);
       expect(await readFile(join(project, generatedIgnorePath), 'utf8')).toBe('dist/\n.env\n');
       expect(await readFile(join(project, '.git', 'config'), 'utf8')).toBe(config);
-      expect(await port.describe()).toMatchObject({ largeObjects: true, largeObjectRule: 'repository' });
+      expect(await port.describe()).toMatchObject({ largeObjects: true, keepsLargeObjectFiles: true });
     });
 
     it("should store exactly the paths its attributes name as pointers, and never write Tau's block", async () => {

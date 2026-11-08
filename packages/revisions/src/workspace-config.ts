@@ -141,10 +141,11 @@ export const hasGeneratedBlock = (content: string | undefined): boolean =>
   content !== undefined && (content.includes(ignoreMarker) || content.includes(attributesMarker));
 
 /**
- * Replace Tau's generated block in a hand-written file, or append it.
+ * Replace Tau's generated block in a file, in place, or append it.
  *
- * Existing content is preserved: a hand-written file keeps every line it had,
- * and re-running this is a no-op once the block is present.
+ * Existing content is preserved: every line outside the block stays where it
+ * was, so a person's line after the block still overrides it, and re-running
+ * this is a no-op once the block is current.
  *
  * @param existing - Current file content, or `undefined` when absent.
  * @param markerStart - The block's opening comment.
@@ -153,12 +154,16 @@ export const hasGeneratedBlock = (content: string | undefined): boolean =>
  */
 const withGeneratedBlock = (existing: string | undefined, markerStart: string, lines: readonly string[]): string => {
   const previous = existing ?? '';
-  const withoutBlock = previous.includes(markerStart)
-    ? previous.slice(0, previous.indexOf(markerStart)) +
-      previous.slice(previous.indexOf(markerEnd) + markerEnd.length).replace(/^\n/u, '')
-    : previous;
-  const head = withoutBlock === '' ? '' : withoutBlock.endsWith('\n') ? withoutBlock : `${withoutBlock}\n`;
-  return `${head}${markerStart}\n${lines.join('\n')}\n${markerEnd}\n`;
+  const block = `${markerStart}\n${lines.join('\n')}\n${markerEnd}\n`;
+  const start = previous.indexOf(markerStart);
+  if (start !== -1) {
+    /* A block that lost its end marker runs to the end of the file. */
+    const end = previous.indexOf(markerEnd, start);
+    const rest = end === -1 ? '' : previous.slice(end + markerEnd.length).replace(/^\n/u, '');
+    return previous.slice(0, start) + block + rest;
+  }
+  const head = previous === '' ? '' : previous.endsWith('\n') ? previous : `${previous}\n`;
+  return `${head}${block}`;
 };
 
 /**
@@ -266,10 +271,14 @@ export const largeObjectExtensions: readonly string[] = Object.freeze([
 export const largeObjectThresholdBytes = 1024 * 1024;
 
 /**
- * Whether one path's family is always a large object.
+ * Whether one path's family is in the families table, case-insensitively.
+ *
+ * Decides only which lines a cut adds to Tau's generated attributes block:
+ * a path is stored as a pointer when the attributes say so
+ * ({@link isTrackedLargeObjectPath}), never because of its family alone.
  *
  * @param projectRelativePath - Path relative to the project root.
- * @returns Whether `.gitattributes` tracks this path with git LFS.
+ * @returns Whether the path's extension is a large-object family.
  * @public
  */
 export const isLargeObjectPath = (projectRelativePath: string): boolean => {
@@ -357,21 +366,53 @@ export const generatedGitattributesContent = (
   ]);
 
 /**
- * Whether the project's attributes already track one path as a large object.
+ * Whether an attributes file carries Tau's generated large-object block.
  *
- * The whole pointer rule, on both legs: a path is stored as a pointer when
- * `.gitattributes` says so — by its family, or by its own name — and never
- * because of what it weighs. Size decides whether a cut *adds* a line, and that
- * line is what a stock clone reads (P15).
+ * The block is what makes Tau a writer of the file at all: a cut regenerates
+ * it (the families, the per-path lines it already holds, and a line per new
+ * path the families or the size threshold name), and a file without it is the
+ * person's alone, never written.
+ *
+ * @param content - Attributes file content, or `undefined` when absent.
+ * @returns Whether Tau's large-object block is present.
+ * @internal
+ */
+export const hasGeneratedAttributesBlock = (content: string | undefined): boolean =>
+  content?.includes(attributesMarker) === true;
+
+/**
+ * Whether one path's attributes put it on git LFS, by the root attributes file.
+ *
+ * The whole pointer rule, on both legs and for every repository, as stock Git
+ * decides it: a path is stored as a pointer exactly when `.gitattributes` says
+ * `filter=lfs` for it (D16). Tau's families table and size threshold decide
+ * only which lines a cut adds to Tau's own block (P15), never a pointer
+ * directly, so a stock clone smudges every pointer Tau writes.
+ *
+ * ponytail: only the root file is read here; a cut reads every attributes file
+ * in the tree (`cleanLargeObjects`). The checkout-read and adoption seams that
+ * call this hold the root file alone.
  *
  * @param projectRelativePath - Path relative to the project root.
- * @param attributes - Current attributes file content, or `undefined` when absent.
+ * @param attributes - Root attributes file content, or `undefined` when absent.
  * @returns Whether this path's bytes are an LFS object.
  * @public
  */
-export const isTrackedLargeObjectPath = (projectRelativePath: string, attributes: string | undefined): boolean =>
-  isLargeObjectPath(projectRelativePath) ||
-  generatedTrackedPatterns(attributes).has(attributePattern(projectRelativePath));
+export const isTrackedLargeObjectPath = (projectRelativePath: string, attributes: string | undefined): boolean => {
+  /* One entry: every path in a cut asks about the same file. */
+  if (rootMatcher === undefined || rootMatcher.source !== attributes) {
+    rootMatcher = {
+      source: attributes,
+      matches:
+        attributes === undefined
+          ? () => false
+          : repositoryLargeObjectMatcher(new Map([[generatedGitattributesPath, attributes]])),
+    };
+  }
+  return rootMatcher.matches(projectRelativePath);
+};
+
+let rootMatcher: Readonly<{ source: string | undefined; matches: (path: string) => boolean }> | undefined;
 
 /**
  * One `.gitattributes` pattern as a matcher over a path relative to the
@@ -468,14 +509,13 @@ const filterRules = (content: string): readonly FilterRule[] =>
 export type RepositoryAttributes = ReadonlyMap<string, string>;
 
 /**
- * Which paths a repository's own attributes files put on git LFS (D16).
+ * Which paths a tree's own attributes files put on git LFS (D16).
  *
- * The rule of a repository Tau adopted: its `.gitattributes` files are the
- * person's, so a path is a large object exactly when *they* say `filter=lfs`
- * for it, as `git add` would decide — later lines override earlier ones, and a
- * deeper file overrides a shallower one. Tau's families table and size
- * threshold never apply, so nothing is converted that their Git would have
- * stored as a blob, and no line is ever added to their files.
+ * The one rule on every leg: a path is a large object exactly when the tree's
+ * `.gitattributes` files say `filter=lfs` for it, as `git add` would decide —
+ * later lines override earlier ones, and a deeper file overrides a shallower
+ * one. Tau's families table and size threshold never apply here directly, so
+ * nothing is converted that a stock Git would have stored as a blob.
  *
  * ponytail: `$GIT_DIR/info/attributes` and `core.attributesFile` are not read:
  * a cut has to predict the tree from the tree alone (I4), so only the
@@ -486,6 +526,20 @@ export type RepositoryAttributes = ReadonlyMap<string, string>;
  * @internal
  */
 export const repositoryLargeObjectMatcher = (attributes: RepositoryAttributes): ((path: string) => boolean) => {
+  const verdict = largeObjectVerdict(attributes);
+  return (path) => verdict(path) === true;
+};
+
+/**
+ * The tree's attributes' verdict on one path, or `undefined` when no line
+ * sets or unsets `filter` for it — the paths Tau's block may still name.
+ *
+ * @param attributes - Every attributes file the tree holds, by its path.
+ * @returns `true` for `filter=lfs`, `false` for another filter or an unset one,
+ *   `undefined` when the attributes say nothing about the path.
+ * @internal
+ */
+export const largeObjectVerdict = (attributes: RepositoryAttributes): ((path: string) => boolean | undefined) => {
   const files = [...attributes]
     .map(([file, content]) => ({
       directory: file.slice(0, file.length - generatedGitattributesPath.length),
@@ -495,10 +549,10 @@ export const repositoryLargeObjectMatcher = (attributes: RepositoryAttributes): 
     /* Shallowest first, so a deeper file's verdict is the one that stands. */
     .toSorted((left, right) => left.directory.split('/').length - right.directory.split('/').length);
   if (files.length === 0) {
-    return () => false;
+    return () => undefined;
   }
   return (path) => {
-    let lfs = false;
+    let lfs: boolean | undefined;
     for (const { directory, rules } of files) {
       if (!path.startsWith(directory)) {
         continue;

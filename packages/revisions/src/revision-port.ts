@@ -19,7 +19,6 @@ import type {
   RevisionDiffEntry as ComparisonDiffEntry,
 } from '#algorithms/revision-comparison.js';
 import type { ObjectFormat } from '#object-hash.js';
-import type { LargeObjectRule } from '#lfs.js';
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
 
@@ -62,14 +61,6 @@ export type RevisionEngineDescriptor = Readonly<{
    * (`lfs.ts`) and only the transport behind it differs.
    */
   largeObjects: boolean;
-  /**
-   * Whose attributes decide which paths are large objects (D16). Absent means
-   * `'generated'`, Tau's own block. `'repository'` is a repository a disk
-   * host adopted: its own `.gitattributes` files decide, as `git add` would,
-   * and Tau never writes to them, so an entry keeps the representation the
-   * person's own Git gave it (rule 13).
-   */
-  largeObjectRule?: LargeObjectRule;
   /**
    * Whether a checkout keeps each large object's bytes as a file once the
    * store holds it (D9: a disk host keeps a physical copy). Large-object

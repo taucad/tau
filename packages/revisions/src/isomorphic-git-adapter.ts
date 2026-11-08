@@ -131,6 +131,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  hasGeneratedBlock,
 } from '#workspace-config.js';
 
 /*
@@ -1787,47 +1788,50 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * Also the open seam: `revision-effects.ensureStore` calls this once per
      * authority, before the first question is asked of the store, and
      * `isomorphic-git`'s own `init` returns early when the config is already
-     * there. So a project created by an older build reaches this with a stale
-     * generated block, and the merge below is its migration (G0-9) — written only
-     * when the merged bytes differ, so a current project's working copy is not
-     * touched on every open and a rewrite cannot repeat.
+     * there. The setup files are created, never merged into (D16), exactly as
+     * the disk leg does (`native-git-port.ts`): a file that exists is the
+     * person's, or already Tau's, and the cut regenerates Tau's own block in
+     * it from the tree (`lfs.ts`), so both legs record one tree (I4/I5).
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
+      const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
       if (input.createSetupFiles !== false) {
-        const ignorePath = generatedIgnorePath;
-        const existing = (await filesystem.exists(ignorePath))
-          ? await filesystem.readFile(ignorePath, 'utf8')
-          : undefined;
-        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-        if (ignore !== existing) {
-          await filesystem.writeFile(ignorePath, ignore);
+        const readText = async (path: string): Promise<string | undefined> =>
+          (await filesystem.exists(path)) ? filesystem.readFile(path, 'utf8') : undefined;
+        const [ignore, attributes] = await Promise.all([
+          readText(generatedIgnorePath),
+          readText(generatedGitattributesPath),
+        ]);
+        /* Both generated files are in the recorded tree, so a leg that wrote
+         * only one of them named a different tree for the same edits
+         * (W22 DEF-W22-1); a brand-new project gets both, versioned (D24). */
+        if (brandNew && ignore === undefined) {
+          await filesystem.writeFile(
+            generatedIgnorePath,
+            generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+          );
         }
-        /*
-         * Beside the ignore file and versioned like it (D24), exactly as the disk
-         * leg writes it (`native-git-port.ts`).
-         *
-         * Both generated files are in the recorded tree, so a leg that wrote only
-         * one of them named a different tree — and therefore a different revision
-         * — for the same edits, which is I4's whole claim (W22 DEF-W22-1). The
-         * bytes come from the one pure `#workspace-config.js` block both legs
-         * already share; only the writer is per-adapter, which is what that
-         * module's own contract says. And `lfs.ts` appends a tracked path to this
-         * file at cut time (P15), so a browser-created project had nowhere for
-         * that line to land and a stock clone of it had no attributes to resolve
-         * its pointers with (S49).
-         */
-        const attributesPath = generatedGitattributesPath;
-        const attributes = (await filesystem.exists(attributesPath))
-          ? await filesystem.readFile(attributesPath, 'utf8')
-          : undefined;
-        const merged = generatedGitattributesContent(attributes);
-        if (merged !== attributes) {
-          await filesystem.writeFile(attributesPath, merged);
+        /* A project an older build created carries Tau's ignore block and no
+         * attributes file (DEF-W22-1); the file it gets here is what keeps its
+         * large files pointers once the cut reads the rule from the tree. */
+        if (attributes === undefined && (brandNew || hasGeneratedBlock(ignore))) {
+          await filesystem.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
         }
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       await init({ fs, dir: '', gitdir, defaultBranch });
+      /* Tau's derived-content ignores, where stock Git reads them and no
+       * revision records them: the store's own file, never versioned. */
+      const excludePath = `${gitdir}/info/exclude`;
+      const existingExclude = (await gitFiles.exists(excludePath))
+        ? await gitFiles.readFile(excludePath, 'utf8')
+        : undefined;
+      const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+      if (exclude !== existingExclude) {
+        await gitFiles.mkdir(`${gitdir}/info`, { recursive: true });
+        await gitFiles.writeFile(excludePath, exclude);
+      }
       /* Every project an older build recorded has no index at all, so this open
        * heals it. An existing index is left alone: in a repository Tau adopted
        * it may hold the person's own staged work. */

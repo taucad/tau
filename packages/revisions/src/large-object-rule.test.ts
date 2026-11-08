@@ -1,0 +1,188 @@
+/**
+ * The one pointer rule, read from the tree on both legs (D16, I5), and the
+ * open that keeps a project an older build created on it.
+ *
+ * A browser project from before W22 DEF-W22-1 recorded Tau's ignore block and
+ * no attributes file, its part files pointers by family alone. Its first open
+ * on this build creates `.gitattributes` with Tau's block (never merging into
+ * a file that exists), so the next cut keeps every unchanged part the pointer
+ * HEAD holds: the only change is the attributes file itself, and no part's
+ * whole bytes become a Git blob a push would carry.
+ */
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { revisionTreeId } from '#git-tree-id.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { cleanLargeObjects, lfsPointerFor, readLfsPointer } from '#lfs.js';
+import { createNativeGitRevisionPort } from '#native-git-port.js';
+import type { RevisionPort } from '#revision-port.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
+
+const author = { name: 'Tau', email: 'tau@example.com' };
+const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 7) } as const;
+const encoder = new TextEncoder();
+const part = encoder.encode('solid part\n'.repeat(256));
+const { bytes: pointerBytes } = lfsPointerFor(part);
+const ignore = generatedIgnoreContent(undefined);
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+});
+
+/* HEAD as the older build recorded it: Tau's ignore block, no attributes file, the part a pointer. */
+const olderHead = new ImmutableRevisionTree([
+  [generatedIgnorePath, ignore],
+  ['main.scad', 'import("models/part.step");\n'],
+  ['models/part.step', pointerBytes],
+]);
+
+/* The checkout after the open: what HEAD holds, the part filled, and the attributes file the open made. */
+const capturedAfterOpen = (attributes: string): ImmutableRevisionTree =>
+  new ImmutableRevisionTree([
+    [generatedGitattributesPath, attributes],
+    [generatedIgnorePath, ignore],
+    ['main.scad', 'import("models/part.step");\n'],
+    ['models/part.step', part],
+  ]);
+
+/* HEAD plus the one file the migration adds: the only change the next cut may record. */
+const expectedTree = new ImmutableRevisionTree([
+  [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+  [generatedIgnorePath, ignore],
+  ['main.scad', 'import("models/part.step");\n'],
+  ['models/part.step', pointerBytes],
+]);
+
+/** Record the older build's HEAD verbatim, open the store as this build does, and cut the filled checkout. */
+const migrate = async (
+  open: () => RevisionPort,
+  readAttributes: () => Promise<string>,
+): Promise<Readonly<{ head: string; next: string; treeId: string; port: RevisionPort }>> => {
+  const older = open();
+  await older.init({ author, createSetupFiles: false });
+  const head = await older.writeRevision({
+    parents: [],
+    tree: olderHead,
+    largeObjects: false,
+    provenance,
+    summary: { generated: 'Older build' },
+  });
+  await older.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(head.commitId) });
+  const port = open();
+  await port.init({ author });
+  const captured = capturedAfterOpen(await readAttributes());
+  const next = await port.writeRevision({
+    parents: [revisionId(head.commitId)],
+    tree: captured,
+    provenance,
+    summary: { generated: 'First cut on this build' },
+  });
+  return {
+    head: head.commitId,
+    next: next.commitId,
+    treeId: revisionTreeId(cleanLargeObjects(captured).tree, 'sha1'),
+    port,
+  };
+};
+
+describe('an older Tau project, opened on this build (DEF-W22-1, D16)', () => {
+  it('keeps its parts pointers in the browser, the attributes file its only change', async () => {
+    const filesystem = new MemoryProvider();
+    await filesystem.writeFile(generatedIgnorePath, ignore);
+    await filesystem.writeFile('main.scad', 'import("models/part.step");\n');
+    await filesystem.mkdir('models', { recursive: true });
+    await filesystem.writeFile('models/part.step', part);
+
+    const { next, treeId, port } = await migrate(
+      () => createIsomorphicGitRevisionPort({ filesystem }),
+      async () => filesystem.readFile(generatedGitattributesPath, 'utf8'),
+    );
+
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(ignore);
+    expect(treeId).toBe(revisionTreeId(expectedTree, 'sha1'));
+    const record = await port.readRevision(revisionId(next));
+    expect(record?.treeId).toBe(treeId);
+  });
+
+  it.runIf(gitToolchainOnPath)(
+    'keeps its parts pointers on disk, the same tree, and stores no whole blob of them',
+    async () => {
+      const project = await mkdtemp(join(tmpdir(), 'tau-older-project-'));
+      roots.push(project);
+      await writeFile(join(project, generatedIgnorePath), ignore);
+      await writeFile(join(project, 'main.scad'), 'import("models/part.step");\n');
+      await mkdir(join(project, 'models'));
+      await writeFile(join(project, 'models', 'part.step'), part);
+      const git = (args: readonly string[]): string =>
+        execFileSync('git', args, { cwd: project, encoding: 'utf8' }).trim();
+
+      const { head, next, treeId } = await migrate(
+        () => createNativeGitRevisionPort({ repositoryPath: project }),
+        async () => readFile(join(project, generatedGitattributesPath), 'utf8'),
+      );
+
+      expect(git(['rev-parse', `${next}^{tree}`])).toBe(treeId);
+      expect(treeId).toBe(revisionTreeId(expectedTree, 'sha1'));
+      expect(git(['diff', '--name-only', head, next])).toBe(generatedGitattributesPath);
+      expect(git(['rev-parse', `${next}:models/part.step`])).toBe(git(['rev-parse', `${head}:models/part.step`]));
+      const stored = encoder.encode(`${git(['cat-file', 'blob', `${next}:models/part.step`])}\n`);
+      expect(readLfsPointer(stored)).toStrictEqual(lfsPointerFor(part).pointer);
+      /* The part's whole bytes as a Git blob: what a push would carry if the cut had dropped the pointer. */
+      const whole = git(['hash-object', '--no-filters', join('models', 'part.step')]);
+      expect(() => git(['cat-file', '-e', whole])).toThrow();
+    },
+    120_000,
+  );
+});
+
+describe('one rule on both legs (I5)', () => {
+  it('records one tree for the same files whether or not the tree carries Tau’s block', async () => {
+    const trees = [
+      capturedAfterOpen(generatedGitattributesContent(undefined)),
+      new ImmutableRevisionTree([
+        [generatedGitattributesPath, '*.stl filter=lfs diff=lfs merge=lfs -text\n'],
+        ['scan.stl', part],
+        ['models/part.step', part],
+      ]),
+    ];
+    const legs = [
+      () => createIsomorphicGitRevisionPort({ filesystem: new MemoryProvider() }),
+      ...(gitToolchainOnPath
+        ? [
+            async () => {
+              const root = await mkdtemp(join(tmpdir(), 'tau-one-rule-'));
+              roots.push(root);
+              return createNativeGitRevisionPort({ repositoryPath: root });
+            },
+          ]
+        : []),
+    ];
+    for (const tree of trees) {
+      // oxlint-disable-next-line no-await-in-loop -- one tree at a time across the legs.
+      const recorded = await Promise.all(
+        legs.map(async (leg) => {
+          const port = await leg();
+          await port.init({ author, createSetupFiles: false });
+          const receipt = await port.writeRevision({ parents: [], tree, provenance, summary: { generated: 'One' } });
+          const record = await port.readRevision(revisionId(receipt.commitId));
+          return record?.treeId;
+        }),
+      );
+      expect(new Set(recorded).size).toBe(1);
+      expect(recorded[0]).toBe(revisionTreeId(cleanLargeObjects(tree).tree, 'sha1'));
+    }
+  }, 120_000);
+});

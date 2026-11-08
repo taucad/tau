@@ -10,6 +10,7 @@ import { createRevisionActors } from '#revision-effects.js';
 import { ImmutableRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { createLargeObjectAdoption } from '#large-object-adoption.js';
 import type { Checkout } from '#revision-port.js';
+import { generatedGitattributesContent } from '#workspace-config.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 
 const encoder = new TextEncoder();
@@ -154,8 +155,24 @@ describe('adopting a large file (D9)', () => {
   }, 30_000);
 
   /* A checkout of many large files is never copied whole: each candidate is copied once, to be stored. */
+  it('adopts nothing the attributes do not name, whatever its family (D16)', async () => {
+    const before = new ImmutableRevisionTree([['models/part.step', part]]);
+    const storeObject = vi.fn<(object: unknown, content: unknown) => Promise<void>>();
+    const { adopt } = createLargeObjectAdoption({
+      capture: async () => before,
+      withCheckoutFence: async (_id, operation) => operation(),
+      materializeTree: vi.fn<() => Promise<void>>(),
+      storeObject,
+      readStoredObject: async () => undefined,
+    });
+
+    expect(await adopt({ id: 'c1' } as Checkout)).toStrictEqual({ adopted: [], left: [] });
+    expect(storeObject).not.toHaveBeenCalled();
+  });
+
   it('shares every unchanged record with the capture and copies only the file being stored', async () => {
     const before = new ImmutableRevisionTree([
+      ['.gitattributes', generatedGitattributesContent(undefined)],
       ['main.scad', 'import("models/part.step");\n'],
       ['models/part.step', part],
     ]);

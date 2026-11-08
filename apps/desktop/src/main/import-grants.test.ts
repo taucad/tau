@@ -4,7 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createImportGrants } from '#main/import-grants.js';
+import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+import { createImportGrants, importGrantCapacity } from '#main/import-grants.js';
 import type { ImportGrant } from '#main/import-grants.js';
 
 const temporary: string[] = [];
@@ -73,5 +74,28 @@ describe('createImportGrants', () => {
     const next = await grants.mint(root, 'directory', 2);
     const last = await grants.mint(root, 'directory', 2);
     expect(grants.list().map(({ grant }) => grant)).toEqual([third.grant, fourth.grant, next.grant, last.grant]);
+  });
+});
+
+describe('importGrantCapacity', () => {
+  it('keeps every grant of a full Open With batch for one window', async () => {
+    const root = sandbox();
+    const { maxFiles } = quickLookManifest.limits;
+    const grants = createImportGrants({ maxGrants: importGrantCapacity(maxFiles), publish: () => undefined });
+    const minted: string[] = [];
+    for (let index = 0; index < maxFiles; index++) {
+      const path = join(root, `part-${index}.step`);
+      writeFileSync(path, 'ISO-10303-21;');
+      // oxlint-disable-next-line no-await-in-loop -- mints in order, as one Open With batch does
+      const { grant } = await grants.mint(path, 'file', 7);
+      minted.push(grant);
+    }
+
+    expect(
+      grants
+        .list()
+        .filter(({ owner }) => owner === '7')
+        .map(({ grant }) => grant),
+    ).toStrictEqual(minted);
   });
 });

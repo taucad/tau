@@ -29,6 +29,17 @@ export type ImportGrant = Readonly<{
   owner: string;
 }>;
 
+/** Grants a window may hold beyond one full Open With batch: its folder pick and a batch still being let go. */
+const grantHeadroom = 16;
+
+/**
+ * The per-window grant cap for an Open With limit of `maxOpenFiles`. One batch mints a grant per file for
+ * one window, so a cap below the batch would evict that batch's own first grants before the window sees them.
+ *
+ * @returns The cap to pass as `maxGrants`.
+ */
+export const importGrantCapacity = (maxOpenFiles: number): number => maxOpenFiles + grantHeadroom;
+
 type ImportGrantsOptions = Readonly<{
   /**
    * The most grants one window holds at once; its oldest is let go first.

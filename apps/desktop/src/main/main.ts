@@ -110,7 +110,7 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
-import { createImportGrants } from '#main/import-grants.js';
+import { createImportGrants, importGrantCapacity } from '#main/import-grants.js';
 import type { ImportGrant } from '#main/import-grants.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
@@ -315,7 +315,7 @@ const watchImportOwner = (sender: WebContents): void => {
 /* The services host is told every grant once it exists, and again on each change (W7.4). */
 let publishImportGrants: (grants: readonly ImportGrant[]) => void = () => undefined;
 const importGrants = createImportGrants({
-  maxGrants: 64,
+  maxGrants: importGrantCapacity(quickLookManifest.limits.maxFiles),
   publish: (grants) => {
     publishImportGrants(grants);
   },

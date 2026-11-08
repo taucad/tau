@@ -1,5 +1,5 @@
-import type { LucideIcon } from 'lucide-react';
-import { ArrowUpRight, ChevronRight, LoaderCircle, X } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { ArrowUpRight, ChevronRight, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from '@taucad/ui/components/sidebar';
@@ -33,7 +33,7 @@ export function UpdateControl({
   readonly title: string;
   readonly version?: string;
   readonly detail: string;
-  readonly icon: LucideIcon;
+  readonly icon: React.ComponentType<{ readonly className?: string }>;
   readonly isFailed?: boolean;
   /** Tints the row with the brand colour (a light wash, a half fill in dark mode) when an update is ready. */
   readonly isProminent?: boolean;
@@ -105,7 +105,7 @@ export function UpdateControl({
               )}
               {action ? (
                 <Button size='xs' variant={action.variant} disabled={action.busy} onClick={action.onClick}>
-                  {action.busy ? <LoaderCircle className='size-3 spin-glyph' /> : undefined}
+                  {action.busy ? <Loader className='size-3' /> : undefined}
                   {action.busy ? 'Please wait…' : action.label}
                 </Button>
               ) : undefined}

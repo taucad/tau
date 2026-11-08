@@ -390,7 +390,8 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S13',
     title: 'LSP module resolution, 3,000 probes',
-    model: '1,000 specifiers × up to three candidates (.ts, .tsx, /index.ts): rooted exists, then stat on a hit.',
+    model:
+      "1,000 specifiers × up to three candidates (.ts, .tsx, /index.ts): exists, then the version of a hit, answered by the language worker's index mirror (lsp-fs createIndexMirror, fed by feedIndexMirror from the root's index as the file manager feeds it on attach); a path the index never holds would ask the rooted view, as the worker's slot does. The mirror is built before the measured window, as the worker builds it once on attach.",
     times: [{ metric: 'duration', limit: 300, description: '≤ 300 ms' }],
     gates: [
       {

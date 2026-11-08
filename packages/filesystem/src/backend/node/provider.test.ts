@@ -14,9 +14,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
+import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
 import type { Event as ParcelEvent } from '@parcel/watcher';
 
@@ -182,6 +183,26 @@ describe('NodeFsProvider atomic writes', () => {
     }
   });
 
+  it('reports a change whose kind a failed stat cannot tell as a reset', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: async () => undefined };
+    });
+    vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    const events: unknown[] = [];
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+    onEvents?.(null, [{ type: 'update', path: join(root, 'target.txt') }]);
+    await drainNodeFsProviderWatchClosures(provider);
+    await vi.waitFor(() => {
+      expect(events).toEqual([{ type: 'reset' }]);
+    });
+    stop();
+    await drainNodeFsProviderWatchClosures(provider);
+  });
+
   it('reports native stream loss as a whole-subscription reset', async () => {
     const provider = new NodeFsProvider(createRoot());
     const close = vi.fn(async () => undefined);
@@ -197,6 +218,103 @@ describe('NodeFsProvider atomic writes', () => {
     stop();
     await drainNodeFsProviderWatchClosures(provider);
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps delivering events after a handler throws', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const close = vi.fn(async () => undefined);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: close };
+    });
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const events: unknown[] = [];
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => {
+      events.push(event);
+      if (events.length === 1) {
+        throw new Error('handler broke');
+      }
+    });
+    try {
+      onEvents?.(null, [{ path: join(root, 'target.txt'), type: 'update' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      onEvents?.(null, [{ path: join(root, 'gone.txt'), type: 'delete' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      /* The event the handler dropped is owed back as a reset, so the consumer resyncs rather than stays stale. */
+      expect(events).toEqual([
+        { type: 'change', path: 'target.txt', kind: 'file' },
+        { type: 'reset' },
+        { type: 'delete', path: 'gone.txt' },
+      ]);
+      expect(reported).toHaveBeenCalledWith(expect.stringContaining('watch handler threw'), expect.any(Error));
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  });
+
+  it('delivers a dropped reset again, ahead of the next event when its retry throws too', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const close = vi.fn(async () => undefined);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: close };
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const events: unknown[] = [];
+    let failures = 2;
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => {
+      events.push(event);
+      if (event.type === 'reset' && failures > 0) {
+        failures -= 1;
+        throw new Error('handler broke');
+      }
+    });
+    try {
+      onEvents?.(new Error('native stream lost'), []);
+      await drainNodeFsProviderWatchClosures(provider);
+      /* The reset, then its one retry, both dropped: still owed, and never retried in a loop. */
+      expect(events).toEqual([{ type: 'reset' }, { type: 'reset' }]);
+      onEvents?.(null, [{ path: join(root, 'target.txt'), type: 'update' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      expect(events).toEqual([
+        { type: 'reset' },
+        { type: 'reset' },
+        { type: 'reset' },
+        { type: 'change', path: 'target.txt', kind: 'file' },
+      ]);
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  });
+
+  it('acknowledges a watch whose handler throws during admission and releases every subscription', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const close = vi.fn(async () => undefined);
+    let subscriptions = 0;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async () => {
+      subscriptions += 1;
+      /* The target's parent appears while the first subscription starts, so admission reconciles with a reset. */
+      if (subscriptions === 1) {
+        mkdirSync(join(root, 'later'));
+      }
+      return { unsubscribe: close };
+    });
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const stop = await provider.watch({ paths: ['later/file.txt'], recursive: false }, () => {
+      throw new Error('handler broke');
+    });
+    expect(subscriptions).toBe(2);
+    expect(reported).toHaveBeenCalled();
+    stop();
+    await drainNodeFsProviderWatchClosures(provider);
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it('should keep excluded subtrees out of the native watch and never stat their events', async () => {
@@ -225,10 +343,59 @@ describe('NodeFsProvider atomic writes', () => {
       const updated: ParcelEvent = { path: join(directory, 'target.txt'), type: 'update' };
       const burst = [...Array.from({ length: 50 }, (_, index) => created(index)), updated];
       statted.paths.length = 0;
+      const stat = vi.spyOn(fs, 'stat');
       onEvents?.(null, burst);
+      await drainNodeFsProviderWatchClosures(provider);
       expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);
       /* A bulk change under an excluded tree costs no syscall on the services utility's event loop. */
-      expect(statted.paths.filter((statPath) => statPath.includes(join('.tau', 'cache')))).toEqual([]);
+      expect(stat.mock.calls.map(([statPath]) => String(statPath))).toEqual([join(directory, 'target.txt')]);
+      /* No event is classified by a synchronous `stat` (D16). */
+      expect(statted.paths.filter((statPath) => statPath.startsWith(`${directory}${sep}`))).toEqual([]);
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  });
+
+  it('should trust a native delete and classify a burst in arrival order without a synchronous stat (D16)', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: async () => undefined };
+    });
+    const events: unknown[] = [];
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+    try {
+      const [[directory]] = subscribe.mock.calls as unknown as [[string]];
+      mkdirSync(join(directory, 'made'));
+      writeFileSync(join(directory, 'made', 'a.txt'), 'a');
+      const stat = vi.spyOn(fs, 'stat');
+      statted.paths.length = 0;
+      const removed = Array.from(
+        { length: 100 },
+        (_, index): ParcelEvent => ({
+          path: join(directory, 'gone', `${String(index)}.txt`),
+          type: 'delete',
+        }),
+      );
+      onEvents?.(null, [
+        { path: join(directory, 'made'), type: 'create' },
+        { path: join(directory, 'made', 'a.txt'), type: 'create' },
+        ...removed,
+      ]);
+      onEvents?.(null, [{ path: join(directory, 'target.txt'), type: 'update' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      expect(events).toEqual([
+        { type: 'change', path: 'made', kind: 'dir' },
+        { type: 'change', path: 'made/a.txt', kind: 'file' },
+        ...removed.map((_, index) => ({ type: 'delete', path: `gone/${String(index)}.txt` })),
+        { type: 'change', path: 'target.txt', kind: 'file' },
+      ]);
+      /* One asynchronous stat per create or update, none per delete, and no synchronous one at all. */
+      expect(stat).toHaveBeenCalledTimes(3);
+      expect(statted.paths.filter((statPath) => statPath.startsWith(`${directory}${sep}`))).toEqual([]);
     } finally {
       stop();
       await drainNodeFsProviderWatchClosures(provider);
@@ -652,5 +819,342 @@ describe('NodeFsProvider head listing', () => {
     expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
     expect(fullRead).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('NodeFsProvider head listing cost (D16)', () => {
+  it('lists a directory with one lstat per row and no per-row realpath', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'parts'));
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(root, 'parts', `${String(index)}.step`), String(index));
+    }
+    mkdirSync(join(root, 'parts', 'sub'));
+    const realpath = vi.spyOn(fs, 'realpath');
+    const lstat = vi.spyOn(fs, 'lstat');
+    const stat = vi.spyOn(fs, 'stat');
+
+    const rows = await provider.readdirWithStats('parts');
+
+    expect(rows).toHaveLength(21);
+    expect(rows.find(({ name }) => name === 'sub')).toMatchObject({ type: 'dir' });
+    expect(rows.find(({ name }) => name === '7.step')).toMatchObject({ type: 'file', size: 1 });
+    /* The root's and the directory's admission, a constant three, then one lstat per row: no row repeats them. */
+    expect(realpath.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(lstat.mock.calls.filter(([entry]) => String(entry).startsWith(`${join(root, 'parts')}${sep}`))).toHaveLength(
+      21,
+    );
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('still stats a row through its link, and refuses one that launders the mask', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'real'));
+    writeFileSync(join(root, 'real', 'a.txt'), 'abc');
+    symlinkSync(join(root, 'real', 'a.txt'), join(root, 'link.txt'));
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.git', 'config'), 'secret');
+    symlinkSync(join(root, '.git', 'config'), join(root, 'notes'));
+
+    const rows = await provider.readdirWithStats('');
+
+    expect(rows.find(({ name }) => name === 'link.txt')).toMatchObject({ type: 'file', size: 3 });
+    expect(rows.map(({ name }) => name)).not.toContain('notes');
+  });
+
+  it('lists through a linked directory by resolving each row', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'real'));
+    writeFileSync(join(root, 'real', 'a.txt'), 'abcd');
+    symlinkSync(join(root, 'real'), join(root, 'alias'));
+    const stat = vi.spyOn(fs, 'stat');
+
+    const rows = await provider.readdirWithStats('alias');
+
+    expect(rows.map(({ name, type, size }) => ({ name, type, size }))).toEqual([
+      { name: 'a.txt', type: 'file', size: 4 },
+    ]);
+    expect(stat).toHaveBeenCalled();
+  });
+});
+
+describe('NodeFsProvider applyBatch (D16)', () => {
+  /** Count every fsync any file handle makes, file or directory, from here on. */
+  const countSyncs = async (root: string): Promise<{ count(): number }> => {
+    const probe = await fs.open(join(root, 'target.txt'), 'r');
+    const prototype = Object.getPrototypeOf(probe) as { sync(): Promise<void> };
+    await probe.close();
+    const sync = vi.spyOn(prototype, 'sync');
+    return { count: () => sync.mock.calls.length };
+  };
+
+  it('fsyncs a changeset at most once per file plus once per directory', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const directories = ['a', 'b', 'c/d'];
+    const entries = directories.flatMap((directory) =>
+      Array.from(
+        { length: 10 },
+        (_, index): Extract<BatchEntry, { op: 'write' }> & { data: Uint8Array<ArrayBuffer> } => ({
+          op: 'write',
+          path: `${directory}/${String(index)}.txt`,
+          data: new TextEncoder().encode(`${directory} ${String(index)}`),
+        }),
+      ),
+    );
+    const syncs = await countSyncs(root);
+
+    const receipts = await provider.applyBatch(entries);
+
+    expect(receipts).toEqual(entries.map(() => ({ outcome: 'applied', kind: 'file' })));
+    /* 30 files in 3 directories: 33, where one write at a time pays 60. Windows cannot sync a directory, so each
+     * file there syncs its own handle again after its rename. */
+    expect(syncs.count()).toBe(process.platform === 'win32' ? 2 * entries.length : entries.length + directories.length);
+    for (const entry of entries) {
+      expect(readFileSync(join(root, entry.path), 'utf8')).toBe(new TextDecoder().decode(entry.data));
+    }
+    expect(directories.flatMap((directory) => temporaryFiles(join(root, directory)))).toEqual([]);
+  });
+
+  it('reads each written file back once and never re-reads an unwritten one (I2)', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = vi.spyOn(fs, 'open');
+    await provider.applyBatch([
+      { op: 'write', path: 'one.txt', data: new TextEncoder().encode('1') },
+      { op: 'write', path: 'two.txt', data: new Blob(['2']) },
+    ]);
+    const verifications = open.mock.calls.filter(([, flags]) => typeof flags === 'number');
+    /* The provider resolves its root natively, so on Windows it opens the long name of an 8.3 temp path. */
+    const resolved = realpathSync.native(root);
+    expect(verifications.map(([opened]) => String(opened)).toSorted()).toEqual([
+      join(resolved, 'one.txt'),
+      join(resolved, 'two.txt'),
+    ]);
+    expect(readFileSync(join(root, 'two.txt'), 'utf8')).toBe('2');
+  });
+
+  it('answers each entry truthfully beside the others', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    mkdirSync(join(root, 'folder'));
+    writeFileSync(join(root, 'moved.txt'), 'm');
+    writeFileSync(join(root, 'removed.txt'), 'r');
+
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('kept'), create: true },
+      { op: 'write', path: 'folder', data: new TextEncoder().encode('x') },
+      { op: 'write', path: 'fresh.sh', data: new TextEncoder().encode('#!/bin/sh\n'), mode: '100755', create: true },
+      { op: 'write', path: 'target.txt.copy', data: new TextEncoder().encode('new') },
+      { op: 'move', from: 'moved.txt', to: 'arrived.txt' },
+      { op: 'delete', path: 'removed.txt' },
+      { op: 'mkdir', path: 'made', recursive: true },
+    ]);
+
+    expect(receipts.map(({ outcome }) => outcome)).toEqual([
+      'failed',
+      'failed',
+      'applied',
+      'applied',
+      'applied',
+      'applied',
+      'applied',
+    ]);
+    expect((receipts[0]!.error as NodeJS.ErrnoException).code).toBe('EEXIST');
+    expect((receipts[1]!.error as NodeJS.ErrnoException).code).toBe('EISDIR');
+    expect(receipts[2]).toEqual({ outcome: 'applied', kind: 'file', created: true });
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(await provider.getFileMode('fresh.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    expect(readFileSync(join(root, 'arrived.txt'), 'utf8')).toBe('m');
+    expect(lstatSync(join(root, 'made')).isDirectory()).toBe(true);
+    expect(readdirSync(root).toSorted()).toEqual(
+      ['arrived.txt', 'folder', 'fresh.sh', 'made', 'target.txt', 'target.txt.copy'].toSorted(),
+    );
+  });
+
+  it('keeps an existing file mode unless the entry names one', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    writeFileSync(join(root, 'run.sh'), 'old', { mode: 0o755 });
+    await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('new') }]);
+    expect(await provider.getFileMode('run.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('x'), mode: '100644' }]);
+    expect(await provider.getFileMode('run.sh')).toBe('100644');
+  });
+
+  it('reports a write uncertain when its directory fsync fails after the rename', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('post-rename-fsync');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('uncertain');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write failed and leaves its target untouched when staging fails', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('file-fsync');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('failed');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write failed and leaves its target untouched when its temp write fails', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('temp-write');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('failed');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write uncertain when its rename lands and then throws', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('rename');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('uncertain');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write uncertain when its rename throws anything but a refusal', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }));
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]).toMatchObject({ outcome: 'uncertain', error: { code: 'EIO' } });
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write failed when its rename is refused', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('EBUSY: busy'), { code: 'EBUSY' }));
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'EBUSY' } });
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+  });
+
+  it('reports a write uncertain when its read-back fails after the rename', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('read-back');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('uncertain');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write uncertain when it fails after making its parent', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('file-fsync');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'made/deeper/new.txt', data: new TextEncoder().encode('new') },
+    ]);
+    /* The directories it made are a change the pipeline must reconcile, as the primitive batch reports it. */
+    expect(receipts[0]?.outcome).toBe('uncertain');
+    expect(lstatSync(join(root, 'made', 'deeper')).isDirectory()).toBe(true);
+  });
+
+  it('refuses to publish through a parent swapped for a symlink while it staged', async () => {
+    const root = createRoot();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-outside-')));
+    roots.push(outside);
+    mkdirSync(join(root, 'sub'));
+    const provider = new NodeFsProvider(root);
+    let swapRefusal: string | undefined;
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (opened, flags, mode) => {
+      const handle = await open(opened, flags, mode);
+      if (flags === 'wx') {
+        const sync = handle.sync.bind(handle);
+        vi.spyOn(handle, 'sync').mockImplementation(async () => {
+          await sync();
+          try {
+            renameSync(join(root, 'sub'), join(root, 'sub-before'));
+          } catch (error) {
+            swapRefusal = (error as NodeJS.ErrnoException).code;
+            throw error;
+          }
+          symlinkSync(outside, join(root, 'sub'), 'dir');
+        });
+      }
+      return handle;
+    });
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'sub/escape.txt', data: new TextEncoder().encode('new') },
+    ]);
+    /*
+     * Windows will not rename a directory while a file inside it is open, so there the swap itself is
+     * refused and the write fails with that refusal. Elsewhere the swap lands and the publish must
+     * refuse the symlinked parent. Either way nothing reaches the outside directory.
+     */
+    if (process.platform === 'win32') {
+      expect(swapRefusal).toBe('EPERM');
+      expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'EPERM' } });
+    } else {
+      expect(swapRefusal).toBeUndefined();
+      expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'ELOOP' } });
+    }
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it('applies the rest of a batch when some of its writes fail', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to).endsWith(`${sep}b.txt`)) {
+        throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+      }
+      await rename(from, to);
+    });
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'a.txt', data: new TextEncoder().encode('a') },
+      { op: 'write', path: 'b.txt', data: new TextEncoder().encode('b') },
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('t'), create: true },
+      { op: 'write', path: 'c/c.txt', data: new TextEncoder().encode('c') },
+      { op: 'delete', path: 'missing.txt' },
+    ]);
+    expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'uncertain', 'failed', 'applied', 'failed']);
+    expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('a');
+    expect(readFileSync(join(root, 'c', 'c.txt'), 'utf8')).toBe('c');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(readdirSync(root).includes('b.txt')).toBe(false);
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('starts no write once the changeset is aborted', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const controller = new AbortController();
+    controller.abort(new DOMException('stopped', 'AbortError'));
+    const receipts = await provider.applyBatch(
+      [{ op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') }],
+      { signal: controller.signal },
+    );
+    expect(receipts[0]?.outcome).toBe('failed');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
   });
 });

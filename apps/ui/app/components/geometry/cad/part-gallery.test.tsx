@@ -350,7 +350,10 @@ describe('PartGallery', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Preview unavailable');
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
-      expect(service.requestForOwner.mock.calls.at(-1)?.[3]).toEqual({ manualPartId: 'housing' });
+      expect(service.requestForOwner.mock.calls.at(-1)?.[3]).toEqual({
+        resolution: 'gallery',
+        manualPartId: 'housing',
+      });
     });
   });
 

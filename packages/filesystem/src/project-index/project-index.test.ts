@@ -13,7 +13,8 @@ import { createWorkspaceFileService } from '#testing/workspace-service-harness.j
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type { ObservedRow } from '#project-index/project-index.js';
 import { ProjectIndexes } from '#project-index/project-indexes.js';
-import { readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
+import { importFactsFreshMilliseconds } from '#importer/facts.js';
+import { parseIndexSnapshot, readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 
@@ -109,6 +110,14 @@ describe('ProjectIndex', () => {
       const before = index.generation;
       index.recordFile('src/new.ts', { size: 1 });
       expect(index.changedSince(before).map((entry) => entry.path)).toEqual(['src/new.ts']);
+    });
+
+    it('should ask the mask before descending when it answers what changed', () => {
+      const before = index.generation;
+      index.recordFile('src/new.ts', { size: 1 });
+      index.recordFile('docs/new.md', { size: 1 });
+      const admits = (path: string): boolean => path !== 'src';
+      expect(index.changedSince(before, { admits }).map((entry) => entry.path)).toEqual(['docs', 'docs/new.md']);
     });
   });
 
@@ -391,6 +400,89 @@ const indexesOver = (provider: FileSystemProvider, tab: { tabId: string; seq: nu
     tab: () => tab,
     persistDelayMilliseconds: 60_000,
   });
+
+describe('ProjectIndex pending entries (D9)', () => {
+  const object = { oid: 'a'.repeat(64), size: 5_000_000 };
+
+  it('should hold a pending entry until a write or a changed observation ends it, and carry it on a move', () => {
+    const index = observed([file('part.step', 131, 1000), file('other.step', 131, 1000)]);
+    const before = index.generation;
+    index.markPending('part.step', object);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    expect(index.entry('part.step')?.pending).toStrictEqual(object);
+    expect(index.generation).toBeGreaterThan(before);
+    /* Marking again changes nothing; a directory or an unknown path is never pending. */
+    const marked = index.generation;
+    index.markPending('part.step', object);
+    index.markPending('missing.step', object);
+    expect(index.generation).toBe(marked);
+    /* An unchanged observation keeps it; a move carries it. */
+    index.completeObservation(index.beginObservation(), '', [
+      file('part.step', 131, 1000),
+      file('other.step', 131, 1000),
+    ]);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    index.move('part.step', 'moved.step');
+    expect(index.pendingFor('moved.step')).toStrictEqual(object);
+    /* The fill's write of the object, or anyone's, ends it. */
+    index.recordFile('moved.step', { size: object.size });
+    expect(index.pendingFor('moved.step')).toBeUndefined();
+    /* So does an observation that finds the bytes changed. */
+    index.markPending('other.step', object);
+    index.completeObservation(index.beginObservation(), '', [
+      file('moved.step', object.size, 2000),
+      file('other.step', 131, 3000),
+    ]);
+    expect(index.pendingFor('other.step')).toBeUndefined();
+  });
+
+  it('should not mark a pointer read pending when a write landed after the read began (I7)', () => {
+    const index = observed([file('part.step', 131, 1000)]);
+    const before = index.entry('part.step')!.generation;
+    /* The fill writes the object while the pointer's read is in flight. */
+    index.recordFile('part.step', { size: object.size });
+    index.markPending('part.step', object, { size: 131, generation: before });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* A size that is not the read's is not the pointer either. */
+    index.markPending('part.step', object, { size: 131 });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* The read's own observation still marks. */
+    index.recordFile('part.step', { size: 131 });
+    index.markPending('part.step', object, { size: 131, generation: index.entry('part.step')!.generation });
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+  });
+
+  it('should know a tree write’s entries before they land, each placeholder arriving until its object lands (D10)', () => {
+    const index = observed([file('tau.json', 40, 1000), file('held.step', 131, 1000)]);
+    expect(index.expecting).toBe(false);
+    index.expect([
+      { path: 'tau.json', size: 40, arriving: false },
+      { path: 'held.step', size: 131, pending: object, arriving: false },
+      { path: 'main.scad', size: 20, arriving: true },
+      { path: 'models/part.step', size: 131, pending: object, arriving: true },
+    ]);
+    /* An entry the checkout already holds is known now, a placeholder as a pending entry still arriving. */
+    expect(index.expecting).toBe(true);
+    expect(index.pendingFor('held.step')).toStrictEqual(object);
+    expect(index.arriving('held.step')).toBe(true);
+    expect(index.arriving('tau.json')).toBe(false);
+    expect(index.arriving('main.scad')).toBe(true);
+    /* A write lands an entry; a placeholder lands pending when its bytes are its pointer's. */
+    index.recordFile('main.scad', { size: 20 });
+    expect(index.arriving('main.scad')).toBe(false);
+    index.recordFile('models/.part.step.staged', { size: 131 });
+    expect(index.arriving('models/part.step')).toBe(true);
+    index.move('models/.part.step.staged', 'models/part.step');
+    expect(index.pendingFor('models/part.step')).toStrictEqual(object);
+    /* A pointer is not readable bytes: the placeholder lands when its object does. */
+    expect(index.arriving('models/part.step')).toBe(true);
+    index.recordFile('models/part.step', { size: object.size });
+    expect(index.arriving('models/part.step')).toBe(false);
+    expect(index.pendingFor('models/part.step')).toBeUndefined();
+    index.endExpectation();
+    expect(index.expecting).toBe(false);
+  });
+});
 
 describe('ProjectIndexes', () => {
   it('should open, list and compare a root reading no file content (I3)', async () => {
@@ -752,6 +844,40 @@ describe('ProjectIndexes', () => {
     expect(reads()).toBe(readsBefore);
   });
 
+  it('should store the provider mtime a compare adopted, so the next load matches every write (W3.2)', async () => {
+    const { provider } = await durableRoot();
+    const first = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await first.ready('/p');
+    await provider.writeFile('project/a.ts', 'a');
+    const { mtimeMs } = await provider.stat('project/a.ts');
+    /* The write path records its file before the provider's mtime is known. */
+    await vi.waitFor(() => {
+      expect(Date.now()).toBeGreaterThan(mtimeMs);
+    });
+    first.addFile('/p/a.ts', { size: 1 });
+    expect(await first.persist('/p')).toBe('written');
+    const written = vi.spyOn(provider, 'writeFile');
+
+    /* The compare adopts the provider's mtime and stores it. */
+    const adopted = await first.compare('/p');
+    expect(adopted.mismatched).toEqual([]);
+    await vi.waitFor(() => {
+      expect(written.mock.calls.some(([path]) => String(path).includes('.tau/index'))).toBe(true);
+    });
+    written.mockRestore();
+
+    const reload = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    /* A cold root's compare is its load's. */
+    const loaded = await reload.compare('/p');
+    expect(loaded.mismatched).toEqual([]);
+    expect(reload.get('/p')?.entry('a.ts')).toMatchObject({ size: 1, mtimeMs });
+  });
+
   it('should never let a tab that is behind overwrite a newer snapshot', async () => {
     const { provider } = await durableRoot();
     await provider.writeFile('project/a.ts', 'a');
@@ -776,6 +902,66 @@ describe('ProjectIndexes', () => {
     /* Once B accounts for A's notice it is no longer behind. */
     b.noteNotice('tab-a', 1, false);
     expect(await b.persist('/p')).toBe('written');
+  });
+
+  /* D9, I3: a reload knows its pending entries from the snapshot, reading no file to find them. */
+  it('should keep pending entries across a reload without reading a file', async () => {
+    const { provider, reads } = await durableRoot();
+    const object = { oid: 'b'.repeat(64), size: 5_000_000 };
+    await provider.writeFile('project/part.step', 'p'.repeat(131));
+    await provider.writeFile('project/main.scad', 'cube(1);');
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    before.markPending('/p/part.step', object);
+    expect(await before.persist('/p')).toBe('written');
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.pending).toEqual({ 'part.step': object });
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+    expect(reloaded.pendingAt('/p/main.scad')).toBeUndefined();
+    expect(reads()).toBe(0);
+  });
+
+  /* D9: a tree write's placeholder is recorded before the provider reports its mtime; the snapshot stores the provider's. */
+  it('should keep a placeholder a write landed pending across a reload, its mtime observed before storing', async () => {
+    const { provider } = await durableRoot();
+    const object = { oid: 'd'.repeat(64), size: 5_000_000 };
+    const pointer = 'p'.repeat(131);
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    await before.expect('/p', [{ path: 'part.step', size: 131, pending: object, arriving: true }]);
+    await provider.writeFile('project/part.step', pointer);
+    /* The write's bracket records its size, never the provider's mtime, which a later clock makes differ. */
+    vi.useFakeTimers({ now: Date.now() + 60_000 });
+    try {
+      before.addFile('/p/part.step', { size: pointer.length });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(before.pendingAt('/p/part.step')).toBeDefined();
+    expect(await before.persist('/p')).toBe('written');
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+  });
+
+  it('should keep each well-formed pending entry when another in the stored map is malformed', () => {
+    const object = { oid: 'c'.repeat(64), size: 7 };
+    const parsed = parseIndexSnapshot(
+      JSON.stringify({
+        format: 'tau-project-index',
+        version: 1,
+        vector: { generation: 1, seqByTab: {} },
+        rescan: false,
+        writtenAt: 1,
+        entries: [],
+        pending: { 'part.step': object, 'bad.step': { oid: 'not-an-oid', size: 7 }, 'odd.step': 3 },
+      }),
+    );
+    expect(parsed?.pending).toEqual({ 'part.step': object });
   });
 
   it('should re-observe what a notice left unknown before storing a snapshot that claims it', async () => {
@@ -1255,5 +1441,137 @@ describe('WorkspaceFileService', () => {
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.txt', 'sub/b.txt']);
     });
+  });
+});
+
+describe('ProjectIndexes import facts (D12)', () => {
+  const sha256 = (character: string): string => character.repeat(64);
+  const recordOf = (
+    at: number,
+    entries: ReadonlyArray<Readonly<{ path: string; size: number; oid: string; mtimeMs?: number }>>,
+  ): string =>
+    JSON.stringify({
+      version: 1,
+      operationId: 'req_import',
+      pin: { kind: 'zip', name: 'x', size: 1, entries: entries.length },
+      at,
+      entries: entries.map(({ path, size, oid, mtimeMs = 1_000_000 }) => ({
+        path,
+        size,
+        mtimeMs,
+        facts: { contentKind: 'text', blobOid: oid, sha256: sha256('e') },
+      })),
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should take the facts a committed import recorded for every file they still describe, without reading it', async () => {
+    const { provider, reads } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    await provider.writeFile('project/edited.txt', 'edit');
+    await provider.writeFile('project/resized.txt', 'size');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [
+        { path: 'kept.txt', size: 4, oid: 'a'.repeat(40) },
+        { path: 'edited.txt', size: 4, oid: 'b'.repeat(40) },
+        { path: 'resized.txt', size: 99, oid: 'c'.repeat(40) },
+        { path: 'malformed.txt', size: 4, oid: 'not-an-oid' },
+      ]),
+    );
+    /* Edited after the import, at the same size. */
+    vi.setSystemTime(1_020_000);
+    await provider.writeFile('project/edited.txt', 'EDIT');
+    const before = reads();
+
+    const indexes = indexesOver(provider);
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid', 'sha256'] });
+
+    expect(facts.get('kept.txt')).toMatchObject({ blobOid: 'a'.repeat(40), sha256: sha256('e') });
+    /* The record and nothing else was read. */
+    expect(reads() - before).toBe(1);
+
+    const measured = await indexes.facts('/project', ['edited.txt', 'resized.txt'], { digests: ['blobOid'] });
+    expect(measured.get('edited.txt')?.blobOid).not.toBe('b'.repeat(40));
+    expect(measured.get('resized.txt')?.blobOid).not.toBe('c'.repeat(40));
+  });
+
+  it('should measure a same-size replacement that carries an older mtime (cp -p, rsync -t, unzip)', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    /* Replaced at the same size with an mtime older than the one the commit observed. */
+    vi.setSystemTime(990_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).toBeDefined();
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should seed from a record once, never again on a later rescan', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    const indexes = indexesOver(provider);
+    const seeded = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+    expect(seeded.get('kept.txt')?.blobOid).toBe('a'.repeat(40));
+    /* Rewritten to other bytes at the very (size, mtime) recorded, then rescanned. */
+    vi.setSystemTime(1_000_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+    indexes.evict('/project');
+
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should take nothing from a record written longer ago than the first open after an import', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    vi.setSystemTime(1_010_000 + importFactsFreshMilliseconds + 1);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should take nothing from a record whose mtime disagrees with when it says it was written', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    /* Rewritten long after the time it carries. */
+    vi.setSystemTime(2_000_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_000_500, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
   });
 });

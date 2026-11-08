@@ -21,9 +21,17 @@ import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurren
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
-import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } from '#project-index/project-index.js';
+import type {
+  ExpectedEntry,
+  IndexAdmits,
+  IndexCompareResult,
+  IndexEntryKind,
+  ObservedRow,
+} from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
+import type { PendingObject } from '#pending-content.js';
+import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -142,6 +150,12 @@ export class ProjectIndexes {
    * read began. No write hook needs to forget them: a write changes the mtime.
    */
   private readonly _readFacts = new Map<string, Map<string, ReadFacts>>();
+
+  /** Roots opened by a scan whose import facts, if any, no digest request has taken yet (D12). */
+  private readonly _importFactsPending = new Set<string>();
+
+  /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
+  private readonly _importFactsTaken = new Set<string>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -262,6 +276,9 @@ export class ProjectIndexes {
       return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal, listed: options?.listed });
     }
     const index = await this.ready(key);
+    if (digests.length > 0 && this._importFactsPending.delete(key)) {
+      await this._seedImportFacts(key, index);
+    }
     const resolution = this._resolve(key);
     const trustworthy = resolution.persist !== undefined;
     const answers = (path: string, known: ContentFacts | undefined): known is ContentFacts => {
@@ -384,7 +401,12 @@ export class ProjectIndexes {
       return 'skipped';
     }
     /* A snapshot claims every notice its vector names: re-observe what those
-     * notices left unknown first, so it never stores a view older than its vector. */
+     * notices left unknown first, so it never stores a view older than its vector.
+     * A pending entry still waiting for its mtime is observed too, so the stored
+     * mtime is the provider's and the reload keeps it pending (D9). */
+    for (const path of state.index.unmeasuredPendingPaths) {
+      state.index.invalidate(path);
+    }
     if (state.index.stalePaths.length > 0) {
       await this._refreshStale(key, state.index);
       clearTimeout(state.persistTimer);
@@ -400,12 +422,17 @@ export class ProjectIndexes {
       provider: resolution.provider,
       providerRoot: resolution.path,
       lockName: resolution.persist.lockName,
-      snapshot: () => ({
-        vector: this.vector(key),
-        rescan: false,
-        writtenAt: Date.now(),
-        entries: state.index.toSnapshot(),
-      }),
+      snapshot: () => {
+        const pending = state.index.pendingSnapshot();
+        return {
+          vector: this.vector(key),
+          rescan: false,
+          writtenAt: Date.now(),
+          entries: state.index.toSnapshot(),
+          ...(Object.keys(pending).length === 0 ? {} : { pending }),
+          removals: state.index.removalSnapshot(),
+        };
+      },
     });
     if (written === 'busy') {
       this._schedulePersist(key);
@@ -484,6 +511,81 @@ export class ProjectIndexes {
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
     });
+  }
+
+  /**
+   * Make one file a pending entry in every index that holds it (see
+   * {@link ProjectIndex.markPending}).
+   *
+   * @param absolutePath - Absolute file path.
+   * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and {@link ProjectIndexes.generationAt} before the read.
+   */
+  public markPending(
+    absolutePath: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.markPending(relative, object, observed);
+    });
+  }
+
+  /**
+   * The generation of one entry in the warm index that covers it, taken before a read so a mark made from that read
+   * can tell whether a write landed since.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The generation, or `undefined` when no warm index holds the entry.
+   */
+  public generationAt(absolutePath: string): number | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.entry(covering.relative)?.generation;
+  }
+
+  /**
+   * The large object a warm index records for one pending entry.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The object, or `undefined` when no index has it pending.
+   */
+  public pendingAt(absolutePath: string): PendingObject | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.pendingFor(covering.relative);
+  }
+
+  /**
+   * Know a tree's entries before its write lands them, in the index of that
+   * exact root (see {@link ProjectIndex.expect}), opening it when it is cold.
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param entries - Every entry of the tree, root-relative.
+   */
+  public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+    /* A cold root is opened first, so a cold open's write is known as it lands. */
+    const index = await this.ready(root);
+    index.expect(entries);
+  }
+
+  /**
+   * Whether every one of these paths of the expected tree has landed (D10).
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param paths - Root-relative file paths.
+   * @returns `true` when none is arriving; `undefined` when that root's index expects no tree.
+   */
+  public landed(root: string, paths: readonly string[]): boolean | undefined {
+    const index = this._states.get(normalizePath(root))?.index;
+    return index?.expecting === true ? paths.every((path) => !index.arriving(path)) : undefined;
+  }
+
+  /**
+   * End a root's expectation: its tree write is over.
+   *
+   * @param root - Absolute root.
+   */
+  public endExpectation(root: string): void {
+    this._states.get(normalizePath(root))?.index.endExpectation();
   }
 
   /**
@@ -589,6 +691,7 @@ export class ProjectIndexes {
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
   public clear(): void {
     this._readFacts.clear();
+    this._importFactsPending.clear();
     for (const state of this._states.values()) {
       clearTimeout(state.persistTimer);
     }
@@ -687,7 +790,10 @@ export class ProjectIndexes {
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
     const usable = snapshot !== undefined && !snapshot.rescan;
     const index = usable
-      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation)
+      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, {
+          ...(snapshot.pending === undefined ? {} : { pending: snapshot.pending }),
+          ...(snapshot.removals === undefined ? {} : { removals: snapshot.removals }),
+        })
       : new ProjectIndex({
           trustworthyMtime:
             resolution.persist !== undefined || resolution.provider.capabilities.trustworthyMtime === true,
@@ -708,8 +814,59 @@ export class ProjectIndexes {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
     }
+    if (!usable) {
+      /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */
+      this._importFactsPending.add(root);
+    }
     this._schedulePersist(root);
     return index;
+  }
+
+  /**
+   * Take a committed import's recorded facts (charter D12) for every file
+   * they still describe, so a digest request finds blob ids and SHA-256
+   * without hashing the import again. Asked once, by the first digest request
+   * after a scan, so opening a root costs nothing more. Only on a provider
+   * whose mtimes are trustworthy, and only what {@link verifiedImportFacts}
+   * holds to the file: anything else is measured like any file. A record
+   * seeds once: a later rescan of the root measures its files. The record
+   * is trusted as of its own mtime, so a file written within the racy window
+   * of it stays untrusted (EQ7).
+   */
+  private async _seedImportFacts(root: string, index: ProjectIndex): Promise<void> {
+    if (!this._trustsMtime(root)) {
+      return;
+    }
+    const { provider, path } = this._resolve(root);
+    const recordPath = joinRelativePath(path, importFactsPath);
+    let record: ReturnType<typeof parseImportFacts>;
+    let recordMtime: number;
+    try {
+      const stat = await provider.stat(recordPath);
+      /* A record for the largest import admitted is a few megabytes; anything far past that is not one. */
+      if (stat.type !== 'file' || stat.size > importFactsMaximumBytes) {
+        return;
+      }
+      recordMtime = stat.mtimeMs;
+      record = parseImportFacts(await provider.readFile(recordPath));
+    } catch {
+      return;
+    }
+    const taken = `${root}\0${record?.operationId ?? ''}`;
+    if (record === undefined || this._importFactsTaken.has(taken)) {
+      return;
+    }
+    this._importFactsTaken.add(taken);
+    const seeded = verifiedImportFacts(record, { recordMtime, now: Date.now() }, (entryPath) => {
+      const entry = index.settled(entryPath) ? index.entry(entryPath) : undefined;
+      return entry === undefined || entry.kind === 'dir'
+        ? undefined
+        : { kind: 'file', size: entry.size, mtimeMs: entry.mtimeMs };
+    });
+    for (const [entryPath, { facts, size, mtimeMs }] of seeded) {
+      index.recordFacts(entryPath, facts, { size, mtimeMs, observedAt: recordMtime });
+    }
+    workerTimings.count('index.importFacts', seeded.size);
   }
 
   /**
@@ -768,7 +925,9 @@ export class ProjectIndexes {
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;
     }
-    if (result.mismatched.length > 0) {
+    /* An adopted mtime changes what the snapshot must hold, not the generation. */
+    const adopted = index.takeAdoptedMtimes();
+    if (result.mismatched.length > 0 || adopted > 0) {
       this._schedulePersist(root);
     }
     return result;

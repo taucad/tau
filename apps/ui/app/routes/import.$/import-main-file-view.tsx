@@ -7,13 +7,16 @@ import { FileSelector } from '#components/files/file-selector.js';
 import { ImportViewer } from '#routes/import.$/import-viewer.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { supportedKernelExtensions } from '#routes/import.$/import.utils.js';
-import type { FileMap } from '#utils/file-reader.utils.js';
+import type { ImportPreviewLoader } from '#routes/import.$/import-viewer.js';
 
 type ImportMainFileViewProperties = {
   readonly title: string;
   readonly subtitle: string;
   readonly requestedMainFileWarning?: string;
-  readonly files: FileMap;
+  /** Every imported path and its size: what the review needs, without the bytes. */
+  readonly files: ReadonlyArray<Readonly<{ path: string; size: number }>>;
+  /** The bytes the preview renders, read on request. */
+  readonly loadPreview: ImportPreviewLoader;
   readonly selectedMainFile: string | undefined;
   readonly owner?: string;
   readonly repo?: string;
@@ -30,6 +33,7 @@ export function ImportMainFileView({
   subtitle,
   requestedMainFileWarning,
   files,
+  loadPreview,
   selectedMainFile,
   owner = '',
   repo = '',
@@ -38,15 +42,24 @@ export function ImportMainFileView({
   onCancel,
 }: ImportMainFileViewProperties): React.JSX.Element {
   const mainFileLabelId = useId();
-  const fileNames = [...files.keys()];
-  const cadSourceCount = fileNames.filter((path) =>
-    supportedKernelExtensions.some((extension) => path.toLowerCase().endsWith(extension)),
-  ).length;
-  let byteLength = 0;
-  for (const file of files.values()) {
-    byteLength += file.content.byteLength;
-  }
-  const dataSource = useMemo(() => createStaticDataSource([...files.keys()].map((path) => ({ path }))), [files]);
+  const fileNames = useMemo(() => files.map(({ path }) => path), [files]);
+  const cadSources = useMemo(
+    () =>
+      fileNames.filter((path) => supportedKernelExtensions.some((extension) => path.toLowerCase().endsWith(extension))),
+    [fileNames],
+  );
+  /*
+   * The preview asks for the CAD sources first, then every other file a model
+   * may read beside them (a mesh, a data file), all within the loader's byte
+   * budget; the viewer puts the main file ahead of both. Stable while the listing is.
+   */
+  const previewPaths = useMemo(() => {
+    const cad = new Set(cadSources);
+    return [...cadSources, ...fileNames.filter((path) => !cad.has(path))];
+  }, [cadSources, fileNames]);
+  const cadSourceCount = cadSources.length;
+  const byteLength = files.reduce((sum, { size }) => sum + size, 0);
+  const dataSource = useMemo(() => createStaticDataSource(files.map(({ path }) => ({ path }))), [files]);
 
   return (
     <PageContent className='space-y-6'>
@@ -58,7 +71,7 @@ export function ImportMainFileView({
             <p className='font-mono text-sm break-all text-muted-foreground'>{subtitle}</p>
           </div>
           <p className='text-xs text-muted-foreground tabular-nums'>
-            {files.size} {files.size === 1 ? 'file' : 'files'} · {cadSourceCount}{' '}
+            {files.length} {files.length === 1 ? 'file' : 'files'} · {cadSourceCount}{' '}
             {cadSourceCount === 1 ? 'CAD source' : 'CAD sources'} · {formatFileSize(byteLength)}
           </p>
           {requestedMainFileWarning ? (
@@ -70,7 +83,13 @@ export function ImportMainFileView({
         <div className='grid gap-6 md:grid-cols-[minmax(0,1fr)_16rem]'>
           {/* Left: CAD Preview */}
           <div className='h-[60vh] min-h-0 min-w-0 overflow-hidden rounded-lg border bg-muted'>
-            <ImportViewer files={files} mainFile={selectedMainFile} owner={owner} repo={repo} />
+            <ImportViewer
+              paths={previewPaths}
+              loadPreview={loadPreview}
+              mainFile={selectedMainFile}
+              owner={owner}
+              repo={repo}
+            />
           </div>
 
           {/* Right: Main file Selection */}

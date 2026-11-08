@@ -90,6 +90,14 @@ export const gitFilesOf = (
     unlink: async (path) => filesystem.unlink(path),
     rmdir: async (path) => filesystem.rmdir(path),
     rename: async (from, to) => filesystem.rename(from, to),
+    /* Streamed only where the provider holds a chunk at a time: a fallback that gathers the file
+     * would cost the object twice over, for nothing (W6.4). */
+    ...(filesystem.writeFileStream === undefined || filesystem.capabilities.streamsWrites !== true
+      ? {}
+      : {
+          writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) =>
+            filesystem.writeFileStream!(path, source),
+        }),
     ...(filesystem.readFileStream === undefined
       ? {}
       : {
@@ -235,6 +243,8 @@ export type ObjectStore = Readonly<{
   read: (oid: string) => Promise<StoredObject | undefined>;
   /** Whether the store holds an object, packed or loose. */
   has: (oid: string) => Promise<boolean>;
+  /** The bytes an object takes in the store, deflated, read from its pack index or file size alone; `undefined` when absent. */
+  storedSize: (oid: string) => Promise<number | undefined>;
   /** Store objects loose; answers their ids, in order. */
   writeLoose: (objects: readonly LooseObject[]) => Promise<string[]>;
   /** Keep a fetched pack, indexed on the compute worker; answers its name. */
@@ -662,6 +672,17 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       }
     }
     return files.exists(loosePath(oid));
+  };
+
+  const storedSize = async (oid: string): Promise<number | undefined> => {
+    for (const pack of await knownPacks()) {
+      const offset = pack.index.offsetOf(oid);
+      if (offset !== undefined) {
+        return pack.index.endOf(offset, packSizes.get(pack.path) ?? 0) - offset;
+      }
+    }
+    const held = await files.stat(loosePath(oid)).catch(() => undefined);
+    return held?.size;
   };
 
   /*
@@ -1117,6 +1138,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     counters,
     read,
     has,
+    storedSize,
     writeLoose,
     addPack,
     importObjects,

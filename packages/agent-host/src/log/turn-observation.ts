@@ -1,4 +1,11 @@
-import type { AgentLogEvent, CompactionTrace, JsonValue, ProviderMessage, RowKey } from '#log/event-types.js';
+import type {
+  AgentLogEvent,
+  CompactionTrace,
+  JsonValue,
+  ProviderMessage,
+  RowKey,
+  RunFailureDetail,
+} from '#log/event-types.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 
 /*
@@ -101,8 +108,17 @@ export type TurnObservation = Readonly<{
   tools: readonly ObservedToolCall[];
   transformations: readonly ObservedTransformation[];
   intervals: readonly ObservedInterval[];
-  /** The row that recorded the run's ending, and when; absent while the run has none. */
-  ending: Readonly<{ source: ObservedSource; at: number }> | undefined;
+  /**
+   * The row that recorded the run's ending, and when; absent while the run has none. A failed ending that recorded a
+   * code carries it in `failure`, with the code a `RUN_ABANDONED` ending wrapped (its `details.code`) in `wrapped`.
+   */
+  ending:
+    | Readonly<{
+        source: ObservedSource;
+        at: number;
+        failure?: Readonly<{ code: string; wrapped: string | undefined }> | undefined;
+      }>
+    | undefined;
   /** Newest time any fact landed. A heartbeat is not a fact, so it never moves this. */
   lastFactAt: number;
   /** Every row the observation was built from, once each, in log order. */
@@ -192,6 +208,24 @@ const checkOf = (content: JsonValue): ObservedCheck | undefined => {
   };
 };
 
+/** The code a failed run's ending row recorded, never its message. */
+type ObservedFailure = NonNullable<NonNullable<TurnObservation['ending']>['failure']>;
+
+/**
+ * The code a failed ending row recorded, and the code it wrapped. A row without a code (a host-level throw, or an
+ * older log) records none.
+ *
+ * @param detail - The ending row's failure detail.
+ * @returns The codes, or `undefined`.
+ */
+const failureOf = (detail: RunFailureDetail | undefined): ObservedFailure | undefined => {
+  if (detail?.code === undefined) {
+    return undefined;
+  }
+  const wrapped = detail.details?.['code'];
+  return { code: detail.code, wrapped: typeof wrapped === 'string' && wrapped !== '' ? wrapped : undefined };
+};
+
 const rowKeyOf = (event: RowKey): string => `${event.leaderEpoch}\u0000${event.sequence}`;
 
 type RunDraft = {
@@ -200,7 +234,10 @@ type RunDraft = {
   turnId: string | undefined;
   external: boolean;
   /** Terminal state per attempt, with the row that recorded it; the highest attempt's wins. */
-  terminal: Map<number, Readonly<{ outcome: ObservedOutcome; source: ObservedSource; at: number }>>;
+  terminal: Map<
+    number,
+    Readonly<{ outcome: ObservedOutcome; source: ObservedSource; at: number; failure: ObservedFailure | undefined }>
+  >;
   revision: TurnObservation['revision'];
   invocations: Map<string, ObservedInvocation>;
   /** The generation invocation prepared last; a tool call that follows it is its output. */
@@ -273,7 +310,12 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
         draft.intervals.push({ phase: 'admission', start: draft.openAdmission, end: at });
         draft.openAdmission = undefined;
       } else if (terminalStates.has(event.state)) {
-        draft.terminal.set(attempt, { outcome: event.state as ObservedOutcome, source, at });
+        draft.terminal.set(attempt, {
+          outcome: event.state as ObservedOutcome,
+          source,
+          at,
+          failure: event.state === 'failed' ? failureOf(event.detail) : undefined,
+        });
       }
       break;
     }
@@ -419,7 +461,14 @@ const settle = (draft: RunDraft): TurnObservation => {
     tools: [...draft.tools.values()],
     transformations: draft.transformations,
     intervals,
-    ending: ending === undefined ? undefined : { source: ending.source, at: ending.at },
+    ending:
+      ending === undefined
+        ? undefined
+        : {
+            source: ending.source,
+            at: ending.at,
+            ...(ending.failure === undefined ? {} : { failure: ending.failure }),
+          },
     lastFactAt: draft.lastFactAt,
     sources: draft.sources,
   };

@@ -38,6 +38,8 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
+import { createIndexMirror, feedIndexMirror, indexMirrorCovers } from '@taucad/lsp-fs/sync';
+import type { TauIndexMirrorMessage } from '@taucad/lsp-fs/sync';
 import type { RpcFileSystem } from '@taucad/chat/rpc';
 import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { createApplyTreeEffects, sweepTemporarySiblings } from '@taucad/revisions/apply-tree';
@@ -186,11 +188,15 @@ const percentile = (values: readonly number[], fraction: number): number => {
  * mode basis and case-collision check an empty target never needs), and a
  * fence that is uncontended because nothing else applies to this checkout.
  *
- * @param live - The checkout's rooted view.
- * @param projectId - Its project.
+ * The checkout is read and written raw, as `revision-effects.ts` opens it: the
+ * revision layer owns its large-object pointers, which every other view reads
+ * through to their objects (D9).
+ *
+ * @param projectId - The project.
  * @returns `materialize(entries)`, which writes the tree over an empty checkout.
  */
-const checkoutMaterializer = (live: RootedFileSystem, projectId: string) => {
+const checkoutMaterializer = (projectId: string) => {
+  const live = service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' });
   const memo = createCaptureMemo();
   const exclude = (path: string): boolean => !tauPathPolicy.classify(path).versioned;
   const capture = async (_place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
@@ -243,8 +249,8 @@ const checkoutMaterializer = (live: RootedFileSystem, projectId: string) => {
 };
 
 /** {@link checkoutMaterializer} over an empty checkout, writing the fixture's tree. */
-const checkoutApply = (live: RootedFileSystem, projectId: string) => {
-  const materialize = checkoutMaterializer(live, projectId);
+const checkoutApply = (projectId: string) => {
+  const materialize = checkoutMaterializer(projectId);
   return async (entries: readonly FixtureEntry[]): Promise<number> =>
     materialize(
       new ImmutableRevisionTree(entries.map((entry) => [entry.path, checkoutBytes(entry), '100644'])),
@@ -311,6 +317,82 @@ const saveText = (size: number, salt: number): Uint8Array<ArrayBuffer> => {
     bytes.set(line.subarray(0, size - offset), offset);
   }
   return bytes;
+};
+
+/**
+ * The language worker's index mirror over one root, fed by lsp-fs's
+ * production feed exactly as the file manager feeds it on attach: the root's
+ * `changedSince` and `statTree`, and one recursive change-set watch.
+ *
+ * @param live - The project's rooted view.
+ * @returns The mirror once its whole index has arrived, and the feed's stop.
+ */
+const languageIndexMirror = async (
+  live: RootedFileSystem,
+): Promise<Readonly<{ mirror: ReturnType<typeof createIndexMirror>; stop: () => void }>> => {
+  if (live.changedSince === undefined || live.statTree === undefined || live.watchChangeSets === undefined) {
+    throw new Error('The rooted view keeps no index to mirror.');
+  }
+  const mirror = createIndexMirror();
+  const channel = new MessageChannel();
+  const arrived = new Promise<void>((resolve) => {
+    channel.port1.addEventListener('message', (event: MessageEvent<TauIndexMirrorMessage>) => {
+      mirror.receive(event.data);
+      if (mirror.ready()) {
+        resolve();
+      }
+    });
+  });
+  channel.port1.start();
+  const stopFeed = feedIndexMirror(channel.port2, {
+    changedSince: async (since, options) => live.changedSince!(since, options),
+    statTree: async (path) => live.statTree!(path),
+    watch: (onChange) => live.watchChangeSets!({ paths: [''], recursive: true }, onChange),
+  });
+  await arrived;
+  return {
+    mirror,
+    stop: () => {
+      stopFeed();
+      channel.port1.close();
+      channel.port2.close();
+    },
+  };
+};
+
+/**
+ * Resolve each specifier as a language service does — up to three candidates,
+ * `exists` then the version of a hit — against the mirror, sending only what
+ * the index never holds to the rooted view (the slot).
+ *
+ * @param live - The project's rooted view, standing in for the slot.
+ * @param mirror - The language worker's index mirror.
+ * @param specifiers - Extensionless module paths.
+ * @returns The probe, hit and slot-probe counts.
+ */
+const resolveAgainstMirror = async (
+  live: RootedFileSystem,
+  mirror: ReturnType<typeof createIndexMirror>,
+  specifiers: readonly string[],
+): Promise<Readonly<{ probes: number; hits: number; slotProbes: number }>> => {
+  let probes = 0;
+  let hits = 0;
+  let slotProbes = 0;
+  for (const specifier of specifiers) {
+    for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`]) {
+      probes += 1;
+      const covered = indexMirrorCovers(candidate);
+      slotProbes += covered ? 0 : 1;
+      // oxlint-disable-next-line no-await-in-loop -- resolution tries candidates in order; the mirror answers synchronously.
+      const exists = covered ? mirror.entry(candidate)?.kind === 'file' : await live.exists(candidate);
+      if (exists) {
+        hits += 1;
+        mirror.version(candidate);
+        break;
+      }
+    }
+  }
+  return { probes, hits, slotProbes };
 };
 
 /** What the agent's view served during one scenario, by kind. */
@@ -557,6 +639,8 @@ const productionTurnConsumers = async (
     transport: {
       listen: viewProxy.listen,
       closed: viewProxy.closed,
+      /* As the file manager wires it: every watch on the connection's one event channel (D14). */
+      events: (handler) => viewProxy.events(handler),
       watchChangeSets: (request, handler) => viewProxy.watchChangeSets(request, handler),
       watchReady: (request, handler) => viewProxy.watchReady(request, handler),
     },
@@ -667,7 +751,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
   const saveSize = parameters['saveBytes'] ?? 1024 * 1024;
   switch (runner) {
     case 'materialize': {
-      const materialize = checkoutApply(live, projectId);
+      const materialize = checkoutApply(projectId);
       const measured = await measure(async () => ({ files: await materialize(entries) }));
       await assertMaterialized(live, entries);
       return measured;
@@ -675,7 +759,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'materialize-with-save': {
       /* S17: a person's save to a path the apply never touches, issued once the apply is writing. */
       const savePath = 'notes/s17-save.ts';
-      const materialize = checkoutApply(live, projectId);
+      const materialize = checkoutApply(projectId);
       counters.trace(['s17-save.ts']);
       const measured = await measure(async () => {
         /* An object, so the loop below sees the apply's completion flip it. */
@@ -886,7 +970,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'replace-seed': {
       /* I1: the old tree the killable apply replaces. */
       return measure(async () => ({
-        files: await checkoutMaterializer(live, projectId)(replaceTree('old'), new ImmutableRevisionTree([])),
+        files: await checkoutMaterializer(projectId)(replaceTree('old'), new ImmutableRevisionTree([])),
       }));
     }
     case 'replace-killable': {
@@ -897,7 +981,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
        * the create changesets alone. */
       const killAfter = parameters['killAfter'] ?? Number.POSITIVE_INFINITY;
       const from = parameters['create'] === 1 ? new ImmutableRevisionTree([]) : replaceTree('old');
-      const materialize = checkoutMaterializer(live, projectId);
+      const materialize = checkoutMaterializer(projectId);
       const operations = (): number => {
         const counts = counters.read();
         return counts.writes + counts.renames + counts.removes;
@@ -961,30 +1045,22 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     }
     case 'stat-probes': {
       /* S13: module resolution as a language service probes it — up to three
-       * candidates per specifier, `exists` then `stat` on a hit. */
+       * candidates per specifier, `exists` then the version of a hit — against
+       * the language worker's index mirror, fed by the production feed over a
+       * port as the file manager feeds it on attach (D13). A path the index
+       * never holds would go over the slot, here the rooted view. */
       const bases = entries
         .filter((entry) => entry.path.endsWith('.ts'))
         .map((entry) => entry.path.slice(0, -'.ts'.length));
       const specifiers = Array.from({ length: 1000 }, (_, index) =>
         index % 2 === 0 && bases.length > 0 ? (bases[index % bases.length] ?? 'missing') : `missing/m${String(index)}`,
       );
-      return measure(async () => {
-        let probes = 0;
-        let hits = 0;
-        for (const specifier of specifiers) {
-          for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`]) {
-            probes += 1;
-            // oxlint-disable-next-line no-await-in-loop -- resolution tries candidates in order.
-            if (await live.exists(candidate)) {
-              hits += 1;
-              // oxlint-disable-next-line no-await-in-loop -- the resolver stats the hit.
-              await live.stat(candidate);
-              break;
-            }
-          }
-        }
-        return { probes, hits };
-      });
+      const language = await languageIndexMirror(live);
+      try {
+        return await measure(async () => resolveAgainstMirror(live, language.mirror, specifiers));
+      } finally {
+        language.stop();
+      }
     }
   }
 };

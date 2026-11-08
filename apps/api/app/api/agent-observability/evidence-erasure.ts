@@ -14,10 +14,9 @@ import {
 /*
  * Erasure of delivered agent evidence (blueprint T13).
  *
- * Deleting an account or a project has to remove what Tau sent to Langfuse,
- * and afterwards nothing says what that was: the account cascade takes the
- * receipts with it, and a project's receipts name traces only through rows
- * that are about to expire. So the erasure is admitted first. In one
+ * Deleting an account has to remove what Tau sent to Langfuse, and afterwards
+ * nothing says what that was: the account cascade takes the receipts with it,
+ * and the projects it owns go with it. So the erasure is admitted first. In one
  * transaction it records the subject, stops every send that has not reached
  * the vendor, and copies every trace id a send may have written. The journal
  * has no foreign key to the subject, so the cascade that follows cannot take
@@ -28,6 +27,11 @@ import {
  * takes beside it. Neither sees the other half-done, so no receipt is
  * admitted under an erased subject and no trace is written that the journal
  * does not name.
+ *
+ * Deleting a project does not erase: admission and delivery already refuse a
+ * deletion-fenced project, and what was sent stays in Langfuse until the
+ * project's retention setting expires it, so a deleted project can still be
+ * debugged.
  */
 
 /** Whose evidence an erasure covers. */
@@ -62,7 +66,7 @@ const receiptsOf = (transaction: OwnerLockTransaction, subject: ErasureSubject) 
  * Admit an erasure inside the caller's transaction. Idempotent per subject: a
  * repeat reopens it only if it finds traces the journal did not yet name.
  *
- * @param transaction - The caller's transaction; project deletion's own, or one of {@link eraseAccountEvidence}'s.
+ * @param transaction - One of {@link eraseAccountEvidence}'s transactions.
  * @param subject - The account or project.
  * @returns The erasure, how many unsent rows it stopped and how many traces it named.
  */

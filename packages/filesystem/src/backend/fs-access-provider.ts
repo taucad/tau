@@ -193,6 +193,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     durability: 'stream-append',
     trustworthyMtime: true,
     externallyEdited: true,
+    streamsWrites: true,
   };
 
   protected _rootHandle: FileSystemDirectoryHandle;
@@ -202,6 +203,19 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   protected _uncommitted: Readonly<{ store: UncommittedChangesetStore; root: string; owner: string }> | undefined;
   private readonly _handleCache = new Map<string, FileSystemDirectoryHandle>();
+  /**
+   * File handles a listing or a stat already acquired, so the next `stat` of
+   * the same path is one `getFile()` instead of a handle lookup and a
+   * `getFile()`. A handle is a locator (its path), never bytes: only `stat`
+   * reads one, and nothing this provider moves or hands out comes from here.
+   * Fenced like {@link FileSystemAccessProvider._handleCache}: a refresh, a
+   * prefix invalidation, or a removal, rename or batch through this provider
+   * forgets the paths it names, and a handle that no longer resolves (gone,
+   * replaced, now a directory) falls back to the lookup. It assumes a handle
+   * locates its entry by path, so a move another context makes without
+   * announcing it is seen only through `refresh(prefixes)`.
+   */
+  private readonly _fileHandleCache = new Map<string, FileSystemFileHandle>();
   private readonly _pendingDirectoryHandles = new Map<string, Promise<FileSystemDirectoryHandle>>();
   private _handleGeneration = 0;
   private readonly _handleCacheMax = handleCacheMaxEntries;
@@ -241,6 +255,63 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       await this._writeBytes(created.fileHandle, bytes);
     } catch (error) {
       await this._cleanupFailedFileCreation(path, created);
+      throw error;
+    }
+  }
+
+  /**
+   * Write `path` from a stream without holding the file (W6.3). A provider
+   * that stages ({@link FileSystemAccessProvider._stageStream}) moves the
+   * finished file into place. Otherwise an existing file takes the writable
+   * stream's swap file, which replaces it only on close, and an error aborts
+   * it (I1). A new file is staged as a temporary sibling and moved into place
+   * on a root that keeps no record, or, on a root that does, recorded before
+   * it is made: it reads as empty until the stream ends, and a crash leaves
+   * that empty file for {@link FileSystemAccessProvider.recoverUncommitted}
+   * to remove. A write that fails removes what it made, and the source is
+   * cancelled whenever the write stops before reading it to the end.
+   *
+   * @param path - Absolute file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public override async writeFileStream(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    let createdDirectories: readonly string[] = [];
+    try {
+      this._assertReady();
+      this._assertRootedPath(path);
+      const segments = this._splitPath(path);
+      const name = segments.pop();
+      if (name === undefined) {
+        throw this._eisdir(path);
+      }
+      const opened = await this._openDirectoryForWrite(segments.join('/'));
+      createdDirectories = opened.createdDirectories;
+      const destination = { directory: opened.directoryHandle, name };
+      let existing: FileSystemFileHandle | undefined;
+      try {
+        existing = await destination.directory.getFileHandle(name);
+      } catch (error) {
+        if (hasDomName(error, 'TypeMismatchError')) {
+          throw this._eisdir(path);
+        }
+        if (!hasDomName(error, 'NotFoundError')) {
+          throw error;
+        }
+      }
+      try {
+        if (await this._stageStream(source, destination)) {
+          return;
+        }
+        await (existing === undefined
+          ? this._streamCreate(path, source, destination)
+          : this._streamInto(existing, source));
+      } finally {
+        this._forgetFileHandlesUnder(path, 'file');
+      }
+    } catch (error) {
+      /* Harmless once the stream was read or cancelled: a locked or closed stream refuses. */
+      await source.cancel(error).catch(() => undefined);
+      await this._cleanupCreatedDirectories(createdDirectories);
       throw error;
     }
   }
@@ -315,10 +386,25 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertReady();
     this._assertRootedPath(path);
+    const generation = this._handleGeneration;
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const handles: Array<[string, FileSystemDirectoryEntryHandle]> = [];
     for await (const entry of directoryEntries(directoryHandle)) {
       handles.push(entry);
+    }
+    /* Enumeration supplied every child's handle: keep them, as readdirEntries
+     * keeps its directories, so a following stat or descent skips the lookup. */
+    if (generation === this._handleGeneration) {
+      for (const [name, handle] of handles) {
+        const childPath = path === '' ? name : `${path}/${name}`;
+        if (handle.kind === 'directory') {
+          if (!this._handleCache.has(childPath)) {
+            this._setHandleCache(childPath, handle);
+          }
+        } else {
+          this._setFileHandleCache(childPath, handle);
+        }
+      }
     }
 
     const listed = await mapConcurrent(handles, statConcurrency, async ([name, handle]) => {
@@ -366,6 +452,22 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
 
+    const known = this._fileHandleCache.get(path);
+    if (known !== undefined) {
+      try {
+        const file = await known.getFile();
+        this._touchFileHandleCache(path, known);
+        return { type: 'file', size: file.size, mtimeMs: file.lastModified };
+      } catch {
+        /* Gone, replaced by a directory, or refused since: forget it and look
+         * the path up, which reports whatever the path holds now. */
+        if (this._fileHandleCache.get(path) === known) {
+          this._fileHandleCache.delete(path);
+        }
+      }
+    }
+
+    const generation = this._handleGeneration;
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
 
@@ -373,6 +475,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
       const file = await fileHandle.getFile();
+      if (generation === this._handleGeneration) {
+        this._setFileHandleCache(path, fileHandle);
+      }
       return { type: 'file', size: file.size, mtimeMs: file.lastModified };
     } catch (error) {
       fileError = error;
@@ -414,6 +519,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       throw this._eisdir(path);
     }
     await parentHandle.removeEntry(name);
+    this._fileHandleCache.delete(path);
   }
 
   /**
@@ -503,7 +609,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return;
     }
     await this._moveFile(from, to);
-    this._invalidateHandleCachePrefix(from);
+    this._invalidateHandleCachePrefix(from, 'file');
+    this._fileHandleCache.delete(to);
   }
 
   /**
@@ -515,6 +622,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     if (prefixes === undefined) {
       this._handleCache.clear();
+      this._fileHandleCache.clear();
       this._pendingDirectoryHandles.clear();
       this._handleGeneration++;
       return;
@@ -604,6 +712,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       },
       options,
     );
+    this._forgetBatchFileHandles(entries);
     const kept = await checks?.settled();
     if (kept !== undefined && this._uncommitted !== undefined) {
       /* Every writable of the batch has closed: the creates have settled. A
@@ -1164,13 +1273,29 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return false;
   }
 
+  /**
+   * Write a stream to a staged file and move it into place (W6.3). A provider
+   * that cannot answers `false` before it reads the stream, and the writable
+   * stream's swap file is used instead.
+   *
+   * @param _source - The bytes, in order.
+   * @param _destination - The target's directory and name.
+   * @returns Whether the file now holds the bytes.
+   */
+  protected async _stageStream(
+    _source: ReadableStream<Uint8Array<ArrayBuffer>>,
+    _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<boolean> {
+    return false;
+  }
+
   protected async _cleanupFailedFileCreation(
     path: string,
     created: { createdFile: boolean; createdDirectories: readonly string[] },
   ): Promise<void> {
     if (created.createdFile) {
       try {
-        await this._removeEntry(path, false);
+        await this._removeEntry(path, false, 'file');
       } catch {
         return;
       }
@@ -1185,6 +1310,104 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         await this._removeEntry(path, false);
       } catch {
         break;
+      }
+    }
+  }
+
+  /**
+   * Write a stream through a file's writable stream, which replaces the file
+   * only on close; an error aborts it and cancels the source.
+   *
+   * @param fileHandle - The file.
+   * @param source - The bytes, in order.
+   */
+  private async _streamInto(
+    fileHandle: FileSystemFileHandle,
+    source: ReadableStream<Uint8Array<ArrayBuffer>>,
+  ): Promise<void> {
+    const reader = source.getReader();
+    let writable: FileSystemWritableFileStream | undefined;
+    try {
+      writable = await fileHandle.createWritable();
+      // oxlint-disable-next-line no-await-in-loop -- a stream is written one chunk after another.
+      for (let read = await reader.read(); !read.done; read = await reader.read()) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await writable.write(read.value);
+      }
+      await writable.close();
+    } catch (error) {
+      await writable?.abort(error).catch(() => undefined);
+      await reader.cancel(error).catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Create a file from a stream, never leaving partial bytes at its path (I1).
+   * A root that keeps no record stages a temporary sibling, the name the
+   * revisions open sweeps, and moves it into place (a picked folder without a
+   * native move copies it). A root that keeps a record puts it before the file
+   * is made and deletes it once the write settles; a record that cannot be
+   * kept refuses the create. A root with neither writes the file in place,
+   * as `writeFile` does.
+   *
+   * @param path - The absent file's path.
+   * @param source - The bytes, in order.
+   * @param destination - Its directory and name.
+   */
+  private async _streamCreate(
+    path: string,
+    source: ReadableStream<Uint8Array<ArrayBuffer>>,
+    destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<void> {
+    const { directory, name } = destination;
+    const uncommitted = this._uncommitted;
+    if (uncommitted === undefined && this._stageCreates) {
+      const siblingName = `.${name}.tau-staged.${randomUuid()}.tmp`;
+      const siblingPath = `${path.slice(0, path.length - name.length)}${siblingName}`;
+      try {
+        await this._streamInto(await directory.getFileHandle(siblingName, { create: true }), source);
+        await this._moveFile(siblingPath, path);
+      } catch (error) {
+        await this._removeEntry(siblingPath, false, 'file').catch(() => undefined);
+        throw error;
+      }
+      return;
+    }
+    let record: UncommittedRecord | undefined;
+    if (uncommitted !== undefined) {
+      await holdRealmOwner();
+      /* Any size above zero marks the file as one that should hold bytes, which is all recovery asks. */
+      record = {
+        root: uncommitted.root,
+        owner: uncommitted.owner,
+        changesetId: randomUuid(),
+        recordedAt: Date.now(),
+        entries: [{ path, size: 1 }],
+      };
+      try {
+        await uncommitted.store.put(record);
+        workerTimings.count('uncommitted.puts');
+      } catch (error) {
+        throw new Error(`${path} was not created: its crash record could not be kept.`, { cause: error });
+      }
+    }
+    try {
+      const fileHandle = await directory.getFileHandle(name, { create: true });
+      try {
+        await this._streamInto(fileHandle, source);
+      } catch (error) {
+        await this._removeEntry(path, false, 'file').catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      if (record !== undefined && uncommitted !== undefined) {
+        await deleteUncommittedRecord(uncommitted.store, record).catch((error: unknown) => {
+          workerTimings.count('uncommitted.deleteFailed');
+          console.error('[filesystem] A settled uncommitted-changeset record is still kept.', error);
+        });
       }
     }
   }
@@ -1401,7 +1624,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       await this._moveFile(siblingPath, entry.path);
       return { outcome: 'applied', kind: 'file', created: true };
     } catch (error) {
-      await this._removeEntry(siblingPath, false).catch(() => undefined);
+      await this._removeEntry(siblingPath, false, 'file').catch(() => undefined);
       return moving ? { outcome: 'uncertain', error } : { outcome: 'failed', error };
     }
   }
@@ -1475,7 +1698,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         return false;
       }
       try {
-        await this._removeEntry(entry.path, false);
+        await this._removeEntry(entry.path, false, 'file');
         return true;
       } catch {
         return false;
@@ -1544,7 +1767,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     } catch (error) {
       if (opened.createdFile) {
         try {
-          await this._removeEntry(entry.path, false);
+          await this._removeEntry(entry.path, false, 'file');
           return { outcome: 'failed', error };
         } catch {
           return { outcome: 'uncertain', error };
@@ -1695,7 +1918,14 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return undefined;
   }
 
-  private async _removeEntry(path: string, recursive: boolean): Promise<void> {
+  /**
+   * Remove one entry and forget the handles kept for it.
+   *
+   * @param path - Where the entry sits, relative to the root.
+   * @param recursive - Remove a directory's contents too.
+   * @param kind - `'file'` when the entry is known to be a file, so only its own kept handle is forgotten.
+   */
+  private async _removeEntry(path: string, recursive: boolean, kind?: 'file'): Promise<void> {
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       return;
@@ -1703,7 +1933,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     const name = segments.pop()!;
     const parent = await this._resolveDirectoryHandle(segments.join('/'));
     await parent.removeEntry(name, { recursive });
-    this._invalidateHandleCachePrefix(path);
+    this._invalidateHandleCachePrefix(path, kind);
   }
 
   private async _missingDirectoryPaths(path: string): Promise<string[]> {
@@ -1730,6 +1960,77 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return missing;
   }
 
+  /**
+   * Keep `handle` for `key` as the most recently used; a new key past the
+   * bound evicts the least recently used, a known key only moves.
+   *
+   * @param key - The file's path.
+   * @param handle - Its handle, from a listing or a lookup.
+   */
+  private _setFileHandleCache(key: string, handle: FileSystemFileHandle): void {
+    if (this._fileHandleCache.has(key)) {
+      this._fileHandleCache.delete(key);
+    } else if (this._fileHandleCache.size >= this._handleCacheMax) {
+      const firstKey = this._fileHandleCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this._fileHandleCache.delete(firstKey);
+      }
+    }
+    this._fileHandleCache.set(key, handle);
+  }
+
+  /**
+   * Move a kept file handle that just answered to the most recently used end,
+   * unless it was forgotten meanwhile.
+   *
+   * @param key - The file's path.
+   * @param handle - The handle that answered.
+   */
+  private _touchFileHandleCache(key: string, handle: FileSystemFileHandle): void {
+    if (this._fileHandleCache.get(key) === handle) {
+      this._fileHandleCache.delete(key);
+      this._fileHandleCache.set(key, handle);
+    }
+  }
+
+  /**
+   * Forget the file handles of the paths a batch's writes name. Its moves and
+   * deletes go through rename, unlink and rmdir, which forget their own paths.
+   *
+   * @param entries - The batch that was applied.
+   */
+  private _forgetBatchFileHandles(entries: readonly BatchEntry[]): void {
+    for (const entry of entries) {
+      if (entry.op === 'write' || entry.op === 'append') {
+        this._fileHandleCache.delete(entry.path);
+      }
+    }
+  }
+
+  /**
+   * Forget the kept file handle at `path`, and for a path that may be a
+   * directory every one under it; the root forgets them all.
+   *
+   * @param path - The file or directory whose handles go, relative to the root.
+   * @param kind - `'file'` when `path` is known to be a file: only its own key is forgotten, without a scan.
+   */
+  private _forgetFileHandlesUnder(path: string, kind?: 'file'): void {
+    if (kind === 'file') {
+      this._fileHandleCache.delete(path);
+      return;
+    }
+    if (path === '') {
+      this._fileHandleCache.clear();
+      return;
+    }
+    const prefix = `${path}/`;
+    for (const key of this._fileHandleCache.keys()) {
+      if (key === path || key.startsWith(prefix)) {
+        this._fileHandleCache.delete(key);
+      }
+    }
+  }
+
   private _setHandleCache(key: string, handle: FileSystemDirectoryHandle): void {
     if (this._handleCache.size >= this._handleCacheMax) {
       const firstKey = this._handleCache.keys().next().value;
@@ -1753,9 +2054,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private _invalidateHandleCachePrefix(path: string): void {
+  private _invalidateHandleCachePrefix(path: string, kind?: 'file'): void {
     this._handleGeneration++;
     this._pendingDirectoryHandles.clear();
+    this._forgetFileHandlesUnder(path, kind);
     if (path === '') {
       this._handleCache.clear();
       return;

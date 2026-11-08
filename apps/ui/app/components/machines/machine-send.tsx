@@ -1,17 +1,6 @@
 import { useRef, useState } from 'react';
-import {
-  Bot,
-  Check,
-  CircleAlert,
-  Eye,
-  Hand,
-  Info,
-  LoaderCircle,
-  Play,
-  SearchCheck,
-  ShieldCheck,
-  X,
-} from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Bot, Check, CircleAlert, Eye, Hand, Info, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
 import { checkMachineAction, fffProcessOf } from '@taucad/runtime/machine';
 import type {
   MachineCheck,
@@ -359,7 +348,7 @@ function JobReview({
             void start();
           }}
         >
-          {isBusy ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Play aria-hidden />}
+          {isBusy ? <Loader /> : <Play aria-hidden />}
           {startLabel}
         </Button>
         <Button
@@ -496,7 +485,7 @@ function JobProgress({
       className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-card p-3'
     >
       <p className='flex min-w-0 items-center gap-2 text-sm'>
-        <LoaderCircle aria-hidden className='size-4 shrink-0 spin-glyph' />
+        <Loader className='size-4 shrink-0' />
         <span className='min-w-0 truncate'>{label}</span>
       </p>
       {job.state === 'preparing' ? null : <PrintSteps steps={progressSteps(job, delivery)} />}
@@ -569,7 +558,7 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
               void reconcile();
             }}
           >
-            {isBusy ? <LoaderCircle aria-hidden className='spin-glyph' /> : <SearchCheck aria-hidden />}
+            {isBusy ? <Loader /> : <SearchCheck aria-hidden />}
             Check again
           </Button>
         </div>

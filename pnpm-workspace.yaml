@@ -223,9 +223,9 @@ catalog:
   geist: ^1.7.2
   # GeoSpec authoring package from taucad/geospec, in the engine's fixed release group: pin the same exact
   # version as geospec-engine.
-  geospec: 0.5.1
+  geospec: 0.6.0
   # GeoSpec engine from taucad/geospec, exact stable pin; bump through a version PR.
-  geospec-engine: 0.5.1
+  geospec-engine: 0.6.0
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
@@ -251,7 +251,7 @@ catalog:
   next: ^16.4.0
   next-themes: ^0.4.6
   nx: 22.7.12
-  '@taulabs/openrscad-engine': 0.11.0-beta.4
+  '@taulabs/openrscad-engine': 0.11.0-beta.5
   oxfmt: 0.39.0
   oxlint: ^1.80.0
   oxlint-tsgolint: ^0.16.0

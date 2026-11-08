@@ -16,7 +16,8 @@
     "apps/ui/app/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
-    "apps/ui/app/workers/agent-host-projects.ts"
+    "apps/ui/app/workers/agent-host-projects.ts",
+    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
   ],
   "rows": [
     {
@@ -26,6 +27,30 @@
       "token": "signal?.removeEventListener('abort', abort)",
       "class": "Backoff",
       "owner": "storage-gateway W15"
+    },
+    {
+      "id": "STORAGE-LFS-STALL",
+      "bound": "LFS transfer no-progress stall: a download that receives no bytes for 60 s (lfsTransferStallMilliseconds, transferStallMilliseconds) is aborted; it restarts on every chunk",
+      "site": "packages/revisions/src/lfs-client.ts",
+      "token": "No bytes arrived for",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
+    },
+    {
+      "id": "STORAGE-FILL-STALL",
+      "bound": "Large-object fill waiter stall: a wait given a stall answers false once that many milliseconds pass with nothing arriving, flushed or told; it restarts on every wake",
+      "site": "packages/revisions/src/large-object-fill.ts",
+      "token": "stalled = setTimeout(",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
+    },
+    {
+      "id": "STORAGE-PENDING-ARRIVAL",
+      "bound": "Pending read arrival wait: the caller's wait, capped at the 60 s materialize stall (defaultStallMilliseconds); on expiry the read answers without the object",
+      "site": "packages/revisions/src/open/content-reads.ts",
+      "token": "arrivalTimeout = AbortSignal.timeout(wait)",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
     },
     {
       "id": "STORAGE-HTTP-RETRY",
@@ -67,6 +92,14 @@
       "token": "idleWindow",
       "class": "Debounce",
       "owner": "W5"
+    },
+    {
+      "id": "REVISIONS-MINT-FLOOR",
+      "bound": "Floor between a checkout's published mints, 1 second (D11); requests queue meanwhile, and close and hidden cuts skip it",
+      "site": "packages/revisions/src/checkout.machine.ts",
+      "token": "mintFloor",
+      "class": "Debounce",
+      "owner": "filesystem redesign W6.4"
     },
     {
       "id": "A8",
@@ -942,6 +975,22 @@
       "owner": "tau prepare"
     },
     {
+      "id": "E38",
+      "bound": "rpc long-call liveness: a long call fails PEER_UNRESPONSIVE after 30 s with neither a heartbeat nor progress from the server",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "callLivenessTimer",
+      "class": "Liveness",
+      "owner": "W10"
+    },
+    {
+      "id": "E39",
+      "bound": "rpc long-call heartbeat: the server sends an rp frame every 10 s for each call still running",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "heartbeatTimer",
+      "class": "Liveness",
+      "owner": "W10"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",
@@ -1142,6 +1191,14 @@
       "token": "resumeTimers.delete(timer)",
       "class": "Debounce",
       "owner": "open first, model waits"
+    },
+    {
+      "id": "LSP-INDEX-MIRROR-RETRY",
+      "bound": "Language-worker index mirror feed retry after a failed index ask: 250 ms, doubling to at most 8 s (indexMirrorRetryBackoff, indexMirrorRetryCeiling); reset on a successful ask, replaced by an immediate ask on the next change set, cleared on dispose",
+      "site": "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
+      "token": "retry = setTimeout(() => {",
+      "class": "Backoff",
+      "owner": "filesystem capability W9 (D13)"
     }
   ]
 }

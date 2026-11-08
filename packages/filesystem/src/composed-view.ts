@@ -51,9 +51,9 @@ import { bufferToStream } from '#backend/stream-utils.js';
 import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
 import { mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
-import type { IndexAdmits, IndexSearchOptions } from '#project-index/project-index.js';
+import type { IndexAdmits, IndexChanges, IndexSearchOptions } from '#project-index/project-index.js';
 import type { IndexFactsOptions } from '#project-index/project-indexes.js';
-import type { AppendFence } from '#changeset.js';
+import type { AppendFence, Changeset, ChangesetEntry, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import type { ChangeSetWatchRequest } from '#watch-registry.js';
 import type { RootedPorcelain } from '#rooted-views.js';
@@ -118,8 +118,14 @@ type WatchableFileSystem = {
  */
 type IndexedFileSystem = {
   search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
-  statTree(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
+  changedSince(
+    since: number,
+    options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+  ): Promise<IndexChanges>;
+  /** Which of these files are pending entries: from the index, or a pointer-sized file read raw (D9). */
+  pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
 
 /**
@@ -758,8 +764,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         projectListed.push(factsOptions?.listed?.[index]);
       }
     }
-    let measured: ReadonlyMap<string, ContentFacts>;
-    if (base.facts === undefined) {
+    const measureHere = async (): Promise<ReadonlyMap<string, ContentFacts>> => {
       const own = await mapConcurrent(project, factsConcurrency, async (target) => {
         const stat = await upperStat(target);
         if (stat?.type !== 'file') {
@@ -776,16 +781,28 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         workerTimings.count('view.facts.bytes', bytesRead);
         return measuredFacts;
       });
-      measured = new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
-    } else {
-      measured =
-        project.length === 0
-          ? new Map()
-          : await base.facts(project, {
-              ...factsOptions,
-              ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
-            });
-    }
+      return new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
+    };
+    const measureBelow = async (facts: NonNullable<typeof base.facts>): Promise<ReadonlyMap<string, ContentFacts>> => {
+      try {
+        return await facts(project, {
+          ...factsOptions,
+          ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
+        });
+      } catch (error) {
+        /* A provider that relays the call can learn only by asking that its far
+         * end keeps no index (ENOTSUP): the view then measures, as it does over
+         * a provider with no `facts` at all. */
+        if (getErrno(error) === 'ENOTSUP') {
+          return measureHere();
+        }
+        throw error;
+      }
+    };
+    const measured =
+      project.length === 0
+        ? new Map<string, ContentFacts>()
+        : await (base.facts === undefined ? measureHere() : measureBelow(base.facts.bind(base)));
     for (const [index, target] of targets.entries()) {
       const value = routes[index]!.kind === 'overlay' ? undefined : measured.get(target);
       if (value !== undefined) {
@@ -844,11 +861,60 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * under the project root is a records row. The control plane needs no such
    * care — it is the control plane at any depth (path policy contract, PP3).
    */
+  /**
+   * One changeset through the mask (charter D2): every entry's paths answered
+   * before the pipeline sees any of them, so a masked entry refuses the whole
+   * changeset with the masked-path error and nothing is applied. A recursive
+   * delete and a move's source reach paths nobody named, so their subtrees are
+   * walked as `rmdir` and `rename` walk them.
+   *
+   * A `lifecycle` changeset takes the project token exclusively: the fence a
+   * project create, delete, adoption or topology replacement needs (D3). That
+   * is the authority's own work, never a masked consumer's, so the view
+   * refuses it with `EPERM` before anything is asked or applied.
+   */
+  const maskedApply = async (
+    apply: (changeset: Changeset) => Promise<ChangesetReceipt>,
+    changeset: Changeset,
+  ): Promise<ChangesetReceipt> => {
+    if (changeset.lifecycle === true) {
+      fileSystemError('EPERM', `EPERM: the ${options.consumer} view may not apply a lifecycle changeset.`);
+    }
+    const named = changeset.entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+    const targets = await writableTargets(named);
+    let at = 0;
+    const entries = changeset.entries.map((entry): ChangesetEntry => {
+      if (entry.op === 'move') {
+        at += 2;
+        return { ...entry, from: targets[at - 2]!, to: targets[at - 1]! };
+      }
+      at += 1;
+      return { ...entry, path: targets[at - 1]! };
+    });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.op === 'move') {
+          await refuseHiddenSubtree(entry.from);
+        } else if (entry.op === 'delete' && entry.recursive === true) {
+          await refuseHiddenSubtree(entry.path);
+        }
+      }),
+    );
+    return apply({ ...changeset, entries });
+  };
+
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.apply === undefined
+      ? {}
+      : { apply: async (changeset: Changeset) => maskedApply(base.apply!.bind(base), changeset) }),
     ...(base.copyTree === undefined
       ? {}
       : {
-          copyTree: async (source: string, target: string, options?: { admits?: IndexAdmits }) => {
+          copyTree: async (
+            source: string,
+            target: string,
+            options?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             /* Every entry a copy writes is a target too: `notes/exports` is
@@ -861,16 +927,17 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             const visible = admitsVisible(from, options?.admits);
             return base.copyTree!(from, to!, {
               admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+              ...(options?.signal === undefined ? {} : { signal: options.signal }),
             });
           },
         }),
     ...(base.duplicate === undefined
       ? {}
       : {
-          duplicate: async (source: string, target: string) => {
+          duplicate: async (source: string, target: string, options?: { signal?: AbortSignal }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            return base.duplicate!(from, to!);
+            return base.duplicate!(from, to!, options);
           },
         }),
     ...(base.move === undefined
@@ -1150,9 +1217,34 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.statTree === undefined
       ? {}
       : {
-          statTree: async (path: string, statOptions?: { admits?: IndexAdmits }): Promise<FileStatEntry[]> => {
+          statTree: async (
+            path: string,
+            statOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ): Promise<FileStatEntry[]> => {
             const target = readablePath(canonical(path));
-            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+            return base.statTree!(target, { ...statOptions, admits: admitsVisible(target, statOptions?.admits) });
+          },
+        }),
+    /* Overlay entries never change, so what changed is the checkout's index, masked. */
+    ...(base.changedSince === undefined
+      ? {}
+      : {
+          changedSince: async (
+            since: number,
+            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+          ): Promise<IndexChanges> =>
+            base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
+        }),
+    /* An overlay entry is never pending: only project files are asked about, masked like `readFile`. */
+    ...(base.pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => readablePath(canonical(path)));
+            const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+            const asked = targets.filter((_, index) => routes[index]!.kind !== 'overlay');
+            const pending = new Set(asked.length === 0 ? [] : await base.pendingPaths!(asked));
+            return paths.filter((_, index) => pending.has(targets[index]!));
           },
         }),
     /*

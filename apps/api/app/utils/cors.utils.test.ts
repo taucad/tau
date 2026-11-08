@@ -18,6 +18,7 @@ it('should expose the durable chat run identity and bearer session token to cros
     'set-auth-token',
     'retry-after',
     'request-id',
+    'x-tau-commit',
   ]);
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
 });
@@ -73,6 +74,15 @@ it('should allow every header a browser git client sends', () => {
   expect(corsBaseConfiguration.allowedHeaders).toEqual(
     expect.arrayContaining(['git-protocol', 'content-type', 'authorization', 'x-tau-proxy-authorization']),
   );
+});
+
+/**
+ * SB17. A traced browser request carries `sentry-trace` and `baggage` to the API; a missing name fails the
+ * preflight and drops the request itself, not just the trace. `traceparent` stays out on purpose.
+ */
+it('should allow the Sentry trace headers and not the W3C one', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(expect.arrayContaining(['sentry-trace', 'baggage']));
+  expect(corsBaseConfiguration.allowedHeaders).not.toContain('traceparent');
 });
 
 describe('separateOriginsAndPatterns', () => {

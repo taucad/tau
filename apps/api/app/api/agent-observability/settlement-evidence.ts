@@ -5,7 +5,7 @@ import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';
-import { executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
+import { apiVersions, executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 
 /** Bumped whenever the facts written for the same settlement change. */
 export const apiSettlementMapper = 'api-settlement-v2';
@@ -88,18 +88,7 @@ export const settlementEvidence = async (
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
     run,
     execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
-    versions: {
-      hostBuild: null,
-      apiBuild: null,
-      harness: null,
-      compaction: null,
-      prompts: [],
-      skills: [],
-      tools: [],
-      kernels: [],
-      mapper: apiSettlementMapper,
-      policy: 'purposes-v1',
-    },
+    versions: apiVersions(apiSettlementMapper),
     task: null,
     clocks: { occurredAt: receipt.resolvedAt.getTime(), sourceOrder: ledger, intervals: [] },
     authority: 'api-reported',

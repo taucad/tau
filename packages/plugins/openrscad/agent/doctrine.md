@@ -50,3 +50,5 @@ In OpenSCAD the explicit object is `{ segments?, linearTolerance?, angularTolera
 ## Verify
 
 Test with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.scad' })`; OpenSCAD yields mesh evidence.
+
+Modules, `render()` and code structure never change the exported surface. If a GeoSpec verdict changes after a refactor that leaves volume, bounding box and triangle count unchanged, report a suspected tool defect with both runs' evidence instead of restructuring the model.

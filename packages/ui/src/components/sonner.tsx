@@ -1,6 +1,7 @@
 import { Toaster as Sonner, toast as sonnerToast } from 'sonner';
+import { Loader } from '#components/loader.js';
 import type { ToasterProps } from 'sonner';
-import { Check, CircleAlert, Info, LoaderCircle, TriangleAlert, X } from 'lucide-react';
+import { Check, CircleAlert, Info, TriangleAlert, X } from 'lucide-react';
 import { buttonVariants } from '#components/button.js';
 import { popoverSurfaceVariants } from '#components/popover.variants.js';
 import { cn } from '#utils/cn.js';
@@ -33,7 +34,7 @@ function Toaster({ theme = 'system', className, toastOptions, icons, ...properti
         info: <Info aria-hidden className='size-4 text-information' />,
         warning: <TriangleAlert aria-hidden className='size-4 text-warning' />,
         error: <CircleAlert aria-hidden className='size-4 text-feature' />,
-        loading: <LoaderCircle aria-hidden className='size-4 spin-glyph' />,
+        loading: <Loader className='size-4' />,
         close: <X aria-hidden className='size-3' />,
         ...icons,
       }}

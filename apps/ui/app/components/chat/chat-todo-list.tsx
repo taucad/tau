@@ -1,7 +1,7 @@
 import { chatComposerTrayHeaderClassName } from '#components/chat/chat-input-styles.js';
 import { useCallback, useMemo, useState } from 'react';
-import { ChevronRight, Circle, CircleCheck, LoaderCircle, ListChecks } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, Circle, CircleCheck, ListChecks } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { parseTodoList, todoListPath } from '@taucad/chat';
 import type { TodoItem, TodoItemStatus } from '@taucad/chat';
 import { Button } from '@taucad/ui/components/button';
@@ -29,10 +29,13 @@ const writeCollapsed = (chatId: string, collapsed: boolean): void => {
 };
 
 /** Status glyphs shared by the list above the composer and the transcript card. */
-export const todoStatusIcons: Record<TodoItemStatus, LucideIcon> = {
+export const todoStatusIcons: Record<
+  TodoItemStatus,
+  React.ComponentType<{ readonly className?: string; readonly 'aria-hidden'?: 'true' }>
+> = {
   pending: Circle,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
-  in_progress: LoaderCircle,
+  in_progress: Loader,
   done: CircleCheck,
 };
 
@@ -55,14 +58,7 @@ function TodoRow({ item }: { readonly item: TodoItem }): React.JSX.Element {
         item.status === 'in_progress' ? 'text-foreground' : 'text-muted-foreground',
       )}
     >
-      <Icon
-        aria-hidden='true'
-        className={cn(
-          'mt-0.5 size-3 shrink-0',
-          item.status === 'done' && 'text-success',
-          item.status === 'in_progress' && 'spin-glyph [--spin-glyph-duration:2s]',
-        )}
-      />
+      <Icon aria-hidden='true' className={cn('mt-0.5 size-3 shrink-0', item.status === 'done' && 'text-success')} />
       <span className='min-w-0 flex-1 wrap-break-word'>
         <span className='sr-only'>{todoStatusLabels[item.status]}: </span>
         <span className={cn(item.status === 'done' && 'line-through')}>{item.title}</span>

@@ -9,6 +9,7 @@ import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
 import { cdnCacheControlResponseHeader } from '#constants/cache.constants.js';
 import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
+import { reportingEndpoints } from '#lib/browser-reports.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
@@ -47,6 +48,8 @@ export default function handleRequest(
   claimSsrErrors(request, routeId, responseStatusCode);
   applyHandleRequestHeaders(responseHeaders);
   responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
+  // SB6: CSP violations (`report-to default`) and Chromium crash reports go to the same-origin receiver.
+  responseHeaders.set('Reporting-Endpoints', reportingEndpoints);
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
    * cache may answer a load or refresh with a stored document without asking the server. It is
    * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex

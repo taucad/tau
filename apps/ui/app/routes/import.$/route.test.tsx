@@ -9,7 +9,8 @@ import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions'
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type { getGitHubClient } from '#lib/github-api.js';
-import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
+import { ImportChannelError } from '#machines/import-staging.js';
+import type * as ImportStagingModule from '#machines/import-staging.js';
 import ImportRoute from '#routes/import.$/route.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
 import type * as LinkedImportModule from '#lib/github-linked-import.js';
@@ -31,7 +32,8 @@ const getRepository = vi.hoisted(() =>
   }),
 );
 const listFiles = vi.hoisted(() => vi.fn(async (): Promise<Array<{ path: string; size: number }>> => []));
-const workerRequests = vi.hoisted((): ImportWorkerRequest[] => []);
+/* The file-manager worker's import channel: what the route asked it to plan. */
+const importChannel = vi.hoisted(() => ({ plan: vi.fn() }));
 const listBranches = vi.hoisted(() =>
   vi.fn<GitHubApiClient['listBranches']>(async () => ({ branches: [], hasMore: false, endCursor: undefined })),
 );
@@ -46,53 +48,6 @@ const repositoryMetadata: RepositoryMetadata = {
   isPrivate: false,
   lastUpdated: '2026-10-01T00:00:00Z',
 };
-
-/** Stands in for the import worker: every download answers with the archive route's size refusal. */
-class TooLargeArchiveWorker {
-  #listener: ((event: MessageEvent<ImportWorkerResponse>) => void) | undefined;
-
-  public addEventListener(type: string, listener: (event: MessageEvent<ImportWorkerResponse>) => void): void {
-    if (type === 'message') {
-      this.#listener = listener;
-    }
-  }
-
-  public postMessage(request: ImportWorkerRequest): void {
-    if (request.type === 'startDownload') {
-      queueMicrotask(() => {
-        this.#listener?.(
-          new MessageEvent('message', {
-            data: {
-              type: 'error',
-              message: 'The repository download is larger than the 256 MB import limit.',
-              phase: 'download',
-              reason: 'tooLarge',
-            } satisfies ImportWorkerResponse,
-          }),
-        );
-      });
-    }
-  }
-
-  public terminate(): void {
-    this.#listener = undefined;
-  }
-}
-
-/** Stands in for the import worker and records what it was asked to download. */
-class RecordingWorker {
-  public addEventListener(): void {
-    // The recorded request is what the test reads; no response is needed.
-  }
-
-  public postMessage(request: ImportWorkerRequest): void {
-    workerRequests.push(request);
-  }
-
-  public terminate(): void {
-    // Nothing to stop.
-  }
-}
 
 /* The route's `clientLoader`, evaluated against the router's own location so navigation re-derives it. */
 vi.mock('react-router', async (importOriginal) => {
@@ -114,6 +69,14 @@ vi.mock('#lib/github-api.js', () => ({
     getArchiveUrl: () => 'https://api.tau.test/v1/repositories/archive',
     getAuthHeaders: () => ({}),
   }),
+}));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => ({ fileManagerRef: { getSnapshot: () => ({ context: { worker: {} } }) } }),
+  waitForFileManagerServices: async () => undefined,
+}));
+vi.mock('#machines/import-staging.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ImportStagingModule>()),
+  openImportSession: () => ({ plan: importChannel.plan, close: () => undefined }),
 }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({ projects: [...slugs.byId.keys()].map((id) => ({ id })) }),
@@ -354,7 +317,10 @@ describe('ImportRoute GitHub card', () => {
   });
 
   it('should explain a repository too large to import instead of asking to check the source', async () => {
-    vi.stubGlobal('Worker', TooLargeArchiveWorker);
+    /* The worker refuses the archive by the gateway's size answer. */
+    importChannel.plan.mockRejectedValueOnce(
+      new ImportChannelError('The repository download is larger than the gateway admits.', 'archiveTooLarge'),
+    );
     const user = userEvent.setup();
     getRepository.mockResolvedValueOnce(repositoryMetadata);
     await renderImport('/import/github.com/KittyCAD/modeling-app');
@@ -376,13 +342,16 @@ describe('ImportRoute GitHub card', () => {
     ).toBeVisible();
     expect(screen.queryByText(/Check the source/u)).not.toBeInTheDocument();
     expect(
-      screen.getByText('Import failed (download): The repository download is larger than the 256 MB import limit.'),
+      screen.getByText('Import failed (download): The repository download is larger than the gateway admits.'),
     ).toBeInTheDocument();
   });
 
-  it('should import the folder named in the address', async () => {
-    vi.stubGlobal('Worker', RecordingWorker);
-    workerRequests.length = 0;
+  it('should import the folder named in the address, and stop its download when cancelled', async () => {
+    importChannel.plan.mockReturnValueOnce(
+      new Promise(() => {
+        /* The download is still running when the test looks. */
+      }),
+    );
     const user = userEvent.setup();
     getRepository.mockResolvedValueOnce(repositoryMetadata);
     listFiles.mockResolvedValueOnce([
@@ -402,8 +371,26 @@ describe('ImportRoute GitHub card', () => {
     expect(screen.getByRole('button', { name: 'Folder public/kcl-samples' })).toBeVisible();
     await user.click(start);
 
+    /* The worker downloads the gateway's archive itself and plans only the folder: the page holds neither. */
     await waitFor(() => {
-      expect(workerRequests).toEqual([expect.objectContaining({ type: 'startDownload', root: 'public/kcl-samples' })]);
+      expect(importChannel.plan).toHaveBeenCalledWith(
+        {
+          kind: 'archive',
+          provider: 'github',
+          url: 'https://api.tau.test/v1/repositories/archive',
+          name: 'KittyCAD/modeling-app',
+          headers: {},
+        },
+        expect.objectContaining({ root: 'public/kcl-samples' }),
+      );
+    });
+
+    /* Cancelling the download ends the actor, which stops the plan in the worker. */
+    const [, { signal }] = importChannel.plan.mock.calls.at(-1) as [unknown, { signal: AbortSignal }];
+    expect(signal.aborted).toBe(false);
+    await user.click(await screen.findByRole('button', { name: 'Cancel import' }));
+    await waitFor(() => {
+      expect(signal.aborted).toBe(true);
     });
   });
 

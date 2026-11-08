@@ -9,13 +9,15 @@
  * `jj:conflict-labels`. One encoder, two object stores, one identity — which is
  * what the conformance suite's cross-adapter test measures (I4).
  *
- * Trees go in through one `fast-import` rather than a process per blob: it is
- * binary-safe, quotes paths itself, and is the path {@link createNativeGitAdapter}
- * already proved against real repositories.
+ * Trees go in incrementally (D16): the store's tree-id memo names every
+ * object a tree needs, digesting only what changed since the last mint, and
+ * only the objects the store lacks are written — changed blobs through one
+ * blob-only `fast-import`, changed trees through one `mktree --batch` — so a
+ * save streams the paths it changed, never the whole project.
  */
 
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -26,7 +28,9 @@ import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.j
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
-import { parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
+import { parseTransportValue } from '#native-git-adapter.js';
+import { createTreeIdMemo } from '#tree-id-memo.js';
+import type { TreeObject } from '#tree-id-memo.js';
 import { NativeGitError } from '#native-git.types.js';
 import { checkoutIdOfBranch } from '#checkout-id.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -59,6 +63,7 @@ import type {
   RevisionLogEntry,
   RevisionLogInput,
   RevisionPort,
+  ReadTreeOptions,
   RevisionReceipt,
   RevisionRecord,
   RevisionFetchInput,
@@ -70,6 +75,7 @@ import type {
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
+  RevisionTreeListing,
   RemoteRef,
   RevisionRemoteAddress,
   UpdateRevisionRefInput,
@@ -77,6 +83,7 @@ import type {
   WriteRevisionInput,
 } from '#revision-port.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import {
   isHostLocalRef,
@@ -84,6 +91,7 @@ import {
   lfsRemoteUnsupportedMessage,
   remoteCarriesLargeObjects,
   remoteOf,
+  refMoved,
   remoteRefusalSaid,
   remoteTrackingRef,
   remoteTransportError,
@@ -451,10 +459,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     if (remoteRecord !== undefined && 'unavailable' in remoteRecord) {
       throw new RevisionPortError('REMOTE_REAUTHORIZATION_REQUIRED', remoteRecord.unavailable);
     }
-    const authorization =
-      held !== undefined && url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
-        ? held.authorization
-        : remoteRecord?.authorization;
+    /* A Tau API remote travels on the Tau session alone, so a held GitHub credential is never at stake for it. */
+    const tauRemote = held !== undefined && url !== undefined && isTauApiUrl(held.apiBaseUrl, url);
+    const authorization = tauRemote ? held.authorization : remoteRecord?.authorization;
     const github = remotes.find((entry) => entry.name === remote)?.provider === 'github';
     if (github) {
       env['GIT_ALLOW_PROTOCOL'] = 'http:https';
@@ -465,7 +472,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         'Reconnect this GitHub repository through Tau using HTTPS. SSH credentials are not used.',
       );
     }
-    if (remoteHeld !== undefined && remoteRecord === undefined) {
+    if (remoteHeld !== undefined && remoteRecord === undefined && !tauRemote) {
       throw new RevisionPortError(
         'INVALID_TRANSPORT',
         'The repository destination changed. Review it before continuing.',
@@ -619,6 +626,118 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
+   * Bring here the large objects a push carries that this store lacks (D16).
+   *
+   * Large objects fill lazily, so a revision fetched from one remote may hold
+   * pointers whose bytes never came: `git lfs push` to another remote would
+   * then have nothing to send. Each pointer blob the push offers — the objects
+   * reachable from its refs and not from the destination's tracking refs, as
+   * `git push` reckons them — is read from the object store; when any names an
+   * object that is not here, the commits offered are fetched from each other
+   * remote that carries large objects, newest first, until none is missing. A
+   * push whose objects are all here spawns only the `rev-list` and one
+   * `cat-file`. What no remote supplies is left to `git lfs push`, which
+   * succeeds when the destination already holds it.
+   *
+   * @param references - The refs this push offers.
+   * @param push - The remote being pushed to, this store's remotes, and the signal that stops the transfer.
+   */
+  const fillPushedLargeObjects = async (
+    references: readonly RevisionPushRef[],
+    push: Readonly<{ destination: string; configuredRemotes: readonly Remote[]; signal: AbortSignal | undefined }>,
+  ): Promise<void> => {
+    const { destination, configuredRemotes, signal } = push;
+    const sources = configuredRemotes.filter(
+      (remote) => remote.name !== destination && remoteCarriesLargeObjects(remote),
+    );
+    if (sources.length === 0) {
+      return;
+    }
+    const listed = textDecoder
+      .decode(
+        await output([
+          'rev-list',
+          '--objects',
+          ...references.map((reference) => reference.name),
+          '--not',
+          `--remotes=${destination}`,
+          '--',
+        ]),
+      )
+      .split('\n')
+      .filter((line) => line !== '');
+    const commits = listed.filter((line) => !line.includes(' '));
+    const named = listed.flatMap((line) => {
+      const [oid, path] = line.split(' ');
+      return path === undefined || path === '' || oid === undefined ? [] : [oid];
+    });
+    if (named.length === 0) {
+      return;
+    }
+    /* Only a blob small enough to be a pointer is read; everything else is known from its header. */
+    const headers = textDecoder
+      .decode(
+        await output(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], {
+          input: [textEncoder.encode(`${named.join('\n')}\n`)],
+        }),
+      )
+      .split('\n');
+    const small = headers.flatMap((line) => {
+      const [oid, type, size] = line.split(' ');
+      return oid !== undefined && type === 'blob' && Number(size) < 1024 ? [oid] : [];
+    });
+    const blobs = small.length === 0 ? new Map<string, Uint8Array<ArrayBuffer>>() : await readObjects(small, 'blob');
+    const wanted = [...blobs.values()].flatMap((content) => {
+      const pointer = readLfsPointer(content);
+      return pointer === undefined ? [] : [pointer.oid];
+    });
+    const absent = async (): Promise<boolean> => {
+      const here = await Promise.all(
+        wanted.map(async (oid) =>
+          access(lfsObjectFile(oid)).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      );
+      return here.includes(false);
+    };
+    if (!(await absent())) {
+      return;
+    }
+    /* Bounded argument lists: a first push may offer the whole history. */
+    const batches: string[][] = [];
+    for (let start = 0; start < commits.length; start += 256) {
+      batches.push(commits.slice(start, start + 256));
+    }
+    for (const source of sources) {
+      for (const batch of batches) {
+        signal?.throwIfAborted();
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one source after another, until every object is here.
+          await output(['lfs', 'fetch', '--', source.name, ...batch], {
+            deadline: transferDeadline,
+            // oxlint-disable-next-line no-await-in-loop -- the credentials belong to this remote.
+            env: await remoteEnvironment(source.name, configuredRemotes),
+            ...(signal === undefined ? {} : { signal }),
+            remote: source.name,
+          });
+        } catch (error) {
+          if (signal?.aborted === true) {
+            throw error;
+          }
+          /* This source could not supply them; the next is asked. */
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the next batch is fetched only while objects are missing.
+        if (!(await absent())) {
+          return;
+        }
+      }
+    }
+  };
+
+  /**
    * Why `git lfs push` failed, in the vocabulary `remote.machine` already owns.
    *
    * An over-quota batch refusal is an `LfsQuotaError` carrying the **file
@@ -658,15 +777,58 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     );
   };
 
+  /* Once per port, before its first large-object write: a `.partial` a crashed writer left is removed once it has
+   * sat an hour, long past any live writer's sync and rename. */
+  let partialsSwept: Promise<void> | undefined;
+  const abandonedPartialMilliseconds = 60 * 60 * 1000;
+  const sweepAbandonedPartials = async (): Promise<void> => {
+    const objects = join(repositoryPath, gitDirectoryName, 'lfs', 'objects');
+    const names = await readdir(objects, { recursive: true }).catch((): string[] => []);
+    const now = Date.now();
+    await Promise.all(
+      names
+        .filter((name) => name.endsWith('.partial'))
+        .map(async (name) => {
+          const file = join(objects, name);
+          const stats = await lstat(file).catch(() => undefined);
+          if (stats?.isFile() === true && now - stats.mtimeMs > abandonedPartialMilliseconds) {
+            await rm(file, { force: true });
+          }
+        }),
+    );
+  };
+
+  /* Written to a synced `.partial` sibling and renamed into place (I1), so the store never names a torn object;
+   * content-addressed, so a rename over a concurrent writer's copy replaces identical bytes. */
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+    partialsSwept ??= sweepAbandonedPartials();
+    try {
+      await partialsSwept;
+    } catch {
+      /* A sweep is housekeeping: one that fails never stops a store. */
+    }
     const file = lfsObjectFile(oid);
+    const held = await access(file).then(
+      () => true,
+      () => false,
+    );
+    if (held) {
+      return;
+    }
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, content, { flag: 'wx' }).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what the write threw.
-        throw error;
+    const partial = `${file}.${String(process.pid)}.${randomUUID()}.partial`;
+    try {
+      const handle = await open(partial, 'wx');
+      try {
+        await handle.writeFile(content);
+        await handle.sync();
+      } finally {
+        await handle.close();
       }
-    });
+      await rename(partial, file);
+    } finally {
+      await rm(partial, { force: true });
+    }
   };
 
   /**
@@ -692,46 +854,546 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  /* What git-lfs prints around a transfer that are no verdict on it: progress, the failure summary, the log hint. */
+  const transferChatter =
+    /^(?:Downloading .*|Fetching .*|fetch: .*|(?:error: )?[Ff]ailed to fetch some objects from .*|Errors logged to .*|Use `git lfs logs last` to view the log\.)$/u;
+  /* An object-level not-found for one oid, as git-lfs spells a batch API object error (`fetch`), or wraps it (`smudge`). */
+  const objectAbsent =
+    /^(?:Error downloading object: .*: )?\[(?<oid>[\da-f]{64})\] Object does not exist(?: on the server)?: \[404\] /u;
+
   /**
-   * Write one tree through a single `fast-import`, then drop the staging ref.
+   * What one remote's failed large-object transfer said (D16).
    *
-   * The commit `fast-import` writes is a throwaway: this port needs the *tree*
-   * it produced, and writes Tau's own commit over it.
+   * It lacks the objects only when every line that is not progress names one
+   * of the objects asked for as not found there. Anything else — a repository
+   * the batch endpoint did not find, a credential it refused, a network
+   * failure, beside or instead of an object not found — is the remote's own
+   * refusal: it may hold the objects, so it is never read as "missing". GitHub
+   * answers a repository the token cannot see as not found, so on a GitHub
+   * remote that is a credential to grant again.
+   *
+   * @param result - The transfer's outcome.
+   * @param asked - The objects it was asked for.
+   * @param remote - The remote it talked to.
+   * @returns `'lacks'`, or the error to keep.
+   */
+  const transferVerdict = (
+    result: GitCommandResult,
+    asked: ReadonlySet<string>,
+    remote: Remote,
+  ): 'lacks' | RevisionPortError => {
+    const stderr = textDecoder.decode(result.stderr);
+    /* A progress meter redraws its line with a carriage return, so each redraw is a line of its own. */
+    const lines = stderr.split(/[\r\n]/u).filter((line) => line.trim() !== '' && !transferChatter.test(line.trim()));
+    if (
+      lines.length > 0 &&
+      lines.every((line) => {
+        const oid = objectAbsent.exec(line.trim())?.groups?.['oid'];
+        return oid !== undefined && asked.has(oid);
+      })
+    ) {
+      return 'lacks';
+    }
+    const refusal =
+      remoteRefusalOf(stderr, remote.name) ??
+      new RevisionPortError(
+        'ENGINE_FAILED',
+        'The remote could not supply this project’s large objects.',
+        stderr.trim() === '' ? undefined : { cause: new Error(stderr.trim()) },
+      );
+    if (refusal.code === 'REMOTE_NOT_FOUND' && remote.provider === 'github') {
+      return new RevisionPortError(
+        'REMOTE_REAUTHORIZATION_REQUIRED',
+        'GitHub did not find this repository for the connected account. Reconnect it in Tau.',
+        { cause: refusal },
+      );
+    }
+    return refusal;
+  };
+
+  /**
+   * Ask each remote that carries large objects, in turn, until nothing is missing (D16).
+   *
+   * A remote that fails is passed over for the next. When objects are still
+   * missing after every remote, the first refusal is thrown; with none, every
+   * remote answered that it lacks them and the caller raises
+   * `MISSING_LARGE_OBJECT`. A cancelled transfer rejects at once.
+   *
+   * @param attempt - One remote's transfer, answering its verdict.
+   * @param stillMissing - Whether anything is still missing here.
+   * @param signal - Stops the transfers.
+   */
+  const fromEachRemote = async (
+    attempt: (remote: Remote, env: Record<string, string | undefined>) => Promise<'done' | 'lacks' | Error>,
+    stillMissing: () => Promise<boolean>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const configuredRemotes = await port.listRemotes();
+    let refusal: Error | undefined;
+    for (const remote of configuredRemotes.filter((candidate) => remoteCarriesLargeObjects(candidate))) {
+      signal?.throwIfAborted();
+      let verdict: 'done' | 'lacks' | Error;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
+        verdict = await attempt(remote, await remoteEnvironment(remote.name, configuredRemotes));
+      } catch (error) {
+        if (signal?.aborted === true) {
+          throw error;
+        }
+        verdict = error instanceof Error ? error : new Error(String(error));
+      }
+      if (verdict instanceof Error) {
+        refusal ??= verdict;
+      }
+      /* A failed transfer may still have landed some objects; the next remote is asked only for the rest. */
+      // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
+      if (!(await stillMissing())) {
+        return;
+      }
+    }
+    if (refusal !== undefined) {
+      throw refusal;
+    }
+  };
+
+  /**
+   * One blob as a `local` read answers it: the content when the large object
+   * is here, else the pointer itself. Nothing is fetched.
+   *
+   * @param content - Bytes as the object store holds them.
+   * @returns The real bytes, or the pointer.
+   */
+  const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    try {
+      return await smudged(content);
+    } catch (error) {
+      if (error instanceof RevisionPortError && error.code === 'MISSING_LARGE_OBJECT') {
+        return content;
+      }
+      throw error;
+    }
+  };
+
+  /**
+   * Whether every one of `oids` is in this store.
+   *
+   * @param oids - Large-object ids.
+   * @returns `true` when none is missing.
+   */
+  const allStored = async (oids: readonly string[]): Promise<boolean> => {
+    const present = await Promise.all(
+      oids.map(async (oid) =>
+        access(lfsObjectFile(oid)).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    );
+    return !present.includes(false);
+  };
+
+  /**
+   * The pointers whose objects this store lacks.
+   *
+   * @param pointers - Candidate objects.
+   * @returns Those not stored, deduplicated, in order.
+   */
+  const missingOf = async (
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+  ): Promise<Array<Readonly<{ oid: string; size: number }>>> => {
+    const unique = [...new Map(pointers.map((pointer) => [pointer.oid, pointer])).values()];
+    const stored = await Promise.all(unique.map(async ({ oid }) => allStored([oid])));
+    return unique.filter((_pointer, index) => !stored[index]);
+  };
+
+  /* One fill per commit at a time; a read that joins one shares its outcome, unless only its caller cancelled it. */
+  const fillsInFlight = new Map<string, Readonly<{ fill: Promise<void>; signal: AbortSignal | undefined }>>();
+
+  /**
+   * Fetch the large objects one read needs and this store lacks (D16): one
+   * `git lfs fetch` of that commit's objects from each remote that carries
+   * large objects, in turn, until none is missing (see {@link fromEachRemote}).
+   * A read with none missing spawns nothing.
+   *
+   * @param commit - The commit whose tree is being read.
+   * @param pointers - The pointers the read holds.
+   * @param signal - Stops the transfer; the read then rejects.
+   */
+  const fillLargeObjects = async (
+    commit: string,
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const oids = pointers.map(({ oid }) => oid);
+    if (await allStored(oids)) {
+      return;
+    }
+    const running = fillsInFlight.get(commit);
+    if (running !== undefined) {
+      try {
+        await running.fill;
+      } catch (error) {
+        /* Its failure is this read's too, unless only the read that started it was cancelled. */
+        if (running.signal?.aborted !== true) {
+          throw error;
+        }
+      }
+      signal?.throwIfAborted();
+      if (await allStored(oids)) {
+        return;
+      }
+    }
+    const asked = new Set(oids);
+    const fill = (async (): Promise<void> => {
+      await fromEachRemote(
+        async (remote, env) => {
+          const result = await run(['lfs', 'fetch', '--', remote.name, commit], {
+            deadline: transferDeadline,
+            env,
+            ...(signal === undefined ? {} : { signal }),
+            remote: remote.name,
+          });
+          if (result.exitCode === 0) {
+            return 'done';
+          }
+          const verdict = transferVerdict(result, asked, remote);
+          if (verdict === 'lacks' || signal?.aborted === true) {
+            return verdict;
+          }
+          /* The fetch's own words did not settle it (a git-lfs whose output this port does not know, a meter drawn
+           * under load): each object still missing is asked by its oid, whose answer is that object's alone. A real
+           * refusal refuses these too, so it is never read as "lacks". */
+          const left = await missingOf(pointers);
+          return left.length === 0 ? 'done' : smudgeFromRemote(remote, left, { env, signal });
+        },
+        async () => !(await allStored(oids)),
+        signal,
+      );
+      /* Every remote answered that it lacks what is still missing: one verdict, for every read that joined. */
+      if (!(await allStored(oids))) {
+        throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this revision references is on no remote.');
+      }
+    })();
+    fillsInFlight.set(commit, { fill, signal });
+    try {
+      await fill;
+    } finally {
+      if (fillsInFlight.get(commit)?.fill === fill) {
+        fillsInFlight.delete(commit);
+      }
+    }
+  };
+
+  /* Objects fetched by their own oid at once, per remote: enough to hide a round trip, few enough to bound processes. */
+  const fetchByOidConcurrency = 4;
+
+  /**
+   * Fetch objects by their own oid from one remote, through `git lfs smudge`
+   * with that remote as its default: each verified against its oid, stored,
+   * then handed to `arrived`. Each object's failure is its own, so the verdict
+   * is per object: `'lacks'` only when every failure was that object not found.
+   *
+   * @param remote - The remote asked.
+   * @param pointers - The objects, in the order to ask for them.
+   * @param transfer - The remote's credentials, the signal that stops the transfers, and who is told each object.
+   * @returns The remote's verdict.
+   */
+  const smudgeFromRemote = async (
+    remote: Remote,
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    transfer: Readonly<{
+      env: Record<string, string | undefined>;
+      signal: AbortSignal | undefined;
+      arrived?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+    }>,
+  ): Promise<'done' | 'lacks' | Error> => {
+    const { env, signal } = transfer;
+    const verdicts: Array<'done' | 'lacks' | Error> = [];
+    const queue = [...pointers];
+    const fetchOne = async ({ oid, size }: Readonly<{ oid: string; size: number }>): Promise<void> => {
+      const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
+        input: [
+          textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`),
+        ],
+        deadline: transferDeadline,
+        env,
+        ...(signal === undefined ? {} : { signal }),
+        remote: remote.name,
+      });
+      if (result.exitCode !== 0) {
+        verdicts.push(transferVerdict(result, new Set([oid]), remote));
+        return;
+      }
+      /* Content-addressed: bytes that are not the object are no answer at all. */
+      if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
+        verdicts.push(
+          new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
+        );
+        return;
+      }
+      /* Stored before it is delivered, so a crash keeps it. */
+      await storeLfsObject(oid, result.stdout);
+      transfer.arrived?.(oid, result.stdout);
+      verdicts.push('done');
+    };
+    /*
+     * A worker never rejects while the others still drain: a store or a
+     * delivery that throws (a full disk) ends this remote's round, its queue
+     * emptied, so the remote's verdict is settled only once every transfer it
+     * started has ended, and none outlives it to deliver late. Aborted, that
+     * abort is what the round answers, once the rest have stopped too.
+     */
+    let abort: { error: unknown } | undefined;
+    const worker = async (): Promise<void> => {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
+          await fetchOne(next);
+        } catch (error) {
+          queue.length = 0;
+          if (signal?.aborted === true) {
+            abort ??= { error };
+          } else {
+            verdicts.push(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(fetchByOidConcurrency, queue.length) }, worker));
+    if (abort !== undefined) {
+      throw abort.error;
+    }
+    return (
+      verdicts.find((verdict): verdict is Error => verdict instanceof Error) ??
+      (verdicts.includes('lacks') ? 'lacks' : 'done')
+    );
+  };
+
+  /**
+   * Large objects by their pointers alone (D10 `filled`): what this store holds
+   * is read here; the rest is fetched object by object through `git lfs
+   * smudge` with each remote that carries large objects as its default, in
+   * turn, verified against its oid and stored, whether or not any revision
+   * names it.
+   *
+   * @param pointers - The objects wanted.
+   * @param fetchOptions - The delivery callback, the order to fetch in, and the signal.
+   * @returns Every object's bytes, by oid.
+   */
+  const fetchLargeObjectsByOid = async (
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    fetchOptions?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'signal'>,
+  ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+    const signal = fetchOptions?.signal;
+    const contents = new Map<string, Uint8Array<ArrayBuffer>>();
+    const wanted = new Map(pointers.map((pointer) => [pointer.oid, pointer.size]));
+    const deliver = (oid: string, content: Uint8Array<ArrayBuffer>): void => {
+      contents.set(oid, content);
+      fetchOptions?.onLargeObject?.(oid, content);
+    };
+    const readHere = async (oid: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+      try {
+        const stored = await readFile(lfsObjectFile(oid));
+        return new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength);
+      } catch {
+        return undefined;
+      }
+    };
+    for (const oid of wanted.keys()) {
+      // oxlint-disable-next-line no-await-in-loop -- one local read at a time; nothing is transferred here.
+      const here = await readHere(oid);
+      if (here !== undefined) {
+        deliver(oid, here);
+      }
+    }
+    const missing = (): string[] => {
+      const first = fetchOptions?.firstLargeObjects?.() ?? new Set<string>();
+      const left = [...wanted.keys()].filter((oid) => !contents.has(oid));
+      return [...left.filter((oid) => first.has(oid)), ...left.filter((oid) => !first.has(oid))];
+    };
+    if (missing().length > 0) {
+      await fromEachRemote(
+        async (remote, env) =>
+          smudgeFromRemote(
+            remote,
+            missing().map((oid) => ({ oid, size: wanted.get(oid)! })),
+            { env, signal, arrived: deliver },
+          ),
+        async () => missing().length > 0,
+        signal,
+      );
+    }
+    if (missing().length > 0) {
+      throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds is on no remote.');
+    }
+    return contents;
+  };
+
+  /*
+   * Objects this store is known to hold, so a mint walks only what changed
+   * (D16). A tree is written only after everything it names, so a held tree
+   * proves its whole subtree is held. Forgotten wholesale every hour and past a
+   * bound: an object a mint wrote but no ref reached is garbage to `git gc`
+   * after its two-week expiry, and must never be trusted that long.
+   */
+  const heldObjects = new Set<string>();
+  let heldSince = Date.now();
+  const heldObjectLimit = 262_144;
+  const heldObjectMilliseconds = 60 * 60 * 1000;
+  const forgetStaleHeldObjects = (): void => {
+    if (Date.now() - heldSince > heldObjectMilliseconds || heldObjects.size > heldObjectLimit) {
+      heldObjects.clear();
+      heldSince = Date.now();
+    }
+  };
+  /* Tree and blob ids for this store's successive mints, digesting only what changed (E3). */
+  const treeIds = createTreeIdMemo();
+
+  /**
+   * Which of `oids` the object store holds, from their headers alone: no
+   * object's content is read.
+   *
+   * @param oids - Candidate object ids.
+   * @returns The ones present.
+   */
+  const presentObjects = async (oids: readonly string[]): Promise<ReadonlySet<string>> => {
+    if (oids.length === 0) {
+      return new Set();
+    }
+    const stdout = await output(['cat-file', '--batch-check=%(objectname)'], {
+      input: [textEncoder.encode(`${oids.join('\n')}\n`)],
+    });
+    return new Set(
+      textDecoder
+        .decode(stdout)
+        .split('\n')
+        .filter((line) => line !== '' && !line.endsWith(' missing')),
+    );
+  };
+
+  /**
+   * Write what the store lacks of one named tree, children first.
+   *
+   * @param root - The tree, as the memo names it.
+   * @returns The root tree's object id.
+   */
+  const storeTreeObjects = async (root: TreeObject): Promise<string> => {
+    forgetStaleHeldObjects();
+    /* A held root is still asked about, header only: a prune, a re-clone or a restore may have removed it since,
+     * and a commit must never be written over a tree the store lacks. */
+    if (root.entries.length === 0) {
+      /* Git answers the empty tree as present whether or not it is stored, so it is never trusted held. */
+      heldObjects.delete(root.oid);
+    } else if (heldObjects.has(root.oid)) {
+      const present = await presentObjects([root.oid]);
+      if (present.has(root.oid)) {
+        return root.oid;
+      }
+      heldObjects.clear();
+      heldSince = Date.now();
+    }
+    /* Children before their parents, and nothing under a tree already held. */
+    const trees: TreeObject[] = [];
+    const blobs = new Map<string, Uint8Array<ArrayBuffer>>();
+    const visited = new Set<string>();
+    const visit = (node: TreeObject): void => {
+      if (heldObjects.has(node.oid) || visited.has(node.oid)) {
+        return;
+      }
+      visited.add(node.oid);
+      for (const entry of node.entries) {
+        if (entry.type === 'tree') {
+          visit(entry.tree);
+        } else if (!heldObjects.has(entry.oid)) {
+          blobs.set(entry.oid, entry.content);
+        }
+      }
+      trees.push(node);
+    };
+    visit(root);
+    const present = await presentObjects([...trees.map(({ oid }) => oid), ...blobs.keys()]);
+    const missingBlobs = [...blobs].filter(([oid]) => !present.has(oid));
+    if (missingBlobs.length > 0) {
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      for (const [, content] of missingBlobs) {
+        chunks.push(
+          textEncoder.encode(`blob\ndata ${String(content.byteLength)}\n`),
+          content,
+          textEncoder.encode('\n'),
+        );
+      }
+      chunks.push(textEncoder.encode('done\n'));
+      await output(['fast-import', '--quiet'], { input: chunks });
+    }
+    /* Git answers the empty tree as present whether or not it is stored, so it is always written. */
+    const missingTrees = trees.filter(({ oid, entries }) => entries.length === 0 || !present.has(oid));
+    if (missingTrees.length > 0) {
+      const listing = (node: TreeObject): string =>
+        node.entries
+          .map((entry) =>
+            entry.type === 'tree'
+              ? `040000 tree ${entry.oid}\t${entry.name}\0`
+              : `${entry.mode} blob ${entry.oid}\t${entry.name}\0`,
+          )
+          .join('');
+      /* An empty root is the one tree with no entries; batch mode cannot spell it, so it goes alone. */
+      const written =
+        missingTrees.length === 1 && missingTrees[0]!.entries.length === 0
+          ? [await text(['mktree', '-z'])]
+          : textDecoder
+              .decode(
+                await output(['mktree', '-z', '--batch'], {
+                  input: [textEncoder.encode(`${missingTrees.map((node) => `${listing(node)}\0`).join('')}`)],
+                }),
+              )
+              .split(/\s+/u)
+              .filter((line) => line !== '');
+      /* Git's ids are the memo's ids, or this engine and the host disagree on identity (I4). */
+      if (written.length !== missingTrees.length || written.some((oid, index) => oid !== missingTrees[index]!.oid)) {
+        throw new RevisionPortError('ENGINE_FAILED', 'Native Git recorded a tree under an unexpected id.');
+      }
+    }
+    for (const node of trees) {
+      heldObjects.add(node.oid);
+    }
+    for (const oid of blobs.keys()) {
+      heldObjects.add(oid);
+    }
+    return root.oid;
+  };
+
+  /**
+   * Store one tree incrementally (D16): the tree's objects are named by the
+   * store's own memo, which digests only blobs and directories that changed
+   * since the last mint, and only what the store lacks is written — the
+   * changed blobs through one blob-only `fast-import`, the changed trees through
+   * one `mktree --batch`, children first. A one-file save streams that file and
+   * the trees on its path to Git, never the project.
    *
    * @param tree - The tree to store.
    * @param largeObjects - Whether the clean step runs; `false` stores it verbatim.
    * @returns The root tree's object id.
    */
   const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
-    /* `fast-import` stores `inline` data verbatim, so git's own clean filter
-     * never runs on this path and the pointer decision is Tau's. It is made by
-     * the host-neutral cut (`lfs.ts`) that the cut's `treeId` is computed from,
-     * so the id this engine records is the id the host predicted. */
+    /* The pointer decision is Tau's, made by the host-neutral cut (`lfs.ts`) that the cut's `treeId` is
+     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs. */
     const recorded = largeObjects
       ? cleanLargeObjects(tree)
       : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
+    /* Each asked of the disk, never of a memo: a pruned object is stored again. */
     await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
-    const stagingRef = `${stagingRefPrefix}-${randomUUID()}`;
-    const chunks: Array<Uint8Array<ArrayBuffer>> = [
-      textEncoder.encode(`commit ${stagingRef}\n`),
-      textEncoder.encode('author Tau Revision <tau@local.invalid> 0 +0000\n'),
-      textEncoder.encode('committer Tau Revision <tau@local.invalid> 0 +0000\n'),
-      textEncoder.encode('data 0\n'),
-      textEncoder.encode('deleteall\n'),
-    ];
-    for (const entry of recorded.tree.entries()) {
-      chunks.push(
-        textEncoder.encode(`M ${entry.mode} inline ${quoteFastImportPath(entry.path)}\n`),
-        textEncoder.encode(`data ${entry.content.byteLength}\n`),
-        entry.content,
-        textEncoder.encode('\n'),
-      );
+    const root = treeIds.treeObject(recorded.tree, await format());
+    try {
+      return await storeTreeObjects(root);
+    } catch (error) {
+      /* A held object the store lost (a pruned subtree) fails the write; forgotten, the retry asks Git for all. */
+      heldObjects.clear();
+      heldSince = Date.now();
+      if (error instanceof RevisionPortError && error.code === 'ENGINE_UNAVAILABLE') {
+        throw error;
+      }
+      return storeTreeObjects(root);
     }
-    chunks.push(textEncoder.encode('done\n'));
-    await output(['fast-import', '--quiet', '--date-format=raw'], { input: chunks });
-    const treeId = await text(['rev-parse', `${stagingRef}^{tree}`]);
-    await run(['update-ref', '-d', stagingRef]);
-    return treeId;
   };
 
   /* A branch name is spelled short and everything else is spelled in full: the
@@ -781,15 +1443,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return textDecoder.decode(result.stdout).trim();
   };
 
-  const listTree = async (commit: string): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: FileMode }>>> => {
-    const stdout = await output(['ls-tree', '-rz', '--full-tree', commit]);
-    const paths = new Map<string, Readonly<{ oid: string; mode: FileMode }>>();
+  const listTree = async (
+    commit: string,
+  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: FileMode; size: number }>>> => {
+    /* `-l` adds each blob's size, padded with spaces: git reads it from the object header, not the blob. */
+    const stdout = await output(['ls-tree', '-rlz', '--full-tree', commit]);
+    const paths = new Map<string, Readonly<{ oid: string; mode: FileMode; size: number }>>();
     for (const record of textDecoder.decode(stdout).split('\0')) {
       if (record === '') {
         continue;
       }
       const tab = record.indexOf('\t');
-      const header = record.slice(0, tab).split(' ');
+      const header = record.slice(0, tab).split(/ +/u);
       if (
         tab === -1 ||
         header[1] !== 'blob' ||
@@ -798,7 +1463,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       ) {
         throw new RevisionPortError('ENGINE_FAILED', 'A revision tree holds a non-file entry.');
       }
-      paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0] });
+      paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0], size: Number(header[3]) });
     }
     return paths;
   };
@@ -1066,22 +1731,31 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param offered - The local refs, in the order they were offered, each with
    *   the commit it named before `git push` was spawned.
    * @param said - The server's own sideband sentence, when it sent one.
+   * @param sideband - Every `remote:` line, read by {@link refMoved} as the browser leg reads its own.
    * @returns One result per offered ref.
    */
+  // oxlint-disable-next-line max-params -- the push's output, its offer and the two readings of its sideband.
   const parsePushPorcelain = (
     stdout: string,
     offered: ReadonlyArray<Readonly<{ name: string; head: string | undefined }>>,
-    said?: string,
+    said: string | undefined,
+    sideband: readonly string[],
   ): readonly RevisionPushRefResult[] => {
-    const rows = new Map<string, Readonly<{ flag: string; summary: string }>>();
+    const rows = new Map<string, Readonly<{ flag: string; summary: string; moved: boolean }>>();
     for (const line of stdout.split('\n')) {
       const parts = line.split('\t');
       if (parts.length < 3 || parts[0] === undefined || parts[1] === undefined) {
         continue;
       }
-      const from = parts[1].split(':')[0] ?? '';
-      rows.set(from, Object.freeze({ flag: parts[0], summary: parts[2] ?? '' }));
+      const [from = '', to = ''] = parts[1].split(':');
+      const summary = parts[2] ?? '';
+      rows.set(
+        from,
+        Object.freeze({ flag: parts[0], summary, moved: parts[0] === '!' && refMoved(to, summary, sideband) }),
+      );
     }
+    /* The server's compare-and-set refused one ref of an atomic push: the others fall with it (D39). */
+    const movedAny = [...rows.values()].some(({ moved }) => moved);
     return Object.freeze(
       offered.map(({ name, head }): RevisionPushRefResult => {
         const row = rows.get(name);
@@ -1093,7 +1767,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             reason:
               row === undefined
                 ? 'The remote did not report this ref.'
-                : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
+                : row.moved || (movedAny && /atomic transaction failed/iu.test(row.summary))
+                  ? 'leaseLost'
+                  : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
           });
         }
         return Object.freeze({
@@ -1374,22 +2050,53 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       });
     },
 
-    /* Three processes whatever the tree holds: the commit, its paths, and one
-     * `cat-file --batch` for every blob in it (rule 20's `readTree` cost). */
-    readTree: async (id: RevisionId): Promise<ImmutableRevisionTree | undefined> => {
+    listTree: async (id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
         return undefined;
       }
-      const paths = await listTree(commit.tree);
+      return Object.freeze(
+        [...(await listTree(commit.tree))]
+          .toSorted(([left], [right]) => (left < right ? -1 : 1))
+          .map(([path, entry]) => Object.freeze({ path, ...entry })),
+      );
+    },
+
+    /* Three processes whatever the tree holds: the commit, its paths, and one
+     * `cat-file --batch` for every blob in it (rule 20's `readTree` cost). */
+    /* Large objects fill lazily (D16): a fetch moves refs only, and a read
+     * that needs a large object this store lacks fetches that one commit's
+     * objects then, never every fetched ref's. A `local` read fetches nothing
+     * and answers a missing object with its pointer, for the placeholder fill
+     * to bring (`large-object-fill.ts`): through a fetching read when the head
+     * names it, and through `fetchLargeObjects` by its oid when it does not. */
+    fetchLargeObjects: async (pointers, fetchOptions) => fetchLargeObjectsByOid(pointers, fetchOptions),
+
+    readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
+      const commit = await readCommitObject(id);
+      if (commit === undefined) {
+        return undefined;
+      }
+      const listed = await listTree(commit.tree);
+      const wanted = readOptions?.paths === undefined ? undefined : new Set(readOptions.paths);
+      const paths = wanted === undefined ? [...listed] : [...listed].filter(([path]) => wanted.has(path));
       const blobs = await readObjects(
-        [...paths.values()].map((entry) => entry.oid),
+        paths.map(([, entry]) => entry.oid),
         'blob',
       );
+      const pointers = paths.flatMap(([, { oid }]) => {
+        const pointer = readLfsPointer(blobs.get(oid)!);
+        return pointer === undefined ? [] : [pointer];
+      });
+      const local = readOptions?.largeObjects === 'local';
+      if (!local && pointers.length > 0) {
+        await fillLargeObjects(id, pointers, readOptions?.signal);
+      }
       const entries = await Promise.all(
-        [...paths].map(
-          async ([path, { oid, mode }]): Promise<RevisionTreeInput> => [path, await smudged(blobs.get(oid)!), mode],
-        ),
+        paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
+          const content = blobs.get(oid)!;
+          return [path, local ? await smudgedIfHere(content) : await smudged(content), mode];
+        }),
       );
       return new ImmutableRevisionTree(entries);
     },
@@ -1414,8 +2121,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           ? {}
           : { conflictedTrees: [...input.conflict.trees], conflictLabels: [...input.conflict.labels] }),
       });
-      const written = await run(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: [commit.body] });
+      const written = await run(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: [commit.body] }).catch(
+        (error: unknown) => {
+          heldObjects.clear();
+          throw error;
+        },
+      );
       if (written.exitCode !== 0) {
+        /* A failed mint trusts nothing it remembered: the next one asks Git again. */
+        heldObjects.clear();
         throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the revision commit object.');
       }
       return receiptOf(revisionId(textDecoder.decode(written.stdout).trim()), decodeCommit(commit.body));
@@ -1693,9 +2407,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       );
       /* Once per fetch (C73): `listRemotes` is `1 + 3R` processes on this leg. */
       const configuredRemotes = await port.listRemotes();
-      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      // Tracking refs only become visible once their LFS payloads are present.
-      // Suppress the remote's configured refmap too: explicit staging refspecs
+      // Large objects are not fetched here: a read fills them lazily (D16).
+      // Suppress the remote's configured refmap: explicit staging refspecs
       // alone still allow Git to opportunistically update normal tracking refs.
       const transaction = `${stagingRefPrefix}-fetch-${randomUUID()}`;
       const references = await Promise.all(
@@ -1722,16 +2435,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             remote: input.remote,
           },
         );
-        if (configuredRemote !== undefined && remoteCarriesLargeObjects(configuredRemote)) {
-          // Let LFS enumerate the pinned tips; a failed ls-files is not proof
-          // that the transfer has no large objects.
-          await output(['lfs', 'fetch', '--', input.remote, ...references.map(({ staged }) => staged)], {
-            deadline: transferDeadline,
-            env: await remoteEnvironment(input.remote, configuredRemotes),
-            signal: input.signal,
-            remote: input.remote,
-          });
-        }
         const zero = await zeroObjectId();
         const updates = await Promise.all(
           references.map(async ({ tracked, staged, previous }) => {
@@ -1847,6 +2550,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if ((configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) && large.length > 0) {
         throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
       } else if (large.length > 0) {
+        await fillPushedLargeObjects(input.refs, {
+          destination: input.remote,
+          configuredRemotes,
+          signal: input.signal,
+        });
         const transfer = await run(['lfs', 'push', '--', destination, ...input.refs.map((ref) => ref.name)], {
           deadline: transferDeadline,
           env,
@@ -1924,6 +2632,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
          * The ceiling and the plan quota are hook sentences too, and the
          * scheduler files them as quota by their marker (FX1 N). */
         refused?.code === 'REMOTE_REJECTED' || refused?.code === 'REMOTE_QUOTA_EXCEEDED' ? refused.message : undefined,
+        [...stderr.matchAll(/^remote: (?<said>.+)$/gmu)].map((match) => match.groups?.['said']?.trim() ?? ''),
       );
       /* Where `fetch` would have put every accepted ref, as the browser leg does:
        * The destination is a pinned URL, so Git does not associate this push

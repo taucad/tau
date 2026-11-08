@@ -3,8 +3,10 @@
  * the importer and search, and nothing that touches storage (charter D1, D7).
  *
  * Inflate, deflate, delta resolution, hashing and pack indexing take bytes in
- * and hand bytes back (zip decode and grep join with W7 and W9, which use them); the authority does every read and
- * write. A host gives the store a dedicated worker through
+ * and hand bytes back; an import's entry decode reads the `Blob` it is handed
+ * and hands the bytes back CRC-checked, and the read-back of what the import
+ * wrote is measured here, its one hash (W7; grep joins with W9). The
+ * authority does every write. A host gives the store a dedicated worker through
  * {@link createSupervisedComputeWorker} (`supervisor.ts`), which that worker
  * serves with {@link serveComputeWorker}; {@link createInlineCompute} runs the
  * same work in the caller's realm where no worker can be spawned. Each
@@ -25,6 +27,8 @@
  */
 
 import { indexPack } from 'isomorphic-git';
+import { decodeImportEntry, measureImportBytes } from '@taucad/filesystem/importer';
+import type { ImportDecodeRequest, ImportDecodedEntry, ImportMeasuredFacts } from '@taucad/filesystem/importer';
 import { bytesToHex, digest } from '#object-hash.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -42,8 +46,17 @@ export type ComputeWorker = Readonly<{
   deflate: (raw: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>;
   /** SHA-1 of the bytes, lowercase hex: WebCrypto where the origin has it. */
   sha1: (bytes: Uint8Array<ArrayBuffer>) => Promise<string>;
-  /** SHA-256 of the bytes, lowercase hex: WebCrypto where the origin has it (an LFS object's id). */
-  sha256: (bytes: Uint8Array<ArrayBuffer>) => Promise<string>;
+  /**
+   * SHA-256 of the bytes, lowercase hex: WebCrypto where the origin has it (an LFS object's id).
+   * `consumed`, the bytes are transferred to the worker rather than cloned, and are unusable after.
+   */
+  sha256: (bytes: Uint8Array<ArrayBuffer>, consumed?: boolean) => Promise<string>;
+  /**
+   * SHA-256 of the bytes, and the bytes themselves: transferred to the worker
+   * and back rather than cloned, so a caller that delivers what it hashed holds
+   * one copy (I2). The bytes passed in are unusable after; use the ones returned.
+   */
+  sha256Kept: (bytes: Uint8Array<ArrayBuffer>) => Promise<Readonly<{ sha256: string; data: Uint8Array<ArrayBuffer> }>>;
   /**
    * The version-2 `.idx` of one whole pack (≤ the store's 64 MiB ceiling).
    * `isomorphic-git`'s indexer over an in-memory file: no store is read.
@@ -60,6 +73,21 @@ export type ComputeWorker = Readonly<{
     declared: number,
     base: Uint8Array<ArrayBuffer>,
   ) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * One import entry read from the `Blob` it was handed (by reference, never
+   * copied), inflated and CRC-checked against its zip entry (charter D12).
+   * Nothing is hashed: the bytes come back transferred.
+   *
+   * @throws ImportRefusedError (revived by name) when the bytes do not decode to the declared size and CRC.
+   */
+  decodeImportEntry: (request: ImportDecodeRequest) => Promise<ImportDecodedEntry>;
+  /**
+   * The facts of one file an import wrote, from its read-back: blob id and
+   * SHA-256 by one-shot WebCrypto digests, and its content kind (EQ6, I2).
+   * The bytes are transferred to the worker, not cloned, and are unusable
+   * after; bytes of another length than `expectedSize` are refused, never measured.
+   */
+  measureImportBytes: (bytes: Uint8Array<ArrayBuffer>, expectedSize: number) => Promise<ImportMeasuredFacts>;
 }>;
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> => {
@@ -182,6 +210,7 @@ export const createInlineCompute = (): ComputeWorker => {
     deflate: async (raw) => through(new CompressionStream('deflate'), raw),
     sha1: async (bytes) => hashHex('sha1', bytes),
     sha256: async (bytes) => hashHex('sha256', bytes),
+    sha256Kept: async (bytes) => ({ sha256: await hashHex('sha256', bytes), data: bytes }),
     indexPack: async (pack) => {
       const { fs, files } = memoryFiles(pack);
       try {
@@ -196,6 +225,8 @@ export const createInlineCompute = (): ComputeWorker => {
       }
       return new Uint8Array(written);
     },
+    decodeImportEntry: async (request) => decodeImportEntry(request),
+    measureImportBytes: async (bytes, expectedSize) => measureImportBytes(bytes, expectedSize, hashHex),
     resolveDelta: async (compressed, declared, base) => {
       const delta = await inflate(compressed);
       if (delta.byteLength !== declared) {
@@ -216,9 +247,24 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'deflate',
   'sha1',
   'sha256',
+  'sha256Kept',
   'indexPack',
   'resolveDelta',
+  'decodeImportEntry',
+  'measureImportBytes',
 ];
+
+/**
+ * Whether a call hands its first argument's buffer over to the worker
+ * (transferred, so the caller's copy is detached once it is sent), not a clone.
+ *
+ * @param method - The call.
+ * @param args - Its arguments.
+ * @returns Whether the bytes are transferred.
+ * @public
+ */
+export const transfersArguments = (method: ComputeMethod, args: readonly unknown[]): boolean =>
+  (method === 'sha256' && args[1] === true) || method === 'sha256Kept' || method === 'measureImportBytes';
 
 /** One request over the seam. */
 export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args: readonly unknown[] }>;
@@ -227,7 +273,8 @@ export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args:
 export type ComputeAnswer = Readonly<{
   id: number;
   result?: unknown;
-  error?: Readonly<{ name: string; message: string }>;
+  /** A refusal's `reason` travels with it, so the import's limits verdict survives the boundary. */
+  error?: Readonly<{ name: string; message: string; reason?: string }>;
   started?: true;
   pong?: true;
 }>;
@@ -247,6 +294,9 @@ export type ComputePort = Readonly<{
 const transferablesOf = (value: unknown): Transferable[] => {
   if (value instanceof Uint8Array) {
     return [value.buffer];
+  }
+  if ((value as { data?: unknown } | undefined)?.data instanceof Uint8Array) {
+    return [(value as { data: Uint8Array<ArrayBuffer> }).data.buffer];
   }
   if (Array.isArray(value)) {
     return value.flatMap((entry: unknown) =>
@@ -281,7 +331,11 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
         port.postMessage({ id, result } satisfies ComputeAnswer, [...new Set(transferablesOf(result))]);
       } catch (error) {
         const { name, message } = error instanceof Error ? error : new Error(String(error));
-        port.postMessage({ id, error: { name, message } } satisfies ComputeAnswer, []);
+        const reason = (error as { reason?: unknown } | undefined)?.reason;
+        port.postMessage(
+          { id, error: { name, message, ...(typeof reason === 'string' ? { reason } : {}) } } satisfies ComputeAnswer,
+          [],
+        );
       }
     })();
   });
@@ -289,10 +343,13 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
 };
 
 /* The error a worker threw: a verdict on the bytes as one, anything else as an error that judges nothing. */
-const reviveError = (error: Readonly<{ name: string; message: string }>): Error =>
+const reviveError = (error: Readonly<{ name: string; message: string; reason?: string }>): Error =>
   error.name === 'CorruptBytesError'
     ? new CorruptBytesError(error.message)
-    : Object.assign(new Error(error.message), { workerErrorName: error.name });
+    : Object.assign(new Error(error.message), {
+        workerErrorName: error.name,
+        ...(error.reason === undefined ? {} : { reason: error.reason }),
+      });
 
 /** The caller's half of one connection: the contract, and what fails every call it holds. */
 export type ComputeConnection = Readonly<{
@@ -351,8 +408,19 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     const call = Promise.withResolvers<unknown>();
     waiting.set(id, { method, call });
     /* Cloned, not transferred: the caller keeps its own bytes, whole and usable (a pack
-     * writer reads an object again after deflating it, a loose writer hashes then deflates). */
-    port.postMessage({ id, method, args } satisfies ComputeRequest, []);
+     * writer reads an object again after deflating it, a loose writer hashes then deflates),
+     * unless it hands them over as consumed. */
+    const [bytes] = args;
+    try {
+      port.postMessage(
+        { id, method, args } satisfies ComputeRequest,
+        transfersArguments(method, args) ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
+      );
+    } catch (error) {
+      /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */
+      waiting.delete(id);
+      throw error;
+    }
     return call.promise;
   };
   const compute = Object.fromEntries(

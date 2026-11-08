@@ -77,10 +77,12 @@ describe('OPFSProvider lifecycle', () => {
     await expect(provider.readFile('file.txt')).rejects.toThrow('not initialized');
   });
 
-  it('should sweep a dead owner and keep one that started while the sweep asked for locks', async () => {
+  it('should sweep a dead owner, keep one that started while the sweep asked for locks, and keep an import staging', async () => {
     const root = createMockRootHandle() as unknown as FileSystemDirectoryHandle;
     const staging = await root.getDirectoryHandle('.tau-staging', { create: true });
     await staging.getDirectoryHandle('dead-owner', { create: true });
+    /* An import's staging is its journal, not a dead writer's leftovers (D12). */
+    await staging.getDirectoryHandle('import-req_abc', { create: true });
     vi.stubGlobal('navigator', {
       storage: { getDirectory: vi.fn().mockResolvedValue(root) },
       locks: {
@@ -103,7 +105,7 @@ describe('OPFSProvider lifecycle', () => {
     for await (const [name] of (staging as unknown as { entries(): AsyncIterable<[string, unknown]> }).entries()) {
       left.push(name);
     }
-    expect(left).toEqual(['late-owner']);
+    expect(left.sort()).toEqual(['import-req_abc', 'late-owner']);
   });
 });
 

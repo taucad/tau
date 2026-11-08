@@ -28,6 +28,10 @@ import {
   paneviewAttachedBodyClassName,
 } from '#paneview/paneview-header.jsx';
 
+/* Rows this far beyond either edge of the pane mount and request their previews, so a row is usually ready
+   before it scrolls into view: about six 80 px rows. */
+const previewLookahead = 480;
+
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 /**
@@ -204,7 +208,14 @@ function LiveComponentTree({
       if (!active) {
         return;
       }
-      const next = [...inView].slice(0, 127);
+      // Rows on screen first, then the mounted lookahead rows above and below, which the virtual list keeps
+      // mounted within `previewLookahead` of the viewport. The observer cannot see those: the list's own
+      // scroller clips them before the pane's root margin applies.
+      const lookahead = [...mounted].flatMap((row) => {
+        const id = row.dataset['modelComponentId'];
+        return id && !inView.has(id) ? [id] : [];
+      });
+      const next = [...new Set([...inView, ...lookahead])].slice(0, 127);
       setVisiblePreviewIds((current) =>
         current.length === next.length && current.every((id, index) => id === next[index]) ? current : next,
       );
@@ -686,6 +697,7 @@ function ComponentRows({
       className='h-full'
       reveal={reveal}
       focusSelector='[data-model-part-button]'
+      increaseViewportBy={previewLookahead}
     />
   );
 }

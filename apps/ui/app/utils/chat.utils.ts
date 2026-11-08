@@ -243,6 +243,9 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       joinLines(
         `Total: ${output.totalMatches}`,
+        output.pendingFiles?.length
+          ? `Not searched (large object not on this device yet): ${output.pendingFiles.join(', ')}`
+          : undefined,
         output.matches
           .flatMap((match) => {
             const firstLine = match.line - (match.before?.length ?? 0);
@@ -284,7 +287,6 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           requested,
           linearTolerance,
           angularTolerance,
-          downgraded,
         } = output.tessellation;
         const grid = [
           voxelSize === undefined ? undefined : `voxelSize ${voxelSize} mm`,
@@ -298,7 +300,6 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           requested === undefined ? undefined : `requested ${requested}`,
           linearTolerance === undefined ? undefined : `linearTolerance ${linearTolerance} mm`,
           angularTolerance === undefined ? undefined : `angularTolerance ${angularTolerance}°`,
-          downgraded === undefined ? undefined : `downgraded ${downgraded}`,
         ].filter(Boolean);
         if (resolution.length > 0) {
           lines.push(`Resolution: ${resolution.join(', ')}`);

@@ -44,12 +44,6 @@ export const replicadOptionsSchema = z.object({
    * installs no proxy and constructs no recipe.
    */
   computeReuse: z.boolean().optional(),
-  /**
-   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
-   *
-   * @deprecated No effect; previews mesh at the requested tessellation.
-   */
-  previewTriangleBudget: z.number().int().positive().optional(),
 });
 
 /**

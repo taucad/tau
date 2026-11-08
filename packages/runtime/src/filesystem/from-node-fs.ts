@@ -7,9 +7,13 @@
  * @public
  */
 
+/* oxlint-disable no-barrel-files/no-barrel-files -- public Node filesystem subpath */
+
 import { _fromNodeFsHandle } from '#transport/_internal/from-node-fs-handle.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+
+export { nodeGrepMatcherWorker } from '#filesystem/node-grep-matcher-worker.js';
 
 /**
  * Create an opaque {@link RuntimeFileSystem} backed by Node.js

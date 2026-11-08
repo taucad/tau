@@ -2929,6 +2929,68 @@ describe('useProjectManager.createProject', () => {
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
   });
 
+  /* W7 (charter D12): a staged import's journal holds its locator, and the commit moves the staging in. */
+  it('journals a staged import by its locator and commits it from the staging', async () => {
+    const staged = { ...pendingCreate, files: {}, staging: { operationId: 'req_staged' } };
+    mockPrepareProjectCreation.mockImplementationOnce(async () => {
+      phaseOrder.push('pending');
+      return staged;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const target = await result.current.prepareImportStaging('Gear Box', { kind: 'home' });
+
+    expect(target).toStrictEqual({
+      location: { kind: 'home' },
+      scope: { backend: 'opfs' },
+      providerBasePath: 'gear-box',
+      owned: [],
+    });
+
+    await act(async () =>
+      result.current.createProject({
+        project: { name: fakeProject.name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+        files: {},
+        location: target.location,
+        staging: { operationId: 'req_staged', carriesWorkbenchLayout: true },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+    expect(prepared['staging']).toStrictEqual({ operationId: 'req_staged' });
+    expect(prepared['seedWorkbench']).toBe(false);
+    expect(prepared['files']).toStrictEqual({});
+    expect(mockCommitPendingProjectDirectory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ files: {}, staging: { operationId: 'req_staged' }, scope: { backend: 'opfs' } }),
+    );
+  });
+
+  /* W7: where a rename copies, an import is written into its project directory, and the create commits there. */
+  it('creates an in-place import in the directory it was staged into, and names the stagings the journal owns', async () => {
+    const owner = { ...pendingCreate, operationId: 'op_owner', staging: { operationId: 'req_owned' } };
+    mockGetPendingProjectOperations.mockResolvedValue([owner]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const target = await result.current.prepareImportStaging('Gear', { kind: 'home' });
+
+    expect(target.owned).toStrictEqual(['req_owned']);
+    expect(await result.current.ownsImportStaging('req_owned')).toBe(true);
+    expect(await result.current.ownsImportStaging('req_other')).toBe(false);
+
+    mockGetPendingProjectOperations.mockResolvedValue([]);
+    await act(async () =>
+      result.current.createProject({
+        project: { name: 'Gear', description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+        files: {},
+        location: target.location,
+        staging: { operationId: 'req_in_place', providerBasePath: 'staged-here' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as { storage: unknown };
+    expect(prepared.storage).toStrictEqual({ backend: 'opfs', providerBasePath: 'staged-here' });
+  });
+
   it('waits for pre-commit discovery before publishing a new project to an immediate route', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const { result } = renderHook(

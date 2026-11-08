@@ -496,7 +496,7 @@ describe('FileTreeService rooted search and external polling', () => {
     try {
       const { tree, proxy, disposeChannel } = createTreeHarness();
       vi.mocked(proxy.searchFiles).mockImplementation(async (_root, query) => [
-        { path: query, name: query, type: 'file', size: 1, mtimeMs: 1, contentKind: 'text' },
+        { path: query, name: query, type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
       ]);
 
       const mention = tree.searchFilesDebounced('mai', { maxResults: 20, caller: 'mention' });

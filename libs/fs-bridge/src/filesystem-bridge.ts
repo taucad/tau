@@ -9,6 +9,7 @@ import {
   policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
+import { Topic } from '@taucad/events';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
@@ -29,19 +30,26 @@ import type {
   WorkspaceMutationContext,
   WorkspaceMutationError,
   WorkspaceMutationErrorCode,
+  ChangesetReceipt,
 } from '@taucad/filesystem';
-import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
+import type { BridgeCallTimeout, BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
 import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer } from '@taucad/rpc/bridge';
 import { z } from 'zod';
 import {
   createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
+  fileSystemLongCalls,
   FileSystemBridgeProtocolVersionError,
 } from '#filesystem-bridge-protocol.js';
 import type {
+  FileSystemBridgeEvent,
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
+  LongCall,
+  ReadManyResult,
+  ReadManyWireRows,
+  FactsWireRows,
   FileSystemBridgeWatchFrame,
   FileSystemBridgeWatchRequest,
   FileSystemBridgeService,
@@ -49,7 +57,12 @@ import type {
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
-import { sha256Bytes } from '@taucad/utils/hash';
+import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
+import type { ComputeEventSource } from '#filesystem-bridge-compute-events.js';
+import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
+import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
+import type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -113,12 +126,26 @@ export type FileSystemBridgeProxyTransport = {
    * The change-set form of a watch (charter D6): one {@link ChangeSet} per
    * committed changeset that reaches the request, as one wire frame. Served by a
    * rooted connection over the authority; `ready` rejects with `ENOTSUP` where
-   * the connection offers only the per-path form.
+   * the connection offers only the per-path form. When the connection is lost
+   * (`authority-lost`), every live watch hears one reset with reason
+   * `observer-uncertain` at its last generation, so a tree re-reads instead of
+   * trusting a stream that may have gaps.
    */
   watchChangeSets(
     request: ChangeSetWatchRequest,
     handler: (set: ChangeSet) => void,
   ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
+  /**
+   * The connection's event channel (charter D14): every change set of the
+   * root as this connection's view sees it, `compute-restarted` when the
+   * authority's compute worker was replaced, and `authority-lost` once when
+   * the connection closes under its subscribers or a call finds the authority
+   * unresponsive (`PEER_UNRESPONSIVE`). However many subscribe, the
+   * connection holds one channel on the wire. The connection's own writes are
+   * not echoed back (each has its receipt). A rooted connection over the
+   * authority serves it; elsewhere `ready` rejects with `ENOTSUP`.
+   */
+  events(handler: (event: FileSystemBridgeEvent) => void): FileSystemBridgeEventSubscription;
 };
 
 /**
@@ -140,7 +167,15 @@ export type FileSystemBridgeWorkspaceProxy = FileSystemBridgeUnrootedCalls & Fil
  *
  * @public
  */
-export type FileSystemBridgeRootedProxy = FileSystemBridgeService & FileSystemBridgeProxyTransport;
+export type FileSystemBridgeRootedProxy = FileSystemBridgeService &
+  FileSystemBridgeProxyTransport & {
+    /**
+     * A file as a stream of `readRange` pages, pulled one page per read
+     * (charter D14). Pages are read as they are pulled, so the chunks are not
+     * a snapshot of one version of the file.
+     */
+    readStream(path: string, options?: ReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;
+  };
 
 /**
  * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
@@ -154,6 +189,33 @@ export type FileSystemBridgeRootedProxy = FileSystemBridgeService & FileSystemBr
  */
 export type FileSystemBridgeProxy = FileSystemBridgeRootedProxy;
 
+/**
+ * What a host tells the bridge about itself beyond its handlers.
+ *
+ * @public
+ */
+export type FileSystemBridgeHostOptions = HostContentCallOptions & {
+  /**
+   * The authority's compute news: a `computeEventRelay()`'s `source`, fed
+   * by the compute worker's supervisor. Every rooted connection's event channel
+   * carries its `compute-restarted` frames.
+   */
+  readonly computeEvents?: ComputeEventSource;
+};
+
+/**
+ * A subscription to a connection's event channel.
+ *
+ * @public
+ */
+export type FileSystemBridgeEventSubscription = {
+  /** Settles when the authority has registered the channel. */
+  readonly ready: Promise<void>;
+  /** Settles when the channel closes. */
+  readonly closed: Promise<void>;
+  unsubscribe(): void;
+};
+
 const isFileSystemBridgeConnection = (
   bridge: FileSystemBridge | FileSystemBridgeConnection,
 ): bridge is FileSystemBridgeConnection => !('onMessage' in bridge.port);
@@ -161,16 +223,47 @@ const isFileSystemBridgeConnection = (
 const defaultUiCoalescingWindow = 500;
 
 /**
- * Milliseconds. A pending-project commit outlives the bridge's 30 s default
- * because it is the one call whose work scales with the project: it waits for
- * a cross-tab lock, recursively removes a half-written target, then writes
- * every file and the manifest one at a time before reading the manifest back.
- * On the slowest backend (Web Access, tens of milliseconds a file) five
- * minutes covers thousands of files — far past anything Tau creates, imports
- * or duplicates — so a real commit cannot reach it, while a peer that dies
- * mid-call now fails project creation instead of wedging it for the session.
+ * Take a long call's {@link LongCall} controls out of its options argument:
+ * an `AbortSignal` and a function cannot cross the wire, and the bridge
+ * carries both itself. Arguments of every other call pass through unchanged.
  */
-const pendingProjectCommitTimeout = 300_000;
+const splitLongCall = (method: string, args: readonly unknown[]): { args: unknown[]; longCall?: LongCall } => {
+  const slot = fileSystemLongCalls[method];
+  const bag = slot === undefined ? undefined : args[slot];
+  if (slot === undefined || bag === null || typeof bag !== 'object') {
+    return { args: [...args] };
+  }
+  /* Stripped even when absent: a call's options may be nothing but its
+   * controls, and an empty bag is not a wire argument the schema admits. */
+  const { signal, onProgress, ...rest } = bag as LongCall & Record<string, unknown>;
+  const wireArgs = [...args];
+  wireArgs[slot] = Reflect.ownKeys(rest).length === 0 ? undefined : rest;
+  while (wireArgs.length > 0 && wireArgs.at(-1) === undefined) {
+    wireArgs.pop();
+  }
+  return {
+    args: wireArgs,
+    longCall: { ...(signal === undefined ? {} : { signal }), ...(onProgress === undefined ? {} : { onProgress }) },
+  };
+};
+
+/**
+ * One call's client deadline: none for checked writes, liveness for long calls,
+ * the ordinary deadline for the rest (Rule 32).
+ */
+const fileSystemCallTimeout = (method: string): BridgeCallTimeout | undefined =>
+  /* Checked writes are compare-and-swap: a late original and a replacement
+   * can never both apply, so they wait for the authority's terminal answer
+   * rather than report a timeout while it may still write (Rule 32).
+   * Connection loss still settles them as potentially applied. */
+  method === 'writeFileChecked' || method === 'deleteFileChecked'
+    ? 'none'
+    : Object.hasOwn(fileSystemLongCalls, method)
+      ? 'liveness'
+      : undefined;
+
+/** `readMany`'s wire rows as the map its callers hold. */
+const readManyResult = (rows: ReadManyWireRows): ReadManyResult => new Map(rows);
 
 /** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
 const relativeToRoot = (root: string, path: string): string | undefined => {
@@ -324,8 +417,48 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
   );
 };
 
+/** The bytes one write call carries, by path, for the I2 crossings ledger. Strings are not counted. */
+const writePayloads = (method: string, args: readonly unknown[]): Array<[string, number]> => {
+  const sized = (path: unknown, payload: unknown): Array<[string, number]> =>
+    typeof path === 'string' && (payload instanceof Uint8Array || payload instanceof ArrayBuffer)
+      ? [[path, payload.byteLength]]
+      : [];
+  const first = args[0];
+  if (method === 'writeFile' || method === 'appendFile' || method === 'appendFileFenced') {
+    return sized(first, args[1]);
+  }
+  if (method === 'writeFileChecked' && first !== null && typeof first === 'object') {
+    const input = first as { path?: unknown; data?: unknown };
+    return sized(input.path, input.data);
+  }
+  const files =
+    method === 'writeFiles'
+      ? first
+      : method === 'commitPendingProjectDirectory' && first !== null && typeof first === 'object'
+        ? (first as { files?: unknown }).files
+        : undefined;
+  if (files === null || typeof files !== 'object') {
+    return [];
+  }
+  return Object.entries(files).flatMap(([path, descriptor]) =>
+    descriptor !== null && typeof descriptor === 'object' && 'content' in descriptor
+      ? sized(path, (descriptor as { content: unknown }).content)
+      : [],
+  );
+};
+
+/** Record each path a write carries as one I2 crossing: a transfer when handed over, else a copy. */
+const recordWriteCrossings = (method: string, args: readonly unknown[], handedOver: boolean): void => {
+  const kind = handedOver ? 'transfer' : 'copy';
+  for (const [path, bytes] of writePayloads(method, args)) {
+    recordFileSystemBridgeCrossing(path, kind, bytes);
+  }
+};
+
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
-  if (handsOverBytes(args)) {
+  const handedOver = handsOverBytes(args);
+  recordWriteCrossings(method, args, handedOver);
+  if (handedOver) {
     /* The caller's own buffers ride the transfer list `wrapAsTransferables`
      * builds from these arguments, and are detached by the postMessage. */
     return args;
@@ -499,6 +632,67 @@ const checkedWritePreDeliveryError = (
   );
 };
 
+/**
+ * The bridge calls that mutate the root without a precondition: a failure the
+ * caller cannot place before or after the authority began says so, as a
+ * checked write's does.
+ */
+const mutatingCalls: ReadonlySet<string> = new Set([
+  'apply',
+  'writeFiles',
+  'bulkMove',
+  'commitPendingProjectDirectory',
+  'copyTree',
+  'duplicate',
+]);
+
+/**
+ * The channel close codes (`ChannelCloseCode`): each ends a call without the
+ * authority's answer, so a sent mutation may already be applying.
+ */
+const lostCallCodes: ReadonlySet<unknown> = new Set([
+  'PEER_UNRESPONSIVE',
+  'PEER_GONE',
+  'PEER_CLOSED',
+  'CHANNEL_CLOSED',
+]);
+
+/** Whether a sent call's rejection is the authority's own answer, not a cut-off call. */
+const isAuthorityAnswer = (error: unknown): boolean => {
+  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  return name !== 'AbortError' && !lostCallCodes.has(code);
+};
+
+/**
+ * A mutating call's failure with what is known about its effect (I10).
+ *
+ * The caller's abort after the call was sent, and a connection that stopped
+ * answering or died under it, all leave the authority possibly mid-way: some
+ * phases or files may have landed. They are `potentially-applied`, like a
+ * checked write's, so the caller re-reads before it retries. An abort before
+ * the call was sent, and a liveness expiry while the request still waited
+ * behind the hello (`requestSent: false`), are `known-not-applied`. Every other failure is the
+ * authority's own answer and passes through.
+ *
+ * @param error - The rejection.
+ * @param sent - Whether the call reached the wire.
+ * @returns The error, carrying `applicationState` where the effect is unknown.
+ */
+const classifyMutationFailure = (error: unknown, sent: boolean): unknown => {
+  if (checkedWriteApplicationState(error) !== undefined) {
+    return error;
+  }
+  const { name, code, requestSent } = (error ?? {}) as { name?: unknown; code?: unknown; requestSent?: unknown };
+  if (name === 'AbortError') {
+    return withCheckedWriteApplicationState(error, sent ? 'potentially-applied' : 'known-not-applied');
+  }
+  /* The channel dropped the request from its queue before it reached the wire. */
+  if (requestSent === false) {
+    return withCheckedWriteApplicationState(error, 'known-not-applied');
+  }
+  return lostCallCodes.has(code) ? withCheckedWriteApplicationState(error, 'potentially-applied') : error;
+};
+
 const classifyCheckedWriteFailure = (error: unknown): Error => {
   restoreCheckedWriteApplicationState(error);
   if (checkedWriteApplicationState(error) !== undefined) {
@@ -563,10 +757,18 @@ const serializeRootedResults = (handlers: StringKeyedObject): StringKeyedObject 
  * client knows to keep the per-path form. Any other request is the handler
  * set's own `watch`.
  *
+ * A request with `form: 'events'` is the connection's event channel (charter
+ * D14): every change set of the whole root, as its view sees it, plus the
+ * authority's compute news from `options.computeEvents`, on one stream.
+ *
  * @param handlers - The handlers one connection is served.
+ * @param options - Where the authority's compute events come from, if it has any.
  * @returns The same handlers, answering the change-set form when they can.
  */
-const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
+const withChangeSetWatch = <Handlers extends StringKeyedObject>(
+  handlers: Handlers,
+  options?: Pick<FileSystemBridgeHostOptions, 'computeEvents'>,
+): Handlers => {
   const { watch, watchChangeSets } = handlers as Partial<Record<string, unknown>>;
   if (typeof watch !== 'function' && typeof watchChangeSets !== 'function') {
     return handlers;
@@ -582,6 +784,25 @@ const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handle
     handler: (frame: FileSystemBridgeWatchFrame) => void,
   ): (() => void) | Promise<() => void> => {
     const { form, coalesce, ...rest } = request;
+    if (form === 'events') {
+      if (changeSets === undefined) {
+        throw Object.assign(new Error('This connection serves no event channel.'), { code: 'ENOTSUP' });
+      }
+      const unsubscribeSets = changeSets.call(
+        handlers,
+        { paths: [''], recursive: true, ...(coalesce === undefined ? {} : { coalesce }) },
+        (set) => {
+          handler({ kind: 'changeSet', set });
+        },
+      );
+      const unsubscribeCompute = options?.computeEvents?.subscribe((event) => {
+        handler(event);
+      });
+      return () => {
+        unsubscribeSets();
+        unsubscribeCompute?.();
+      };
+    }
     if (form === 'change-sets') {
       if (changeSets === undefined) {
         throw Object.assign(new Error('This connection serves no change-set watch.'), { code: 'ENOTSUP' });
@@ -604,56 +825,6 @@ const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handle
       /* A frozen member must be returned as itself (proxy invariant). */
       return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
         ? (value as (...callArgs: unknown[]) => unknown).bind(target)
-        : value;
-    },
-  });
-};
-
-/**
- * Serve `hashFiles` beside a handler set that reads files, so every host the
- * bridge fronts digests where the bytes live: one round trip, no bodies.
- *
- * A handler that brings its own `hashFiles` keeps it. Otherwise each path is
- * read through the connection's own `readFile` (its view's mask included) and
- * digested with the SHA-256 the runtime computes; an absent path is
- * `'missing'`. Bytes stay the evidence, never a size or mtime stamp. Members
- * stay bound to the original handler set, so private state survives.
- *
- * @param handlers - The handlers one connection is served.
- * @returns The same handlers, answering `hashFiles` when they can read.
- */
-const withHostHashFiles = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
-  const { hashFiles, readFile } = handlers as Partial<Record<string, unknown>>;
-  if (typeof hashFiles === 'function' || typeof readFile !== 'function') {
-    return handlers;
-  }
-  const read = readFile.bind(handlers) as (path: string) => Promise<Uint8Array<ArrayBuffer>>;
-  const hostHashFiles = async (paths: readonly string[]): Promise<Record<string, string>> =>
-    Object.fromEntries(
-      await Promise.all(
-        paths.map(async (path) => {
-          try {
-            return [path, await sha256Bytes(await read(path))] as const;
-          } catch (error) {
-            const code = (error as { code?: unknown } | undefined)?.code;
-            if (code === 'ENOENT' || code === 'ENOTDIR') {
-              return [path, 'missing'] as const;
-            }
-            throw error;
-          }
-        }),
-      ),
-    );
-  return new Proxy(handlers, {
-    get(target, property) {
-      if (property === 'hashFiles') {
-        return hostHashFiles;
-      }
-      const value: unknown = Reflect.get(target, property, target);
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
-      /* A frozen member must be returned as itself (proxy invariant). */
-      return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
-        ? (value as (...args: unknown[]) => unknown).bind(target)
         : value;
     },
   });
@@ -968,21 +1139,22 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @returns Handle with cleanup, activePorts, and serverHandles
  * @public
  */
-type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
-  // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
-  handlerForRoot?: (
-    root: string,
-    context: WorkspaceMutationContext,
-    consumer: RootedBridgeConsumer,
-    policy: PathPolicy,
-  ) => StringKeyedObject | undefined;
-  policy: PathPolicy;
-  changeEventBus?: BridgeChangeEventBus;
-  /* Inline `Pick`, no named alias.
-   * ponytail: one more port-like type declaration is exactly the failure mode
-   * this batch guards against — six already exist in the tree. */
-  messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
-};
+type InternalExposeFileSystemOptions = FileSystemBridgeOptions &
+  FileSystemBridgeHostOptions & {
+    // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
+    handlerForRoot?: (
+      root: string,
+      context: WorkspaceMutationContext,
+      consumer: RootedBridgeConsumer,
+      policy: PathPolicy,
+    ) => StringKeyedObject | undefined;
+    policy: PathPolicy;
+    changeEventBus?: BridgeChangeEventBus;
+    /* Inline `Pick`, no named alias.
+     * ponytail: one more port-like type declaration is exactly the failure mode
+     * this batch guards against — six already exist in the tree. */
+    messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+  };
 
 function exposeFileSystemHandlers(
   handlers: StringKeyedObject,
@@ -1156,7 +1328,12 @@ function exposeFileSystemHandlers(
         return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
-      return { portHandlers: withChangeSetWatch(withHostHashFiles(serializeRootedResults(rootedHandlers))) };
+      return {
+        portHandlers: withChangeSetWatch(
+          withHostContentCalls(serializeRootedResults(rootedHandlers), options),
+          options,
+        ),
+      };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
        * `VirtualPathError` from a non-canonical root used to reach the client as
@@ -1262,6 +1439,7 @@ function exposeFileSystemHandlers(
     >(portHandlers, wrappedPort, {
       hello,
       protocolSchemas: fileSystemBridgeSchemas,
+      bindLongCall: bindFileSystemLongCall,
       onDisconnect() {
         disconnectPort();
       },
@@ -1372,28 +1550,29 @@ export function workspaceBridgeService(service: WorkspaceFileService): FileSyste
 /** Expose the complete workspace filesystem service over validated bridge connections. @public */
 export function exposeFileSystem(
   handlers: FileSystemBridgeWorkspaceService | FileSystemBridgeRuntimeService,
-  options?: FileSystemBridgeOptions & {
-    handlerForRoot?: RootedFileSystemHandlerFactory;
-    /**
-     * The reserved layout this server enforces on the change stream (D6).
-     *
-     * A masked rooted connection (`'user'`, `'agent'`) is never told about a path
-     * its own view hides, so an agent cannot learn the names or the timing of
-     * control-plane writes it may not read (CI1). Any host that serves a masked
-     * consumer passes its policy here; a `'working-copy'` connection receives the
-     * stream whole either way. It is also what {@link RootedFileSystemHandlerFactory}
-     * is handed, rebased on the connection's root.
-     */
-    policy: PathPolicy;
-    changeEventBus?: BridgeChangeEventBus;
-    /**
-     * Where to listen for connect envelopes. Defaults to the worker global,
-     * exactly as before. A `node:worker_threads` `MessagePort` satisfies this
-     * directly (it *is* an `EventTarget`), which is what lets the authority
-     * run in a plain Node process, an Electron utility, or a daemon.
-     */
-    messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
-  },
+  options?: FileSystemBridgeOptions &
+    FileSystemBridgeHostOptions & {
+      handlerForRoot?: RootedFileSystemHandlerFactory;
+      /**
+       * The reserved layout this server enforces on the change stream (D6).
+       *
+       * A masked rooted connection (`'user'`, `'agent'`) is never told about a path
+       * its own view hides, so an agent cannot learn the names or the timing of
+       * control-plane writes it may not read (CI1). Any host that serves a masked
+       * consumer passes its policy here; a `'working-copy'` connection receives the
+       * stream whole either way. It is also what {@link RootedFileSystemHandlerFactory}
+       * is handed, rebased on the connection's root.
+       */
+      policy: PathPolicy;
+      changeEventBus?: BridgeChangeEventBus;
+      /**
+       * Where to listen for connect envelopes. Defaults to the worker global,
+       * exactly as before. A `node:worker_threads` `MessagePort` satisfies this
+       * directly (it *is* an `EventTarget`), which is what lets the authority
+       * run in a plain Node process, an Electron utility, or a daemon.
+       */
+      messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+    },
 ): ExposeFileSystemHandle {
   return exposeFileSystemHandlers(handlers, options);
 }
@@ -1497,6 +1676,7 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
     hashable: answersHashFiles(handlers),
   }),
   protocolSchemas: fileSystemBridgeSchemas,
+  bindLongCall: bindFileSystemLongCall,
 });
 
 /**
@@ -1504,14 +1684,16 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
  *
  * @param handlers - Rooted filesystem authority exposed to the peer.
  * @param port - Existing RPC port, including a wrapped transferred channel.
+ * @param options - What the host tells the derived calls about its platform.
  * @returns Server handle whose disposal closes the bridge lifecycle.
  * @public
  */
 export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
+  options?: FileSystemBridgeHostOptions,
 ): BridgeServerHandle {
-  const served = withChangeSetWatch(withHostHashFiles(handlers));
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options), options);
   return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
@@ -1522,8 +1704,11 @@ export function serveFileSystemBridgePort(
  *
  * @public
  */
-export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const served = withChangeSetWatch(withHostHashFiles(handlers));
+export function createFileSystemBridgePort(
+  handlers: FileSystemBridgeRuntimeService,
+  options?: FileSystemBridgeHostOptions,
+): FileSystemBridgeConnection {
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options), options);
   const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),
@@ -1559,6 +1744,101 @@ export function createFileSystemBridge(
 }
 
 /**
+ * One connection's event channel, fanned out: the first subscriber opens it
+ * on the wire, the last one to leave closes it, and every subscriber hears
+ * `authority-lost` once per loss while the proxy is live: when the connection
+ * closes under it, or when a call finds the authority unresponsive
+ * (`PEER_UNRESPONSIVE`: no heartbeat, progress or answer within its liveness
+ * window) while the port stays open. Whichever comes first is the loss; the
+ * other says nothing more. A loss clears once a call is answered again (with a
+ * result or an error), so the
+ * next one is announced too.
+ *
+ * On a loss, `onLost` runs as well: the proxy resets every change-set watch it
+ * holds, so a tree re-reads instead of trusting a stream that may have gaps.
+ */
+const eventChannel = ({
+  watchReady,
+  closed,
+  isDisposed,
+  onLost,
+}: {
+  readonly watchReady: ReturnType<
+    typeof createBridgeCall<FileSystemBridgeWatchRequest, FileSystemBridgeWatchFrame, FileSystemBridgeHello>
+  >['watchReady'];
+  readonly closed: Promise<void>;
+  readonly isDisposed: () => boolean;
+  readonly onLost: () => void;
+}): {
+  readonly subscribe: (handler: (event: FileSystemBridgeEvent) => void) => FileSystemBridgeEventSubscription;
+  readonly announceLost: () => void;
+  readonly answered: () => void;
+} => {
+  const topic = new Topic<FileSystemBridgeEvent>({ name: 'FileSystemBridge.events' });
+  let wire: ReturnType<typeof watchReady> | undefined;
+  let lost = false;
+  const announceLost = (): void => {
+    if (lost || isDisposed()) {
+      return;
+    }
+    lost = true;
+    onLost();
+    topic.emit({ kind: 'authority-lost' });
+  };
+  const answered = (): void => {
+    lost = false;
+  };
+  const announceOnClose = async (): Promise<void> => {
+    await closed;
+    announceLost();
+  };
+  // async-iife: bootstrap -- `closed` only resolves; the announcement is the outcome.
+  void announceOnClose();
+  const subscribe = (handler: (event: FileSystemBridgeEvent) => void): FileSystemBridgeEventSubscription => {
+    const leave = topic.subscribe(handler);
+    let subscribed = true;
+    if (lost) {
+      queueMicrotask(() => {
+        handler({ kind: 'authority-lost' });
+      });
+    }
+    wire ??= watchReady({ paths: [''], recursive: true, form: 'events' }, (frame) => {
+      topic.emit(frame as FileSystemBridgeEvent);
+    });
+    const opened = wire;
+    return {
+      unsubscribe() {
+        if (!subscribed) {
+          return;
+        }
+        subscribed = false;
+        leave();
+        if (topic.size > 0 || wire !== opened) {
+          return;
+        }
+        wire = undefined;
+        opened.unsubscribe();
+      },
+      ready: opened.ready,
+      closed: opened.closed,
+    };
+  };
+  return { subscribe, announceLost, answered };
+};
+
+/**
+ * The reset a change-set watch hears when its connection is lost (D6): every
+ * path it watches must be re-read, since frames may have been missed. It keeps
+ * the last generation the watch saw, because nothing new was committed.
+ */
+const lostConnectionReset = (generation: number): ChangeSet => ({
+  generation,
+  entries: [],
+  touchedDirectories: [],
+  reset: { prefix: '', reason: 'observer-uncertain' },
+});
+
+/**
  * Create a typed proxy over a filesystem bridge.
  *
  * @param bridge - Bridge returned from {@link createFileSystemBridge} or raw connection from {@link openFileSystemBridge}.
@@ -1584,23 +1864,24 @@ export function createFileSystemBridgeProxy(
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
-    /* Checked writes are compare-and-swap: a late original and a replacement
-     * can never both apply, so they wait for the authority's terminal answer
-     * rather than report a timeout while it may still write (Rule 32).
-     * Connection loss still settles them as potentially applied. */
-    resolveCallTimeout: (method) =>
-      method === 'writeFileChecked' || method === 'deleteFileChecked'
-        ? 'none'
-        : method === 'commitPendingProjectDirectory'
-          ? pendingProjectCommitTimeout
-          : undefined,
+    resolveCallTimeout: fileSystemCallTimeout,
     protocolSchemas: fileSystemBridgeSchemas,
   });
   const connectionId = nextFileSystemBridgeConnectionId();
   let isDisposed = false;
+  /* Every live change-set watch subscribes here for the reset it hears when the connection is lost. */
+  const connectionLost = new Topic<undefined>({ name: 'FileSystemBridge.connectionLost' });
+  const events = eventChannel({
+    watchReady,
+    closed,
+    isDisposed: () => isDisposed,
+    onLost() {
+      connectionLost.emit(undefined);
+    },
+  });
 
   return new Proxy({} as FileSystemBridgeProxy, {
-    get(_target, property): unknown {
+    get(_target, property, receiver: FileSystemBridgeRootedProxy): unknown {
       if (property === 'dispose') {
         return (): void => {
           if (isDisposed) {
@@ -1624,12 +1905,65 @@ export function createFileSystemBridgeProxy(
       if (property === 'watchReady') {
         return watchReady;
       }
+      if (property === 'events') {
+        return events.subscribe;
+      }
       if (property === 'watchChangeSets') {
         return (
           request: ChangeSetWatchRequest,
           handler: (set: ChangeSet) => void,
-        ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> =>
-          watchReady({ ...request, form: 'change-sets' }, handler as (frame: FileSystemBridgeWatchFrame) => void);
+        ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> => {
+          let generation = 0;
+          /* A second reset with no frame between them says nothing new. */
+          let resetSinceFrame = false;
+          let active = true;
+          const registration = watchReady({ ...request, form: 'change-sets' }, (frame) => {
+            const set = frame as ChangeSet;
+            generation = set.generation;
+            resetSinceFrame = false;
+            handler(set);
+          });
+          const reset = (): void => {
+            if (!active || resetSinceFrame) {
+              return;
+            }
+            resetSinceFrame = true;
+            handler(lostConnectionReset(generation));
+          };
+          const leaveLost = connectionLost.subscribe(reset);
+          const leave = (): void => {
+            active = false;
+            leaveLost();
+          };
+          /* The watch holds its loss subscription only while it is open. A refused
+           * registration hears no reset (its caller handles `ready`); a watch the
+           * connection's close ends hears its reset first, since the watch closes
+           * at the channel's teardown, before the connection's own close settles. */
+          const followRegistration = async (): Promise<void> => {
+            try {
+              await registration.ready;
+            } catch {
+              leave();
+              return;
+            }
+            try {
+              await registration.closed;
+            } catch (error) {
+              if (!isDisposed && !isAuthorityAnswer(error)) {
+                reset();
+              }
+            }
+            leave();
+          };
+          void followRegistration();
+          return {
+            ...registration,
+            unsubscribe() {
+              leave();
+              registration.unsubscribe();
+            },
+          };
+        };
       }
       if (property === 'ready') {
         return ready;
@@ -1639,6 +1973,10 @@ export function createFileSystemBridgeProxy(
       }
       if (property === 'hello') {
         return hello;
+      }
+      if (property === 'readStream') {
+        return (path: string, options?: ReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> =>
+          rangeStream(async (offset, length) => receiver.readRange(path, offset, length), options);
       }
       /* `$$typeof` is React's element probe, read off props by its development render log. */
       if (property === 'then' || property === 'toJSON' || property === '$$typeof' || typeof property === 'symbol') {
@@ -1660,11 +1998,37 @@ export function createFileSystemBridgeProxy(
             );
           }
         }
+        /* Whether the call reached the wire: an abort before it never did. */
+        const wire = { sent: false };
         try {
-          return await timeFileSystemBridgeCall(connectionId, property, async () => call(property, args));
+          const split = property === 'apply' ? await prepareApplyCall(args) : splitLongCall(property, args);
+          const result = await timeFileSystemBridgeCall(connectionId, property, async () => {
+            wire.sent = split.longCall?.signal?.aborted !== true;
+            return call(property, split.args, split.longCall);
+          });
+          events.answered();
+          if (property === 'readMany') {
+            return readManyResult(result as ReadManyWireRows);
+          }
+          if (property === 'facts') {
+            return new Map(result as FactsWireRows);
+          }
+          if (property === 'apply') {
+            return receiptFromWire(result as ChangesetReceipt);
+          }
+          return result;
         } catch (error) {
+          if ((error as { code?: unknown } | undefined)?.code === 'PEER_UNRESPONSIVE') {
+            events.announceLost();
+          } else if (wire.sent && isAuthorityAnswer(error)) {
+            // An error answer is still an answer: the authority is back.
+            events.answered();
+          }
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);
+          }
+          if (mutatingCalls.has(property)) {
+            throw classifyMutationFailure(error, wire.sent);
           }
           throw error;
         }

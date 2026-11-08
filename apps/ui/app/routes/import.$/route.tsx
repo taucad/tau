@@ -4,6 +4,7 @@ import { Link, useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
 import { useEffect, useId, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import { createCallbackLogic } from 'xstate';
 import { ArrowRight, X } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
@@ -11,7 +12,11 @@ import type { MachineActors } from '#lib/xstate.lib.js';
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
+import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
+import { ImportChannelError, createFromStagedImport, openImportSession } from '#machines/import-staging.js';
+import type { ImportSession } from '#machines/import-staging.js';
+import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
@@ -42,7 +47,7 @@ import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
-import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
+import { isExcludedImportPath } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -52,6 +57,7 @@ import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest 
 import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { workbenchPaths } from '@taucad/workbench';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
@@ -118,6 +124,21 @@ export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
 }
 
 type ImportMode = 'github' | 'disk';
+
+/** The workbench layout an exported Tau project carries; one that does is not seeded another. */
+const workbenchLayoutPath = workbenchPaths.layout;
+
+/** Bytes the review's preview reads of a disk import, decoded in the worker on request. */
+const previewByteBudget = 32 * 1024 * 1024;
+
+/* A refusal the person can only answer with a smaller repository: retrying the same branch cannot succeed. */
+const tooLargeReasons: ReadonlySet<string> = new Set([
+  'archiveTooLarge',
+  'expandedTooLarge',
+  'fileTooLarge',
+  'ratioTooHigh',
+  'tooManyEntries',
+]);
 
 const failureOf = (error: Error | undefined): ImportGitHubError['failure'] | undefined =>
   error instanceof ImportGitHubError ? error.failure : undefined;
@@ -202,6 +223,30 @@ export default function ImportRoute(): React.JSX.Element {
   const [arrivalRepository] = useState({ owner, repo });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const fileManagerRef = useOptionalFileManager()?.fileManagerRef;
+  /* One import channel to the file-manager worker, opened on first use (W7). */
+  const importSessionRef = useRef<ImportSession | undefined>(undefined);
+  const importSession = useCallback(async (): Promise<ImportSession> => {
+    if (importSessionRef.current === undefined) {
+      if (fileManagerRef === undefined) {
+        throw new Error('The file manager is not available to import.');
+      }
+      await waitForFileManagerServices(fileManagerRef);
+      const { worker } = fileManagerRef.getSnapshot().context;
+      if (worker === undefined) {
+        throw new Error('The file manager is not ready to import.');
+      }
+      importSessionRef.current = openImportSession(worker);
+    }
+    return importSessionRef.current;
+  }, [fileManagerRef]);
+  useEffect(
+    () => () => {
+      importSessionRef.current?.close();
+      importSessionRef.current = undefined;
+    },
+    [],
+  );
   const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
@@ -231,24 +276,91 @@ export default function ImportRoute(): React.JSX.Element {
   const gitHubActorRef = useActorRef(
     importGitHubMachine.provide({
       actors: {
-        createProjectActor: fromSafeAsync(async ({ input }) => {
-          const projectFiles = createImportedProjectFiles(input.files, input.mainFile);
-
-          try {
-            const project = await projectManager.createProject({
-              project: {
-                name: `${input.owner}/${input.repo}`,
-                description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}${
-                  input.path ? `/tree/${input.ref}/${input.path}` : ''
-                }`,
-                tags: [],
-                assets: {
-                  main: {
-                    entryPath: input.mainFile,
+        /* The file-manager worker downloads the archive and plans it: the page holds paths and sizes only (D12). */
+        importWorkerActor: createCallbackLogic<ImportArchiveEvents, ImportArchiveInput>(({ sendBack, input }) => {
+          const closed = new AbortController();
+          // async-iife: bootstrap -- the plan's outcome is sent back while the actor lives.
+          void (async (): Promise<void> => {
+            try {
+              const session = await importSession();
+              const listing = await session.plan(
+                {
+                  kind: 'archive',
+                  provider: 'github',
+                  url: input.downloadUrl,
+                  name: input.name,
+                  ...(input.headers === undefined ? {} : { headers: input.headers }),
+                },
+                {
+                  root: input.root,
+                  /* The actor's end cancels the plan in the worker: its download stops, and it never becomes the plan. */
+                  signal: closed.signal,
+                  onDownload: ({ loaded, total }) => {
+                    if (!closed.signal.aborted) {
+                      sendBack({ type: 'updateDownloadProgress', loaded, total });
+                    }
                   },
                 },
-              },
-              files: projectFiles,
+              );
+              if (!closed.signal.aborted) {
+                sendBack({
+                  type: 'workerExtractComplete',
+                  filePaths: listing.files.map(({ path: listed }) => listed),
+                  files: [...listing.files],
+                });
+              }
+            } catch (error) {
+              if (!closed.signal.aborted) {
+                const reason = error instanceof ImportChannelError ? error.reason : undefined;
+                sendBack({
+                  type: 'workerError',
+                  message: error instanceof Error ? error.message : String(error),
+                  phase: 'download',
+                  ...(reason !== undefined && tooLargeReasons.has(reason) ? { reason: 'tooLarge' } : {}),
+                });
+              }
+            }
+          })();
+          return () => {
+            closed.abort();
+          };
+        }),
+        createProjectActor: fromSafeAsync(async ({ input }) => {
+          if (isExcludedImportPath(input.mainFile)) {
+            throw new Error(
+              "That file belongs to a repository or a cache, so it can't be the main file. Choose a design file.",
+            );
+          }
+          if (!input.files.has(input.mainFile)) {
+            throw new Error(`The selected main file "${input.mainFile}" is not present in the imported files.`);
+          }
+          const name = `${input.owner}/${input.repo}`;
+          try {
+            /* The planned archive stages on the creation root and lands in the project at commit (D12). */
+            const target = await projectManager.prepareImportStaging(name);
+            const project = await createFromStagedImport({
+              session: await importSession(),
+              target,
+              operationId: generatePrefixedId(idPrefix.request),
+              owns: projectManager.ownsImportStaging,
+              create: async (staging) =>
+                projectManager.createProject({
+                  project: {
+                    name,
+                    description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}${
+                      input.path ? `/tree/${input.ref}/${input.path}` : ''
+                    }`,
+                    tags: [],
+                    assets: {
+                      main: {
+                        entryPath: input.mainFile,
+                      },
+                    },
+                  },
+                  files: {},
+                  location: target.location,
+                  staging: { ...staging, carriesWorkbenchLayout: input.files.has(workbenchLayoutPath) },
+                }),
             });
 
             return { type: 'projectCreated', projectId: project.id };
@@ -276,21 +388,41 @@ export default function ImportRoute(): React.JSX.Element {
     importDiskMachine.provide({
       actors: {
         createProjectActor: fromSafeAsync(async ({ input }) => {
-          const projectFiles = createImportedProjectFiles(input.files, input.mainFile);
-
+          if (!input.listing.files.some(({ path: listed }) => listed === input.mainFile)) {
+            throw new Error(`The selected main file "${input.mainFile}" is not present in the imported files.`);
+          }
           try {
-            const project = await projectManager.createProject({
-              project: {
-                name: input.importName,
-                description: `Imported from disk`,
-                tags: [],
-                assets: {
-                  main: {
-                    entryPath: input.mainFile,
-                  },
-                },
+            /* The files stage on the storage root the project is created on, then land in it at commit (D12). */
+            const target = await projectManager.prepareImportStaging(input.importName);
+            const project = await createFromStagedImport({
+              session: await importSession(),
+              target,
+              operationId: generatePrefixedId(idPrefix.request),
+              owns: projectManager.ownsImportStaging,
+              onProgress: (progress) => {
+                input.onProgress(progress.files, progress.totalFiles);
               },
-              files: projectFiles,
+              create: async (staging) =>
+                projectManager.createProject({
+                  project: {
+                    name: input.importName,
+                    description: `Imported from disk`,
+                    tags: [],
+                    assets: {
+                      main: {
+                        entryPath: input.mainFile,
+                      },
+                    },
+                  },
+                  files: {},
+                  location: target.location,
+                  staging: {
+                    ...staging,
+                    carriesWorkbenchLayout: input.listing.files.some(
+                      ({ path: listed }) => listed === workbenchLayoutPath,
+                    ),
+                  },
+                }),
             });
 
             return { type: 'projectCreated', projectId: project.id };
@@ -302,7 +434,12 @@ export default function ImportRoute(): React.JSX.Element {
       } satisfies Partial<MachineActors<typeof importDiskMachine>>,
     }),
     {
-      input: {},
+      input: {
+        plan: async (source) => {
+          const session = await importSession();
+          return session.plan(source);
+        },
+      },
       inspect,
     },
   );
@@ -320,6 +457,18 @@ export default function ImportRoute(): React.JSX.Element {
   const gitHubError = useSelector(gitHubActorRef, (snapshot) => snapshot.context.error);
   const gitHubProjectId = useSelector(gitHubActorRef, (snapshot) => snapshot.context.projectId);
   const gitHubFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.files);
+  const gitHubListing = useMemo(
+    () => [...gitHubFiles].map(([listed, file]) => ({ path: listed, size: file.size })),
+    [gitHubFiles],
+  );
+  /* The archive is planned in the file-manager worker, which reads a preview's few files from it on request. */
+  const loadGitHubPreview = useCallback(
+    async (paths: readonly string[]) => {
+      const session = await importSession();
+      return session.preview(paths, previewByteBudget);
+    },
+    [importSession],
+  );
   const gitHubSelectedMainFile = useSelector(gitHubActorRef, (snapshot) => snapshot.context.selectedMainFile);
   const requestedMainFile = useSelector(gitHubActorRef, (snapshot) => snapshot.context.requestedMainFile);
   const repoUrl = useSelector(gitHubActorRef, (snapshot) => snapshot.context.repoUrl);
@@ -388,7 +537,14 @@ export default function ImportRoute(): React.JSX.Element {
 
   // Disk machine selectors
   const diskState = useSelector(diskActorRef, (snapshot) => snapshot);
-  const diskFiles = useSelector(diskActorRef, (snapshot) => snapshot.context.files);
+  const diskListing = useSelector(diskActorRef, (snapshot) => snapshot.context.listing);
+  const loadDiskPreview = useCallback(
+    async (paths: readonly string[]) => {
+      const session = await importSession();
+      return session.preview(paths, previewByteBudget);
+    },
+    [importSession],
+  );
   const diskImportName = useSelector(diskActorRef, (snapshot) => snapshot.context.importName);
   const diskSelectedMainFile = useSelector(diskActorRef, (snapshot) => snapshot.context.selectedMainFile);
   const diskProgress = useSelector(diskActorRef, (snapshot) => snapshot.context.progress);
@@ -728,7 +884,8 @@ export default function ImportRoute(): React.JSX.Element {
       <ImportMainFileView
         title='Review import'
         subtitle={diskImportName}
-        files={diskFiles}
+        files={diskListing.files}
+        loadPreview={loadDiskPreview}
         selectedMainFile={diskSelectedMainFile}
         repo={diskImportName}
         onSelectMainFile={(file) => {
@@ -1270,7 +1427,8 @@ export default function ImportRoute(): React.JSX.Element {
           title='Review import'
           subtitle={`${owner}/${repo}${ref === 'main' ? '' : ` @ ${ref}`}`}
           requestedMainFileWarning={requestedFileWarning}
-          files={gitHubFiles}
+          files={gitHubListing}
+          loadPreview={loadGitHubPreview}
           selectedMainFile={gitHubSelectedMainFile}
           owner={owner}
           repo={repo}

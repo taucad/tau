@@ -25,6 +25,8 @@ export const kernelIssueCodeValues = [
   'INVALID_ANNOTATION',
   'INVALID_REFERENCE',
   'RESOURCE_LIMIT',
+  // Retired: no kernel produces it since previews lost their triangle budget (kernel budget program D1, D9). It stays
+  // so stored chat transcripts, results and telemetry that carry it still validate against this closed list.
   'TESSELLATION_DOWNGRADED',
   // Retired: nothing produces it since the display simplification middleware was removed. It stays so stored
   // chat transcripts and results that carry it still validate against this closed list.

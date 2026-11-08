@@ -56,9 +56,27 @@ All frames carry `v: 1`. The optional fields are documented per kind.
 | `rq` | C → S     | Request                                       | `i: string`, `n: string`, `a: unknown`                                                          | —               |
 | `rs` | S → C     | Response                                      | `i: string`, `o: 0\|1` plus either `d: unknown` (when `o===1`) or `e: WireError` (when `o===0`) | —               |
 | `rc` | C → S     | Cancel a pending `rq` (LSP `$/cancelRequest`) | `i: string`                                                                                     | `e: WireError`  |
+| `rp` | S → C     | A pending `rq` is still being served          | `i: string`                                                                                     | `d: unknown`    |
 
 `rq.i` is allocated by the client and MUST be unique within the channel
-session. `rs.i` and `rc.i` MUST equal the originating `rq.i`.
+session. `rs.i`, `rc.i` and `rp.i` MUST equal the originating `rq.i`.
+
+`rp` never settles a call. Without `d` it is a heartbeat; with `d` it carries
+one progress report the handler made through its call context
+(`context.progress(data)`). The server sends nothing for a call after its `rs`,
+after an `rc` for it, or after the channel closes. Two options govern it, both in
+milliseconds and off by default:
+
+| Option                  | Side              | Effect                                                                                                                              |
+| ----------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `callHeartbeatInterval` | server            | Send a heartbeat `rp` for every call still running at this interval                                                                 |
+| `livenessTimeout`       | client (per call) | Reject the call with code `PEER_UNRESPONSIVE`, and send `rc`, when no `rp` or `rs` for it arrives this long; the channel stays open |
+
+A per-call bound replaces a wall-clock deadline for calls whose duration grows
+with their input: the call lives while the server keeps saying it is working on
+it. The heartbeat interval MUST be shorter than the bound. Time and frozen-page
+handling follow the channel bound below. A client observes progress with
+`call(name, args, signal, { onProgress })`; a throwing observer is ignored.
 
 ### Notify family (`n*`)
 
@@ -211,6 +229,7 @@ Adding a new wire kind REQUIRES adding a fixture under `packages/rpc/test/confor
 | ------------------------ | ----------------------------- | --------------------------------- | ------------------ | -------------------------------------------- |
 | `rq` / `rs`              | `$/request` / `$/response`    | `RequestMessage` / `ReplyMessage` | request / response | Standard request-response                    |
 | `rc`                     | `$/cancelRequest`             | `CancelMessage`                   | n/a                | Cooperative cancellation                     |
+| `rp`                     | `$/progress` (work done)      | n/a                               | n/a                | Per-call heartbeat and progress              |
 | `nt`                     | `$/notification`              | `Notification`                    | event              | Fire-and-forget, no `i`                      |
 | `ss`/`sn`/`sc`/`se`/`su` | `$/progress` (loose analogue) | n/a (no first-class streams)      | iterator           | Server-pushed iterables with consumer cancel |
 | `lh`                     | `initialize` (server-pushed)  | greeting frame                    | `ready` event      | Handshake gate for `Channel.ready`           |
@@ -225,8 +244,8 @@ Adding a new wire kind REQUIRES adding a fixture under `packages/rpc/test/confor
 - Underscore-prefixed kinds are reserved for transport internals (e.g.
   `multiplex` framing) and MUST NOT escape the framing layer.
 - Adding fields to existing kinds requires bumping `v` to maintain wire
-  identity. Adding a kind does not: `lk` was added in v1, and an older peer
-  ignores it.
+  identity. Adding a kind does not: `lk` and `rp` were added in v1, and an
+  older peer ignores them.
 - `wireVersion` is exported from `@taucad/rpc` for runtime version checks.
 
 ## References

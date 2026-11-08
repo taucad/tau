@@ -45,7 +45,7 @@ describe('CrashReportPrompt (SB12, D9)', () => {
     offerCrashFeedback(foregroundKill, 'event-1');
     render(<CrashReportPrompt />);
 
-    expect(screen.getByRole('heading')).toHaveTextContent('ran out of memory');
+    expect(screen.getByRole('heading')).toHaveTextContent('Tau reloaded after the page stopped unexpectedly');
     /* Nothing is pre-filled, and nothing can be sent until they write something. */
     expect(screen.getByRole('textbox', { name: /what were you doing/iu })).toHaveValue('');
     expect(screen.getByLabelText(/email/iu)).toHaveValue('');
@@ -81,7 +81,7 @@ describe('CrashReportPrompt (SB12, D9)', () => {
     offerCrashFeedback(foregroundKill, 'event-1');
     render(<CrashReportPrompt />);
 
-    const prompt = screen.getByRole('region', { name: /ran out of memory/iu });
+    const prompt = screen.getByRole('region', { name: /stopped unexpectedly/iu });
     expect(prompt).toHaveAttribute('popover', 'manual');
     expect(shown).toEqual([prompt]);
   });

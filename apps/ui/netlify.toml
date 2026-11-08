@@ -148,6 +148,8 @@ Document-Policy = "js-profiling"
 # Content Security Policy (CSP) - Start with report-only mode
 # NOTE: Test thoroughly before switching to enforcing mode
 # Remove '-Report-Only' suffix to enforce
+# report-to default: violations go to the same-origin /api/reports receiver
+# named by Reporting-Endpoints (browser observability SB6), then to Sentry.
 # connect-src allowlist:
 #   - 'self' covers same-origin SSR fetches (proxied PostHog at /api/ph,
 #     health endpoints).
@@ -164,7 +166,8 @@ Document-Policy = "js-profiling"
 #   - https://files.tau.new / https://files.taucad.dev: the files service's signed
 #     LFS downloads (files service blueprint). The two private R2 endpoints stay for
 #     presigned uploads and for rollback to presigned downloads.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-au-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://files.tau.new https://files.taucad.dev https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-au-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://files.tau.new https://files.taucad.dev https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests; report-to default;"
+Reporting-Endpoints = 'default="/api/reports"'
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.
@@ -186,6 +189,14 @@ Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
 # (picogk-browser/<sha256>/), so every path is immutable like /assets/*.
 [[headers]]
 for = "/picogk-browser/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
+# C# language service runtime, emitted under its manifest digest
+# (csharp-language/<sha256>/), so every path is immutable like /assets/*.
+[[headers]]
+for = "/csharp-language/*"
 [headers.values]
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"

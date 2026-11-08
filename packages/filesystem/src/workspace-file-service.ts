@@ -54,11 +54,14 @@ import type {
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
+import type { ImportStagingPort } from '#importer/staging.js';
 import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
+import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
 /** Milliseconds. */
@@ -145,6 +148,8 @@ export class WorkspaceFileService {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _mountTable: MountTable;
   private readonly _policy: PathPolicy | undefined;
+  private _pendingSource: PendingObjectSource | undefined;
+  private readonly _pendingStallMilliseconds: number | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
   private readonly _projectIndexes: ProjectIndexes;
   private readonly _projectRoutes = new Set<string>();
@@ -175,8 +180,11 @@ export class WorkspaceFileService {
      * a workspace with no reserved layout means.
      */
     policy?: PathPolicy;
+    /** How long a read of a pending entry waits for its object; see {@link pendingStallMilliseconds}. */
+    pendingStallMilliseconds?: number;
   }) {
     this._registry = options.providerRegistry;
+    this._pendingStallMilliseconds = options.pendingStallMilliseconds;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     // Kernels deduplicate by content hash, so a lone edit is delivered at once and only the burst behind it waits.
@@ -206,6 +214,10 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       watchRegistry: this._watchRegistry,
       projectIndexes: this._projectIndexes,
+      pendingSource: () => this._pendingSource,
+      ...(options.pendingStallMilliseconds === undefined
+        ? {}
+        : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
     });
     this._projectDirectories = new ProjectDirectories({
       registry: this._registry,
@@ -257,10 +269,26 @@ export class WorkspaceFileService {
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
+   * @param options - `placeholders: 'raw'` for the revision layer alone, which reads large-object pointers as they are.
    * @returns A writable filesystem whose root is the captured mount.
    */
-  public createRootedFileSystem(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
-    return this._rootedViews.create(authorityRoot, mutationContext);
+  public createRootedFileSystem(
+    authorityRoot: string,
+    mutationContext?: WorkspaceMutationContext,
+    options?: Readonly<{ placeholders?: 'raw' }>,
+  ): RootedFileSystem {
+    return this._rootedViews.create(authorityRoot, mutationContext, options);
+  }
+
+  /**
+   * Say where a read of a pending entry gets its large object (D9): the
+   * revision layer's store, fetching by oid on demand. Without one, every
+   * such read refuses with `PENDING`.
+   *
+   * @param source - The host's source, or `undefined` to remove it.
+   */
+  public setPendingObjectSource(source: PendingObjectSource | undefined): void {
+    this._pendingSource = source;
   }
 
   // --- Read operations (direct to provider, no serialization) ---
@@ -289,7 +317,7 @@ export class WorkspaceFileService {
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
-    const data = await provider.readFile(resolvedPath);
+    const data = await this._readThrough(canonicalPath, { provider, path: resolvedPath }, optionsObject);
     return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 
@@ -311,7 +339,19 @@ export class WorkspaceFileService {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    const { provider, path: resolvedPath } = this._resolveProvider(resolveAuthorityPath(filepath));
+    const canonicalPath = resolveAuthorityPath(filepath);
+    const { provider, path: resolvedPath } = this._resolveProvider(canonicalPath);
+
+    /* A file small enough to be a pointer is read whole, so a pending entry streams its object (D9). */
+    let size: number | undefined;
+    try {
+      ({ size } = await provider.stat(resolvedPath));
+    } catch {
+      size = undefined;
+    }
+    if (size !== undefined && size <= 1024) {
+      return bufferToStream(await this._readThrough(canonicalPath, { provider, path: resolvedPath }, options), options);
+    }
 
     if (provider.readFileStream) {
       return provider.readFileStream(resolvedPath, options);
@@ -1104,6 +1144,17 @@ export class WorkspaceFileService {
   }
 
   /**
+   * Where an import stages on one durable storage root (in process only: the
+   * import runs in the authority, so no wire carries this).
+   *
+   * @param scope - A durable storage root.
+   * @returns The staging port.
+   */
+  public async importStaging(scope: StorageRootConfig): Promise<ImportStagingPort> {
+    return this._projectDirectories.importStaging(scope);
+  }
+
+  /**
    * Install one admitted ephemeral preview mount or the boot-owned
    * `/node_modules` mount. Project routes are configured only through
    * {@link configureProjectRoots}; `/` is installed directly by composition.
@@ -1223,6 +1274,42 @@ export class WorkspaceFileService {
     this._watchRegistry.dispose();
     this._registry.disposeAll();
     this._eventBus.dispose();
+  }
+
+  /**
+   * Read one file's bytes, through to its object when it is a pending entry (D9). The pointer is marked pending
+   * unless a write landed after the read began (I7).
+   *
+   * @param canonicalPath - Absolute authority path.
+   * @param resolved - The provider and path it resolves to.
+   * @param options - The caller's cancellation and the scope it read under.
+   * @returns The bytes the path stands for.
+   */
+  private async _readThrough(
+    canonicalPath: string,
+    resolved: Readonly<{ provider: FileSystemProvider; path: string }>,
+    options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    const generation = this._projectIndexes.generationAt(canonicalPath);
+    const read = await resolved.provider.readFile(resolved.path);
+    const object = pendingObjectOf(read);
+    if (object === undefined) {
+      return read;
+    }
+    this._projectIndexes.markPending(canonicalPath, object, { size: read.byteLength, generation });
+    /* The source answers by mount, as a rooted view's read asks it. */
+    const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
+    const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
+    const signal = options?.signal;
+    return readThroughPending(
+      this._pendingSource,
+      { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
+      {
+        pointer: read,
+        ...(signal === undefined ? {} : { signal }),
+        stallMilliseconds: this._pendingStallMilliseconds,
+      },
+    );
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {

@@ -12,13 +12,16 @@ description: >-
 # deployed first.
 #
 # When this deploy comes from a `staging.yml` push run, a newer run that is still going
-# supersedes it as well, once that run's plan has passed and its deploy job for this
+# supersedes it as well, once that run's plan has passed, its `Wait for CI checks` job
+# has finished and recorded every deploy gate as passed, and its deploy job for this
 # app has not ended without deploying. Its plan diffs the app against the last commit
-# staging recorded (`staging-deploy-history`), which this unpublished commit is not,
-# so it deploys this change too, or the app is unchanged since that record and there
-# is nothing to publish. If that run then fails before deploying, the record stays
-# behind this commit and the next push to `main` ships it. Waiting here instead would
-# hold the deploy queue the newer job needs.
+# staging recorded (`staging-deploy-history`), which this unpublished commit is not, so
+# it deploys this change too, or the app is unchanged since that record and there is
+# nothing to publish. A newer run whose gates are unrecorded or failed does not supersede: its
+# deploy jobs skip on a red check, so deferring to it left staging on an older commit
+# until the next green push (2026-11-08: #1527 passed CI, skipped for c6362d1e8f, whose
+# CI then failed). Publishing this commit first costs one extra deploy at most; waiting
+# here instead would hold the deploy queue the newer job needs.
 
 inputs:
   job-name:
@@ -50,6 +53,23 @@ runs:
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
             --jq '.jobs[] | {name, conclusion}' | jq -s .
         }
+        # The checks `staging.yml`'s `Wait for CI checks` job gates every deploy on; keep
+        # in step with its CHECKS.
+        gates='["Validate workspace","Run affected tasks","API tests (Postgres + MinIO)","Billing contracts (no Stripe credentials)"]'
+        gates_passed() {
+          local job log
+          # Its `Wait for CI checks` job has finished and recorded every gate as passed,
+          # one `<check>: <conclusion>` line each in its log. Until it has, what it will
+          # record is unproven (a gate can be re-run after its last poll, or it can give
+          # up at its deadline), so this older deploy goes ahead.
+          job=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name == "Wait for CI checks" and .status == "completed") | .id')
+          [ -n "$job" ] || return 1
+          log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs") || return 1
+          jq -r '.[]' <<< "$gates" | while IFS= read -r g; do
+            grep -qF " $g: success" <<< "$log" || exit 1
+          done
+        }
         # In a called workflow the run is the caller's, so this is the staging.yml push run;
         # a manual dispatch looks at the runs started since it began.
         created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
@@ -76,9 +96,14 @@ runs:
               and any(.[]; .name == $plan and .conclusion == "success")
               and (any(.[]; deploy and .conclusion != null) | not) then "coming"
             else "none" end')
+          # A newer run only takes this deploy over once its `Wait for CI checks` job has
+          # finished and recorded every deploy gate as passed.
+          if [ "$verdict" = coming ] && ! gates_passed "$run_id"; then
+            continue
+          fi
           case "$verdict" in
             deployed) echo "::notice::Run $run_id already deployed $sha, which contains $GITHUB_SHA; skipping this older deploy." ;;
-            coming) echo "::notice::Run $run_id for $sha, which contains $GITHUB_SHA, passed its plan and has not ended its deploy; skipping this older deploy." ;;
+            coming) echo "::notice::Run $run_id for $sha, which contains $GITHUB_SHA, passed its plan and CI gates and has not ended its deploy; skipping this older deploy." ;;
             *) continue ;;
           esac
           echo "superseded=true" >> "$GITHUB_OUTPUT"

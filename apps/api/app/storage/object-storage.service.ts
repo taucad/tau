@@ -100,6 +100,28 @@ export type PutBlobResult =
   | { lost: false; etag: string; alreadyExisted: boolean }
   | { lost: true; alreadyExisted: boolean };
 
+export type HeadBlobArgs = {
+  namespace: StorageNamespace;
+  key: string;
+  tier?: StorageTier;
+  signal?: AbortSignal;
+  /** Ask the store for the object's stored SHA-256 (`ChecksumMode: ENABLED`). */
+  checksum?: boolean;
+};
+
+export type HeadBlobResult = {
+  contentType: string;
+  size: number;
+  etag: string;
+  cacheControl: string;
+  /**
+   * The base64 SHA-256 the store verified on write, when `checksum` was asked
+   * and the object was written whole with one. A multipart object's composite
+   * checksum (`<digest>-<parts>`) is not the object's hash and is left out.
+   */
+  checksumSha256?: string;
+};
+
 /** One object in a prefix listing, keyed relative to its namespace. */
 export type ListedObject = { key: string; bytes: number; modifiedAt: Date | undefined };
 
@@ -112,15 +134,7 @@ export type ObjectStorageServiceContract = {
     tier?: StorageTier;
     signal?: AbortSignal;
   }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }>;
-  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier; signal?: AbortSignal }): Promise<
-    | {
-        contentType: string;
-        size: number;
-        etag: string;
-        cacheControl: string;
-      }
-    | undefined
-  >;
+  headBlob(args: HeadBlobArgs): Promise<HeadBlobResult | undefined>;
   deleteBlob(args: {
     namespace: StorageNamespace;
     key: string;
@@ -425,20 +439,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     };
   }
 
-  public async headBlob(args: {
-    namespace: StorageNamespace;
-    key: string;
-    tier?: StorageTier;
-    signal?: AbortSignal;
-  }): Promise<
-    | {
-        contentType: string;
-        size: number;
-        etag: string;
-        cacheControl: string;
-      }
-    | undefined
-  > {
+  public async headBlob(args: HeadBlobArgs): Promise<HeadBlobResult | undefined> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     try {
@@ -446,15 +447,18 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         new HeadObjectCommand({
           Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
+          ...(args.checksum === true ? { ChecksumMode: 'ENABLED' } : {}),
         }),
         { abortSignal: args.signal },
       );
+      const checksumSha256 = response.ChecksumSHA256;
 
       return {
         contentType: response.ContentType ?? 'application/octet-stream',
         size: Number(response.ContentLength ?? 0),
         etag: response.ETag?.replaceAll('"', '') ?? '',
         cacheControl: response.CacheControl ?? '',
+        ...(checksumSha256 === undefined || checksumSha256.includes('-') ? {} : { checksumSha256 }),
       };
     } catch (error) {
       if (isS3ObjectMissing(error)) {

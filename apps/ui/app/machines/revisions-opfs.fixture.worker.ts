@@ -114,7 +114,7 @@ const applyPointerTree = async (
     resourceQueue: new ResourceQueue(),
     eventBus: new ChangeEventBus(),
     mountTable,
-  }).createRootedFileSystem('/projects/cold-open');
+  }).createRootedFileSystem('/projects/cold-open', undefined, { placeholders: 'raw' });
   /* The bare-provider row reads its objects through the provider too, as it always has. */
   const port = createIsomorphicGitRevisionPort({ filesystem: surface === 'provider' ? checkout : rooted });
   await port.init({ author: { name: 'Tau', email: 'tau@example.test' }, createSetupFiles: false });

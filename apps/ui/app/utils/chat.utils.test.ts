@@ -761,6 +761,27 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes the files a grep could not search because their large object is pending', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-grep',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: 'foo' },
+          output: {
+            matches: [],
+            totalMatches: 0,
+            pendingFiles: ['models/part.step'],
+            appliedHeadLimit: 50,
+            appliedOffset: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (large object not on this device yet): models/part.step\n</tool_result>',
+      );
+    });
+
     it('serializes tool-grep context lines with ripgrep-style separators', () => {
       const message = baseMessage([
         {
@@ -883,19 +904,6 @@ describe('serializeMessage', () => {
           angularTolerance: 12,
         },
         'Mesh: 4096 triangles, 2050 vertices, 18 ms\nResolution: requested high, linearTolerance 0.06 mm, angularTolerance 12°',
-      ],
-      [
-        'a downgraded render',
-        {
-          triangles: 1_999_872,
-          vertices: 1_000_014,
-          elapsed: 812,
-          requested: 'extra-high',
-          linearTolerance: 0.02,
-          angularTolerance: 10,
-          downgraded: 1,
-        },
-        'Mesh: 1999872 triangles, 1000014 vertices, 812 ms\nResolution: requested extra-high, linearTolerance 0.02 mm, angularTolerance 10°, downgraded 1',
       ],
     ])('serializes the evaluate_model mesh cost of %s', (_kernel, tessellation, line) => {
       const message = baseMessage([

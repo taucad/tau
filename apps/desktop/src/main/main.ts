@@ -67,6 +67,7 @@ import {
   forwardRendererDiagnostics,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
+  watchRendererHangs,
 } from '#main/diagnostics.js';
 import {
   clientEnvironment,
@@ -114,7 +115,12 @@ import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
-import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
+import { updaterFailureSignal } from '#main/desktop-signals.js';
+import {
+  initializeDesktopErrorReporting,
+  rendererErrorReportingEnvironment,
+  reportDesktopSignal,
+} from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
@@ -1722,7 +1728,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         preload: join(import.meta.dirname, '../preload/preload.cjs'),
         additionalArguments: [
           `${bootstrapArgumentPrefix}${JSON.stringify({
-            env: clientEnvironment(environment),
+            env: { ...clientEnvironment(environment), ...rendererErrorReportingEnvironment() },
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds(),
           })}`,
@@ -1764,11 +1770,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
-    forwardRendererDiagnostics(window.webContents, log, () => {
-      if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-        window.webContents.reload();
-      }
+    forwardRendererDiagnostics(window.webContents, log, {
+      recover: () => {
+        if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.reload();
+        }
+      },
+      report: reportDesktopSignal,
     });
+    watchRendererHangs(window, log, { report: reportDesktopSignal });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is
@@ -2291,6 +2301,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     openExternal: async (url) => shell.openExternal(url),
     log: (level, event, detail) => {
       log.log(level, event, detail);
+      reportDesktopSignal(updaterFailureSignal(event, detail, { channel: desktopChannel, version: app.getVersion() }));
     },
     ...(appLocation === undefined
       ? {}

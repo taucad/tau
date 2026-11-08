@@ -30,6 +30,9 @@ import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { applyEntryWithPrimitives, mapRolling, runBatch } from '#backend/batch.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { isRefusal } from '#changeset.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type {
@@ -58,7 +61,6 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
   'read-write': 2,
 });
 
-/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 /**
  * Files one `hashFiles` call digests at once. Each holds a descriptor and at
  * most one bounded chunk, and the call is not nested in a tree walk, so this
@@ -66,7 +68,73 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
  */
 const hashConcurrency = 32;
 
+/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
+
+/** The writer's pid in a temp sibling's name. */
+const temporaryWriterPid = /\.(\d+)\.[\da-f-]{36}\.tmp$/u;
+/** A temp sibling whose writer is gone is swept once it has been idle this long. */
+const orphanedTemporaryMilliseconds = 60_000;
+/** A temp sibling idle this long is swept whoever wrote it: no write stalls for a day. */
+const abandonedTemporaryMilliseconds = 24 * 60 * 60 * 1000;
+/** Directories one provider remembers having swept before it forgets them all and sweeps again. */
+const sweptDirectoryLimit = 1024;
+/** Writes one batch stages at once: each holds one descriptor while its temp sibling fills and syncs. */
+const batchWriteConcurrency = 16;
+
+/** A write's bytes: in hand, or streamed a chunk at a time. */
+type WriteSource =
+  | { readonly data: Uint8Array<ArrayBuffer>; readonly source?: undefined }
+  | { readonly data?: undefined; readonly source: ReadableStream<Uint8Array<ArrayBuffer>> };
+
+/** One temp+rename write between its phases, so a batch can share one directory fsync per directory (D16). */
+type StagedWrite = {
+  readonly rootedPath: string;
+  readonly targetPath: string;
+  readonly realBase: string;
+  readonly admittedDirectory: string;
+  readonly admittedTarget: string;
+  readonly temporaryPath: string;
+  /** The permission bits the file takes, or `undefined` for a new file's default. */
+  readonly permissions: number | undefined;
+  data?: Uint8Array<ArrayBuffer>;
+  streamed?: Readonly<{ size: number; sha256: string }>;
+  retainedHandle?: FileHandle;
+  written?: BigIntStats;
+  /** Set once the rename is attempted: a rename that throws may still have published (rename-then-throw). */
+  renaming?: boolean;
+  replaced: boolean;
+};
+
+type BatchWrite = Extract<BatchEntry, { op: 'write' }>;
+
+/** One native event a watch callback admitted, or a whole-subscription reset, in arrival order. */
+type ObservedEvent = Readonly<{ rootedPath: string; absolute: string; deleted: boolean }> | 'reset';
+
+/* The directories a recursive `mkdir` made, deepest first, each removed only while it is empty. */
+const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; last: string }>): Promise<void> => {
+  for (let directory: string | undefined = last; directory !== undefined; ) {
+    // oxlint-disable-next-line no-await-in-loop -- a parent is removed after its child.
+    const removed: boolean = await fs.rmdir(directory).then(
+      () => true,
+      () => false,
+    );
+    directory = removed && directory !== first ? path.dirname(directory) : undefined;
+  }
+};
+
+/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 /**
  * The POSIX `open` hardening flag `flag`, or `0` where the platform omits it.
@@ -109,6 +177,60 @@ const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boo
   }
   const current = await fs.lstat(target, { bigint: true }).catch(() => undefined);
   return current !== undefined && current.dev === written.dev && current.ino === written.ino;
+};
+
+/* Every chunk of a stream written at the handle's position, and the size and SHA-256 of what was written. */
+const writeStreamTo = async (
+  handle: FileHandle,
+  source: ReadableStream<Uint8Array<ArrayBuffer>>,
+): Promise<Readonly<{ size: number; sha256: string }>> => {
+  const digest = createHash('sha256');
+  let size = 0;
+  const reader = source.getReader();
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is written one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      for (let written = 0; written < read.value.byteLength; ) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const { bytesWritten } = await handle.write(
+          read.value,
+          written,
+          read.value.byteLength - written,
+          size + written,
+        );
+        written += bytesWritten;
+      }
+      digest.update(read.value);
+      size += read.value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
+  }
+  return { size, sha256: digest.digest('hex') };
+};
+
+/* Whether the published file is exactly `size` bytes hashing to `sha256`, read one chunk at a time. */
+const publishedDigestEquals = async (
+  handle: FileHandle,
+  expected: Readonly<{ size: number; sha256: string }>,
+): Promise<boolean> => {
+  const digest = createHash('sha256');
+  const chunk = Buffer.alloc(streamChunkSize);
+  let size = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, size);
+    if (bytesRead === 0) {
+      break;
+    }
+    digest.update(chunk.subarray(0, bytesRead));
+    size += bytesRead;
+    if (size > expected.size) {
+      return false;
+    }
+  }
+  return size === expected.size && digest.digest('hex') === expected.sha256;
 };
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
@@ -227,6 +349,23 @@ export const drainNodeFsProviderWatchClosures = async (provider: NodeFsProvider)
 
 // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
 /** ponytail: prefix-only exclude matching, mirroring the runtime adapter's kernel contract. */
+/* Head metadata from one stat: kind, size and time, never content (I3). */
+const headStat = (stats: Stats): FileStat =>
+  stats.isDirectory()
+    ? { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs }
+    : { type: 'file', size: stats.size, mtimeMs: stats.mtimeMs };
+
+/* What a watched path holds now, by one asynchronous `stat`; `undefined` when it cannot be told. */
+const entryKindAt = async (absolute: string): Promise<'file' | 'dir' | 'absent' | undefined> => {
+  try {
+    const stats = await fs.stat(absolute);
+    return stats.isDirectory() ? 'dir' : 'file';
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : undefined;
+  }
+};
+
 const isExcluded = (rootedPath: string, excludes: readonly string[]): boolean =>
   excludes.some((pattern) => {
     if (!pattern.endsWith('/**')) {
@@ -273,6 +412,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     durability: 'transactional-rewrite',
     trustworthyMtime: true,
     externallyEdited: true,
+    streamsWrites: true,
+    movesInPlace: true,
   };
 
   private readonly _base: string;
@@ -280,6 +421,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private _realBaseCache: Promise<string> | undefined;
 
   private readonly _openSubscriptions = new Set<() => void>();
+  /** Directories whose crashed temp siblings this provider has swept. */
+  private readonly _sweptDirectories = new Set<string>();
 
   /**
    * @param basePath - Host directory mapped to this provider's root. It must
@@ -358,6 +501,77 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     });
   }
 
+  /**
+   * Write `path` from a stream (W6.3): each chunk goes to the same temp
+   * sibling `writeFile` uses, which is synced and renamed over the path only
+   * once the stream ends, and the published entry is verified by its SHA-256
+   * read back in chunks. Never more than a chunk is held.
+   *
+   * @param path_ - Rooted file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public override async writeFileStream(path_: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    let created: Readonly<{ first: string; last: string }> | undefined;
+    try {
+      this._assertRootedPath(path_);
+      if (path_ === '') {
+        throw this._eisdir(path_);
+      }
+      const target = await this._resolve(path_, 'mutate');
+      const existingEntry = await this._lstatOrUndefined(target);
+      if (existingEntry?.isDirectory() === true) {
+        throw this._eisdir(path_);
+      }
+      const first = await fs.mkdir(path.dirname(target), { recursive: true });
+      created = first === undefined ? undefined : { first, last: path.dirname(target) };
+      await this._atomicWrite(path_, target, { source });
+    } catch (error) {
+      /* Harmless once the stream was read or cancelled: a locked or closed stream refuses. */
+      await source.cancel(error).catch(() => undefined);
+      if (created !== undefined) {
+        await removeCreatedParents(created);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Apply one changeset phase on disk (D16). Every write is staged to its temp
+   * sibling and fsynced, a rolling window at a time; the synced siblings are
+   * renamed over their targets; and each directory the renames landed in is
+   * fsynced once, so a phase costs at most one fsync per file plus one per
+   * directory rather than two per file. Each write is then read back once (I2),
+   * and only then reported `applied`: no receipt claims an entry that is not
+   * durable (I1). Other entries run through the primitives beside the writes;
+   * the pipeline admitted that no two entries touch one path.
+   *
+   * @param entries - One phase's entries, in provider paths.
+   * @param options - The changeset's abort signal: no entry starts after it aborts.
+   * @returns One receipt per entry, in entry order.
+   */
+  public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    const receipts = Array.from<BatchReceipt>({ length: entries.length });
+    const writes: Array<Readonly<{ index: number; entry: BatchWrite }>> = [];
+    const others: number[] = [];
+    for (const [index, entry] of entries.entries()) {
+      if (entry.op === 'write') {
+        writes.push({ index, entry });
+      } else {
+        others.push(index);
+      }
+    }
+    const otherEntries = others.map((index) => entries[index]!);
+    await Promise.all([
+      this._applyBatchWrites(writes, receipts, options?.signal),
+      runBatch(otherEntries, async (entry) => applyEntryWithPrimitives(this, entry), options).then((settled) => {
+        for (const [position, receipt] of settled.entries()) {
+          receipts[others[position]!] = receipt;
+        }
+      }),
+    ]);
+    return receipts;
+  }
+
   /** Direct providers do not own the cross-client authority needed for checked replacement. */
   public async writeFileChecked(_input: CheckedFileWrite): Promise<CheckedFileWriteResult> {
     throw Object.assign(new Error('Checked writes require a node filesystem authority owner.'), {
@@ -409,30 +623,41 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * instead of one per file — the whole saving on the port client, where each of
    * those was a round trip.
    *
-   * Composed from this provider's own two primitives on purpose: the listing
-   * keeps its temp-file and laundered-link refusals, each row keeps the stat
-   * `_resolve` and the content sniff would have given it, and the answer is
-   * `readdir` + `stat` by construction rather than by a second implementation.
+   * The answer is `readdir` + `stat`: the listing keeps its temp-file and
+   * laundered-link refusals, and a row that is a link, or whose kind the
+   * directory did not report, is stat'ed through `_resolve` exactly as `stat`
+   * would. Every other row costs one `lstat` (D16): when the directory's real
+   * path is its spelled one, a regular child's real path is its spelled one
+   * too, so the containment and mask checks `_resolve` would repeat per row are
+   * already answered by the directory's. This listing is what the Project
+   * Index's head compare walks, so its per-row cost is that compare's cost.
    *
    * @param path_ - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
   public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
-    const names = await this.readdir(path_);
-    return mapConcurrent(names, statConcurrency, async (name) => ({
-      name,
-      ...(await this.stat(joinRooted(path_, name))),
-    }));
+    const entries = await this._admittedDirectoryEntries(path_);
+    const canonical = assertRootedPath(path_);
+    const directory = path.resolve(this._base, canonical);
+    const [realBase, realDirectory] = await Promise.all([this._realBase, fs.realpath(directory)]);
+    const direct = realDirectory === path.resolve(realBase, canonical);
+    return mapConcurrent(entries, statConcurrency, async (entry) => {
+      const rooted = joinRooted(canonical, entry.name);
+      if (direct && (entry.isFile() || entry.isDirectory())) {
+        const stats = await fs.lstat(path.join(directory, entry.name));
+        if (!stats.isSymbolicLink()) {
+          return { name: entry.name, ...headStat(stats) };
+        }
+      }
+      return { name: entry.name, ...(await this.stat(rooted)) };
+    });
   }
 
   /** Head metadata from `fs.stat` alone; no content is opened (I3). */
   public async stat(path_: string): Promise<FileStat> {
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
-    const stats = await fs.stat(target);
-    return stats.isDirectory()
-      ? { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs }
-      : { type: 'file', size: stats.size, mtimeMs: stats.mtimeMs };
+    return headStat(await fs.stat(target));
   }
 
   public async getFileMode(path_: string): Promise<FileMode> {
@@ -527,6 +752,24 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
     const ignored = (rootedPath: string): boolean =>
       isExcluded(rootedPath, excludes) || inFlightTemporaryName.test(path.basename(rootedPath));
+    let classifying: Promise<void> = Promise.resolve();
+    /*
+     * A handler that throws loses its event, never the stream (D16). What it
+     * lost leaves the consumer stale, so a reset is owed: retried once, in
+     * order, after what is already queued, and, if that throws too, delivered
+     * ahead of the next event, until one lands.
+     */
+    let owedReset = false;
+    let retryingReset = false;
+    const deliver = (event: NodeFsWatchEvent): boolean => {
+      try {
+        handler(event);
+        return true;
+      } catch (error) {
+        console.error('[filesystem] A watch handler threw; a reset follows so its consumer resyncs.', error);
+        return false;
+      }
+    };
     const emit = (event: NodeFsWatchEvent): void => {
       if (unsubscribed) {
         return;
@@ -534,21 +777,72 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (event.type !== 'reset' && ignored(event.path)) {
         return;
       }
-      handler(event);
-    };
-    /* Filtered before the `stat`: a bulk change under an excluded tree must cost no syscall per event. */
-    const classify = (rootedPath: string, absolute: string): void => {
-      if (ignored(rootedPath)) {
+      if (owedReset && event.type !== 'reset') {
+        owedReset = !deliver({ type: 'reset' });
+      }
+      if (deliver(event)) {
+        if (event.type === 'reset') {
+          owedReset = false;
+        }
         return;
       }
-      try {
-        emit({ type: 'change', path: rootedPath, kind: statSync(absolute).isDirectory() ? 'dir' : 'file' });
-      } catch (error) {
-        const { code } = error as NodeJS.ErrnoException;
-        if (code === 'ENOENT' || code === 'ENOTDIR') {
-          emit({ type: 'delete', path: rootedPath });
-        }
+      owedReset = true;
+      if (retryingReset) {
+        return;
       }
+      retryingReset = true;
+      const previous = classifying;
+      classifying = (async (): Promise<void> => {
+        await previous;
+        retryingReset = false;
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- an event delivered meanwhile may have paid it.
+        if (owedReset) {
+          retryingReset = true;
+          emit({ type: 'reset' });
+          retryingReset = false;
+        }
+      })();
+      trackWatchAdmission(this, classifying);
+    };
+    /*
+     * Classified off the event loop (D16): a native callback's events are
+     * filtered first, so a bulk change under an excluded tree costs no syscall;
+     * a native `delete` is trusted as it stands, since the watcher reports a
+     * path's final state for the callback; and each create or update learns its
+     * kind from one asynchronous `stat`, never a synchronous one per event.
+     * Callbacks emit in the order they arrived, each as one run of events.
+     */
+    const classify = (batch: readonly ObservedEvent[]): void => {
+      const admitted = batch.filter((event) => event === 'reset' || !ignored(event.rootedPath));
+      if (admitted.length === 0) {
+        return;
+      }
+      const kinds = mapConcurrent(admitted, statConcurrency, async (event) =>
+        event === 'reset' ? 'reset' : event.deleted ? 'absent' : entryKindAt(event.absolute),
+      );
+      const previous = classifying;
+      classifying = (async (): Promise<void> => {
+        await previous;
+        /* `entryKindAt` answers every failure as a kind and `emit` keeps a handler's throw, so no run rejects. */
+        const resolved = await kinds;
+        for (const [index, event] of admitted.entries()) {
+          const kind = resolved[index];
+          if (event === 'reset') {
+            emit({ type: 'reset' });
+            continue;
+          }
+          const { rootedPath } = event;
+          if (kind === 'absent') {
+            emit({ type: 'delete', path: rootedPath });
+          } else if (kind === 'file' || kind === 'dir') {
+            emit({ type: 'change', path: rootedPath, kind });
+          } else {
+            /* A change whose kind a failed `stat` cannot tell is unnameable: the consumer resyncs. */
+            emit({ type: 'reset' });
+          }
+        }
+      })();
+      trackWatchAdmission(this, classifying);
     };
     const desiredDirectory = (entry: Entry): { directory: string; targetIsDirectory: boolean } => {
       const targetIsDirectory = this._isDirectorySync(entry.target);
@@ -587,13 +881,14 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           }
           const current = desiredDirectory(entry);
           if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
+            /* After any reconciliation the rearm classified, in order. */
             entry.rearming ??= open(entry)
               .then(
                 () => {
-                  emit({ type: 'reset' });
+                  classify(['reset']);
                 },
                 () => {
-                  emit({ type: 'reset' });
+                  classify(['reset']);
                 },
               )
               .finally(() => {
@@ -601,11 +896,13 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
               });
             trackWatchAdmission(this, entry.rearming);
           }
+          const batch: ObservedEvent[] = [];
           for (const event of events) {
             if (!isContained(watchBase, event.path)) {
-              emit({ type: 'reset' });
+              batch.push('reset');
               continue;
             }
+            const deleted = event.type === 'delete';
             if (entry.targetIsDirectory) {
               const relative = path.relative(entry.target, event.path);
               if (relative === '' || !isContained(entry.target, event.path)) {
@@ -614,11 +911,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
               if (!request.recursive && relative.includes(path.sep)) {
                 continue;
               }
-              classify(joinRooted(entry.rootedPath, relative.split(path.sep).join('/')), event.path);
+              batch.push({
+                rootedPath: joinRooted(entry.rootedPath, relative.split(path.sep).join('/')),
+                absolute: event.path,
+                deleted,
+              });
             } else if (event.path === entry.target) {
-              classify(entry.rootedPath, entry.target);
+              batch.push({ rootedPath: entry.rootedPath, absolute: entry.target, deleted });
             }
           }
+          classify(batch);
         },
         ignore.length === 0 ? undefined : { ignore },
       );
@@ -639,11 +941,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         // A parent may appear while native subscribe is still starting. Keep
         // this admitted stream until its replacement is ready, then reconcile.
         await open(entry);
-        emit({ type: 'reset' });
+        classify(['reset']);
       } else if (previous && !entry.targetIsDirectory) {
         // The ancestor stream may miss leaf events before this directory is
         // observed. Reconcile the exact target once its replacement is ready.
-        classify(entry.rootedPath, entry.target);
+        classify([{ rootedPath: entry.rootedPath, absolute: entry.target, deleted: false }]);
       }
     };
     const unsubscribe = (): void => {
@@ -701,6 +1003,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
       throw new Error('Native watch admission failed.', { cause: failure.reason });
     }
+    /* What admission reconciled is delivered before the watch is acknowledged; no run rejects (`emit` keeps a throw). */
+    await classifying;
     if (!this._openSubscriptions.has(unsubscribe)) {
       throw new Error('Node filesystem observation was cancelled during admission.');
     }
@@ -1053,135 +1357,379 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return target;
   }
 
+  /**
+   * Remove the temp siblings a crashed write left in one directory, the first
+   * time this provider writes there (W6.3). A sibling goes when its writer's
+   * process is gone and it has not been written for a minute, or when it has
+   * not been written for a day whoever wrote it; one still being written is
+   * touched by every chunk, so it stays. Failures are ignored: the next
+   * provider to write there tries again.
+   *
+   * @param directory - The admitted real directory a write is about to use.
+   */
+  private async _sweepTemporarySiblings(directory: string): Promise<void> {
+    if (this._sweptDirectories.has(directory)) {
+      return;
+    }
+    if (this._sweptDirectories.size >= sweptDirectoryLimit) {
+      this._sweptDirectories.clear();
+    }
+    this._sweptDirectories.add(directory);
+    const names = await fs.readdir(directory).catch((): string[] => []);
+    const now = Date.now();
+    await Promise.all(
+      names
+        .filter((name) => inFlightTemporaryName.test(name))
+        .map(async (name) => {
+          const entry = path.join(directory, name);
+          const stats = await fs.lstat(entry).catch(() => undefined);
+          if (stats?.isFile() !== true) {
+            return;
+          }
+          const idle = now - stats.mtimeMs;
+          const pid = Number(temporaryWriterPid.exec(name)?.[1]);
+          if (
+            idle > abandonedTemporaryMilliseconds ||
+            (idle > orphanedTemporaryMilliseconds && pid !== process.pid && !isProcessAlive(pid))
+          ) {
+            await fs.unlink(entry).catch(() => undefined);
+          }
+        }),
+    );
+  }
+
+  /**
+   * The write half of {@link applyBatch}: stage, rename, one fsync per
+   * directory, read back. A refusal is `failed`, and so is a write that fails
+   * before its rename is attempted (its target is untouched) unless it had
+   * already made a parent directory; any other failure is `uncertain`.
+   *
+   * @param writes - The batch's writes with their entry indexes.
+   * @param receipts - Filled in at each write's index.
+   * @param signal - Stops writes that have not started staging.
+   */
+  private async _applyBatchWrites(
+    writes: ReadonlyArray<Readonly<{ index: number; entry: BatchWrite }>>,
+    receipts: BatchReceipt[],
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    type Pending = { index: number; entry: BatchWrite; staged: StagedWrite; madeParent: boolean; failure?: unknown };
+    /* The primitive batch's rule (`batch.ts`): a refusal is `failed`, and so is any failure before anything moved;
+     * once a parent was made or a rename attempted, anything else is `uncertain`. */
+    const refuse = (index: number, error: unknown, moved: boolean): void => {
+      receipts[index] = { outcome: moved && !isRefusal(error) ? 'uncertain' : 'failed', error };
+    };
+    const staged = await mapRolling(writes, batchWriteConcurrency, async ({ index, entry }) => {
+      if (signal?.aborted === true) {
+        refuse(index, signal.reason, false);
+        return undefined;
+      }
+      let madeParent = false;
+      let prepared: StagedWrite | undefined;
+      try {
+        this._assertRootedPath(entry.path);
+        if (entry.path === '') {
+          throw this._eisdir(entry.path);
+        }
+        const target = await this._resolve(entry.path, 'mutate');
+        const existing = await this._lstatOrUndefined(target);
+        if (existing?.isDirectory() === true) {
+          throw this._eisdir(entry.path);
+        }
+        if (entry.create === true && existing !== undefined) {
+          throw this._errno('EEXIST', 'file already exists', entry.path);
+        }
+        madeParent = (await fs.mkdir(path.dirname(target), { recursive: true })) !== undefined;
+        prepared = await this._prepareWrite(entry.path, target, entry.mode);
+        await this._fillTemporary(
+          prepared,
+          entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
+        );
+        const write: Pending = { index, entry, staged: prepared, madeParent };
+        return write;
+      } catch (error) {
+        let failure = error;
+        if (prepared !== undefined) {
+          try {
+            await this._settleWrite(prepared, error);
+          } catch (settleError) {
+            failure = settleError;
+          }
+        }
+        refuse(index, failure, madeParent);
+        return undefined;
+      }
+    });
+    const pending = staged.filter((write): write is Pending => write !== undefined);
+    await mapRolling(pending, batchWriteConcurrency, async (write) => {
+      try {
+        await this._publishTemporary(write.staged);
+      } catch (error) {
+        write.failure = error;
+      }
+    });
+    /* One fsync per directory the renames landed in, whatever number of files each holds. */
+    const byDirectory = new Map<string, Pending[]>();
+    for (const write of pending) {
+      if (write.failure === undefined) {
+        const group = byDirectory.get(write.staged.admittedDirectory) ?? [];
+        group.push(write);
+        byDirectory.set(write.staged.admittedDirectory, group);
+      }
+    }
+    await mapRolling([...byDirectory], batchWriteConcurrency, async ([directory, group]) => {
+      try {
+        await this._syncPublished(
+          directory,
+          group.map(({ staged: published }) => published),
+        );
+      } catch (error) {
+        for (const write of group) {
+          write.failure = error;
+        }
+      }
+    });
+    await mapRolling(pending, batchWriteConcurrency, async (write) => {
+      if (write.failure === undefined) {
+        try {
+          await this._verifyPublished(write.staged);
+        } catch (error) {
+          write.failure = error;
+        }
+      }
+      try {
+        await this._settleWrite(write.staged, write.failure);
+        receipts[write.index] = {
+          outcome: 'applied',
+          kind: 'file',
+          ...(write.entry.create === true ? { created: true } : {}),
+        };
+      } catch (error) {
+        refuse(write.index, error, write.madeParent || write.staged.renaming === true);
+      }
+    });
+  }
+
   /** Temp file + fsync + rename, refusing to replace a symlink or a swapped parent. */
   private async _atomicWrite(
     rootedPath: string,
     targetPath: string,
-    options: { data: Uint8Array<ArrayBuffer>; beforeReplace?: () => Promise<void> },
+    options: WriteSource & { beforeReplace?: () => Promise<void> },
   ): Promise<void> {
-    const { data, beforeReplace } = options;
+    const staged = await this._prepareWrite(rootedPath, targetPath, undefined);
+    let failure: unknown;
+    try {
+      await this._fillTemporary(staged, options);
+      await this._publishTemporary(staged, options.beforeReplace);
+      await this._syncPublished(staged.admittedDirectory, [staged]);
+      await this._verifyPublished(staged);
+    } catch (error) {
+      failure = error;
+    }
+    await this._settleWrite(staged, failure);
+  }
+
+  /**
+   * Admit one write's directory and name its temp sibling; nothing is created yet.
+   *
+   * @param rootedPath - The rooted path being written, for errors.
+   * @param targetPath - Its resolved absolute path, whose parent exists.
+   * @param mode - The mode the file takes, or `undefined` to keep the existing file's.
+   * @returns The staged write, with no file opened.
+   */
+  private async _prepareWrite(
+    rootedPath: string,
+    targetPath: string,
+    mode: FileMode | undefined,
+  ): Promise<StagedWrite> {
     const realBase = await this._realBase;
     const admittedDirectory = await fs.realpath(path.dirname(targetPath));
     if (!isContained(realBase, admittedDirectory)) {
       throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
     }
+    await this._sweepTemporarySiblings(admittedDirectory);
     const admittedTarget = path.join(admittedDirectory, path.basename(targetPath));
     const temporaryPath = path.join(
       admittedDirectory,
       `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
-    const bytes = data;
     const existing = await this._lstatOrUndefined(admittedTarget);
     if (existing?.isSymbolicLink() === true) {
       throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
     }
-    const existingMode = existing === undefined ? undefined : existing.mode % 0o1000;
+    const permissions =
+      mode === undefined
+        ? existing === undefined
+          ? undefined
+          : existing.mode % 0o1000
+        : mode === '100755'
+          ? 0o755
+          : 0o644;
+    return {
+      rootedPath,
+      targetPath,
+      realBase,
+      admittedDirectory,
+      admittedTarget,
+      temporaryPath,
+      permissions,
+      replaced: false,
+    };
+  }
 
-    let replaced = false;
-    let failure: unknown;
-    let retainedHandle: FileHandle | undefined;
+  /**
+   * Write the temp sibling and fsync it: the one file fsync a write pays.
+   *
+   * @param staged - The prepared write.
+   * @param source - Its bytes, in hand or streamed.
+   */
+  private async _fillTemporary(staged: StagedWrite, source: WriteSource): Promise<void> {
+    const { permissions } = staged;
+    const handle = await fs.open(staged.temporaryPath, 'wx', permissions ?? 0o666);
+    if (process.platform === 'win32') {
+      staged.retainedHandle = handle;
+    }
     try {
-      const handle = await fs.open(temporaryPath, 'wx', existingMode ?? 0o666);
-      if (process.platform === 'win32') {
-        retainedHandle = handle;
-      }
-      try {
-        await handle.writeFile(bytes);
-        if (existingMode !== undefined) {
-          await handle.chmod(existingMode);
-        }
-        await handle.sync();
-      } finally {
-        if (retainedHandle === undefined) {
-          await handle.close();
-        }
-      }
-
-      const currentDirectory = await fs.realpath(path.dirname(targetPath));
-      if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
-        throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
-      }
-      const currentTarget = await this._lstatOrUndefined(admittedTarget);
-      if (currentTarget?.isSymbolicLink() === true) {
-        throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
-      }
-
-      await beforeReplace?.();
-      /* Rename keeps the inode, so this identifies the entry the rename is about
-       * to publish — and tells a later writer's entry apart from ours below. */
-      const written = await fs.lstat(temporaryPath, { bigint: true });
-      await fs.rename(temporaryPath, admittedTarget);
-      replaced = true;
-      if (retainedHandle === undefined) {
-        const directoryHandle = await fs.open(admittedDirectory, 'r');
-        try {
-          await directoryHandle.sync();
-        } finally {
-          await directoryHandle.close();
-        }
+      if (source.data === undefined) {
+        staged.streamed = await writeStreamTo(handle, source.source);
       } else {
-        // Windows FlushFileBuffers commits file metadata as well as content.
-        // Keep the writable handle through rename to flush the same file object,
-        // without reopening a replaced path or trying to sync a read-only directory.
-        // https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
-        await retainedHandle.sync();
+        staged.data = source.data;
+        await handle.writeFile(source.data);
       }
+      if (permissions !== undefined) {
+        await handle.chmod(permissions);
+      }
+      await handle.sync();
+    } finally {
+      if (staged.retainedHandle === undefined) {
+        await handle.close();
+      }
+    }
+  }
 
-      const verification = await fs.open(admittedTarget, verificationReadFlags);
+  /**
+   * Rename the synced temp sibling over its target, refusing a swapped parent or a symlink target.
+   *
+   * @param staged - A filled write.
+   * @param beforeReplace - Runs after the checks, immediately before the rename.
+   */
+  private async _publishTemporary(staged: StagedWrite, beforeReplace?: () => Promise<void>): Promise<void> {
+    const { rootedPath, targetPath, realBase, admittedDirectory, admittedTarget, temporaryPath } = staged;
+    const currentDirectory = await fs.realpath(path.dirname(targetPath));
+    if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
+      throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
+    }
+    const currentTarget = await this._lstatOrUndefined(admittedTarget);
+    if (currentTarget?.isSymbolicLink() === true) {
+      throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
+    }
+    await beforeReplace?.();
+    /* Rename keeps the inode, so this identifies the entry the rename is about
+     * to publish — and tells a later writer's entry apart from ours below. */
+    staged.written = await fs.lstat(temporaryPath, { bigint: true });
+    staged.renaming = true;
+    await fs.rename(temporaryPath, admittedTarget);
+    staged.replaced = true;
+  }
+
+  /**
+   * Make the renames into one directory durable: one directory fsync, however
+   * many of `published` it holds (D16). Windows syncs each file's own handle
+   * instead, since a directory there cannot be synced.
+   *
+   * @param directory - The admitted directory every one of `published` was renamed into.
+   * @param published - The writes renamed into it.
+   */
+  private async _syncPublished(directory: string, published: readonly StagedWrite[]): Promise<void> {
+    if (published.every(({ retainedHandle }) => retainedHandle === undefined)) {
+      const directoryHandle = await fs.open(directory, 'r');
       try {
-        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
-        if (!bytesEqual(committed, bytes)) {
-          throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
-        }
-      } catch (error) {
-        /*
-         * `writeFile` has never held the path exclusively: two writes of the same
-         * path settle last-writer-wins, so a concurrent writer may replace the
-         * entry this rename published. `readPublishedDescriptor` already covers a
-         * replacement part way through the read, by holding the descriptor to its
-         * inode's identity but not to the status-change time an unlink moves. It
-         * cannot cover a replacement that lands before this descriptor is opened:
-         * the open then resolves to the other writer's entry, whose bytes are
-         * reported as unverifiable — or, when they outgrow this write's own
-         * allowance, as `EFBIG`. Our rename did apply; a later write superseded
-         * it, and that entry says nothing about ours. Only a path that still holds
-         * this write's own entry can fail its verification.
-         */
-        if (await isEntryStillAt(admittedTarget, written)) {
-          throw error;
-        }
+        await directoryHandle.sync();
       } finally {
-        await verification.close();
+        await directoryHandle.close();
+      }
+      return;
+    }
+    // Windows FlushFileBuffers commits file metadata as well as content.
+    // Keep the writable handle through rename to flush the same file object,
+    // without reopening a replaced path or trying to sync a read-only directory.
+    // https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
+    await Promise.all(published.map(async ({ retainedHandle }) => retainedHandle?.sync()));
+  }
+
+  /**
+   * Read the published entry back once and compare it with what was written (I2).
+   *
+   * @param staged - A published write.
+   */
+  private async _verifyPublished(staged: StagedWrite): Promise<void> {
+    const { rootedPath, admittedTarget, data, streamed, written } = staged;
+    const verification = await fs.open(admittedTarget, verificationReadFlags);
+    try {
+      const verified =
+        data === undefined
+          ? streamed !== undefined && (await publishedDigestEquals(verification, streamed))
+          : bytesEqual(await readPublishedDescriptor(verification, data.byteLength), data);
+      if (!verified) {
+        throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
       }
     } catch (error) {
-      failure = error;
-    } finally {
-      try {
-        await retainedHandle?.close();
-      } catch (error) {
-        failure ??= error;
+      /*
+       * `writeFile` has never held the path exclusively: two writes of the same
+       * path settle last-writer-wins, so a concurrent writer may replace the
+       * entry this rename published. `readPublishedDescriptor` already covers a
+       * replacement part way through the read, by holding the descriptor to its
+       * inode's identity but not to the status-change time an unlink moves. It
+       * cannot cover a replacement that lands before this descriptor is opened:
+       * the open then resolves to the other writer's entry, whose bytes are
+       * reported as unverifiable — or, when they outgrow this write's own
+       * allowance, as `EFBIG`. Our rename did apply; a later write superseded
+       * it, and that entry says nothing about ours. Only a path that still holds
+       * this write's own entry can fail its verification.
+       */
+      if (written === undefined || (await isEntryStillAt(admittedTarget, written))) {
+        throw error;
       }
+    } finally {
+      await verification.close();
+    }
+  }
+
+  /**
+   * Close and remove what a write left behind, then raise its failure, if any,
+   * as a published write that may have applied when the rename had happened.
+   *
+   * @param staged - The write.
+   * @param failure - What a phase raised, or `undefined`.
+   */
+  private async _settleWrite(staged: StagedWrite, failure: unknown): Promise<void> {
+    let settled = failure;
+    try {
+      await staged.retainedHandle?.close();
+    } catch (error) {
+      settled ??= error;
     }
     try {
-      await fs.unlink(temporaryPath);
+      await fs.unlink(staged.temporaryPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && failure === undefined) {
-        failure = error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && settled === undefined) {
+        settled = error;
       }
     }
-    if (failure !== undefined) {
-      if (
-        replaced &&
-        !['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
-          (failure as NodeJS.ErrnoException).code ?? '',
-        )
-      ) {
-        throw Object.assign(new Error('Checked write may have been applied.', { cause: failure }), {
-          code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
-        });
-      }
-      throw failure instanceof Error ? failure : new Error('Filesystem write failed with a non-Error rejection.');
+    if (settled === undefined) {
+      return;
     }
+    if (
+      staged.replaced &&
+      !['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
+        (settled as NodeJS.ErrnoException).code ?? '',
+      )
+    ) {
+      throw Object.assign(new Error('Checked write may have been applied.', { cause: settled }), {
+        code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+      });
+    }
+    throw settled instanceof Error ? settled : new Error('Filesystem write failed with a non-Error rejection.');
   }
 
   /** Compare all expected bytes and replace one file inside the module-owned authority integration. */

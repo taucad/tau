@@ -3,9 +3,7 @@ import type { AnyActorRef, EnqueueObject, SystemRegistry } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { isReservedBranchName } from '@taucad/revisions';
 import { getGitHubClient } from '#lib/github-api.js';
-import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';
-import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
 /**
  * Import GitHub Machine Context
@@ -43,10 +41,10 @@ export type ImportGitHubContext = {
   isLoadingFiles: boolean;
   downloadProgress: { loaded: number; total: number };
   extractProgress: { processed: number; total: number };
-  files: Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>;
-  /** File paths from import worker (lighter than full file contents) */
+  /** What the archive holds, as the file-manager worker planned it: paths and sizes, never bytes (D12). */
+  files: Map<string, { filename: string; size: number }>;
+  /** File paths the worker planned, in its order. */
   importedFilePaths: string[];
-  importWorker: Worker | undefined;
   projectId: string | undefined;
   error: Error | undefined;
   fetchErrors: {
@@ -180,7 +178,7 @@ type ImportGitHubEventInternal =
   | {
       type: 'workerExtractComplete';
       filePaths: string[];
-      files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
+      files: Array<{ path: string; size: number }>;
     }
   | {
       type: 'workerError';
@@ -332,85 +330,44 @@ const createProjectActor = fromSafeAsync<
     ref: string;
     path: string;
     mainFile: string;
-    files: Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>;
+    files: Map<string, { filename: string; size: number }>;
   }
 >(async () => {
   throw new Error('Not implemented');
 });
 
-type ImportWorkerCallbackInput = {
+/**
+ * What the archive actor is given: the gateway's archive address, the
+ * headers it sends (no credential), the repository folder to import, and a
+ * name for the source.
+ */
+export type ImportArchiveInput = {
   downloadUrl: string;
   headers?: Record<string, string>;
   root: string;
+  name: string;
 };
 
-type ImportWorkerCallbackEvents =
+/** What the archive actor reports back. */
+export type ImportArchiveEvents =
   | { type: 'updateDownloadProgress'; loaded: number; total: number }
   | { type: 'updateExtractProgress'; processed: number; total: number }
   | {
       type: 'workerExtractComplete';
       filePaths: string[];
-      files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
+      files: Array<{ path: string; size: number }>;
     }
   | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write'; reason?: 'tooLarge' };
 
-const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(
-  ({ sendBack, input }) => {
-    const worker = reportWorkerFailures(
-      new Worker(new URL('../workers/import.worker.ts', import.meta.url), { type: 'module' }),
-      'import-github',
-    );
-
-    worker.addEventListener('message', (event: MessageEvent<ImportWorkerResponse>) => {
-      const message = event.data;
-      switch (message.type) {
-        case 'downloadProgress': {
-          sendBack({ type: 'updateDownloadProgress', loaded: message.loaded, total: message.total });
-          break;
-        }
-        case 'extractProgress': {
-          sendBack({ type: 'updateExtractProgress', processed: message.processed, total: message.total });
-          break;
-        }
-        case 'extractComplete': {
-          sendBack({
-            type: 'workerExtractComplete',
-            filePaths: message.filePaths,
-            files: message.files,
-          });
-          break;
-        }
-        case 'error': {
-          sendBack({
-            type: 'workerError',
-            message: message.message,
-            phase: message.phase,
-            ...(message.reason === undefined ? {} : { reason: message.reason }),
-          });
-          break;
-        }
-      }
-    });
-
-    worker.addEventListener('error', (event) => {
-      sendBack({ type: 'workerError', message: event.message, phase: 'download' });
-    });
-
-    const startMessage: ImportWorkerRequest = {
-      type: 'startDownload',
-      url: input.downloadUrl,
-      headers: input.headers,
-      root: input.root,
-    };
-    worker.postMessage(startMessage);
-
-    return () => {
-      const cancelMessage: ImportWorkerRequest = { type: 'cancel' };
-      worker.postMessage(cancelMessage);
-      worker.terminate();
-    };
-  },
-);
+/*
+ * Download, read and plan the archive. The page provides it: the file-manager
+ * worker downloads the archive into a Blob and plans it (D12), so this page
+ * never holds the archive or its files, only their paths and sizes.
+ */
+const importWorkerActor = createCallbackLogic<ImportArchiveEvents, ImportArchiveInput>(({ sendBack }) => {
+  sendBack({ type: 'workerError', message: 'No archive import is available here.', phase: 'download' });
+  return () => undefined;
+});
 
 const importGitHubActors = {
   getRepoMetadataActor,
@@ -623,7 +580,7 @@ const initialMainFile = (context: ImportGitHubContext): string | undefined => {
  * Manages importing a GitHub repository as a project.
  *
  * States:
- * - downloading: Download and extract via import worker (ZIP stream) with progress tracking
+ * - downloading: The file-manager worker downloads and plans the archive, with progress
  * - selectingMainFile: User reviews files and selects main file
  * - creating: Creating the project with selected main file
  * - success: Import completed successfully
@@ -671,7 +628,6 @@ export const importGitHubMachine = setup({
     extractProgress: { processed: 0, total: 0 },
     files: new Map(),
     importedFilePaths: [],
-    importWorker: undefined,
     projectId: undefined,
     error: undefined,
     fetchErrors: noFetchErrors,
@@ -921,6 +877,7 @@ export const importGitHubMachine = setup({
             }),
             headers: client.getAuthHeaders(),
             root: context.path,
+            name: `${context.owner}/${context.repo}`,
           };
         },
       },
@@ -932,10 +889,10 @@ export const importGitHubMachine = setup({
           context: ({ event }) => ({ extractProgress: { processed: event.processed, total: event.total } }),
         },
         workerExtractComplete: ({ context, event }) => {
-          const files = new Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>();
+          const files = new Map<string, { filename: string; size: number }>();
           for (const entry of event.files) {
             const filename = entry.path.split('/').pop() ?? entry.path;
-            files.set(entry.path, { filename, content: entry.content });
+            files.set(entry.path, { filename, size: entry.size });
           }
           const extracted = { importedFilePaths: event.filePaths, files };
           return {
@@ -985,7 +942,6 @@ export const importGitHubMachine = setup({
             extractProgress: { processed: 0, total: 0 },
             files: new Map(),
             importedFilePaths: [],
-            importWorker: undefined,
             projectId: undefined,
             error: undefined,
             fetchErrors: noFetchErrors,

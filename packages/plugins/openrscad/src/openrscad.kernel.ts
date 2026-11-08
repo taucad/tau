@@ -23,6 +23,7 @@ import type {
   OpenrscadResolvedTessellation,
   OpenrscadTessellation,
 } from '#openrscad-tessellation.js';
+import { addOpenrscadTopology } from '#openrscad-topology.js';
 import {
   asBuffer,
   assertRootedPath,
@@ -562,7 +563,13 @@ class OpenRscadExportError extends Error {
 }
 
 /** Engine version this kernel is authored against. @public */
-const engineVersion = '0.11.0-beta.4';
+const engineVersion = '0.11.0-beta.5';
+
+/**
+ * Build metadata for changes in this kernel's own meshing, which the engine release does not capture.
+ * `tessellation1`: previews and exports mesh once, with no triangle budget (kernel budget program D1).
+ */
+const kernelMeshing = 'tessellation1';
 
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {
@@ -582,7 +589,7 @@ export type CreateOpenrscadKernelOptions = {
   loadBackend?: () => Promise<OpenRscadBackend>;
   /**
    * Kernel version, and with it the runtime's build-cache namespace. It is the
-   * *engine release*, not the backend: one release's addon and WebAssembly
+   * *engine release* with this kernel's meshing as build metadata, not the backend: one release's addon and WebAssembly
    * build are byte-identical artifacts, gated per release, so they share one
    * cache key deliberately. Override this only for an engine build that is not
    * that release.
@@ -600,7 +607,7 @@ export type CreateOpenrscadKernelOptions = {
  */
 export const createOpenrscadKernel = ({
   loadBackend = async () => import('@taulabs/openrscad-engine'),
-  version = engineVersion,
+  version = `${engineVersion}+${kernelMeshing}`,
 }: CreateOpenrscadKernelOptions = {}) =>
   defineKernel({
     id: 'openrscad',
@@ -726,7 +733,7 @@ export const createOpenrscadKernel = ({
         logger.debug(result.echo);
       }
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
-      const preview = await markClosedGlbMeshesSingleSided(asBuffer(result.bytes));
+      const preview = addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)));
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
         previewGlbTessellation: resolutionKey(scriptResolution),
@@ -797,7 +804,7 @@ export const createOpenrscadKernel = ({
           span.end();
         }
         return {
-          content: await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)),
+          content: addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes))),
           issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
           triangles: result.triangleCount,
           vertices: result.vertexCount,
@@ -866,7 +873,11 @@ export const createOpenrscadKernel = ({
             ),
           );
           const issues = checked(result);
-          return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
+          // Explorer and a downloaded GLB read the same module components.
+          return {
+            files: [createExportFile('glb', 'model.glb', addOpenrscadTopology(asBuffer(result.bytes)))],
+            issues,
+          };
         }
         case '3mf': {
           const { options } = input;

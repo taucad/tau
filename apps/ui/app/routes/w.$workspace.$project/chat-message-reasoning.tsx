@@ -1,6 +1,7 @@
 import type { ReasoningUIPart } from 'ai';
+import { Loader } from '@taucad/ui/components/loader';
 import { useMemo, useState } from 'react';
-import { ChevronRight, LoaderCircle } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { getReasoningEndedAtMs, getReasoningStartedAtMs } from '@taucad/chat';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
@@ -80,7 +81,7 @@ export function ChatMessageReasoning({
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
         >
           {isThinking ? (
-            <LoaderCircle aria-hidden='true' className='size-3 shrink-0 spin-glyph' />
+            <Loader className='size-3 shrink-0' />
           ) : (
             <ThoughtBubble aria-hidden='true' className='size-3 shrink-0' />
           )}

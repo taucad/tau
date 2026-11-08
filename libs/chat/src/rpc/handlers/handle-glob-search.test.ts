@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcDirectoryEntry, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
@@ -218,5 +218,42 @@ describe('handleGlobSearch', () => {
       success: false,
       errorCode: rpcClientErrorCode.ioError,
     });
+  });
+
+  it('should match the Project Index rows with no walk, reporting only the facts the index knows (D13, I3)', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => [
+      { path: 'src/main.ts', size: 100, contentKind: 'text', lineCount: 4, modifiedAt: '2026-01-15T10:00:00.000Z' },
+      { path: 'src/util.ts', size: 50 },
+      { path: 'README.md', size: 10, contentKind: 'text' },
+    ]);
+    fileSystem.indexedFiles = indexedFiles;
+
+    const result = await handleGlobSearch({ pattern: '**/*.ts' }, fileSystem);
+
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
+    expect(result.success && result.entries).toEqual([
+      {
+        path: 'src/main.ts',
+        isDirectory: false,
+        size: 100,
+        contentKind: 'text',
+        lineCount: 4,
+        modifiedAt: '2026-01-15T10:00:00.000Z',
+      },
+      { path: 'src/util.ts', isDirectory: false, size: 50 },
+    ]);
+  });
+
+  it('should walk when the index cannot answer for the directory', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => undefined);
+    fileSystem.indexedFiles = indexedFiles;
+    fileSystem.readdir.mockResolvedValue([textEntry('index.d.ts', 20)]);
+
+    const result = await handleGlobSearch({ pattern: '*.ts', path: 'node_modules' }, fileSystem);
+
+    expect(fileSystem.readdir).toHaveBeenCalledWith('node_modules');
+    expect(result.success && result.files).toEqual(['node_modules/index.d.ts']);
   });
 });

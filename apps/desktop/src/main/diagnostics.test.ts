@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +9,7 @@ import {
   forwardRendererDiagnostics,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
+  watchRendererHangs,
 } from '#main/diagnostics.js';
 
 const logDirectory = (): string => mkdtempSync(join(tmpdir(), 'tau-diagnostics-'));
@@ -162,7 +164,7 @@ describe('forwarders', () => {
         },
       },
       log,
-      recover,
+      { recover },
     );
     handlers.get('did-fail-load')?.({}, -6, 'ERR_FILE_NOT_FOUND', 'app://tau/');
     handlers.get('render-process-gone')?.({}, { reason: 'crashed' });
@@ -194,6 +196,65 @@ describe('forwarders', () => {
       ['info', 'renderer.console', { message: 'unknown message', source: 'app://tau/index.js', line: 4 }],
     ]);
     expect(recover).toHaveBeenCalledOnce();
+  });
+
+  it('should report a failed app load and an out-of-memory renderer, and nothing for a subframe or crash', () => {
+    const handlers = new Map<string, (...args: unknown[]) => void>();
+    const report = vi.fn();
+    forwardRendererDiagnostics(
+      {
+        on: (event: string, listener: (...args: unknown[]) => void) => {
+          handlers.set(event, listener);
+        },
+      },
+      { filePath: '', log: vi.fn() },
+      { report },
+    );
+    handlers.get('did-fail-load')?.({}, -6, 'ERR_FILE_NOT_FOUND', 'app://tau/', true);
+    handlers.get('did-fail-load')?.({}, -6, 'ERR_FILE_NOT_FOUND', 'https://embed.example/', false);
+    handlers.get('render-process-gone')?.({}, { reason: 'oom', exitCode: 9 });
+    handlers.get('render-process-gone')?.({}, { reason: 'crashed' });
+
+    const sent = report.mock.calls.map(
+      ([signal]: readonly unknown[]) => (signal as { message: string } | undefined)?.message,
+    );
+    expect(sent).toEqual([
+      'App document failed to load: ERR_FILE_NOT_FOUND',
+      undefined,
+      'Renderer gone: oom',
+      undefined,
+    ]);
+  });
+
+  it('should log every hang and report one that lasted longer than the threshold when it ends', () => {
+    const handlers = new Map<string, () => void>();
+    const log = { filePath: '', log: vi.fn() };
+    const report = vi.fn();
+    let now = 0;
+    watchRendererHangs(
+      {
+        on: (event: string, listener: () => void) => {
+          handlers.set(event, listener);
+        },
+      },
+      log,
+      { report, now: () => now },
+    );
+
+    handlers.get('responsive')?.();
+    handlers.get('unresponsive')?.();
+    now = 3000;
+    handlers.get('unresponsive')?.();
+    now = 9000;
+    handlers.get('responsive')?.();
+
+    expect(log.log.mock.calls).toEqual([
+      ['warn', 'renderer.unresponsive'],
+      ['warn', 'renderer.unresponsive'],
+      ['info', 'renderer.responsive', { milliseconds: 9000 }],
+    ]);
+    expect(report).toHaveBeenCalledOnce();
+    expect(report.mock.calls[0]?.[0]).toMatchObject({ message: 'Renderer unresponsive', tags: { hang_seconds: '9' } });
   });
 
   it('should collapse a renderer console message repeated back-to-back', () => {

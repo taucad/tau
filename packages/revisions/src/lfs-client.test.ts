@@ -79,6 +79,30 @@ describe('createLfsClient batch validation', () => {
     ).rejects.toThrow(/did not hash to its own id/u);
   });
 
+  /* D9, D11: `downloadMany` checks the size and leaves the hash to the caller's
+   * read-back of what it stores, so each object is hashed once. */
+  it('hands a many-object download over at its declared size, unhashed, for the read-back', async () => {
+    const oid = 'd'.repeat(64);
+    const http: RevisionHttpClient = {
+      request: async (request) =>
+        request.url.endsWith('/batch')
+          ? response(
+              JSON.stringify({
+                objects: [{ oid, size: 3, actions: { download: { href: 'https://api.tau.test/object' } } }],
+              }),
+            )
+          : response(encoder.encode('xyz')),
+    };
+    const received: string[] = [];
+    await createLfsClient({ url: 'https://github.com/a/b.git', http }).downloadMany({
+      pointers: [{ oid, size: 3 }],
+      received: async (pointer, content) => {
+        received.push(`${pointer.oid}:${new TextDecoder().decode(content)}`);
+      },
+    });
+    expect(received).toStrictEqual([`${oid}:xyz`]);
+  });
+
   /* D53: a renamed GitHub repository serves git at its old path but redirects
    * LFS, so the batch is where the move surfaces. */
   it('should classify a refused batch as the git leg does, so a moved repository reads as moved', async () => {
@@ -371,6 +395,66 @@ describe('bounded private transfers', () => {
     ).resolves.toEqual(bytes);
     expect(request).toHaveBeenCalledTimes(2);
     expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  /* I10: a transfer that hangs is abandoned and retried, so a fill fails and can be retried rather than waiting forever. */
+  it('abandons a transfer that goes without a byte for its stall bound, before its first byte or mid-stream', async () => {
+    const request = vi
+      .fn<RevisionHttpClient['request']>()
+      .mockImplementation(async () => batchResponse([answer({ actions: { download: action } })]));
+    const hanging = async (): Promise<Response> =>
+      new Promise<Response>(() => {
+        /* Never answers, and ignores its signal. */
+      });
+    const client = (transfer: typeof fetch) =>
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        transferStallMilliseconds: 40,
+      });
+
+    /* Hung before its first byte, then answered: the retry delivers. */
+    const recovering = vi.fn<typeof fetch>().mockImplementationOnce(hanging).mockResolvedValueOnce(new Response(bytes));
+    await expect(client(recovering).download(pointer)).resolves.toEqual(bytes);
+    expect(recovering).toHaveBeenCalledTimes(2);
+
+    /* Hung mid-stream every time: it fails after its attempts instead of living on. */
+    const stalling = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(bytes.slice(0, 4));
+            },
+          }),
+        ),
+    );
+    await expect(client(stalling).download(pointer)).rejects.toThrow('failed after three attempts');
+    expect(stalling).toHaveBeenCalledTimes(3);
+
+    /* A slow transfer that keeps sending bytes is never cut off, however long it takes in all. */
+    let sent = 0;
+    const slow = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await new Promise((resolve) => {
+                setTimeout(resolve, 20);
+              });
+              if (sent >= bytes.byteLength) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(bytes.slice(sent, sent + 2));
+              sent += 2;
+            },
+          }),
+        ),
+    );
+    await expect(client(slow).download(pointer)).resolves.toEqual(bytes);
+    expect(slow).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -668,6 +752,38 @@ describe('downloadMany', () => {
     expect(received).toEqual(contentOf);
   });
 
+  /* D10: an opened path jumps the fill queue, ahead of objects already answered and of later batches. */
+  it('transfers the objects `first` names before the rest, even one named while the download runs', async () => {
+    const { request, asked } = batchEndpoint();
+    const order: string[] = [];
+    const first = new Set<string>();
+    const late = pointers[150]!.oid;
+    const answered = pointers[50]!.oid;
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: async (url) => new Response(contentOf.get(oidOf(url))),
+      downloadConcurrency: 1,
+    }).downloadMany({
+      pointers,
+      first: () => first,
+      received: async (pointer) => {
+        order.push(pointer.oid);
+        if (order.length === 3) {
+          first.add(late);
+          first.add(answered);
+        }
+      },
+    });
+    /* At most one object was already admitted when the promotion landed. */
+    expect(order.indexOf(answered)).toBeLessThanOrEqual(4);
+    expect(order.indexOf(late)).toBeLessThanOrEqual(5);
+    /* The unasked one got a batch call of its own. */
+    expect(asked[1]).toEqual([late]);
+    expect(order).toHaveLength(pointers.length);
+    expect(new Set(order)).toEqual(new Set(contentOf.keys()));
+  });
+
   it('should hand each object over with the transport its action named', async () => {
     const { request } = batchEndpoint();
     const transports: string[] = [];
@@ -903,6 +1019,108 @@ describe('downloadMany', () => {
     ).rejects.toThrow('quota exceeded');
     expect(transfer).toHaveBeenCalledTimes(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  /* W6.4: a streaming sink takes each object's bytes as they arrive, and takes a broken transfer's retry afresh. */
+  it('streams each object to the sink, calling it again for a transfer that broke part way', async () => {
+    const [broken, whole] = [pointers[0]!, pointers[1]!];
+    let first = true;
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      const content = contentOf.get(oidOf(url))!;
+      if (oidOf(url) === broken.oid && first) {
+        first = false;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(content.slice(0, 3));
+              controller.error(new TypeError('interrupted'));
+            },
+          }),
+        );
+      }
+      return new Response(content);
+    });
+    const attempts: string[] = [];
+    const stored = new Map<string, string>();
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchEndpoint().request },
+      fetch: transfer,
+    }).downloadMany({
+      pointers: [broken, whole],
+      streamed: async (pointer, source) => {
+        attempts.push(pointer.oid);
+        let text = '';
+        for await (const chunk of source) {
+          text += new TextDecoder().decode(chunk);
+        }
+        stored.set(pointer.oid, text);
+      },
+    });
+    expect(attempts.toSorted()).toEqual([broken.oid, broken.oid, whole.oid].toSorted());
+    expect(stored).toEqual(
+      new Map([broken, whole].map(({ oid }) => [oid, new TextDecoder().decode(contentOf.get(oid))])),
+    );
+  });
+
+  it('errors the sink’s stream past the declared size, and reports it without a retry', async () => {
+    const [pointer] = pointers;
+    const transfer = vi.fn<typeof fetch>(async () => new Response(new Uint8Array(pointer!.size + 1)));
+    const streamed = vi.fn(async (_pointer: LfsPointer, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
+      for await (const _chunk of source) {
+        /* Drained until it errors. */
+      }
+    });
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request: batchEndpoint().request },
+        fetch: transfer,
+      }).downloadMany({ pointers: [pointer!], streamed }),
+    ).rejects.toThrow('exceeds its declared size');
+    expect(streamed).toHaveBeenCalledTimes(1);
+  });
+
+  /* The stall bound measures the network, not the writer: a sink slower than the bound is never cut off. */
+  it('never abandons a transfer while its sink is busy with the bytes it already has', async () => {
+    const [pointer] = pointers;
+    const content = contentOf.get(pointer!.oid)!;
+    /* The rest arrives 20 ms after the sink is done with the first chunk: well inside the bound,
+     * but long after a bound counted from the first chunk would have run out. */
+    const transfer = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(content.slice(0, 2));
+              setTimeout(() => {
+                controller.enqueue(content.slice(2));
+                controller.close();
+              }, 120);
+            },
+          }),
+        ),
+    );
+    let text = '';
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchEndpoint().request },
+      fetch: transfer,
+      transferStallMilliseconds: 50,
+    }).downloadMany({
+      pointers: [pointer!],
+      streamed: async (_pointer, source) => {
+        for await (const chunk of source) {
+          text += new TextDecoder().decode(chunk);
+          /* Two stall bounds spent writing each chunk. */
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+          });
+        }
+      },
+    });
+    expect(transfer).toHaveBeenCalledTimes(1);
+    expect(text).toBe(new TextDecoder().decode(content));
   });
 
   it('asks nothing for nothing', async () => {

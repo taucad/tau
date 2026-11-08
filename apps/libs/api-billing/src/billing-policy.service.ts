@@ -60,6 +60,18 @@ export type CancelPolicyActivationInput = {
 /** A SKU this replica cannot dispatch. Admission denies that SKU alone; every other failure still throws. */
 export class PolicyRouteUnavailableError extends Error {}
 
+/**
+ * The environment has never published a tariff. It is a route-unavailable error so a funded
+ * admission denies with `policy_unavailable` instead of failing, and it keeps the message the
+ * publication and sync paths already match on.
+ */
+export class BillingPolicyMissingError extends PolicyRouteUnavailableError {
+  public constructor() {
+    super('no effective billing policy');
+    this.name = 'BillingPolicyMissingError';
+  }
+}
+
 export type PolicyPublicationResult = { activationId: string; headRevision: bigint; replay: boolean };
 export type SelectEffectivePolicyInput = {
   environment: FinancialEnvironment;
@@ -138,7 +150,7 @@ export class BillingPolicyService {
       });
     const observation = z.object({ activationId: z.string().nullable() }).parse(observationRows[0]);
     if (observation.activationId === null) {
-      throw new Error('no effective billing policy');
+      throw new BillingPolicyMissingError();
     }
     const rows = await database.execute(sql`
       select
@@ -158,7 +170,7 @@ export class BillingPolicyService {
         and cancellation.activation_id is null
     `);
     if (rows[0] === undefined) {
-      throw new Error('no effective billing policy');
+      throw new BillingPolicyMissingError();
     }
     const row = activationRowSchema.parse(rows[0]);
     /* Read leniently: the stored hash, the environment and the schema floor still gate the document,

@@ -24,14 +24,15 @@ describe('createOpenFileQueue', () => {
       extensions: ['mesh.xml'],
       maxBytes: 3,
       maxFiles: 2,
-      grant: async (canonical) => {
+      grant: async (canonical, owner) => {
+        expect(owner).toBe(3);
         granted.push(canonical);
         return { grant: 'grant-0001', name: 'part.mesh.xml' };
       },
     });
 
     expect(queue.enqueue([path, path, join(root, 'ignored.txt')])).toBe(1);
-    await expect(queue.consume()).resolves.toEqual([{ name: 'part.mesh.xml', grant: 'grant-0001' }]);
+    await expect(queue.consume(3)).resolves.toEqual([{ name: 'part.mesh.xml', grant: 'grant-0001' }]);
     expect(granted).toEqual([realpathSync(path)]);
     expect(queue.hasPending()).toBe(false);
   });
@@ -49,6 +50,6 @@ describe('createOpenFileQueue', () => {
     });
     queue.enqueue([path]);
 
-    await expect(queue.consume()).rejects.toThrow('byte limit');
+    await expect(queue.consume(3)).rejects.toThrow('byte limit');
   });
 });

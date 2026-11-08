@@ -346,7 +346,7 @@ export type NodeFsHostOptions = {
    * resolve every path against it here, so the client names a grant and a
    * path inside it, never a host path (I6). Omitted, every grant is refused.
    */
-  importSource?(grant: string): ImportSourceGrant | undefined;
+  importSource?(grant: string): ImportSourceGrant | undefined | Promise<ImportSourceGrant | undefined>;
 };
 
 declare const entryIdentityBrand: unique symbol;
@@ -1036,7 +1036,7 @@ const runOperation = async (
       return receipts.map((receipt) => wireReceipt(receipt));
     }
     case 'importCopy': {
-      const grant = importSourceGrant(importSource, request.grant);
+      const grant = await importSourceGrant(importSource, request.grant);
       const receipts = await mutate(
         request.root,
         request.entries.map((entry) => entry.path),
@@ -1246,10 +1246,10 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       const operation = (async () => {
         let response: NodeFsResponse;
         try {
-          const grant = importSourceGrant(options.importSource, request.grant);
+          const grant = await importSourceGrant(options.importSource, request.grant);
           const value =
             request.op === 'importSourceList'
-              ? await listImportSource(grant, request.path)
+              ? await listImportSource(grant, request.path, request.offset)
               : await readImportSource(grant, request.path, request);
           response = { v: nodeFsProtocolVersion, id: request.id, type: 'result', value };
         } catch (error) {

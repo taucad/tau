@@ -44,7 +44,7 @@ import {
 } from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import type { EmitterPort } from '@taucad/filesystem/backend/node';
+import type { EmitterPort, ImportSourceGrant } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { DesktopShell } from '#tau/services-host-shell.js';
 import { desktopChatObserver } from '#tau/services-host-evidence.js';
@@ -394,6 +394,33 @@ export type ServicesHost = {
  * @param options - Diagnostics sink and injected seams.
  * @returns The host.
  */
+/** How long a filesystem request waits for an import grant main has not sent yet (W7.4). */
+const importGrantWaitMilliseconds = 2000;
+
+/** An import grant as main sends it: the chosen entry, its identity, and the window it was minted for. */
+type HeldImportGrant = Readonly<{
+  grant: string;
+  path: string;
+  kind: 'directory' | 'file';
+  identity: Readonly<{ dev: string; ino: string }>;
+  owner: string;
+}>;
+
+/* One grant from main's frame, or nothing for a malformed one. */
+const heldImportGrant = (entry: unknown): HeldImportGrant | undefined => {
+  const { grant, path, kind, identity, owner } = (entry ?? {}) as Record<string, unknown>;
+  const { dev, ino } = (identity ?? {}) as Record<string, unknown>;
+  return typeof grant === 'string' &&
+    typeof path === 'string' &&
+    isAbsolute(path) &&
+    (kind === 'directory' || kind === 'file') &&
+    typeof dev === 'string' &&
+    typeof ino === 'string' &&
+    typeof owner === 'string'
+    ? { grant, path, kind, identity: { dev, ino }, owner }
+    : undefined;
+};
+
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
   const machinesEnabled = isMachinesFeatureEnabled(process.env['TAU_MACHINES_ENABLED']);
   const log =
@@ -450,7 +477,35 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * copies the source by it, so no host path for an import ever comes from
    * the renderer (I6). Replaced whole by each `importGrants` frame.
    */
-  let importGrants = new Map<string, Readonly<{ path: string; kind: 'directory' | 'file' }>>();
+  let importGrants = new Map<string, HeldImportGrant>();
+  /* Woken on each `importGrants` frame: a request may arrive on its own port before the frame naming its grant. */
+  const importGrantWaiters = new Set<() => void>();
+  /**
+   * The grant a window's filesystem connection may resolve (W7.4): only one
+   * minted for that window. A grant not seen yet is waited for, a bounded
+   * time, since main sends it on another channel just before the renderer can
+   * ask; anything else is refused at once.
+   */
+  const importGrantFor = async (grant: string, owner: string | undefined): Promise<ImportSourceGrant | undefined> => {
+    if (owner === undefined) {
+      return undefined;
+    }
+    const deadline = Date.now() + importGrantWaitMilliseconds;
+    while (!importGrants.has(grant) && Date.now() < deadline) {
+      // oxlint-disable-next-line no-await-in-loop -- each frame is waited for in turn, until the deadline.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(wake, Math.max(0, deadline - Date.now()));
+        function wake(): void {
+          clearTimeout(timer);
+          importGrantWaiters.delete(wake);
+          resolve();
+        }
+        importGrantWaiters.add(wake);
+      });
+    }
+    const held = importGrants.get(grant);
+    return held?.owner === owner ? { path: held.path, kind: held.kind, identity: held.identity } : undefined;
+  };
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One `projectHost` actor per workspace root (W6 RH-S5), outliving every
@@ -1248,20 +1303,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const handleControlFrame = (frame: Record<string, unknown>): void => {
     switch (frame['type']) {
       case 'importGrants': {
-        const next = new Map<string, Readonly<{ path: string; kind: 'directory' | 'file' }>>();
+        const next = new Map<string, HeldImportGrant>();
         for (const entry of (frame['grants'] as readonly unknown[] | undefined) ?? []) {
-          const { grant, path, kind } = (entry ?? {}) as { grant?: unknown; path?: unknown; kind?: unknown };
-          if (
-            typeof grant === 'string' &&
-            typeof path === 'string' &&
-            isAbsolute(path) &&
-            (kind === 'directory' || kind === 'file')
-          ) {
-            next.set(grant, { path, kind });
+          const held = heldImportGrant(entry);
+          if (held !== undefined) {
+            next.set(held.grant, held);
           }
         }
         importGrants = next;
         log('import-grants-updated', { count: importGrants.size });
+        for (const wake of importGrantWaiters) {
+          wake();
+        }
         return;
       }
       case 'allowRoots': {
@@ -1801,7 +1854,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           const stop = serve(toNodeFsPort(port), {
             allowRoot: isTrustedRoot,
             policy: tauPathPolicy,
-            importSource: (grant) => importGrants.get(grant),
+            /* Main names the window this connection is for; its grants are the only ones it resolves. */
+            importSource: async (grant) =>
+              importGrantFor(grant, typeof context?.['importOwner'] === 'string' ? context['importOwner'] : undefined),
             ...(authority ? { authority } : {}),
           }).close;
           let stopped: Promise<void> | undefined;

@@ -705,12 +705,13 @@ describe('a source chosen on the desktop host', () => {
           names.set(name!, rest.length > 0 ? 'dir' : 'file');
         }
       }
-      return [...names].map(([name, kind]) => ({
+      const rows = [...names].map(([name, kind]) => ({
         name,
         kind,
         size: kind === 'file' ? encoder.encode(hostFolder[`${prefix}${name}`]).byteLength : 0,
         mtimeMs: 1,
       }));
+      return { rows, more: false };
     },
     read: async (_grant, path, maximumBytes) => encoder.encode(hostFolder[path]).slice(0, maximumBytes),
   };

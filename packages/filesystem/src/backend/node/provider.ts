@@ -35,7 +35,9 @@ import type { BatchEntry, BatchOptions, BatchReceipt, LargeObjectWriteSource } f
 import { isLargeObjectSource, isRefusal } from '#changeset.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
-import { getFileContentMetadata } from '#content-metadata.js';
+import { headSniffByteLength, seemsBinary } from '#content-metadata.js';
+import { heldDescriptorPath } from '#backend/node/import-source.js';
+import { importLimits } from '#importer/limits.js';
 import type {
   ContentFacts,
   DirectoryEntry,
@@ -116,13 +118,14 @@ type BatchWrite = Extract<BatchEntry, { op: 'write' }>;
 type BatchWriteFill = (staged: StagedWrite) => Promise<Readonly<Record<string, unknown>> | undefined>;
 
 /**
- * One file a host-side import copies into this root (W7.4). `from` is the
- * absolute source the host resolved from a person's grant and admitted; no
- * client ever names it (I6).
+ * One file a host-side import copies into this root (W7.4). `open` opens the
+ * source the host resolved from a person's grant and proved inside it, when
+ * the copy's turn comes, so a batch holds one source descriptor per write in
+ * flight; no client ever names it (I6).
  *
  * @public
  */
-export type ImportFileCopy = Readonly<{ path: string; from: string; size: number }>;
+export type ImportFileCopy = Readonly<{ path: string; size: number; open: () => Promise<FileHandle> }>;
 
 /**
  * The facts of one copied file, measured from the one read of what landed (EQ6, I2).
@@ -139,6 +142,69 @@ export type ImportCopyFacts = ContentFacts & Readonly<{ blobOid: string; sha256:
 export type ImportCopyReceipt = BatchReceipt & Readonly<{ facts?: ImportCopyFacts }>;
 
 const noBytes = new Uint8Array(0);
+
+/* A copy streamed from a held descriptor into a new file: where no path reopens the descriptor's inode. */
+const copyFromDescriptor = async (source: FileHandle, target: string, size: number): Promise<void> => {
+  const out = await fs.open(target, 'wx', 0o600);
+  try {
+    const chunk = new Uint8Array(streamChunkSize);
+    for (let position = 0; position <= size; ) {
+      // oxlint-disable-next-line no-await-in-loop -- a file is copied one chunk after another.
+      const { bytesRead } = await source.read(chunk, 0, chunk.byteLength, position);
+      if (bytesRead === 0) {
+        break;
+      }
+      for (let written = 0; written < bytesRead; ) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const { bytesWritten } = await out.write(chunk, written, bytesRead - written, position + written);
+        written += bytesWritten;
+      }
+      position += bytesRead;
+    }
+  } finally {
+    await out.close();
+  }
+};
+
+/*
+ * The facts of a landed file, read once in bounded chunks: the git blob id and
+ * SHA-256 hashed as it is read, the content kind sniffed from its head as
+ * `getFileContentMetadata` sniffs it, and its lines counted the same way.
+ * `undefined` when it does not hold exactly `size` bytes.
+ */
+const measureLanded = async (handle: FileHandle, size: number): Promise<ImportCopyFacts | undefined> => {
+  const blob = createHash('sha1').update(`blob ${String(size)}\0`);
+  const digest = createHash('sha256');
+  const chunk = new Uint8Array(streamChunkSize);
+  const head = new Uint8Array(Math.min(headSniffByteLength, size));
+  let lines = 1;
+  let position = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
+    if (bytesRead === 0) {
+      break;
+    }
+    const part = chunk.subarray(0, bytesRead);
+    if (position + bytesRead > size) {
+      return undefined;
+    }
+    if (position < head.byteLength) {
+      head.set(part.subarray(0, head.byteLength - position), position);
+    }
+    blob.update(part);
+    digest.update(part);
+    for (let at = part.indexOf(0x0a); at !== -1; at = part.indexOf(0x0a, at + 1)) {
+      lines += 1;
+    }
+    position += bytesRead;
+  }
+  if (position !== size) {
+    return undefined;
+  }
+  const kind: ContentFacts = seemsBinary(head) ? { contentKind: 'binary' } : { contentKind: 'text', lineCount: lines };
+  return { ...kind, blobOid: blob.digest('hex'), sha256: digest.digest('hex') };
+};
 
 /** One native event a watch callback admitted, or a whole-subscription reset, in arrival order. */
 type ObservedEvent = Readonly<{ rootedPath: string; absolute: string; deleted: boolean }> | 'reset';
@@ -1771,76 +1837,71 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Fill the temp sibling from an import's source (W7.4): the source opened
-   * without following a link and held to a regular file of the listed size,
-   * `copyFile` with `COPYFILE_FICLONE`, the new-file mode, one fsync, and one
-   * read of the sibling through its own handle for the facts. The source must
-   * still be the very file that was opened once the copy is done, so a swap
-   * during the copy is refused rather than landed.
+   * Fill the temp sibling from an import's source (W7.4), only ever through
+   * the descriptor the host opened and proved inside the person's grant
+   * (`copy.open`): on Linux `copyFile` from `/proc/self/fd/<n>` with
+   * `COPYFILE_FICLONE`, which reopens that very inode and clones where the
+   * file system can; elsewhere a copy streamed from the descriptor. The source
+   * must be a regular file of the listed size within the import file limit,
+   * checked on the descriptor itself, and its size, mtime and ctime must be
+   * unchanged once the copy is done, so a file written to meanwhile is refused
+   * rather than landed torn. The sibling then takes the new-file mode, is
+   * synced, and is read once in bounded chunks for the facts (I2).
    *
    * @param staged - The prepared write.
-   * @param copy - The source and the size it was listed at.
+   * @param copy - How to open the source, and the size it was listed at.
    * @returns The facts of the bytes that landed.
    */
   private async _copyTemporary(staged: StagedWrite, copy: ImportFileCopy): Promise<ImportCopyFacts> {
     const changed = (): Error =>
       this._errno('ESTALE', 'the import source changed since it was listed', staged.rootedPath);
-    const opened = await fs.open(copy.from, verificationReadFlags).catch((error: unknown) => {
-      throw (error as NodeJS.ErrnoException).code === 'ELOOP'
-        ? this._errno('ELOOP', 'refusing to follow a symbolic link out of an import source', staged.rootedPath)
-        : error;
-    });
-    let source: BigIntStats;
+    /* The host holds its own limit: a size a client names is never trusted to bound a copy. */
+    if (!Number.isSafeInteger(copy.size) || copy.size < 0 || copy.size > importLimits.maximumFileBytes) {
+      throw this._errno('EFBIG', 'the import source is larger than an import file may be', staged.rootedPath);
+    }
+    const source = await copy.open();
     try {
-      source = await opened.stat({ bigint: true });
+      const before = await source.stat({ bigint: true });
+      if (!before.isFile()) {
+        throw this._errno('EOPNOTSUPP', 'the import source is not a regular file', staged.rootedPath);
+      }
+      if (before.size !== BigInt(copy.size)) {
+        throw changed();
+      }
+      const permissions = staged.permissions ?? (await this._newFileMode(staged.temporaryPath));
+      const through = heldDescriptorPath(source.fd);
+      /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
+      await (through === undefined
+        ? copyFromDescriptor(source, staged.temporaryPath, copy.size)
+        : // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
+          fs.copyFile(through, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE));
+      const after = await source.stat({ bigint: true });
+      if (
+        after.dev !== before.dev ||
+        after.ino !== before.ino ||
+        after.size !== before.size ||
+        after.mtimeNs !== before.mtimeNs ||
+        after.ctimeNs !== before.ctimeNs
+      ) {
+        throw changed();
+      }
+      await fs.chmod(staged.temporaryPath, permissions);
     } finally {
-      await opened.close();
+      await source.close();
     }
-    if (!source.isFile()) {
-      throw this._errno('EOPNOTSUPP', 'the import source is not a regular file', staged.rootedPath);
-    }
-    if (source.size !== BigInt(copy.size)) {
-      throw changed();
-    }
-    const permissions = staged.permissions ?? (await this._newFileMode(staged.temporaryPath));
-    /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
-    // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
-    await fs.copyFile(copy.from, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
-    const after = await fs.lstat(copy.from, { bigint: true }).catch(() => undefined);
-    if (after?.dev !== source.dev || after.ino !== source.ino || after.size !== source.size) {
-      throw changed();
-    }
-    await fs.chmod(staged.temporaryPath, permissions);
     const handle = await fs.open(staged.temporaryPath, 'r+');
     if (process.platform === 'win32') {
       staged.retainedHandle = handle;
     }
     try {
       await handle.sync();
-      /* One read of what landed, a byte past its size so a file that grew is seen. */
-      const bytes = new Uint8Array(copy.size + 1);
-      let filled = 0;
-      for (let read = -1; read !== 0 && filled < bytes.byteLength; filled += read) {
-        // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
-        ({ bytesRead: read } = await handle.read(
-          bytes,
-          filled,
-          Math.min(streamChunkSize, bytes.byteLength - filled),
-          filled,
-        ));
-      }
-      if (filled !== copy.size) {
+      const facts = await measureLanded(handle, copy.size);
+      if (facts === undefined) {
         throw changed();
       }
-      const landed = bytes.subarray(0, copy.size);
-      const blobOid = createHash('sha1')
-        .update(`blob ${String(copy.size)}\0`)
-        .update(landed)
-        .digest('hex');
-      const sha256 = createHash('sha256').update(landed).digest('hex');
       const { dev, ino } = await handle.stat({ bigint: true });
       staged.cloned = { dev, ino };
-      return { ...getFileContentMetadata(landed), blobOid, sha256 };
+      return facts;
     } finally {
       if (staged.retainedHandle === undefined) {
         await handle.close();

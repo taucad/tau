@@ -127,6 +127,8 @@ const importSourcePathSchema = z
       message: 'An import source path is relative and plain.',
     },
   );
+/** Rows one `importSourceList` reply carries at most. @internal */
+export const maximumImportSourceRows = 1024;
 /** Bytes one `importSourceRead` reply carries at most. @internal */
 export const maximumImportSourceReadBytes = streamChunkSize * 16;
 /** Files one `importCopy` request may carry: a changeset's own ceiling. @internal */
@@ -225,7 +227,14 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('watch'), request: watchRequestSchema }),
   z.object({ ...versioned, op: z.literal('unwatch') }),
   /* Rootless: a granted source is the host's to resolve, whatever root the import lands in. */
-  z.object({ ...versioned, op: z.literal('importSourceList'), grant: importGrantSchema, path: importSourcePathSchema }),
+  /* One page of a directory: a reply carries a bounded number of rows, so a huge directory is never one frame. */
+  z.object({
+    ...versioned,
+    op: z.literal('importSourceList'),
+    grant: importGrantSchema,
+    path: importSourcePathSchema,
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  }),
   z.object({
     ...versioned,
     op: z.literal('importSourceRead'),
@@ -353,7 +362,7 @@ export const nodeFsResultSchemas = {
   rename: z.undefined(),
   watch: z.undefined(),
   unwatch: z.undefined(),
-  importSourceList: z.array(importSourceRowSchema),
+  importSourceList: z.object({ rows: z.array(importSourceRowSchema).max(maximumImportSourceRows), more: z.boolean() }),
   importSourceRead: bytesSchema,
   importCopy: z.array(importCopyReceiptSchema),
 } as const satisfies Record<NodeFsRequest['op'], z.ZodType>;

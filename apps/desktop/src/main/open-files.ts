@@ -10,11 +10,12 @@ type OpenFileQueueOptions = {
   readonly maxBytes: number;
   readonly maxFiles: number;
   /** Mint the import grant the services host copies the file by (W7.4): the bytes stay on the host. */
-  readonly grant: (path: string) => Promise<Readonly<{ grant: string; name: string }>>;
+  readonly grant: (path: string, owner: number) => Promise<Readonly<{ grant: string; name: string }>>;
 };
 
 type OpenFileQueue = {
-  readonly consume: () => Promise<DesktopOpenFile[]>;
+  /** Hand the queued files to the window that asked, as grants scoped to it. */
+  readonly consume: (owner: number) => Promise<DesktopOpenFile[]>;
   readonly enqueue: (candidates: readonly string[]) => number;
   readonly hasPending: () => boolean;
 };
@@ -43,7 +44,7 @@ export const createOpenFileQueue = (options: OpenFileQueueOptions): OpenFileQueu
       return paths.length;
     },
     hasPending: (): boolean => paths.length > 0,
-    async consume(): Promise<DesktopOpenFile[]> {
+    async consume(owner: number): Promise<DesktopOpenFile[]> {
       const queued = paths.splice(0);
       return Promise.all(
         queued.map(async (path) => {
@@ -54,7 +55,7 @@ export const createOpenFileQueue = (options: OpenFileQueueOptions): OpenFileQueu
               `Tau refused opened file outside the 1–${String(options.maxBytes)} byte limit: ${basename(path)}`,
             );
           }
-          const { grant } = await options.grant(canonical);
+          const { grant } = await options.grant(canonical, owner);
           return { name: basename(path), grant };
         }),
       );

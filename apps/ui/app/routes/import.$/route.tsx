@@ -272,13 +272,37 @@ export default function ImportRoute(): React.JSX.Element {
   }, [fileManagerRef]);
   /* A linked import's run: leaving the route stops its stage in the worker, the fetch with it. */
   const linkedImportAbortRef = useRef<AbortController | undefined>(undefined);
+  /*
+   * The desktop import grants this import holds (W7.4): let go once the
+   * project is created, the review is cancelled, another source replaces
+   * them, or the route is left. A failed create keeps them, so a retry can
+   * stage again; main lets go of the rest when the window closes.
+   */
+  const hostGrantsRef = useRef<string[]>([]);
+  const holdHostGrants = useCallback((grants: readonly string[]): void => {
+    const held = hostGrantsRef.current.splice(0, hostGrantsRef.current.length, ...grants);
+    const bridge = desktopBridge();
+    if (held.length === 0 || bridge === undefined) {
+      return;
+    }
+    const release = async (): Promise<void> => {
+      try {
+        await bridge.dialog.releaseImportGrants(held);
+      } catch {
+        /* Main lets go of them when the window closes. */
+      }
+    };
+    // async-iife: fire-and-forget -- a release is best effort; the window's close releases the rest.
+    void release();
+  }, []);
   useEffect(
     () => () => {
       linkedImportAbortRef.current?.abort(new Error('The import was cancelled.'));
       importSessionRef.current?.close();
       importSessionRef.current = undefined;
+      holdHostGrants([]);
     },
-    [],
+    [holdHostGrants],
   );
   const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
   const presentLocationError = useProjectCreationLocationError();
@@ -458,6 +482,8 @@ export default function ImportRoute(): React.JSX.Element {
                 }),
             });
 
+            /* Staged and committed: the host's copy is done with what was chosen. */
+            holdHostGrants([]);
             return { type: 'projectCreated', projectId: project.id };
           } catch (error) {
             presentLocationError(error);
@@ -613,6 +639,7 @@ export default function ImportRoute(): React.JSX.Element {
         setActiveMode('disk');
         setLocalOperation('read');
         /* Grants, not bytes: the desktop host copies the opened files into the staging itself (W7.4). */
+        holdHostGrants(opened.map(({ grant }) => grant));
         diskActorRef.send({
           type: 'processHost',
           grants: opened.map(({ grant, name }): HostImportGrant => ({ grant, name, kind: 'file' })),
@@ -632,7 +659,7 @@ export default function ImportRoute(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [clearDesktopOpen, diskActorRef, isDesktopOpen]);
+  }, [clearDesktopOpen, diskActorRef, holdHostGrants, isDesktopOpen]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state
@@ -766,11 +793,12 @@ export default function ImportRoute(): React.JSX.Element {
       }
       setActiveMode('disk');
       setLocalOperation('read');
+      holdHostGrants([picked.grant]);
       diskActorRef.send({ type: 'processHost', grants: [{ ...picked, kind: 'directory' }] });
     } catch (error) {
       diskActorRef.send({ type: 'externalError', error: error instanceof Error ? error : new Error(String(error)) });
     }
-  }, [diskActorRef]);
+  }, [diskActorRef, holdHostGrants]);
   const isDesktopHost = desktopBridge() !== undefined;
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
@@ -948,6 +976,7 @@ export default function ImportRoute(): React.JSX.Element {
         }}
         onCancel={() => {
           diskActorRef.send({ type: 'reset' });
+          holdHostGrants([]);
           setActiveMode(undefined);
         }}
       />
@@ -983,6 +1012,7 @@ export default function ImportRoute(): React.JSX.Element {
             ? undefined
             : () => {
                 diskActorRef.send({ type: 'reset' });
+                holdHostGrants([]);
                 setActiveMode(undefined);
               }
         }

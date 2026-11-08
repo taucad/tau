@@ -39,3 +39,6 @@ export type DesktopOpenFile = {
 
 /** The import folder picker (W7.4): resolves to a grant and the folder's name, never its path. */
 export const selectImportFolderIpcChannel = 'tau:select-import-folder';
+
+/** Let go of import grants the asking window holds, once its import is done (W7.4). */
+export const releaseImportGrantsIpcChannel = 'tau:release-import-grants';

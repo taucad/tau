@@ -6,15 +6,19 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -112,11 +116,20 @@ const serve = (): Fixture => {
   };
 };
 
+/* A grant as main mints one: the chosen entry's links resolved, pinned by its device and inode. */
+const grantOf = (path: string, kind: ImportSourceGrant['kind']): ImportSourceGrant => {
+  const resolved = realpathSync(path);
+  const { dev, ino } = lstatSync(resolved, { bigint: true });
+  return { path: resolved, kind, identity: { dev: String(dev), ino: String(ino) } };
+};
+
 const folderGrant = (fixture: Fixture, path = fixture.folder): HostImportGrant => {
   const grant = `grant-${String(fixture.grants.size + 1).padStart(4, '0')}`;
-  fixture.grants.set(grant, { path, kind: 'directory' });
+  fixture.grants.set(grant, grantOf(path, 'directory'));
   return { grant, name: 'Bracket', kind: 'directory' };
 };
+
+const sizeOf = (path: string): number => Buffer.byteLength(tree[path] as string);
 
 const stage = async (fixture: Fixture, plan: Awaited<ReturnType<typeof planImport>>, operationId: string) =>
   stageImport({
@@ -160,6 +173,25 @@ describe('a host-side import', () => {
     expect(staged.entries.find(({ path }) => path === 'assets/mesh.bin')!.facts.contentKind).toBe('binary');
   });
 
+  it('copies through the held descriptor where no path reopens it (macOS), with the same facts', async () => {
+    const fixture = serve();
+    const plan = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), { policy: tauPathPolicy });
+    const onLinux = await stage(fixture, plan, 'op_linux');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    const copyFile = vi.spyOn(fs, 'copyFile');
+    try {
+      const replanned = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), {
+        policy: tauPathPolicy,
+      });
+      const elsewhere = await stage(fixture, replanned, 'op_darwin');
+      expect(copyFile).not.toHaveBeenCalled();
+      expect(elsewhere.entries).toEqual(onLinux.entries);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('stages what a browser folder import of the same tree stages, fact for fact', async () => {
     const fixture = serve();
     const viaHost = await stage(
@@ -197,8 +229,8 @@ describe('a host-side import', () => {
 
   it('imports files opened with Tau, each by its own grant', async () => {
     const fixture = serve();
-    fixture.grants.set('grant-file-1', { path: join(fixture.folder, 'main.ts'), kind: 'file' });
-    fixture.grants.set('grant-file-2', { path: join(fixture.folder, 'assets/mesh.bin'), kind: 'file' });
+    fixture.grants.set('grant-file-1', grantOf(join(fixture.folder, 'main.ts'), 'file'));
+    fixture.grants.set('grant-file-2', grantOf(join(fixture.folder, 'assets/mesh.bin'), 'file'));
     const plan = await planImport(
       hostImportSource(fixture.sources, [
         { grant: 'grant-file-1', name: 'main.ts', kind: 'file' },
@@ -252,7 +284,8 @@ describe('a host-side import', () => {
     writeFileSync(join(fixture.root, 'main.ts'), 'old');
     const copyFile = fs.copyFile.bind(fs);
     vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
-      if (String(from).endsWith('main.ts')) {
+      /* The source is the held descriptor's path; the sibling is named for its target. */
+      if (String(to).includes('main.ts')) {
         await fs.writeFile(to, 'export const a');
         throw Object.assign(new Error('EIO: i/o error, copyfile'), { code: 'EIO' });
       }
@@ -266,6 +299,125 @@ describe('a host-side import', () => {
     expect(readFileSync(join(fixture.root, 'main.ts'), 'utf8')).toBe('old');
     /* No temp sibling is left beside it. */
     expect(readdirSync(fixture.root).toSorted()).toEqual(['main.ts', 'part.ts']);
+  });
+
+  it('refuses a chosen folder or file swapped for a link after it was chosen', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    fixture.grants.set('grant-file-0001', grantOf(join(fixture.folder, 'main.ts'), 'file'));
+    const elsewhere = join(fixture.sandbox, 'elsewhere');
+    write(elsewhere, { 'main.ts': tree['main.ts']!, 'secret.txt': 'secret' });
+    /* The file: replaced by a link to a file of the same name outside. */
+    renameSync(join(fixture.folder, 'main.ts'), join(fixture.sandbox, 'main.ts.moved'));
+    symlinkSync(join(elsewhere, 'main.ts'), join(fixture.folder, 'main.ts'));
+    await expect(fixture.sources.list('grant-file-0001', '')).rejects.toMatchObject({ code: 'EACCES' });
+    const fileCopy = await fixture.client.copyFromImportGrant('grant-file-0001', [
+      { from: 'main.ts', path: 'main.ts', size: sizeOf('main.ts') },
+    ]);
+    expect(fileCopy[0]?.outcome).toBe('failed');
+    /* The folder: moved away, and a link to another folder put in its place. */
+    renameSync(fixture.folder, join(fixture.sandbox, 'Bracket.moved'));
+    symlinkSync(elsewhere, fixture.folder);
+    await expect(fixture.sources.list(grant, '')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fixture.sources.read(grant, 'secret.txt', 64)).rejects.toMatchObject({ code: 'EACCES' });
+    const copied = await fixture.client.copyFromImportGrant(grant, [
+      { from: 'secret.txt', path: 'secret.txt', size: 6 },
+    ]);
+    expect(copied[0]?.outcome).toBe('failed');
+    expect(existsSync(join(fixture.root, 'secret.txt'))).toBe(false);
+  });
+
+  it('refuses bytes from a directory swapped for a link and back while the file was opened', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    const evil = join(fixture.sandbox, 'evil');
+    /* Same name, same size: only its inode tells it apart. */
+    write(evil, { 'part.ts': 'export const p = 666;'.slice(0, sizeOf('src/part.ts')).padEnd(sizeOf('src/part.ts')) });
+    const sourceDirectory = join(fixture.folder, 'src');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      if (String(path) === join(sourceDirectory, 'part.ts')) {
+        renameSync(sourceDirectory, `${sourceDirectory}.real`);
+        symlinkSync(evil, sourceDirectory);
+        try {
+          return await open(path, flags, mode);
+        } finally {
+          unlinkSync(sourceDirectory);
+          renameSync(`${sourceDirectory}.real`, sourceDirectory);
+        }
+      }
+      return open(path, flags, mode);
+    });
+    const copied = await fixture.client.copyFromImportGrant(grant, [
+      { from: 'src/part.ts', path: 'part.ts', size: sizeOf('src/part.ts') },
+    ]);
+    expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'ESTALE' } });
+    expect(existsSync(join(fixture.root, 'part.ts'))).toBe(false);
+  });
+
+  it('refuses a file written to while it was copied', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    const copyFile = fs.copyFile.bind(fs);
+    vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+      await copyFile(from, to, mode);
+      /* Same size, new bytes: only its times say it changed. */
+      await fs.writeFile(join(fixture.folder, 'main.ts'), (tree['main.ts'] as string).toUpperCase());
+    });
+    const copied = await fixture.client.copyFromImportGrant(grant, [
+      { from: 'main.ts', path: 'main.ts', size: sizeOf('main.ts') },
+    ]);
+    expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'ESTALE' } });
+    expect(existsSync(join(fixture.root, 'main.ts'))).toBe(false);
+  });
+
+  it('holds its own file limit, whatever size the client names', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    const copied = await fixture.client.copyFromImportGrant(grant, [
+      { from: 'main.ts', path: 'main.ts', size: importLimits.maximumFileBytes + 1 },
+    ]);
+    expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'EFBIG' } });
+  });
+
+  it('lists a large directory a bounded page at a time, and counts special files against the entry limit', async () => {
+    const fixture = serve();
+    const many = join(fixture.folder, 'many');
+    write(many, Object.fromEntries(Array.from({ length: 2100 }, (_, index) => [`f-${String(index)}.txt`, 'x'])));
+    execFileSync('mkfifo', [join(fixture.folder, 'pipe')]);
+    const list = vi.spyOn(fixture.sources, 'list');
+    const plan = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), { policy: tauPathPolicy });
+    expect(plan.entries.filter(({ path }) => path.startsWith('many/'))).toHaveLength(2100);
+    const pages = await Promise.all(
+      list.mock.results.map(async ({ value }) => value as ReturnType<typeof fixture.sources.list>),
+    );
+    expect(Math.max(...pages.map(({ rows }) => rows.length))).toBeLessThanOrEqual(1024);
+    expect(list.mock.calls.filter(([, path]) => path === 'many')).toHaveLength(3);
+    /* The pipe is left out of the import, but it counts as an entry the walk found. */
+    expect(plan.entries.some(({ path }) => path === 'pipe')).toBe(false);
+    const counted = plan.pin.entries;
+    await expect(
+      planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), {
+        policy: tauPathPolicy,
+        limits: { ...importLimits, maximumEntries: counted - 1 },
+      }),
+    ).rejects.toMatchObject({ reason: 'tooManyEntries' });
+  });
+
+  it('stops a batch where one copy fails, records none of it, and leaves nothing once discarded', async () => {
+    const fixture = serve();
+    const plan = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), { policy: tauPathPolicy });
+    /* One of the batch's sources is gone by the time it is copied; the rest land. */
+    rmSync(join(fixture.folder, 'src/deep/notes.md'));
+    await expect(stage(fixture, plan, 'op_group')).rejects.toMatchObject({ code: 'ENOENT' });
+    const staging = join(fixture.root, importStagingDirectory('op_group'));
+    expect(existsSync(join(staging, 'tree/main.ts'))).toBe(true);
+    /* The batch was announced, never recorded: a resume trusts none of it. */
+    const ledger = readdirSync(join(staging, 'ledger'));
+    expect(ledger.some((name) => name.endsWith('.pending.json'))).toBe(true);
+    expect(ledger.some((name) => /^\d+\.json$/u.test(name))).toBe(false);
+    await discardStagedImport(fixture.port, 'op_group');
+    expect(existsSync(staging)).toBe(false);
   });
 
   it('holds a host source to the import limits while it walks', async () => {

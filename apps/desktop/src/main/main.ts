@@ -42,7 +42,7 @@ import {
   systemPreferences,
   utilityProcess,
 } from 'electron';
-import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron';
 import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
@@ -162,6 +162,7 @@ import {
   isQuickLookEnabled,
   openFilesIpcChannel,
   quickLookIpcChannels,
+  releaseImportGrantsIpcChannel,
   selectImportFolderIpcChannel,
 } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
@@ -298,6 +299,19 @@ const applicationResource = (name: string): string =>
 const applicationIcon = applicationResource(`icon.${process.platform === 'win32' ? 'ico' : 'png'}`);
 const themedApplicationIcon = (theme: AppIconTheme): string =>
   applicationResource(`icon${theme === 'dark' ? '-dark' : ''}.png`);
+/* A window's import grants go with it (W7.4): watched once, from its first grant. */
+const watchedImportOwners = new Set<number>();
+const watchImportOwner = (sender: WebContents): void => {
+  if (watchedImportOwners.has(sender.id)) {
+    return;
+  }
+  const { id } = sender;
+  watchedImportOwners.add(id);
+  sender.once('destroyed', () => {
+    watchedImportOwners.delete(id);
+    importGrants.releaseOwner(id);
+  });
+};
 /* The services host is told every grant once it exists, and again on each change (W7.4). */
 let publishImportGrants: (grants: readonly ImportGrant[]) => void = () => undefined;
 const importGrants = createImportGrants({
@@ -311,7 +325,7 @@ const openFiles = createOpenFileQueue({
   maxBytes: quickLookManifest.limits.maxSourceBytes,
   maxFiles: quickLookManifest.limits.maxFiles,
   /* An opened file is imported by a grant the services host copies from: its bytes stay on this computer. */
-  grant: async (path) => importGrants.mint(path, 'file'),
+  grant: async (path, owner) => importGrants.mint(path, 'file', owner),
 });
 let showOpenFileImport: (() => void) | undefined;
 const enqueueOpenFiles = (paths: readonly string[]): void => {
@@ -1502,7 +1516,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return [];
     }
     try {
-      return await openFiles.consume();
+      watchImportOwner(event.sender);
+      return await openFiles.consume(event.sender.id);
     } catch (error) {
       log.log('error', 'open-files.failed', error);
       throw error;
@@ -1640,9 +1655,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (directory === undefined) {
       return undefined;
     }
-    const granted = await importGrants.mint(directory, 'directory');
+    watchImportOwner(event.sender);
+    const granted = await importGrants.mint(directory, 'directory', event.sender.id);
     log.log('info', 'dialog.import-folder-granted', { seeded: seededPick !== undefined });
     return granted;
+  });
+
+  ipcMain.handle(releaseImportGrantsIpcChannel, (event, grants: unknown) => {
+    if (!trusted(event.senderFrame) || !Array.isArray(grants)) {
+      return;
+    }
+    importGrants.release(
+      grants.filter((grant): grant is string => typeof grant === 'string'),
+      event.sender.id,
+    );
   });
 
   ipcMain.on(servicesPortRelayTag, (event, payload: unknown) => {
@@ -1703,10 +1729,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
         refuse('services.invalid-compute-mode');
         return;
       }
+      /* A filesystem connection resolves only the import grants minted for the window that asked for it (W7.4):
+       * main names that window here, over anything the renderer sent. */
+      const scoped = concern === 'nodeFs' ? { ...resolved, importOwner: String(event.sender.id) } : resolved;
       const port =
         concern === 'exactMeasurement'
           ? geometry.connectMeasurement()
-          : services.connect(concern as ServicesConcern, resolved);
+          : services.connect(concern as ServicesConcern, scoped);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       /* Quit and reload refuse new concerns by design: an expected answer the

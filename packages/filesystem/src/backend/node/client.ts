@@ -657,14 +657,19 @@ export class NodeFsImportSources {
   }
 
   /**
-   * One directory of a granted source.
+   * One page of one directory of a granted source.
    *
    * @param grant - The source's grant.
    * @param path - The directory inside it, `''` for the source itself.
-   * @returns Its rows: name, kind, size and modification time.
+   * @param offset - Rows of the directory already read.
+   * @returns A bounded page of rows (name, kind, size, modification time), and whether more follow.
    */
-  public async list(grant: string, path: string): Promise<NodeFsImportSourceRow[]> {
-    return this._channel.request({ op: 'importSourceList', grant, path });
+  public async list(
+    grant: string,
+    path: string,
+    offset = 0,
+  ): Promise<Readonly<{ rows: NodeFsImportSourceRow[]; more: boolean }>> {
+    return this._channel.request({ op: 'importSourceList', grant, path, offset });
   }
 
   /**

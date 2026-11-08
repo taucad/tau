@@ -357,7 +357,12 @@ export type HostImportRow = Readonly<{
  * @public
  */
 export type HostImportSourcePort = Readonly<{
-  list: (grant: string, path: string) => Promise<readonly HostImportRow[]>;
+  /** One bounded page of a directory, from `offset`, and whether more rows follow. */
+  list: (
+    grant: string,
+    path: string,
+    offset?: number,
+  ) => Promise<Readonly<{ rows: readonly HostImportRow[]; more: boolean }>>;
   read: (grant: string, path: string, maximumBytes: number) => Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
@@ -376,7 +381,26 @@ const walkHostDirectory = async function* (
   prefix: string,
 ): AsyncGenerator<ImportListedEntry> {
   const { port, grant, control } = walk;
-  for (const row of await port.list(grant, directory)) {
+  /* A page at a time, so a directory of any size is never held whole: the entry limit stops it as it goes. */
+  for (let offset = 0, more = true; more; ) {
+    control.signal?.throwIfAborted();
+    // oxlint-disable-next-line no-await-in-loop -- a directory is read one page after another.
+    const page = await port.list(grant, directory, offset);
+    offset += page.rows.length;
+    more = page.more && page.rows.length > 0;
+    yield* hostRows(walk, page.rows, { directory, prefix });
+  }
+};
+
+/* One page of a granted directory's rows, each counted against the entry limit as it is found. */
+const hostRows = async function* (
+  walk: Readonly<{ port: HostImportSourcePort; grant: string; control: ImportListControl }>,
+  rows: readonly HostImportRow[],
+  at: Readonly<{ directory: string; prefix: string }>,
+): AsyncGenerator<ImportListedEntry> {
+  const { grant, control } = walk;
+  const { directory, prefix } = at;
+  for (const row of rows) {
     control.signal?.throwIfAborted();
     const from = directory === '' ? row.name : `${directory}/${row.name}`;
     const path = prefix === '' ? row.name : `${prefix}/${row.name}`;
@@ -386,11 +410,11 @@ const walkHostDirectory = async function* (
       }
       continue;
     }
-    /* A special file (a socket, a device) is not content: it is left, as a picked folder never offers one. */
+    control.listed(path);
+    /* A special file (a socket, a device) is not content: counted, then left, as a picked folder never offers one. */
     if (row.kind === 'other') {
       continue;
     }
-    control.listed(path);
     /* A link is counted as skipped, as an archive's is: it is never followed out of the source. */
     yield row.kind === 'symlink'
       ? { source: path, size: -1, host: { grant, from } }
@@ -434,11 +458,15 @@ export const hostImportSource = (
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- a source's grants are listed in order.
-        const [row] = await port.list(grant.grant, '');
-        if (row === undefined || row.kind === 'other') {
+        const listed = await port.list(grant.grant, '');
+        const [row] = listed.rows;
+        if (row === undefined) {
           continue;
         }
         control.listed(grant.name);
+        if (row.kind === 'other') {
+          continue;
+        }
         yield row.kind === 'file'
           ? {
               source: grant.name,

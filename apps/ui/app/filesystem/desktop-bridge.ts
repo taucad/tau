@@ -327,6 +327,11 @@ export type DesktopBridge = {
      * `undefined` when the user cancels.
      */
     selectImportFolder(): Promise<{ readonly grant: string; readonly name: string } | undefined>;
+    /**
+     * Revoke import grants this window holds, once the import that used them
+     * finished or was abandoned. Grants also lapse when the window closes.
+     */
+    releaseImportGrants(grants: readonly string[]): Promise<void>;
   };
   readonly openFiles: {
     /**

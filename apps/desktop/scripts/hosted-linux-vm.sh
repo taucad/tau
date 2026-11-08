@@ -206,7 +206,7 @@ if [[ "$host" == gcp ]]; then
   new_boot=''
   for _attempt in $(seq 1 90); do
     sleep 5
-    wait_for_guest
+    wait_for_guest || { printf 'Guest unreachable after the driver reboot\n' >&2; exit 1; }
     new_boot="$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true)"
     if [[ -n "$new_boot" && "$new_boot" != "$first_boot" ]]; then break; fi
   done

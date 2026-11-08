@@ -60,9 +60,8 @@ import { workbenchPaths } from '@taucad/workbench';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import {
-  linkedManifestBytes,
-  linkedManifestChanges,
   linkedProjectData,
+  linkedSetupManifest,
   prepareLinkedGithubImport,
   readLinkedGithubManifest,
 } from '#lib/github-linked-import.js';
@@ -556,16 +555,14 @@ export default function ImportRoute(): React.JSX.Element {
   const linkedExistingBlocks =
     heldProjectsLoading || (linkedProjectId !== undefined && linkedExisting.status !== 'not-found');
   /* Exactly what the import's setup revision writes: an empty branch's main file, and `tau.json` unless the repository's
-   * own bytes are already those the create commits. */
+   * own declares the same project, in which case its bytes are what the create commits. */
   const linkedNeedsSetup =
     linkedSelection !== undefined &&
     (linkedSelection.branch.head === undefined ||
-      linkedManifestChanges(
+      linkedSetupManifest(
         linkedSelection,
-        linkedManifestBytes(
-          linkedProjectData({ selection: linkedSelection, mainFile: linkedMainFile, syncChats: linkedSyncChats }),
-        ),
-      ));
+        linkedProjectData({ selection: linkedSelection, mainFile: linkedMainFile, syncChats: linkedSyncChats }),
+      ).changes);
   const isLoadingFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.isLoadingFiles);
   const fetchErrors = useSelector(gitHubActorRef, (snapshot) => snapshot.context.fetchErrors);
   const hasMoreBranches = useSelector(gitHubActorRef, (snapshot) => snapshot.context.hasMoreBranches);
@@ -817,11 +814,12 @@ export default function ImportRoute(): React.JSX.Element {
           syncChats: linkedSyncChats,
         });
         /* The bytes the create commits as `tau.json`: the setup revision records exactly these, so the project opens clean
-         * (a repository whose own `tau.json` already reads so gets no setup change for it). */
+         * (a repository whose own `tau.json` declares the same project keeps its bytes, with no setup change for it). */
+        const manifest = linkedSetupManifest(linkedSelection, projectData);
         const prepared = await prepareLinkedGithubImport({
           selection: linkedSelection,
           targetBranch: linkedTargetBranch,
-          manifest: linkedManifestBytes(projectData),
+          manifest: manifest.bytes,
           mainFile: linkedMainFile,
         });
         /* The worker fetches the branch into the staging and stages its tree; the page holds none of it (D12, I6). */
@@ -846,6 +844,7 @@ export default function ImportRoute(): React.JSX.Element {
                 carriesWorkbenchLayout: linkedSelection.files.some(
                   ({ path: listed }) => listed === workbenchLayoutPath,
                 ),
+                manifestBytes: manifest.bytes,
               },
             }),
         });

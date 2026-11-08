@@ -12,6 +12,7 @@ import { githubConnections } from '#lib/github-connections.js';
 import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { LinkedImportRequest } from '#machines/import-linked.js';
+import { declaresManifest } from '#lib/project-manifest-equivalence.js';
 
 /* The largest worktree a linked import materializes; the worker's own bound for every answer but the pack. */
 const maximumMaterializedBytes = 256 * 1024 * 1024;
@@ -67,29 +68,25 @@ export const linkedProjectData = ({
 };
 
 /**
- * The `tau.json` a linked import's create commits, byte for byte: what its
- * setup revision must record, so the project opens with nothing to save.
- *
- * @param data - The project data, from {@link linkedProjectData}.
- * @returns The manifest's bytes.
- * @public
- */
-export const linkedManifestBytes = (data: Omit<ProjectManifest, '$schema'>): Uint8Array<ArrayBuffer> =>
-  serializeProjectManifest(projectToManifest(data));
-
-/**
- * Whether a linked import changes the repository's `tau.json`: it has none,
- * or its bytes are not those the create commits.
+ * The `tau.json` a linked import's create commits, byte for byte, and so
+ * what its setup revision must record for the project to open with nothing
+ * to save: the repository's own bytes when they parse strictly and declare
+ * the same project (indentation, key order, a trailing newline or a spelled
+ * out default aside), so no setup revision rewrites them; otherwise the
+ * canonical encoding of the project, which the setup revision writes.
  *
  * @param selection - The reviewed selection.
- * @param manifest - The bytes the create commits.
- * @returns `true` when the setup revision writes `tau.json`.
+ * @param data - The project data, from {@link linkedProjectData}.
+ * @returns The bytes, and whether the setup revision writes them.
  * @public
  */
-export const linkedManifestChanges = (
+export const linkedSetupManifest = (
   selection: Pick<GithubRepositorySelection, 'manifest'>,
-  manifest: Uint8Array<ArrayBuffer>,
-): boolean => selection.manifest === undefined || !sameBytes(selection.manifest, manifest);
+  data: Omit<ProjectManifest, '$schema'>,
+): Readonly<{ bytes: Uint8Array<ArrayBuffer>; changes: boolean }> =>
+  selection.manifest !== undefined && declaresManifest(selection.manifest, data)
+    ? { bytes: selection.manifest, changes: false }
+    : { bytes: serializeProjectManifest(projectToManifest(data)), changes: true };
 
 /** A linked import as the page hands it to the worker: the request, and the credential generation the binding records. */
 export type LinkedGithubImport = Readonly<{
@@ -138,7 +135,7 @@ export async function prepareLinkedGithubImport({
     content: Uint8Array<ArrayBuffer>;
     mode: '100644';
   }> = [];
-  if (linkedManifestChanges(selection, manifest)) {
+  if (selection.manifest === undefined || !sameBytes(selection.manifest, manifest)) {
     setupFiles.push({ path: 'tau.json', content: manifest, mode: '100644' });
   }
   if (selection.branch.head === undefined) {

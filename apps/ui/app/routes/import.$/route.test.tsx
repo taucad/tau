@@ -837,45 +837,76 @@ describe('ImportRoute GitHub card', () => {
     expect(projects.create).not.toHaveBeenCalled();
   });
 
+  /* The fixture's declaration, spelled differently: four-space indent, keys reordered, no trailing newline, a default spelled out. */
+  const respelled = (): Uint8Array<ArrayBuffer> => {
+    const { $schema, ...rest } = JSON.parse(new TextDecoder().decode(manifest)) as Record<string, unknown>;
+    return new TextEncoder().encode(JSON.stringify({ ...rest, syncChats: true, $schema }, undefined, 4));
+  };
+
   it.each([
-    { held: 'canonical', bytes: (canonical: Uint8Array<ArrayBuffer>) => canonical, changes: false },
-    {
-      held: 'differently formatted',
-      bytes: (canonical: Uint8Array<ArrayBuffer>) =>
-        new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(canonical)), undefined, 4)),
-      changes: true,
-    },
-  ])(
-    'should record in the setup revision the very tau.json the create commits, from a $held repository manifest',
-    async ({ bytes, changes }) => {
-      const user = userEvent.setup();
-      picked.selection = {
-        ...selection,
-        manifest: bytes(manifest),
-        connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
-      };
-      linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
-      projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
-        id,
-        slugs: { workspaceSlug: 'home', projectSlug: 'part' },
-      }));
-      await renderImport();
-      await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
-      /* The review says what the setup revision writes. */
-      expect(screen.queryByText(/Add or update/u) !== null).toBe(changes);
+    { held: 'canonical', bytes: () => manifest },
+    { held: 'respelled but equal', bytes: respelled },
+  ])('should commit a $held repository tau.json as authored, with no setup change rewriting it', async ({ bytes }) => {
+    const user = userEvent.setup();
+    const authored = bytes();
+    picked.selection = {
+      ...selection,
+      manifest: authored,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    /* The review says what the setup revision writes. */
+    expect(screen.queryByText(/Add or update/u)).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Import and link' }));
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
 
-      await waitFor(() => {
-        expect(projects.create).toHaveBeenCalled();
-      });
-      const created = projects.create.mock.calls[0]?.[0] as { project: Parameters<typeof projectToManifest>[0] };
-      const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
-      /* `tau.json` as the commit writes it (`serializeProjectManifest` of the journaled manifest), so nothing opens dirty. */
-      expect(new TextDecoder().decode(prepared.manifest)).toBe(
-        new TextDecoder().decode(serializeProjectManifest(projectToManifest(created.project))),
-      );
-      expect(new TextDecoder().decode(prepared.manifest)).toBe(new TextDecoder().decode(manifest));
-    },
-  );
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    const created = projects.create.mock.calls[0]?.[0] as { staging: { manifestBytes?: Uint8Array<ArrayBuffer> } };
+    const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    /* The setup revision is handed the repository's own bytes (so it writes none), and the create commits them. */
+    expect(new TextDecoder().decode(prepared.manifest)).toBe(new TextDecoder().decode(authored));
+    expect(new TextDecoder().decode(created.staging.manifestBytes)).toBe(new TextDecoder().decode(authored));
+  });
+
+  it('should write the canonical tau.json in the setup revision and commit it when the declaration changes', async () => {
+    const user = userEvent.setup();
+    picked.selection = {
+      ...selection,
+      manifest: respelled(),
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    /* Turning chat sync off is a change to the declaration. */
+    await user.click(screen.getByRole('checkbox', { name: 'Sync project chats with this repository' }));
+    expect(screen.getByText(/Add or update/u)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    const created = projects.create.mock.calls[0]?.[0] as {
+      project: Parameters<typeof projectToManifest>[0];
+      staging: { manifestBytes?: Uint8Array<ArrayBuffer> };
+    };
+    const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    const canonical = new TextDecoder().decode(serializeProjectManifest(projectToManifest(created.project)));
+    expect(created.project.syncChats).toBe(false);
+    expect(new TextDecoder().decode(prepared.manifest)).toBe(canonical);
+    expect(new TextDecoder().decode(created.staging.manifestBytes)).toBe(canonical);
+  });
 });

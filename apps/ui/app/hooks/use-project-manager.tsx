@@ -1,3 +1,4 @@
+import { declaresManifest } from '#lib/project-manifest-equivalence.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
@@ -243,6 +244,12 @@ type CreateProjectFromData = CreateProjectChatOptions & {
     operationId: string;
     /** The import carries its own workbench layout, so none is seeded beside it. */
     carriesWorkbenchLayout?: boolean;
+    /**
+     * The `tau.json` bytes to commit, when they declare `project` exactly: a
+     * linked repository's own, kept as authored so no setup revision rewrites
+     * them. Bytes that declare anything else are not committed.
+     */
+    manifestBytes?: Uint8Array<ArrayBuffer>;
     /**
      * The project directory the entries were written straight into (where
      * the root's rename copies): the create commits there instead of
@@ -1525,7 +1532,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           projectId: operation.projectId,
           scope,
           files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
-          manifest: serializeProjectManifest(operation.manifest),
+          manifest:
+            operation.kind === 'create' &&
+            operation.manifestBytes !== undefined &&
+            declaresManifest(operation.manifestBytes, operation.manifest)
+              ? operation.manifestBytes
+              : serializeProjectManifest(operation.manifest),
           ...(operation.kind === 'create' && operation.staging !== undefined ? { staging: operation.staging } : {}),
         };
         result = await fileManager.client.commitPendingProjectDirectory(
@@ -1727,6 +1739,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           ? {
               staging: { operationId: options.staging.operationId },
               seedWorkbench: options.staging.carriesWorkbenchLayout !== true,
+              ...(options.staging.manifestBytes === undefined ? {} : { manifestBytes: options.staging.manifestBytes }),
             }
           : {}),
         storage: pendingStorage,

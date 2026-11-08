@@ -29,6 +29,18 @@ describe('void call results', () => {
   });
 });
 
+describe('archive ceilings', () => {
+  it('carries a caller byte ceiling on both archive calls and refuses a malformed one', () => {
+    const { archive, getScopedZippedDirectory } = fileSystemBridgeSchemas.calls;
+    const scope = { backend: 'opfs' } as const;
+    expect(archive.args.safeParse(['', { versionedOnly: true, maxBytes: 1024 }]).success).toBe(true);
+    expect(archive.args.safeParse(['', { maxBytes: 0 }]).success).toBe(false);
+    expect(archive.args.safeParse(['', { maxBytes: 1.5 }]).success).toBe(false);
+    expect(getScopedZippedDirectory.args.safeParse(['dir', { scope, maxBytes: 1024 }]).success).toBe(true);
+    expect(getScopedZippedDirectory.args.safeParse(['dir', { scope, maxBytes: -1 }]).success).toBe(false);
+  });
+});
+
 describe('metadata-only stats (I3)', () => {
   it('accepts a stat with no facts, with known facts, and refuses a malformed count', () => {
     const listing = fileSystemBridgeSchemas.calls.readdirWithStats;

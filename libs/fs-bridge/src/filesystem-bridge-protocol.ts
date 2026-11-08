@@ -446,7 +446,10 @@ export type FileSystemBridgeScopedReads = {
   readScopedFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readScopedFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
   readScopedShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
-  getScopedZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getScopedZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /** Workspace-wide bridge calls, with signatures derived from the authority service. @public */
@@ -1167,8 +1170,11 @@ const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
 const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema });
+/** A caller's archive byte ceiling: an archive streams and holds none of its own. */
+const archiveCeilingSchema = z.number().int().positive().optional();
+const scopedArchiveOptionsSchema = z.looseObject({ scope: workspaceScopeSchema, maxBytes: archiveCeilingSchema });
 /** The rooted read content operations take the caller's own export filter. */
-const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional() });
+const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional(), maxBytes: archiveCeilingSchema });
 
 const helloVersionProbeSchema = z.looseObject({ v: z.unknown().optional() });
 const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.preprocess(
@@ -1555,7 +1561,10 @@ const callSchemas = {
     result: z.union([z.string(), bytesSchema]),
   },
   readScopedShallowDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: fileTreeNodesSchema },
-  getScopedZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: z.instanceof(Blob) },
+  getScopedZippedDirectory: {
+    args: z.tuple([z.string(), scopedArchiveOptionsSchema]),
+    result: z.instanceof(Blob),
+  },
   disposeStorageRoot: { args: oneStringArgument, result: voidResult },
   pollExternalChanges: {
     args: z.union([z.tuple([]), z.tuple([z.string().optional()])]),

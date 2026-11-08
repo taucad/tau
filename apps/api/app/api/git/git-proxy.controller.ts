@@ -31,7 +31,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '@taucad/api-core';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { GitProxyQueryDto } from '#api/git/git.dto.js';
 import { RedisService } from '@taucad/api-redis';

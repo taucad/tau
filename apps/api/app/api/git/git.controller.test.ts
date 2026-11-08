@@ -6,7 +6,7 @@ import type { IncomingMessage } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '@taucad/api-core';
 import type { RedisService } from '@taucad/api-redis';
-import { attachHostDevice } from '#auth/auth.guard.js';
+import { attachHostDevice } from '@taucad/api-auth';
 import { gitRequestsPerUserPerWindow, gitRequestsPerWindow, quotaRefusalMarker } from '#api/git/git.constants.js';
 import { GitController, receivePackOutcome, syncOutcomeOf } from '#api/git/git.controller.js';
 import type { GitExecution } from '#api/git/forwarding/git-execution.js';

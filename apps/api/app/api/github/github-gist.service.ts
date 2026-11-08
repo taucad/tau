@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { BetterAuthService } from '#auth/better-auth.service.js';
+import { BetterAuthService } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import { account, githubGistPreference } from '@taucad/api-database/schema';
 import type { Environment } from '@taucad/api-core';

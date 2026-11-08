@@ -3,5 +3,14 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/api-auth",
   "projectType": "library",
-  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:auth"]
+  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:auth"],
+  "targets": {
+    "auth-schema-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx auth@latest generate --config src/config/auth.ts --output src/auth-schema.generated.ts --yes",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
 }

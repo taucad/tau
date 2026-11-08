@@ -19,8 +19,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { ZodSerializerDto } from 'nestjs-zod';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { OptionalAuth, OptionalUser, UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { AuthGuard, OptionalAuth, OptionalUser, UseAuth, User } from '@taucad/api-auth';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import {
   InvitePublicationAccessDto,

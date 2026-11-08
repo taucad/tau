@@ -40,8 +40,8 @@ import type {
   WireOperationReceipt,
 } from '@taucad/billing';
 import { serializeEntitlements } from '@taucad/billing';
-import type { AuthUser } from '#auth/auth.type.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import type { AuthUser } from '@taucad/api-auth';
+import { UseAuth, User } from '@taucad/api-auth';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';

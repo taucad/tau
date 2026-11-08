@@ -1,5 +1,3 @@
-import type { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import type { HostsService } from '#api/hosts/hosts.service.js';
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError } from 'better-auth/api';
@@ -16,12 +14,12 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseService } from '@taucad/api-database';
 import { eq } from 'drizzle-orm';
 import { storageTombstone, user as userTable } from '@taucad/api-database/schema';
-import { eraseAccountEvidence } from '#api/agent-observability/evidence-erasure.js';
 import type { Environment } from '@taucad/api-core';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
-import { emailDomainNotAllowed, isEmailDomainAllowed } from '#auth/email-domain-allowlist.js';
+import { emailDomainNotAllowed, isEmailDomainAllowed } from '#email-domain-allowlist.js';
 import type { EmailService } from '@taucad/api-email';
+import type { AccountDeletionGate, AccountDeletionHook } from '#auth-extensions.js';
 import {
   buildFrontendForgotPasswordUrl,
   buildFrontendMagicLinkVerifyUrl,
@@ -110,9 +108,14 @@ type BetterAuthConfigOptions = {
   databaseService: DatabaseService;
   configService: ConfigService<Environment, true>;
   emailService: EmailService;
-  closure?: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'> | undefined;
-  /** Stops the account's cloud hosts before the cascade takes their rows (W10 a4). */
-  cloudHosts?: Pick<HostsService, 'retireCloudHosts'> | undefined;
+  /** The financial account closure in Tau Cloud; it may refuse the deletion. */
+  closure?: AccountDeletionGate | undefined;
+  /**
+   * The rest of an accepted deletion, in order: stopping the account's cloud
+   * hosts before the cascade takes their rows (W10 a4) ahead of the tombstone,
+   * erasing its agent evidence after it (T13).
+   */
+  deletionHooks?: readonly AccountDeletionHook[] | undefined;
 };
 
 /**
@@ -123,6 +126,7 @@ type BetterAuthConfigOptions = {
 export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAuthOptions {
   const logger = new Logger('BetterAuth');
   const { databaseService, configService, emailService } = options;
+  const deletionHooks = options.deletionHooks ?? [];
   const baseURL = configService.get('AUTH_URL', { infer: true });
   const secureCookies = new URL(baseURL).protocol === 'https:';
   const allowedEmailDomains = configService.get('TAU_AUTH_ALLOWED_EMAIL_DOMAINS', { infer: true });
@@ -208,7 +212,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
           /* After the closure, which may still refuse: a cloud host holds a
              clone of the account's project, so it stops before the account
              goes, and never for a deletion that was refused (W10 a4). */
-          await options.cloudHosts?.retireCloudHosts(user.id);
+          for (const hook of deletionHooks.filter(({ stage }) => stage === 'before-storage-tombstone')) {
+            // oxlint-disable-next-line no-await-in-loop -- the steps run in the order bound, each after the last
+            await hook.run({ userId: user.id });
+          }
           await databaseService.database
             .insert(storageTombstone)
             .values({ ownerId: user.id, purgeAfter: new Date(Date.now() + storageTombstoneGrace) })
@@ -216,7 +223,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
           /* Last, once nothing above can refuse: an erased account admits no
              further evidence, and every trace it reported or that its projects
              hold is named for deletion before the cascade removes the receipts (T13). */
-          await eraseAccountEvidence(databaseService.database, user.id);
+          for (const hook of deletionHooks.filter(({ stage }) => stage === 'after-storage-tombstone')) {
+            // oxlint-disable-next-line no-await-in-loop -- the steps run in the order bound, each after the last
+            await hook.run({ userId: user.id });
+          }
         },
       },
     },

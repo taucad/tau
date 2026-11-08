@@ -1,23 +1,20 @@
 /* oxlint-disable no-use-extend-native/no-use-extend-native -- Reflect.Metadata is required */
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { DynamicModule, NestModule, OnModuleInit } from '@nestjs/common';
-import { Global, HttpException, Inject, Logger, Module, Optional } from '@nestjs/common';
+import { Global, Inject, Logger, Module, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } from '@nestjs/core';
 import { betterAuth } from 'better-auth';
 import type { FastifyReply as Reply, FastifyRequest as Request } from 'fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
-import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#constants/auth.constant.js';
+import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#auth.constant.js';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
-import { AuthService } from '#auth/auth.service.js';
-import { BetterAuthService } from '#auth/better-auth.service.js';
+import { AuthService } from '#auth.service.js';
+import { BetterAuthService } from '#better-auth.service.js';
 import type { Environment } from '@taucad/api-core';
 import { EmailModule, EmailService } from '@taucad/api-email';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { HostsModule } from '#api/hosts/hosts.module.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '#auth-extensions.js';
+import type { AccountDeletionGate, AccountDeletionHook, AuthRouteExtension } from '#auth-extensions.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
@@ -34,42 +31,39 @@ const hooks = [
   exports: [AuthService],
 })
 export class AuthModule implements NestModule, OnModuleInit {
-  public static forRootAsync(options: { readonly tauCloudEnabled: boolean }): DynamicModule {
-    const authProvider = options.tauCloudEnabled
-      ? {
-          provide: authInstanceKey,
-          // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct auth composition tokens.
-          async useFactory(
-            databaseService: DatabaseService,
-            configService: ConfigService<Environment, true>,
-            emailService: EmailService,
-            cloudHosts: HostsService,
-            closure: BillingAccountClosureService,
-          ): Promise<AuthInstance> {
-            return betterAuth(
-              getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts, closure }),
-            );
-          },
-          inject: [DatabaseService, ConfigService, EmailService, HostsService, BillingAccountClosureService],
-        }
-      : {
-          provide: authInstanceKey,
-          // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct auth composition tokens.
-          async useFactory(
-            databaseService: DatabaseService,
-            configService: ConfigService<Environment, true>,
-            emailService: EmailService,
-            cloudHosts: HostsService,
-          ): Promise<AuthInstance> {
-            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts }));
-          },
-          inject: [DatabaseService, ConfigService, EmailService, HostsService],
-        };
+  /**
+   * The Better Auth instance and its Nest services. What an account deletion
+   * and the auth routes extend it with comes through the ports in
+   * `auth-extensions.ts`, which the app binds; `tauCloudEnabled` is the mode
+   * the app composes them for.
+   */
+  public static forRootAsync(_options: { readonly tauCloudEnabled: boolean }): DynamicModule {
+    const authProvider = {
+      provide: authInstanceKey,
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct auth composition tokens.
+      async useFactory(
+        databaseService: DatabaseService,
+        configService: ConfigService<Environment, true>,
+        emailService: EmailService,
+        closure: AccountDeletionGate | undefined,
+        deletionHooks: readonly AccountDeletionHook[] | undefined,
+      ): Promise<AuthInstance> {
+        return betterAuth(
+          getBetterAuthConfig({ databaseService, configService, emailService, closure, deletionHooks }),
+        );
+      },
+      inject: [
+        DatabaseService,
+        ConfigService,
+        EmailService,
+        { token: accountDeletionGateToken, optional: true },
+        { token: accountDeletionHooksToken, optional: true },
+      ],
+    };
     return {
       global: true,
       module: AuthModule,
-      /* HostsModule for account deletion's cloud-host stop (W10 a4). */
-      imports: [DatabaseModule, EmailModule, HostsModule, ...(options.tauCloudEnabled ? [BillingModule] : [])],
+      imports: [DatabaseModule, EmailModule],
       providers: [authProvider, BetterAuthService],
       exports: [authInstanceKey, BetterAuthService],
     };
@@ -83,7 +77,7 @@ export class AuthModule implements NestModule, OnModuleInit {
     @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
     @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost<FastifyAdapter>,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
-    @Optional() @Inject(BillingPaymentsService) private readonly payments?: BillingPaymentsService,
+    @Optional() @Inject(authRouteExtensionsToken) private readonly routeExtensions?: readonly AuthRouteExtension[],
   ) {}
 
   public onModuleInit(): void {
@@ -127,34 +121,9 @@ export class AuthModule implements NestModule, OnModuleInit {
       return;
     }
 
-    // This scoped parser preserves signed bytes ahead of the authentication wildcard.
-    if (this.payments) {
-      const stripeWebhookPath = `${basePath}/stripe/webhook`;
-      void instance.register(async (scoped) => {
-        scoped.removeContentTypeParser('application/json');
-        scoped.addContentTypeParser(
-          'application/json',
-          { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
-          (_request, body, done) => {
-            done(null, body);
-          },
-        );
-        scoped.post(stripeWebhookPath, { bodyLimit: 1024 * 1024 }, async (request: Request, reply: Reply) => {
-          if (!Buffer.isBuffer(request.body) || typeof request.headers['stripe-signature'] !== 'string') {
-            await reply.status(400).send({ code: 'invalid_stripe_delivery' });
-            return;
-          }
-          try {
-            await this.payments?.receiveWebhook(new Uint8Array(request.body), request.headers['stripe-signature']);
-            await reply.status(200).send({ received: true });
-          } catch (error) {
-            const status = error instanceof HttpException ? error.getStatus() : 503;
-            await reply
-              .status(status)
-              .send({ code: status >= 500 ? 'stripe_inbox_unavailable' : 'invalid_stripe_delivery' });
-          }
-        });
-      });
+    // Extensions (the byte-exact Stripe webhook in Tau Cloud) register ahead of the authentication wildcard.
+    for (const extension of this.routeExtensions ?? []) {
+      extension.register(instance, basePath);
     }
 
     // Configure the auth routes

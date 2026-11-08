@@ -24,8 +24,7 @@ import {
   CodeOwnedBillableModelQualificationResolver,
   registerBillableModelMeterContracts,
 } from '#api/billing/billable-model-qualification.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import type { Environment } from '@taucad/api-core';
 

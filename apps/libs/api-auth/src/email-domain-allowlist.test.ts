@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isEmailDomainAllowed } from '#auth/email-domain-allowlist.js';
+import { isEmailDomainAllowed } from '#email-domain-allowlist.js';
 
 describe('isEmailDomainAllowed', () => {
   const allowed = ['tau.new', 'fontein.co'];

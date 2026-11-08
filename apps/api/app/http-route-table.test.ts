@@ -11,8 +11,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { mockDeep } from 'vitest-mock-extended';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
-import { AuthModule } from '#auth/auth.module.js';
-import { isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
+import { AuthModule, isOptionalAuth, isPublicAuth } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import { getEnvironment } from '@taucad/api-core';
 

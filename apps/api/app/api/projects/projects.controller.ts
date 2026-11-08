@@ -17,7 +17,7 @@ import type { Environment } from '@taucad/api-core';
 import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
 import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { and, count, desc, eq, or, isNull } from 'drizzle-orm';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import { project, projectCollaborator, projectDeletion } from '@taucad/api-database/schema';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';

@@ -13,9 +13,8 @@ import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
 
 const instant = new Date('2026-09-05T12:00:00.000Z');
 const owner = {

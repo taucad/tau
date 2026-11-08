@@ -24,7 +24,7 @@ import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import type { KernelId } from '@taucad/types/constants';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
 import { HostsService } from '#api/hosts/hosts.service.js';

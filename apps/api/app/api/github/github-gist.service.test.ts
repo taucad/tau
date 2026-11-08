@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
-import type { BetterAuthService } from '#auth/better-auth.service.js';
+import type { BetterAuthService } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '@taucad/api-database';
 import type { account, githubGistPreference } from '@taucad/api-database/schema';

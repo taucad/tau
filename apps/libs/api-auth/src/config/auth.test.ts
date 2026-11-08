@@ -50,7 +50,7 @@ describe('auth config modules', () => {
     expect(source).not.toMatch(/from '#config\/auth\.js'/);
   });
 
-  // The better-auth CLI (`nx run api:auth-schema-generate`) loads `auth.ts` and reads the `auth` export's options.
+  // The better-auth CLI (`nx run api-auth:auth-schema-generate`) loads `auth.ts` and reads the `auth` export's options.
   it('still gives the CLI an instance that generates every auth table', async () => {
     const { auth } = await import('#config/auth.js');
 
@@ -59,10 +59,10 @@ describe('auth config modules', () => {
     const models = Object.entries(getSchema(auth.options))
       .filter(([, table]) => table.disableMigrations !== true)
       .map(([name]) => name);
-    const schema = readFileSync(fileURLToPath(new URL('../database/auth-schema.ts', import.meta.url)), 'utf8');
+    const schema = readFileSync(fileURLToPath(new URL('../auth-schema.generated.ts', import.meta.url)), 'utf8');
     const tables = [...schema.matchAll(/pgTable\(\s*'([^']+)'/g)].map(([, name]) => name);
 
-    // `deviceCode` is newer than the generated file and is declared by hand in `database/schema.ts`.
+    // `deviceCode` is newer than the generated file and is declared by hand in `@taucad/api-database/schema` (`auth.schema.ts`).
     expect(models.toSorted()).toEqual(['account', 'apikey', 'deviceCode', 'session', 'user', 'verification']);
     expect(models).toEqual(expect.arrayContaining(tables));
   });

@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 
 /**
- * Better Auth instance for CLI schema generation (`nx run api:auth-schema-generate`).
+ * Better Auth instance for CLI schema generation (`nx run api-auth:auth-schema-generate`).
  *
  * Creating it logs Better Auth's warnings for the missing secret and base URL, so only the
  * CLI may import this module. The runtime and tests import `#config/auth-static.config.js`.

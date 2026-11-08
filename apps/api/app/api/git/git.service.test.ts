@@ -24,7 +24,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import type { RedisService } from '@taucad/api-redis';
 import { GitController } from '#api/git/git.controller.js';

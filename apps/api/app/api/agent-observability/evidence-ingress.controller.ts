@@ -4,7 +4,7 @@ import type { OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { evidenceLimits } from '@taucad/agent-observability/contract';
-import { User } from '#auth/decorators/auth.decorator.js';
+import { User } from '@taucad/api-auth';
 import { CloudHost, CloudHostEvidenceGuard } from '#api/hosts/cloud-host-evidence.guard.js';
 import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';

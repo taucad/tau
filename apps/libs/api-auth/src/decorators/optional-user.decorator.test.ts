@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import type { AuthUser } from '#auth/auth.type.js';
-import { readOptionalUser } from '#auth/decorators/auth.decorator.js';
+import type { AuthUser } from '#auth.type.js';
+import { readOptionalUser } from '#decorators/auth.decorator.js';
 
 function mockExecutionContext(request: unknown): ExecutionContext {
   const stub = {

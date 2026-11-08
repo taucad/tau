@@ -13,7 +13,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '@taucad/api-auth';
 import type { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';

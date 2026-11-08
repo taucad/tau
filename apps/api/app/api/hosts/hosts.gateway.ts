@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '@taucad/api-auth';
 import { asBuffer, hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';

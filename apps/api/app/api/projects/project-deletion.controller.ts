@@ -2,7 +2,7 @@
 import { BadRequestException, Controller, Delete, Get, Header, Inject, Param, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { FastifyReply } from 'fastify';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import type { Environment } from '@taucad/api-core';
 import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';

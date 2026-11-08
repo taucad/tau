@@ -49,13 +49,6 @@
       },
       "parallelism": true
     },
-    "auth-schema-generate": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "npx auth@latest generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
-        "cwd": "{projectRoot}"
-      }
-    },
     "launch": {
       "executor": "nx:run-commands",
       "options": {

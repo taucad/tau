@@ -14,8 +14,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { hostDeviceOf } from '#auth/auth.guard.js';
+import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
 import { FileLinksService } from '#storage/file-links.service.js';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import {

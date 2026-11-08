@@ -9,7 +9,8 @@ import { getEnvironment } from '@taucad/api-core';
 import { TelemetryModule } from '@taucad/api-observability';
 import { RedisModule } from '@taucad/api-redis';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
-import { AuthModule } from '#auth/auth.module.js';
+import { AuthModule } from '@taucad/api-auth';
+import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingService } from '#api/billing/billing.service.js';
@@ -33,6 +34,7 @@ import { LoggerModule } from '@taucad/api-observability/logger-module';
     RedisModule, // @Global()
     DatabaseModule,
     BillingModule,
+    AuthExtensionsModule.forRoot({ tauCloudEnabled: true }),
     AuthModule.forRootAsync({ tauCloudEnabled: true }),
   ],
   providers: [{ provide: APP_PIPE, useClass: ZodValidationPipe }],

@@ -10,6 +10,7 @@ import type { Environment } from '@taucad/api-core';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '@taucad/api-database';
 import type { EmailService } from '@taucad/api-email';
+import type { AccountDeletionHook } from '#auth-extensions.js';
 
 /** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
 type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };
@@ -44,12 +45,6 @@ const createConfig = (
           },
         }),
       }),
-      // Agent-evidence erasure: the owned-project read, then one transaction per subject.
-      select: () => ({ from: () => ({ where: async () => [] }) }),
-      transaction: async () => {
-        order.push('evidence');
-        return { erasureId: 'eve_test', fenced: 0, traces: 0 };
-      },
     },
   } as unknown as DatabaseService;
   const configService = {
@@ -82,9 +77,24 @@ const createConfig = (
       order.push('cloudHosts');
     }),
   };
+  // The deletion hooks the app binds (`composition/auth-extensions.module.ts`): cloud hosts before the tombstone, agent evidence after it.
+  const deletionHooks: AccountDeletionHook[] = [
+    {
+      stage: 'before-storage-tombstone',
+      run: async ({ userId }) => {
+        await cloudHosts.retireCloudHosts(userId);
+      },
+    },
+    {
+      stage: 'after-storage-tombstone',
+      run: async () => {
+        order.push('evidence');
+      },
+    },
+  ];
   const config = getBetterAuthConfig({
     closure,
-    cloudHosts,
+    deletionHooks,
     databaseService,
     configService: configService as unknown as ConfigService<Environment, true>,
     emailService: emailService as unknown as EmailService,

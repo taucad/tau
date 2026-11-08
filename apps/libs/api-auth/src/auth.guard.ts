@@ -5,7 +5,7 @@ import { Reflector } from '@nestjs/core';
 import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyRequest } from 'fastify';
-import { authInstanceKey, isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
+import { authInstanceKey, isOptionalAuth, isPublicAuth } from '#auth.constant.js';
 
 /** A cloud host acting for its owner on one project's git routes (D21). */
 export type HostDevicePrincipal = {

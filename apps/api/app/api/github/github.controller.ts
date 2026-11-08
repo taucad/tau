@@ -18,7 +18,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { PublicAuth, UseAuth, User } from '@taucad/api-auth';
 import { GithubService } from '#api/github/github.service.js';
 import type { Environment } from '@taucad/api-core';
 

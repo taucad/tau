@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { Controller, Get, HttpException, HttpStatus, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';

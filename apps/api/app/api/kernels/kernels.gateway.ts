@@ -6,7 +6,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import { WebSocketServer, WebSocket } from 'ws';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';

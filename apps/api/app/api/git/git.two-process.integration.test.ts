@@ -15,7 +15,7 @@ import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '@taucad/api-auth';
 import { getEnvironment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';

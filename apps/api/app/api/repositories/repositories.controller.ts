@@ -3,7 +3,7 @@ import { Controller, Get, Ip, Query, Req, Res } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { PublicAuth } from '#auth/decorators/auth.decorator.js';
+import { PublicAuth } from '@taucad/api-auth';
 import { ArchiveQueryDto, BranchesQueryDto } from '#api/repositories/repositories.dto.js';
 import type { GithubBranchesResponse } from '#api/repositories/repositories.dto.js';
 import { RepositoriesService } from '#api/repositories/repositories.service.js';

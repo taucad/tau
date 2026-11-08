@@ -9,9 +9,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { fromNodeHeaders } from 'better-auth/node';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '#auth.guard.js';
 import { staticAuthConfig } from '#config/auth-static.config.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '#auth.constant.js';
 
 const testEmail = 'bearer-auth@example.test';
 const testPassword = 'correct horse battery staple';

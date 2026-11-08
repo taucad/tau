@@ -3,8 +3,7 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HostsService } from '#api/hosts/hosts.service.js';
 
 /** A provisioned cloud host reporting for its owner on its own project (T11). */

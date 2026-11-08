@@ -7,7 +7,7 @@ import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ZodValidationException, ZodValidationPipe } from 'nestjs-zod';
-import { AuthGuard } from '#auth/auth.guard.js';
+import { AuthGuard } from '@taucad/api-auth';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';
 import {
   PublicationsController,

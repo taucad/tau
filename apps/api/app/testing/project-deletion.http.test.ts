@@ -24,10 +24,8 @@ import {
   mintHostGitCredential,
   resolveHostGitCredential,
 } from '#api/hosts/host-git-credential.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { staticAuthConfig } from '#config/auth-static.config.js';
+import { AuthGuard, authInstanceKey, staticAuthConfig } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
-import { authInstanceKey } from '#constants/auth.constant.js';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';

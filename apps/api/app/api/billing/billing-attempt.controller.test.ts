@@ -16,7 +16,7 @@ import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import { environmentSchemaBase } from '@taucad/api-core';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;

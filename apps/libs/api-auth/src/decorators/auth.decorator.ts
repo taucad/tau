@@ -3,9 +3,9 @@
 import { applyDecorators, createParamDecorator, SetMetadata, UseGuards } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { isPublicAuth, isOptionalAuth } from '#constants/auth.constant.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import type { AuthUser } from '#auth/auth.type.js';
+import { isPublicAuth, isOptionalAuth } from '#auth.constant.js';
+import { AuthGuard } from '#auth.guard.js';
+import type { AuthUser } from '#auth.type.js';
 
 /**
  * Compound decorator that applies authentication guard.

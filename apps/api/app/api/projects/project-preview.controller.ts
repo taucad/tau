@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { createHash } from 'node:crypto';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';

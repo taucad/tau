@@ -7,7 +7,7 @@ import type { Auth } from 'better-auth';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { evidenceLimits } from '@taucad/agent-observability/contract';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import {
   EvidenceIngressController,

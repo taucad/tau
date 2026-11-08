@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Configuration fixtures retain their environment key names. */
 import { ConfigService } from '@nestjs/config';
 import { mockDeep } from 'vitest-mock-extended';
+import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
 import { DatabaseService } from '@taucad/api-database';
@@ -8,6 +9,8 @@ import { getEnvironment } from '@taucad/api-core';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
+import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '@taucad/api-auth';
+import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
 import { ApiModule } from '#api/api.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
@@ -43,6 +46,14 @@ describe('AppModule', () => {
       ),
     ).not.toContain('CodeCompletionModule');
     expect(() => moduleRef.get(BillingPaymentsService)).toThrow();
+    // Auth's extension ports: self-host binds no deletion gate and no extra auth route, and still retires
+    // cloud hosts before the storage tombstone and erases agent evidence after it.
+    expect(() => moduleRef.get<unknown>(accountDeletionGateToken)).toThrow();
+    expect(() => moduleRef.get<unknown>(authRouteExtensionsToken)).toThrow();
+    expect(moduleRef.get<AccountDeletionHook[]>(accountDeletionHooksToken).map(({ stage }) => stage)).toEqual([
+      'before-storage-tombstone',
+      'after-storage-tombstone',
+    ]);
   });
 
   it('should configure Stripe test collection and preserve webhook persistence failure', async () => {
@@ -69,6 +80,9 @@ describe('AppModule', () => {
       .useValue(database)
       .compile();
     const payments = moduleRef.get(BillingPaymentsService);
+    // Tau Cloud gates account deletion on billing's closure and registers the Stripe webhook ahead of the auth wildcard.
+    expect(moduleRef.get(accountDeletionGateToken)).toBe(moduleRef.get(BillingAccountClosureService));
+    expect(moduleRef.get<AuthRouteExtension[]>(authRouteExtensionsToken)).toHaveLength(1);
     await expect(
       payments.prepareTopup('user', {
         requestId: 'request',

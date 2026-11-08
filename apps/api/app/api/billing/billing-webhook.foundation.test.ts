@@ -12,8 +12,8 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { Stripe } from 'stripe';
-import { AuthModule } from '#auth/auth.module.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { authInstanceKey, AuthModule, authRouteExtensionsToken } from '@taucad/api-auth';
+import { stripeWebhookRoute } from '#api/billing/billing-stripe-webhook.route.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { BillingCashQualification } from '#api/billing/billing-payments.service.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
@@ -75,6 +75,11 @@ const auth = {
           mockDeep<BillingCashQualification>(),
         );
       },
+    },
+    {
+      provide: authRouteExtensionsToken,
+      inject: [BillingPaymentsService],
+      useFactory: (payments: BillingPaymentsService) => [stripeWebhookRoute(payments)],
     },
   ],
 })

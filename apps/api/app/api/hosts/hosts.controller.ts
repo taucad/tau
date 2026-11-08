@@ -19,8 +19,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
-import { AuthGuard } from '#auth/auth.guard.js';
-import { OptionalAuth, OptionalUser, PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { AuthGuard, OptionalAuth, OptionalUser, PublicAuth, UseAuth, User } from '@taucad/api-auth';
 import {
   ApproveHostPairingDto,
   CreateCloudHostDto,

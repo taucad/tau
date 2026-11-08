@@ -30,5 +30,31 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@better-auth/api-key": "catalog:",
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@nestjs/platform-fastify": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-email": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "better-auth": "catalog:",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "postgres": "^3.4.9",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "@taucad/api-observability": "workspace:*",
+    "dotenv": "catalog:",
+    "pino-http": "^10.5.0",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:"
   }
 }

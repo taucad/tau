@@ -171,6 +171,11 @@ const readingHandlers = {
     enq.emit({ type: 'progress', processed: event.processed, total: event.total });
     return { context: { progress: { processed: event.processed, total: event.total } } };
   },
+  /* Cancel while a source is planned: leaving the state stops its actor, so a late listing never becomes the review. */
+  reset: {
+    target: 'idle',
+    context: reset,
+  },
 };
 
 /**

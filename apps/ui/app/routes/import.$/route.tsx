@@ -279,15 +279,16 @@ export default function ImportRoute(): React.JSX.Element {
    * stage again; main lets go of the rest when the window closes.
    */
   const hostGrantsRef = useRef<string[]>([]);
-  const holdHostGrants = useCallback((grants: readonly string[]): void => {
-    const held = hostGrantsRef.current.splice(0, hostGrantsRef.current.length, ...grants);
+  /* False once the route is left: a grant that resolves after that is let go at once, never held. */
+  const routeActiveRef = useRef(true);
+  const releaseHostGrants = useCallback((grants: readonly string[]): void => {
     const bridge = desktopBridge();
-    if (held.length === 0 || bridge === undefined) {
+    if (grants.length === 0 || bridge === undefined) {
       return;
     }
     const release = async (): Promise<void> => {
       try {
-        await bridge.dialog.releaseImportGrants(held);
+        await bridge.dialog.releaseImportGrants(grants);
       } catch {
         /* Main lets go of them when the window closes. */
       }
@@ -295,15 +296,26 @@ export default function ImportRoute(): React.JSX.Element {
     // async-iife: fire-and-forget -- a release is best effort; the window's close releases the rest.
     void release();
   }, []);
-  useEffect(
-    () => () => {
+  const holdHostGrants = useCallback(
+    (grants: readonly string[]): void => {
+      if (!routeActiveRef.current) {
+        releaseHostGrants(grants);
+        return;
+      }
+      releaseHostGrants(hostGrantsRef.current.splice(0, hostGrantsRef.current.length, ...grants));
+    },
+    [releaseHostGrants],
+  );
+  useEffect(() => {
+    routeActiveRef.current = true;
+    return () => {
       linkedImportAbortRef.current?.abort(new Error('The import was cancelled.'));
       importSessionRef.current?.close();
       importSessionRef.current = undefined;
       holdHostGrants([]);
-    },
-    [holdHostGrants],
-  );
+      routeActiveRef.current = false;
+    };
+  }, [holdHostGrants]);
   const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
@@ -633,7 +645,12 @@ export default function ImportRoute(): React.JSX.Element {
           return;
         }
         const opened = await bridge.openFiles.consume();
-        if (!active || opened.length === 0) {
+        if (!active) {
+          /* Consumed after this effect ended: nothing will import them, so they are let go now. */
+          releaseHostGrants(opened.map(({ grant }) => grant));
+          return;
+        }
+        if (opened.length === 0) {
           return;
         }
         setActiveMode('disk');
@@ -659,7 +676,7 @@ export default function ImportRoute(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [clearDesktopOpen, diskActorRef, holdHostGrants, isDesktopOpen]);
+  }, [clearDesktopOpen, diskActorRef, holdHostGrants, isDesktopOpen, releaseHostGrants]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state
@@ -791,6 +808,11 @@ export default function ImportRoute(): React.JSX.Element {
       if (picked === undefined) {
         return;
       }
+      if (!routeActiveRef.current) {
+        /* Picked after the route was left: nothing will import it. */
+        releaseHostGrants([picked.grant]);
+        return;
+      }
       setActiveMode('disk');
       setLocalOperation('read');
       holdHostGrants([picked.grant]);
@@ -798,7 +820,7 @@ export default function ImportRoute(): React.JSX.Element {
     } catch (error) {
       diskActorRef.send({ type: 'externalError', error: error instanceof Error ? error : new Error(String(error)) });
     }
-  }, [diskActorRef, holdHostGrants]);
+  }, [diskActorRef, holdHostGrants, releaseHostGrants]);
   const isDesktopHost = desktopBridge() !== undefined;
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {

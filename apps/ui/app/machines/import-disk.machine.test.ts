@@ -226,6 +226,23 @@ describe('importDiskMachine', () => {
   });
 
   describe('reset', () => {
+    it('leaves a host plan still listing on reset, and never turns its late listing into the review', async () => {
+      const listed = Promise.withResolvers<ImportListing>();
+      const actor = createTestActor({ plan: async () => listed.promise });
+      actor.start();
+      actor.send({ type: 'processHost', grants: [{ grant: 'grant-1', name: 'folder', kind: 'directory' }] });
+      expect(actor.getSnapshot().value).toBe('readingHost');
+      actor.send({ type: 'reset' });
+      expect(actor.getSnapshot().value).toBe('idle');
+      listed.resolve(listing);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(actor.getSnapshot().value).toBe('idle');
+      expect(actor.getSnapshot().context.listing.files).toHaveLength(0);
+      actor.stop();
+    });
+
     it('should reset on reset event from idle', () => {
       const actor = createTestActor();
       actor.start();

@@ -681,14 +681,12 @@ jobs:
           file: apps/api/Dockerfile
           load: true
           tags: tau-api:smoke
-          # Read-through both caches so the smoke test benefits from the
-          # production deploy's registry cache when available. Cache-to
-          # writes only to GHA — PRs from forks can't push to registry.fly.io
-          # and we don't want to invalidate the production cache from a PR.
-          cache-from: |
-            type=gha
-            type=registry,ref=registry.fly.io/tau-api-staging:buildcache
-          cache-to: type=gha,mode=max
+          # Read-only: `api-docker-cache` below writes the dependency layers from
+          # `main`, which every PR can read. A PR writing its own cache spent about
+          # 4 minutes exporting layers that its own branch scope then rarely reused
+          # (job 128576364405: 247 s of a 14-minute build). The Fly registry cache
+          # needs a Fly login a PR does not have, so it is not read here.
+          cache-from: type=gha,scope=api-deps
           # Secret may be unset for fork PRs. The Dockerfile tolerates a
           # missing nx_cloud_token secret (Nx falls back to local cache).
           secrets: |
@@ -700,10 +698,9 @@ jobs:
           context: .
           file: packages/host/Dockerfile
           target: deps
-          cache-from: |
-            type=gha,scope=host-deps
-            type=gha
-          cache-to: type=gha,scope=host-deps,mode=max
+          # Read-only, written from `main` by `api-docker-cache`; its export alone
+          # took about 4 minutes per PR run.
+          cache-from: type=gha,scope=host-deps
 
       - name: Migrate the smoke database
         run: |
@@ -768,6 +765,62 @@ jobs:
   # files reach a service — plus the service-backed targets (`test:models`,
   # `test:server-modes`, `test:git`). Billing contracts have their own job. Always runs on `main`
   # pushes so the deploy gate in `staging.yml` is never green off a stale service check.
+  # Writes the dependency layers the PR-only `api-docker-smoke` job reads: the GHA cache
+  # a branch writes is readable by pull requests into it, so one `main` writer replaces a
+  # cold cache and a 4-minute export on every PR run. It rebuilds only when an input of
+  # the `deps` stages, or this workflow, changed since the previous `main` commit, so most
+  # pushes skip it.
+  api-docker-cache:
+    name: API Docker dependency cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check whether the dependency stages changed
+        id: inputs
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BEFORE"
+          git cat-file -e "$base^{commit}" 2>/dev/null || base=HEAD~1
+          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml pnpm-workspace.yaml '*package.json' tools/pnpm apps/api/Dockerfile packages/host/Dockerfile .github/workflows/ci.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo 'Dependency inputs unchanged; the cache from an earlier main commit still applies.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Cache API dependency layers
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: deps
+          cache-from: type=gha,scope=api-deps
+          cache-to: type=gha,scope=api-deps,mode=max,ignore-error=true
+
+      - name: Cache host dependency layers
+        if: steps.inputs.outputs.changed == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: packages/host/Dockerfile
+          target: deps
+          cache-from: type=gha,scope=host-deps
+          cache-to: type=gha,scope=host-deps,mode=max,ignore-error=true
+
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest

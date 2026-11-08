@@ -66,4 +66,15 @@ describe('Page server rendering', () => {
     expect(html).toContain('Server sidebar');
     expect(html).toContain('Server route content');
   });
+
+  it('places both panes in CSS and streams no fallback for them (R4, R10)', () => {
+    const html = renderToString(<Page />);
+
+    // The panes carry their final geometry before Allotment measures.
+    expect(html).toContain('w-(--sidebar-panel-width)');
+    expect(html).toContain('left-(--sidebar-panel-width)');
+    // No Suspense boundary in the shell, so nothing to outline behind a spinner.
+    expect(html).not.toContain('<!--$-->');
+    expect(html).not.toContain('role="status"');
+  });
 });

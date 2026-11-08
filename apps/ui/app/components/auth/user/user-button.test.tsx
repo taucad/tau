@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
 
@@ -30,6 +31,17 @@ describe('UserButton', () => {
     render(<UserButton size='sm' />);
 
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
+  });
+
+  it('renders the final signed-out row while the session loads, with no skeleton stage (R7)', () => {
+    session.isPending = true;
+    const pending = renderToString(<UserButton size='sm' />);
+    session.isPending = false;
+    const signedOut = renderToString(<UserButton size='sm' />);
+
+    expect(pending).toBe(signedOut);
+    expect(pending).toContain('Account');
+    expect(pending).not.toContain('data-slot="skeleton"');
   });
 
   it('names the signed-out way in "Sign in", the word every other sign-in entry uses (I6)', async () => {

@@ -699,12 +699,18 @@ export class FileContentService {
    *
    * Each path settles on its latest save: a write refused as a conflict that
    * its editor rebased and saved again settles on that save, not on the refusal.
+   * A refusal its editor answers another way (a conflict recorded beside the
+   * file) settles on the promise `resolution` hands back for it.
    *
+   * @param options - `resolution` answers a refusal its caller owns with the
+   *   promise that settles it, or `undefined` when the caller does not own it.
    * @returns Promise settled once no editor write is outstanding.
    * @throws The latest failure of a path whose last write failed, a refused
    *   write included: that edit is not on disk, so a cut now would not hold it.
    */
-  public async settleEditorSaves(): Promise<void> {
+  public async settleEditorSaves(
+    options?: Readonly<{ resolution?: (failure: unknown) => Promise<void> | undefined }>,
+  ): Promise<void> {
     this.#editorSaveFlush.emit(undefined);
     const barriers = await Promise.allSettled(
       this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
@@ -718,16 +724,30 @@ export class FileContentService {
       }
       // oxlint-disable-next-line no-await-in-loop -- each round waits on the saves the previous one's failures started.
       const outcomes = await Promise.allSettled(round.map(async ([, state]) => state.completion));
+      const answered: Array<Readonly<{ path: string; settled: Promise<void> }>> = [];
       for (const [index, [path]] of round.entries()) {
         const outcome = outcomes[index];
-        if (outcome?.status === 'rejected') {
+        const settled = outcome?.status === 'rejected' ? options?.resolution?.(outcome.reason) : undefined;
+        if (outcome?.status === 'rejected' && settled === undefined) {
           failures.set(path, outcome.reason);
         } else {
           failures.delete(path);
         }
+        if (settled !== undefined) {
+          answered.push({ path, settled });
+        }
       }
       /* A failed path saved again since (its editor rebased onto the file) settles on that save. */
       round = [...this.editorSaves.entries()].filter(([path, state]) => failures.has(path) && !seen.has(state));
+      /* A refusal its editor owns settles on that editor's answer: the record, or the rebased save. */
+      // oxlint-disable-next-line no-await-in-loop -- this round's answers settle before the next round runs.
+      const answers = await Promise.allSettled(answered.map(async ({ settled }) => settled));
+      for (const [index, { path }] of answered.entries()) {
+        const answer = answers[index];
+        if (answer?.status === 'rejected') {
+          failures.set(path, answer.reason);
+        }
+      }
     }
     const barrierFailure: unknown = barriers.find(
       (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',

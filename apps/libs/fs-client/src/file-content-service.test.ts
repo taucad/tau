@@ -681,6 +681,55 @@ describe('FileContentService', () => {
       expect(vi.mocked(proxy.writeFile).mock.calls.at(-1)?.[1]).toEqual(new Uint8Array([1, 2]));
     });
 
+    it('should settle a refusal its editor answers on that answer, not as an unsaved edit', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      /* The editor records the overlap beside the file; the close waits on that record. */
+      const record = Promise.withResolvers<void>();
+      let settled = false;
+
+      const settling = (async () => {
+        await service.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined => (failure === refused ? record.promise : undefined),
+        });
+        settled = true;
+      })();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(settled).toBe(false);
+      record.resolve();
+      await settling;
+
+      expect(settled).toBe(true);
+      await expect(saving).rejects.toBe(refused);
+    });
+
+    it('should report the answer when the editor fails to answer a refusal it owns', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      const unrecorded = new Error('record failed');
+
+      await expect(
+        service.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined =>
+            failure === refused ? Promise.reject(unrecorded) : undefined,
+        }),
+      ).rejects.toBe(unrecorded);
+      await expect(saving).rejects.toBe(refused);
+    });
+
+    it('should still report a refusal its editor does not own', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+
+      await expect(service.settleEditorSaves({ resolution: () => undefined })).rejects.toBe(refused);
+      await expect(saving).rejects.toBe(refused);
+    });
+
     it('should settle only once an edit made during a move is written at the destination', async () => {
       const move = Promise.withResolvers<FileStat>();
       vi.mocked(proxy.move).mockReturnValueOnce(move.promise);

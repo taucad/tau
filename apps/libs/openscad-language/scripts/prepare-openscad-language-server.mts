@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const wasiSdkVersion = '27';
 const wasiSdks: Readonly<Partial<Record<string, { readonly archive: string; readonly sha256: string }>>> = {
@@ -69,6 +70,38 @@ const succeeds = (command: string, args: readonly string[]): string | undefined 
   }
 };
 
+const downloadAttempts = 4;
+
+/**
+ * Fetch a release asset, retrying a network error or a 5xx with backoff (2 s, 4 s, 8 s).
+ * GitHub release downloads answer 502/503 for minutes at a time; a 4xx is final.
+ */
+const downloadWithRetry = async (url: string): Promise<Uint8Array<ArrayBuffer>> => {
+  let failure = 'no attempt';
+  for (let attempt = 1; attempt <= downloadAttempts; attempt += 1) {
+    if (attempt > 1) {
+      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
+      await delay(1000 * 2 ** (attempt - 1));
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
+      const response = await fetch(url);
+      if (response.ok) {
+        // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
+        return new Uint8Array(await response.arrayBuffer());
+      }
+      failure = `HTTP ${String(response.status)}`;
+      if (response.status < 500) {
+        break;
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+    console.log(`wasi-sdk download attempt ${String(attempt)} failed (${failure})`);
+  }
+  throw new Error(`wasi-sdk download failed with ${failure}`);
+};
+
 /** A C compiler and archiver for wasm32-unknown-unknown: the override, a capable system clang, or wasi-sdk. */
 const ensureWasmCompiler = async (): Promise<{ cc: string; ar: string }> => {
   if (ccOverride) {
@@ -89,13 +122,9 @@ const ensureWasmCompiler = async (): Promise<{ cc: string; ar: string }> => {
   const recorded = (await exists(marker)) ? await readFile(marker, 'utf8') : undefined;
   if (recorded?.trim() !== sdk.sha256) {
     console.log(`Downloading ${sdk.archive}`);
-    const response = await fetch(
+    const bytes = await downloadWithRetry(
       `https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${wasiSdkVersion}/${sdk.archive}`,
     );
-    if (!response.ok) {
-      throw new Error(`wasi-sdk download failed with HTTP ${String(response.status)}`);
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
     if (sha256(bytes) !== sdk.sha256) {
       throw new Error('wasi-sdk integrity mismatch');
     }

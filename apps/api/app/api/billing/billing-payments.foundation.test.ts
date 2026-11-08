@@ -194,6 +194,16 @@ const server = createServer((request, response) => {
     sessionReply(session);
     return;
   }
+  if (request.method === 'GET' && url.pathname === '/v1/checkout/sessions') {
+    const customer = url.searchParams.get('customer');
+    sessionReply({
+      object: 'list',
+      data: [...checkoutSessions.values()].filter((session) => customer === null || session['customer'] === customer),
+      has_more: false,
+      url: url.pathname,
+    });
+    return;
+  }
   const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)$/u.exec(url.pathname)?.groups?.['id'];
   if (request.method === 'GET' && sessionId !== undefined && checkoutSessions.has(sessionId)) {
     sessionReply(checkoutSessions.get(sessionId));
@@ -2601,7 +2611,7 @@ describe('billing payments PostgreSQL foundation', () => {
       await expect(payments.listActions(pro.userId, 'billing_portal')).resolves.toEqual([]);
       await database
         .update(billingProviderLeg)
-        .set({ state: 'dispatched' })
+        .set({ state: 'attention' })
         .where(eq(billingProviderLeg.id, created.actionId));
       await onlyDue(created.actionId);
       // Nothing about a portal session is recoverable, so the sweep never claims one.

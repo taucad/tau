@@ -60,6 +60,7 @@ describe('holdInStandby (DC4)', () => {
         },
         signal: new AbortController().signal,
         report,
+        retryDelay: 0,
       }),
     ).rejects.toThrow("Maintenance standby check 'database' failed");
 
@@ -67,6 +68,28 @@ describe('holdInStandby (DC4)', () => {
     expect(report.mock.calls.map(([line]) => JSON.parse(line) as unknown)).toEqual([
       { event: 'revisions_maintenance.standby_failed', check: 'database', error: 'TypeError' },
     ]);
+  });
+
+  it('should retry a check that fails transiently before verifying it', async () => {
+    const stop = new AbortController();
+    const report = vi.fn<(line: string) => void>();
+    const database = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('connection terminated unexpectedly'))
+      .mockResolvedValue('ok');
+
+    const held = holdInStandby({ checks: { database }, signal: stop.signal, report, retryDelay: 0 });
+    await vi.waitFor(() => {
+      expect(report).toHaveBeenCalledTimes(1);
+    });
+
+    expect(database).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(report.mock.calls[0]?.[0] ?? '{}')).toEqual({
+      event: 'revisions_maintenance.standby',
+      verified: ['database'],
+    });
+    stop.abort();
+    await held;
   });
 
   it('should return at once when already stopped', async () => {

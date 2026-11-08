@@ -517,7 +517,18 @@ const main = async (): Promise<void> => {
           maxBuffer: 8 * 1024 * 1024,
           timeout: 1_200_000,
         },
-      );
+      ).catch(async (error: unknown) => {
+        /* A renderer that never answers leaves no evidence of its own; the app's log since this step began says
+         * whether the main process was busy, still starting or already gone. Bounded, and only on failure. */
+        const log = await readFile(join(profile, 'logs/desktop.log')).then(
+          (bytes) => bytes.subarray(offset).subarray(-16_384).toString(),
+          () => '(no desktop log)',
+        );
+        throw new Error(
+          `Renderer step ${stage}/${action ?? 'render'} failed; desktop log since the step began:\n${log}`,
+          { cause: error },
+        );
+      });
       return action && action !== 'reinstall-ui' && action !== 'active'
         ? undefined
         : rendererSchema.parse(await json(output));

@@ -83,6 +83,12 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
+# The IAP tunnel can exit when its host goes away (the post-driver reboot does that), so it is restarted on demand.
+start_tunnel() {
+  gcloud compute start-iap-tunnel "$instance" 22 --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
+    --local-host-port=127.0.0.1:2222 >> "$output/iap-tunnel.log" 2>&1 &
+  tunnel_pid=$!
+}
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
 if [[ "$host" == qemu ]]; then
   # Do not hide or wait indefinitely on hosted-runner repository refresh problems.
@@ -160,9 +166,7 @@ if [[ "$host" == gcp ]]; then
     sleep 5
   done
   [[ -s "$work/known_hosts" ]] || { printf 'Guest never published its host keys\n' >&2; exit 1; }
-  gcloud compute start-iap-tunnel "$instance" 22 --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
-    --local-host-port=127.0.0.1:2222 > "$output/iap-tunnel.log" 2>&1 &
-  tunnel_pid=$!
+  start_tunnel
 fi
 ssh_options=(-i "$work/client" -p 2222 -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known_hosts")
 # An IAP tunnel can drop a session that stays silent through a long harness step; keep it alive.
@@ -170,7 +174,14 @@ if [[ "$host" == gcp ]]; then ssh_options+=(-o ServerAliveInterval=30 -o ServerA
 wait_for_guest() {
   local _attempt
   for _attempt in $(seq 1 90); do
-    if [[ -n "$qemu_pid" ]]; then kill -0 "$qemu_pid"; else kill -0 "$tunnel_pid"; fi
+    if [[ -n "$qemu_pid" ]]; then
+      kill -0 "$qemu_pid"
+    elif ! kill -0 "$tunnel_pid" 2>/dev/null; then
+      wait "$tunnel_pid" 2>/dev/null || true
+      printf 'IAP tunnel exited; restarting it\n'
+      tail -n 5 "$output/iap-tunnel.log" || true
+      start_tunnel
+    fi
     if ssh "${ssh_options[@]}" tau@127.0.0.1 true 2>/dev/null; then return 0; fi
     sleep 5
   done
@@ -183,12 +194,15 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'if command -v cloud-init >/dev/null; then
 if [[ "$host" == gcp ]]; then
   ssh "${ssh_options[@]}" tau@127.0.0.1 'bash -s' \
     < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-gpu-driver-guest.sh" | tee "$output/gpu-driver.txt"
-  # Boot into the installed driver, as a user does after installing it. The IAP tunnel serves each new connection.
+  # Boot into the installed driver, as a user does after installing it. wait_for_guest restarts the IAP tunnel if the
+  # reboot ended it.
   first_boot="$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')"
+  printf 'Rebooting into the NVIDIA driver\n'
   timeout 30 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo systemctl reboot' || true
   sleep 20
   wait_for_guest
   [[ "$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')" != "$first_boot" ]]
+  printf 'Guest is back on a new boot\n'
 fi
 # Distro is constrained to three literals above, intentionally passed to the guest.
 # shellcheck disable=SC2029

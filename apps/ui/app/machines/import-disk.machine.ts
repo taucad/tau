@@ -10,7 +10,8 @@ import { findMainFile } from '#routes/import.$/import.utils.js';
  * Plans one source in the file-manager worker: paths and sizes come back,
  * never bytes (charter D12). The route supplies it from its import session.
  */
-export type ImportPlanner = (source: ImportSourceDescriptor) => Promise<ImportListing>;
+/** Plans a source in the worker; `signal` aborts when the planning actor stops, so a cancelled plan never becomes the plan. */
+export type ImportPlanner = (source: ImportSourceDescriptor, signal?: AbortSignal) => Promise<ImportListing>;
 
 const emptyListing: ImportListing = {
   name: 'Uploaded Files',
@@ -71,36 +72,40 @@ type ImportDiskEmitted =
 type FilesReadResult = { type: 'filesRead'; listing: ImportListing; importName: string };
 type ProjectCreatedResult = { type: 'projectCreated'; projectId: string };
 
-const planned = async (plan: ImportPlanner, source: ImportSourceDescriptor): Promise<FilesReadResult> => {
-  const listing = await plan(source);
+const planned = async (
+  plan: ImportPlanner,
+  source: ImportSourceDescriptor,
+  signal: AbortSignal,
+): Promise<FilesReadResult> => {
+  const listing = await plan(source, signal);
   return { type: 'filesRead', listing, importName: listing.name };
 };
 
 /** Picked files (or a folder pick): handed over by reference. */
 const readFilesActor = fromSafeAsync<FilesReadResult, { files: FileList | File[]; plan: ImportPlanner }>(
-  async ({ input }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }),
+  async ({ input, signal }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }, signal),
 );
 
 /** A drop: its items are taken while the event lasts, then handed over as handles or walked for references. */
 const readDataTransferActor = fromSafeAsync<
   FilesReadResult,
   { source: Promise<ImportSourceDescriptor>; plan: ImportPlanner }
->(async ({ input }) => planned(input.plan, await input.source));
+>(async ({ input, signal }) => planned(input.plan, await input.source, signal));
 
 /** A zip: its central directory is read by range in the worker. */
-const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input }) =>
-  planned(input.plan, { kind: 'zip', file: input.file }),
+const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input, signal }) =>
+  planned(input.plan, { kind: 'zip', file: input.file }, signal),
 );
 
 /** A picked folder: the handle crosses to the worker, which walks it. */
 const readDirectoryHandleActor = fromSafeAsync<
   FilesReadResult,
   { handle: FileSystemDirectoryHandle; plan: ImportPlanner }
->(async ({ input }) => planned(input.plan, { kind: 'directory', handle: input.handle }));
+>(async ({ input, signal }) => planned(input.plan, { kind: 'directory', handle: input.handle }, signal));
 
 /** A desktop pick or open-with: the grants cross to the worker, whose host lists and later copies them. */
 const readHostActor = fromSafeAsync<FilesReadResult, { grants: readonly HostImportGrant[]; plan: ImportPlanner }>(
-  async ({ input }) => planned(input.plan, { kind: 'host', grants: input.grants }),
+  async ({ input, signal }) => planned(input.plan, { kind: 'host', grants: input.grants }, signal),
 );
 
 /**

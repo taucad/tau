@@ -506,9 +506,9 @@ export default function ImportRoute(): React.JSX.Element {
     }),
     {
       input: {
-        plan: async (source) => {
+        plan: async (source, signal) => {
           const session = await importSession();
-          return session.plan(source);
+          return session.plan(source, signal === undefined ? undefined : { signal });
         },
       },
       inspect,

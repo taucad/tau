@@ -31,6 +31,8 @@ export type TerminalRendererOptions = {
   readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
   /** Exponent on glyph coverage in the WebGL renderer: above 1 thins text. Default 1. */
   readonly textWeight?: number;
+  /** The regular face's weight. Default 400. */
+  readonly fontWeight?: number;
   readonly reducedMotion: boolean;
   /** Receives an `http(s)` link the person Ctrl/Cmd+clicked; the caller applies Tau's navigation policy. */
   readonly onLinkActivate: (uri: string) => void;
@@ -275,6 +277,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     ghostty: await aurigax.Ghostty.load(wasmUrl),
     fontFamily: options.fontFamily,
     fontSize: options.fontSize,
+    fontWeight: options.fontWeight ?? 400,
     theme: options.theme,
     scrollback: options.scrollback,
     renderer: 'webgl',

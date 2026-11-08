@@ -3,7 +3,6 @@ import { useCallback, useMemo } from 'react';
 import type { CadAgentExecution, ModelFamily, ModelProvider, TauAgentExecution } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import { cadAgentExecutionSchema } from '@taucad/chat/schemas';
-import type { Model as ApiModel } from '@taucad/chat/model-catalog';
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
@@ -12,9 +11,10 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 import { resolveNewChatExecution } from '#utils/new-chat-execution.js';
 import type { ModelCatalog } from '#utils/new-chat-execution.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { catalogFreshness, modelsQueryKey, readModelCatalog } from '#lib/model-catalog.js';
+import type { Model as CatalogModel } from '#lib/model-catalog.js';
 
-export type Model = ApiModel;
+export type Model = CatalogModel;
 
 /**
  * UI-local resolved view of a {@link Model}. Always non-null so call sites can
@@ -28,47 +28,42 @@ export type ResolvedModel = {
   family: ModelFamily | typeof unknownIconId;
   provider: { id: ModelProvider | typeof unknownIconId; name: string };
   isResolved: boolean;
+  /**
+   * Whether the display name is not known yet: no catalog row for the id, and either no catalog at all (still loading
+   * or unavailable) or no id. A label shows a fixed-width placeholder then, never the raw id or an empty name. A
+   * catalog that answered without the id (a retired model) is not pending: `name` falls back to the id.
+   */
+  isNamePending: boolean;
   model?: Model;
 };
 
-const buildResolved = (id: string, model?: Model): ResolvedModel => ({
-  id,
-  name: model?.name ?? id.split('/').pop() ?? id,
-  family: model?.details.family ?? unknownIconId,
-  provider: model?.provider ?? { id: unknownIconId, name: 'Unknown' },
-  isResolved: Boolean(model),
-  model,
-});
-
-/**
- * The model catalog. An unreachable API, an error status and a body that is not a list all reject, so a failed
- * catalog is never mistaken for an empty one.
- *
- * @returns The catalog rows.
- */
-export const getModels = async (): Promise<Model[]> => {
-  const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    throw recordApiRequestId(new Error(`The model catalog answered ${response.status}.`), response);
-  }
-  const data: unknown = await response.json();
-  if (!Array.isArray(data)) {
-    throw new TypeError('The model catalog answered with something other than a list.');
-  }
-  // ponytail: the API's own Zod schema shapes the rows; the UI checks only the envelope.
-  return data as Model[];
+const buildResolved = (id: string, rows: readonly Model[] | undefined): ResolvedModel => {
+  const model = rows?.find((entry) => entry.id === id);
+  return {
+    id,
+    name: model?.name ?? id.split('/').pop() ?? id,
+    family: model?.details.family ?? unknownIconId,
+    provider: model?.provider ?? { id: unknownIconId, name: 'Unknown' },
+    isResolved: Boolean(model),
+    isNamePending: model === undefined && (rows === undefined || id === ''),
+    model,
+  };
 };
 
 /**
- * How long a fetched catalog counts as fresh. Milliseconds. The catalog is the same for every visitor and changes
- * only with an API deploy, so remounts and window focus reuse it instead of refetching.
+ * The model catalog. An unreachable API, an error status and a body that is not a list all reject.
+ *
+ * @returns The catalog rows.
  */
-const catalogFreshness = 30 * 60 * 1000;
+export const getModels = async (): Promise<Model[]> =>
+  readModelCatalog(
+    await fetch(`${ENV.TAU_API_URL}/v1/models`, {
+      credentials: 'include',
+    }),
+  );
 
 const modelsQuery = {
-  queryKey: ['models'],
+  queryKey: modelsQueryKey,
   queryFn: getModels,
   staleTime: catalogFreshness,
   /* One retry, whatever the network reports: admission waits on this fetch, so it must settle. */
@@ -284,22 +279,13 @@ export const useModels = () => {
 
   const recommendedModels = useMemo(() => (data ?? []).filter((model) => model.recommended === true), [data]);
 
-  const modelById = useMemo(() => new Map((data ?? []).map((m) => [m.id, m])), [data]);
-
-  /* Reads the query cache rather than this render's map, so a caller that just awaited the catalog sees it. */
+  /* Reads the query cache rather than this render's data, so a caller that just awaited the catalog sees it. */
   const resolveModel = useCallback(
-    (id: string): ResolvedModel =>
-      buildResolved(
-        id,
-        (queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data)?.find((model) => model.id === id),
-      ),
+    (id: string): ResolvedModel => buildResolved(id, queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data),
     [queryClient, data],
   );
 
-  const selectedModel = useMemo<ResolvedModel>(
-    () => buildResolved(selectedModelId, modelById.get(selectedModelId)),
-    [modelById, selectedModelId],
-  );
+  const selectedModel = useMemo<ResolvedModel>(() => buildResolved(selectedModelId, data), [data, selectedModelId]);
 
   return {
     data,

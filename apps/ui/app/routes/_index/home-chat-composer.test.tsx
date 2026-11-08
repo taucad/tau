@@ -66,7 +66,7 @@ describe('Home chat composer', () => {
       </TooltipProvider>,
     );
     expect(within(container).getAllByText('OpenSCAD')).toHaveLength(1);
-    expect(container.querySelector('textarea')).toHaveAttribute('data-autofocus');
+    expect(container.querySelector('textarea')).toHaveAttribute('autofocus');
     const bar = container.querySelector('[data-slot="composer-bar"]')!;
     expect(bar).toHaveAttribute('inert');
     expect(bar.querySelector('[aria-label="Add"]')).not.toBeNull();
@@ -82,7 +82,7 @@ describe('Home chat composer', () => {
         <HomeChatComposer enableAutoFocus={false} />
       </TooltipProvider>,
     );
-    expect(container.querySelector('textarea')).not.toHaveAttribute('data-autofocus');
+    expect(container.querySelector('textarea')).not.toHaveAttribute('autofocus');
   });
 
   it('should serve a native input, hold text typed before the composer arrives and hand it over', async () => {

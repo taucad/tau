@@ -16,6 +16,11 @@
       "import": "./src/constants/index.ts",
       "default": "./src/constants/index.ts"
     },
+    "./model-catalog": {
+      "types": "./src/model-catalog/index.ts",
+      "import": "./src/model-catalog/index.ts",
+      "default": "./src/model-catalog/index.ts"
+    },
     "./utils": {
       "types": "./src/utils/index.ts",
       "import": "./src/utils/index.ts",

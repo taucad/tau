@@ -7,9 +7,8 @@ import type { ToolName } from '@taucad/chat';
 import { filterProviderFacingToolNamesByModelSupport } from '@taucad/chat/schemas';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import type { Environment } from '#config/environment.config.ts';
-import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
+import type { Model, ModelFamily, ModelProviderKind, ModelSupport, ProviderId } from '@taucad/chat/model-catalog';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';
 import {
   assertSingleDefaultModel,
   isModelListEntryEnabled,

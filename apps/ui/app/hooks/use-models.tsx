@@ -3,10 +3,7 @@ import { useCallback, useMemo } from 'react';
 import type { CadAgentExecution, ModelFamily, ModelProvider, TauAgentExecution } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import { cadAgentExecutionSchema } from '@taucad/chat/schemas';
-/* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
-import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
-/* oxlint-enable import/extensions -- Re-enable project import checks. */
+import type { Model as ApiModel } from '@taucad/chat/model-catalog';
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';

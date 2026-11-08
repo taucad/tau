@@ -21,28 +21,21 @@ case "$graphics" in
   nvidia) systemd-detect-virt | grep -xE 'kvm|google' ;;
   *) exit 1 ;;
 esac
-if [[ "$graphics" == nvidia && "$ID" == debian ]]; then
-  # Debian ships the NVIDIA driver in non-free; the cloud image enables main only.
-  sudo sed -i -E 's/^Components: main$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
-fi
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-apps x11-xserver-utils xclip \
   dbus-x11 apparmor apparmor-utils libfuse2t64 fuse3 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-utils
 command -v fusermount
 if [[ "$graphics" == nvidia ]]; then
-  # The distribution's own packaged driver, as a user of that release installs it (secure boot is off on these hosts).
-  if [[ "$ID" == ubuntu ]]; then
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ubuntu-drivers-common
-    sudo env DEBIAN_FRONTEND=noninteractive ubuntu-drivers install
-  else
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      "linux-headers-$(uname -r)" nvidia-driver firmware-misc-nonfree
+  # hosted-linux-gpu-driver-guest.sh installed the distribution's driver and the host rebooted into it.
+  if ! nvidia-smi; then
+    # The kernel's own account of why the driver did not take the GPU (NVRM lines name no app data).
+    lsmod | grep -E '^(nvidia|nouveau)' || true
+    lspci -nnk -d 10de: || true
+    sudo dmesg | grep -iE 'nvrm|nvidia|nouveau' | tail -n 60 || true
+    exit 1
   fi
-  sudo modprobe nvidia
-  sudo modprobe nvidia-drm modeset=1 || true
-  nvidia-smi
-  dpkg-query -W -f='${Package} ${Version}\n' | grep -E '^(nvidia-driver|xserver-xorg-video-nvidia|libnvidia-gl)' || true
+  dpkg-query -W -f='${Package} ${Version}\n' | grep -E '^(nvidia-driver|linux-modules-nvidia|nvidia-kernel-dkms|xserver-xorg-video-nvidia|libnvidia-gl)' || true
 fi
 sudo aa-status
 [[ "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]

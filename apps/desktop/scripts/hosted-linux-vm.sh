@@ -167,16 +167,29 @@ fi
 ssh_options=(-i "$work/client" -p 2222 -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known_hosts")
 # An IAP tunnel can drop a session that stays silent through a long harness step; keep it alive.
 if [[ "$host" == gcp ]]; then ssh_options+=(-o ServerAliveInterval=30 -o ServerAliveCountMax=6); fi
-ready=false
-for _attempt in $(seq 1 90); do
-  if [[ -n "$qemu_pid" ]]; then kill -0 "$qemu_pid"; else kill -0 "$tunnel_pid"; fi
-  if ssh "${ssh_options[@]}" tau@127.0.0.1 true 2>/dev/null; then ready=true; break; fi
-  sleep 5
-done
-[[ "$ready" == true ]]
+wait_for_guest() {
+  local _attempt
+  for _attempt in $(seq 1 90); do
+    if [[ -n "$qemu_pid" ]]; then kill -0 "$qemu_pid"; else kill -0 "$tunnel_pid"; fi
+    if ssh "${ssh_options[@]}" tau@127.0.0.1 true 2>/dev/null; then return 0; fi
+    sleep 5
+  done
+  return 1
+}
+wait_for_guest
 # Debian's Google Cloud image has no cloud-init; its guest agent made the tau user from the ssh-keys metadata.
 ssh "${ssh_options[@]}" tau@127.0.0.1 'if command -v cloud-init >/dev/null; then sudo cloud-init status --wait; else echo no cloud-init; fi' \
   > "$output/cloud-init-status.txt"
+if [[ "$host" == gcp ]]; then
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'bash -s' \
+    < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-gpu-driver-guest.sh" | tee "$output/gpu-driver.txt"
+  # Boot into the installed driver, as a user does after installing it. The IAP tunnel serves each new connection.
+  first_boot="$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')"
+  timeout 30 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo systemctl reboot' || true
+  sleep 20
+  wait_for_guest
+  [[ "$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')" != "$first_boot" ]]
+fi
 # Distro is constrained to three literals above, intentionally passed to the guest.
 # shellcheck disable=SC2029
 ssh "${ssh_options[@]}" tau@127.0.0.1 "bash -s -- $TAU_VM_DISTRO $guest_graphics" \

@@ -33,7 +33,8 @@ publish = "build/client"
 # The last step keeps the previous deploys' `/assets/*` in this one, so a page
 # loaded just before a deploy can still lazy-load its chunks (TAU-UI-6), and the
 # content-addressed runtime bundles (`/picogk-browser/<sha256>/`,
-# `/csharp-language/<sha256>/`), so it can still start PicoGK or the C# service. It runs
+# `/csharp-language/<sha256>/`, listed in their own `tau-served-runtimes.json` so a
+# rollback to an older build still deploys), so it can still start PicoGK or the C# service. It runs
 # after source-map injection, reads the live deploy's `tau-served-assets.json`
 # from `TAU_RETAIN_ASSETS_FROM` (set by `deploy-ui.yml`), verifies every byte
 # against it, and writes this deploy's index. Unset, it writes the index only.

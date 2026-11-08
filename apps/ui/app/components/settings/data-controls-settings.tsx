@@ -35,7 +35,8 @@ const improvementPurposes: readonly TelemetryPurpose[] = ['summary', 'content', 
 /**
  * Whether the owner's chats may improve the service. The server answers with the effective consent: on by default for
  * Free, off for a paid plan until its owner turns it on here. Turning it on or off also records an explicit decision
- * for each improvement purpose once a recording notice is in force; the Free default alone records nothing.
+ * for each improvement purpose once a recording notice is in force. While a Free account's switch is on and it has not
+ * decided, the server grants those purposes by default; turning the switch off opts out.
  */
 function ImproveServiceRow(): React.JSX.Element {
   const { data: session } = useSession(authClient);

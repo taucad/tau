@@ -132,6 +132,60 @@ describe('resolvePurposeAuthority', () => {
     });
   });
 
+  describe('free plan default', () => {
+    const improvement: TelemetryPurpose[] = ['summary', 'content', 'reuse', 'training'];
+
+    it('records an assured free account with the switch on until it opts out', () => {
+      const states = resolvePurposeAuthority(authority({ improvementDefault: true }));
+
+      expect(states.filter((state) => state.allowed).map((state) => state.purpose)).toEqual(improvement);
+      /* Nothing was decided; the plan's default allows it. Ratings and diagnosis still need their own grant. */
+      expect(states.every((state) => !state.decided && !state.granted)).toBe(true);
+      expect(refusalOf(authority({ improvementDefault: true }), 'feedback')).toBe('no-decision');
+      expect(refusalOf(authority({ improvementDefault: true }), 'diagnosis')).toBe('no-decision');
+    });
+
+    it('honours an opt-out, including one taken under an earlier notice', () => {
+      expect(
+        refusalOf(authority({ improvementDefault: true, decisions: [decided('content', false)] }), 'content'),
+      ).toBe('withdrawn');
+      expect(
+        refusalOf(
+          authority({ improvementDefault: true, decisions: [decided('content', false, superseded)] }),
+          'content',
+        ),
+      ).toBe('withdrawn');
+      expect(allowed(authority({ improvementDefault: false }))).toEqual([]);
+    });
+
+    it('grants nothing by default to a paid tier, an unassured tier, or before a notice is approved', () => {
+      for (const tier of ['pro', 'enterprise'] as const) {
+        expect(allowed(authority({ improvementDefault: true, tier }))).toEqual([]);
+      }
+      expect(allowed(authority({ improvementDefault: true, tierAssured: false }))).toEqual([]);
+      expect(allowed(authority({ improvementDefault: true, noticeVersion: undefined }))).toEqual([]);
+    });
+
+    it('keeps project fences and the shared-material rule ahead of the default', () => {
+      const project = { fenced: false, ownedByPrincipal: true, mixedSource: true };
+
+      expect(allowed(authority({ improvementDefault: true, project }))).toEqual(['summary']);
+      expect(allowed(authority({ improvementDefault: true, project: { ...project, fenced: true } }))).toEqual([]);
+      expect(
+        allowed(authority({ improvementDefault: true, project: { ...project, ownedByPrincipal: false } })),
+      ).toEqual([]);
+    });
+
+    it('makes a cached answer stale when the switch is turned off', () => {
+      const subject = { userId: 'user-a', projectId: undefined, noticeVersion: notice, decisions: [] };
+
+      expect(purposeEpoch({ ...subject, improvementDefault: true })).not.toBe(
+        purposeEpoch({ ...subject, improvementDefault: false }),
+      );
+      expect(purposeEpoch({ ...subject, improvementDefault: false })).toBe(purposeEpoch(subject));
+    });
+  });
+
   describe('project authority', () => {
     const granted = telemetryPurposes.map((purpose) => decided(purpose, true));
     const project = { fenced: false, ownedByPrincipal: true, mixedSource: false };

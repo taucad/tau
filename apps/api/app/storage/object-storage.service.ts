@@ -19,7 +19,7 @@ import type { S3ClientConfig } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { ObjectStorageEnvironment } from '#config/environment.config.js';
+import type { ObjectStorageEnvironment } from '@taucad/api-core';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';

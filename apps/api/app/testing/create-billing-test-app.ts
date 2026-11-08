@@ -5,7 +5,7 @@ import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { TelemetryModule } from '#telemetry/telemetry.module.js';
 import { RedisModule } from '#redis/redis.module.js';
 import { DatabaseModule } from '#database/database.module.js';

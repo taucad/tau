@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { AttributeKey } from '@taucad/telemetry';
 import { MetricsService } from '#telemetry/metrics.js';
 

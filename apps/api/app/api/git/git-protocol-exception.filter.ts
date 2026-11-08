@@ -3,7 +3,7 @@ import { Catch, HttpException, Logger } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { httpHeader } from '#constants/http-header.constant.js';
+import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { isRetryableGitRefusal } from '#telemetry/sentry.js';
 

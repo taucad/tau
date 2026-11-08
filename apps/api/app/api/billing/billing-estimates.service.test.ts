@@ -27,7 +27,7 @@ import {
 import { AuthGuard } from '#auth/auth.guard.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 const instant = new Date('2026-09-12T12:00:00.000Z');
 const owner = {

@@ -1,8 +1,8 @@
 import process from 'node:process';
 import type { FastifyRequest } from 'fastify';
 import type { PinoLoggerOptions } from 'fastify/types/logger.js';
-import { logServiceProvider } from '#constants/app.constant.js';
-import type { LogServiceProvider } from '#constants/app.constant.js';
+import { logServiceProvider } from '@taucad/api-core/constants/app';
+import type { LogServiceProvider } from '@taucad/api-core/constants/app';
 import { consoleLoggingConfig, logServiceConfig, redactUrlQuery } from '#logger/logger-factory.js';
 
 /** Fastify's own request projection, with an OAuth callback's query dropped as the request logger drops it. */

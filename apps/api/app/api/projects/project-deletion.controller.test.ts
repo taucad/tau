@@ -17,7 +17,7 @@ import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
 import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
 import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { DatabaseService } from '#database/database.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';

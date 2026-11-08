@@ -8,7 +8,7 @@ import { AppModule } from '#app.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
 import { RedisService } from '#redis/redis.service.js';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 
 // Mock DatabaseService for tests that don't need database access
 const mockDatabaseService = {

@@ -12,7 +12,7 @@ import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/p
 import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '#database/database.service.js';
 import type { Database } from '#database/owner-lock.js';
 import { readProjectDeletion } from '#database/project-lifecycle.js';

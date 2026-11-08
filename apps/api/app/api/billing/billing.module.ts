@@ -39,7 +39,7 @@ import {
   createBillableModelProviderAdapters,
 } from '#api/billing/billable-model-provider.js';
 import { stripeClientKey, stripeReadClientKey } from '#api/billing/billing.constants.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 /**
  * Send every funded provider call to a local upstream instead, path preserved.

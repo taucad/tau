@@ -5,7 +5,7 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { RepositoriesController } from '#api/repositories/repositories.controller.js';
 import { RepositoriesService } from '#api/repositories/repositories.service.js';
-import { getTrustProxyOption, isPrivatePeer, trustFlyProxy } from '#utils/trust-proxy.utils.js';
+import { getTrustProxyOption, isPrivatePeer, trustFlyProxy } from '@taucad/api-core/utils/trust-proxy';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name
 const flyMachineEnvironment = { FLY_APP_NAME: 'tau-api' };

@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import * as schema from '#database/schema.js';
 import { SqlLogger } from '#database/database.logger.js';
 import { assertSchemaCompatibility } from '#database/database-migration.js';

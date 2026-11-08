@@ -3,7 +3,7 @@ import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 /** Format version; a verifier refuses every other prefix. */
 const tokenPrefix = 'zt1';

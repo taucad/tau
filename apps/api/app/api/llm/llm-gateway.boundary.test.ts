@@ -5,7 +5,7 @@ import type { ArgumentsHost, ExecutionContext } from '@nestjs/common';
 import type { Auth } from 'better-auth';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';

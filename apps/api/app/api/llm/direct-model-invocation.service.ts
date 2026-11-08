@@ -33,7 +33,7 @@ import {
 } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { ModelService } from '#api/models/model.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 const encoder = new TextEncoder();
 

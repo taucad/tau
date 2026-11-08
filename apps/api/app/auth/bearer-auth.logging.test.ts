@@ -3,8 +3,8 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { pinoHttp } from 'pino-http';
-import type { Environment } from '#config/environment.config.js';
-import { logServiceProvider } from '#constants/app.constant.js';
+import type { Environment } from '@taucad/api-core';
+import { logServiceProvider } from '@taucad/api-core/constants/app';
 import { useLoggerFactory } from '#logger/logger-factory.js';
 
 describe('bearer authentication logging', () => {

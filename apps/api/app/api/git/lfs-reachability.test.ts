@@ -14,7 +14,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { project, projectGit, projectGitLfsObject, user } from '#database/schema.js';
 import * as schema from '#database/schema.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';

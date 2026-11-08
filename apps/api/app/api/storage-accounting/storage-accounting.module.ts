@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';

@@ -5,7 +5,7 @@ import type { FastifyRequest } from 'fastify';
 import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { GithubGistService } from '#api/github/github-gist.service.js';
 
 @Controller({ path: 'github/gists', version: '1' })

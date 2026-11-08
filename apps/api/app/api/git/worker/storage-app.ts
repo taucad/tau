@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { StorageEnvironment } from '#config/storage-environment.config.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';

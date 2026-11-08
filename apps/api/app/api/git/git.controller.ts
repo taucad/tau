@@ -24,7 +24,7 @@ import { ConfigService } from '@nestjs/config';
 import { pipeline, Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { hostDeviceOf } from '#auth/auth.guard.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import {

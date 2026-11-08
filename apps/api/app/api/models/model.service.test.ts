@@ -6,7 +6,7 @@ import { assertSingleDefaultModel, isModelListEntryEnabled, modelList } from '#a
 import { ModelService } from '#api/models/model.service.js';
 import { gatewayModelRoutes } from '#api/providers/provider-gateway.js';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { Environment } from '#config/environment.config.ts';
+import type { Environment } from '@taucad/api-core';
 
 const maxEffectiveContextWindow = 200_000;
 

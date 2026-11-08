@@ -6,7 +6,7 @@ import { openShareArchive, shareArtifactLimits } from '@taucad/share/artifact';
 import { repositoryImportLimits } from '@taucad/share/repository-archive';
 import { formatRepositoryTarget } from '@taucad/share/repository-target';
 import { projectManifestSchemaUrl } from '@taucad/types';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { RedisService } from '#redis/redis.service.js';
 import { RepositoriesService } from '#api/repositories/repositories.service.js';
 

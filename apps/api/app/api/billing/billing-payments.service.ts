@@ -69,7 +69,7 @@ import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js'
 import { collectionMatchesScope } from '#api/billing/billing-collection.js';
 import type { BillingCollection } from '#api/billing/billing-collection.js';
 import type { DatabaseService } from '#database/database.service.js';
-import { desktopAppOrigin } from '#utils/cors.utils.js';
+import { desktopAppOrigin } from '@taucad/api-core/utils/cors';
 import {
   billingOwnerBinding,
   billingPeriod,

@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { BetterAuthService } from '#auth/better-auth.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { account, githubGistPreference } from '#database/schema.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 const artifactLimit = 921_600;
 const filenames = ['tau-project.zip.base64url', 'tau-project.jwe'] as const;

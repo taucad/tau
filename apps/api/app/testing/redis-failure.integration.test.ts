@@ -18,7 +18,7 @@ import { HealthIndicatorService } from '@nestjs/terminus';
 import type { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { RedisService } from '#redis/redis.service.js';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';

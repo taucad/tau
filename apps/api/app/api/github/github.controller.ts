@@ -20,7 +20,7 @@ import { z } from 'zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { GithubService } from '#api/github/github.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 type AuthenticatedRequest = FastifyRequest & { session: { session: { id: string } } };
 type StartBody = Readonly<{ returnTo?: unknown; completionMode?: unknown }>;

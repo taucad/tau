@@ -13,7 +13,7 @@ import { BillingAttemptController } from '#api/billing/billing-attempt.controlle
 import type { AttemptLookupAnswer } from '#api/billing/billing-attempt.controller.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
-import { environmentSchemaBase } from '#config/environment.config.js';
+import { environmentSchemaBase } from '@taucad/api-core';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { authInstanceKey } from '#constants/auth.constant.js';

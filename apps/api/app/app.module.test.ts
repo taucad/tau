@@ -4,7 +4,7 @@ import { mockDeep } from 'vitest-mock-extended';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
 import { DatabaseService } from '#database/database.service.js';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';

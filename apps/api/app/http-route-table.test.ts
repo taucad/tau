@@ -14,7 +14,7 @@ import { AppModule } from '#app.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import { isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
 import { DatabaseService } from '#database/database.service.js';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 
 /**
  * HTTP surface guard. Pins every route the API serves (method, versioned path,

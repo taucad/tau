@@ -14,7 +14,7 @@ import { resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import type { BillingEnvironment, JointInputMaximum, MeterQuantity } from '#api/billing/credit-ledger.types.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 /* Contract C2 publishes two holds per route, both at the 16,384 requested output
  * tokens every Tau turn asks for.

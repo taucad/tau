@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 describe('ProviderService morph', () => {
   it('should construct ChatOpenAI against Morph API with reasoning config', () => {

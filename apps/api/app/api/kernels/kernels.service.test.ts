@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 import type { ConfigService } from '@nestjs/config';
 import { KernelsService } from '#api/kernels/kernels.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 const config = (values: Partial<Environment> = {}): ConfigService<Environment, true> => {
   const configured = { get: (key: keyof Environment) => values[key] } satisfies Pick<

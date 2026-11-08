@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
-import { environmentSchema } from '#config/environment.config.js';
+import { environmentSchema } from '@taucad/api-core';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys */
 

@@ -8,8 +8,8 @@ import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { describe, expect, it, vi } from 'vitest';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
-import { environmentSchemaBase } from '#config/environment.config.js';
-import type { Environment } from '#config/environment.config.js';
+import { environmentSchemaBase } from '@taucad/api-core';
+import type { Environment } from '@taucad/api-core';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 

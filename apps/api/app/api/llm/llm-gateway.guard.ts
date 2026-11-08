@@ -6,9 +6,9 @@ import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { HostsService } from '#api/hosts/hosts.service.js';
-import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
+import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { readSingleHeader } from '#api/llm/llm-gateway.headers.js';
 

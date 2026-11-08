@@ -8,7 +8,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ConfigService } from '@nestjs/config';
 import { PayloadTooLargeException } from '@nestjs/common';
 import type { StreamableFile } from '@nestjs/common';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { z } from 'zod';
 import { GitProxyController, sealRelayRecord } from '#api/git/git-proxy.controller.js';
 import type { RedisService } from '#redis/redis.service.js';

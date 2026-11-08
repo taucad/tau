@@ -12,7 +12,7 @@ import { HostsGateway } from '#api/hosts/hosts.gateway.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import type { DevWebSocketService, WebSocketConnectionHandler } from '#api/websocket/dev-websocket.service.js';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';

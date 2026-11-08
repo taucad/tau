@@ -15,7 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { parseEvidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
 import { DatabaseService } from '#database/database.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { MetricsService } from '#telemetry/metrics.js';
 import type { AgentEvidenceAdmissionAttributes } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';

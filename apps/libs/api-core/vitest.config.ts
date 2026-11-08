@@ -18,8 +18,6 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
     testTimeout: 120_000,
-    // ponytail: the library is empty until its move commit; removed there.
-    passWithNoTests: true,
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

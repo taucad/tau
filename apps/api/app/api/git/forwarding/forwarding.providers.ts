@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';

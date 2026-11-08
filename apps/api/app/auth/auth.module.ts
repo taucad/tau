@@ -14,7 +14,7 @@ import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { AuthService } from '#auth/auth.service.js';
 import { BetterAuthService } from '#auth/better-auth.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
 import { BillingModule } from '#api/billing/billing.module.js';

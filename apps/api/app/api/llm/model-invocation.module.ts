@@ -14,7 +14,7 @@ import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { ObservedModelInvocationService } from '#api/agent-observability/model-invocation-observer.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 @Injectable()
 class FundedModelInvocationService implements ModelInvocationService {

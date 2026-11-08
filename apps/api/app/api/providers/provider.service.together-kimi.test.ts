@@ -3,7 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 describe('ProviderService Together Kimi', () => {
   const configService: Pick<ConfigService, 'get'> = {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 describe('ProviderService xai', () => {
   it('should construct TauChatXaiResponses with reasoning', () => {

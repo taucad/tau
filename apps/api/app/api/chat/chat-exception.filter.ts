@@ -15,7 +15,7 @@ import { ZodError } from 'zod';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
-import { httpHeader } from '#constants/http-header.constant.js';
+import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';

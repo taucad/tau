@@ -16,7 +16,7 @@ import { agentRun, project } from '#database/schema.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 vi.mock('#api/hosts/host-frame-relay.js', () => ({
   relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn(), depart: vi.fn(async () => undefined) })),

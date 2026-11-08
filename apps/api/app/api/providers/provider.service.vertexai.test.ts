@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { ChatVertexAI } from '@langchain/google-vertexai';
 import { ProviderService } from '#api/providers/provider.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 describe('ProviderService vertexai', () => {
   /**

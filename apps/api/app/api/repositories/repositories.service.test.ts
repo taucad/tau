@@ -1,7 +1,7 @@
 import { BadGatewayException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { RedisService } from '#redis/redis.service.js';
 import { branchesQuerySchema } from '#api/repositories/repositories.dto.js';
 import { RepositoriesService } from '#api/repositories/repositories.service.js';

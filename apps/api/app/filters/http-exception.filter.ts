@@ -8,7 +8,7 @@ import { trace, SpanStatusCode, context as otelContext } from '@opentelemetry/ap
 import type { HttpErrorResponse } from '@taucad/types';
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
-import { httpHeader } from '#constants/http-header.constant.js';
+import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';

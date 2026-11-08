@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
 import type { JobArtifactManifest, JobDefinition } from '@taucad/jobs';
 import { digestJobDefinition } from '@taucad/jobs';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { durableStreamEvent, jobArtifact, user } from '#database/schema.js';
 import { DatabaseService } from '#database/database.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';

@@ -12,7 +12,7 @@ import type { ChatAnthropicInput } from '@langchain/anthropic';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
-import type { Environment } from '#config/environment.config.ts';
+import type { Environment } from '@taucad/api-core';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';

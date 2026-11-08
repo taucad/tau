@@ -3,7 +3,7 @@ import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 import { parseRuntimeTelemetryMode, policyMaxAgeBounds, releasePattern } from '@taucad/telemetry';
 import { fileLinkOrigin, parseFileLinkSigningSecret } from '@taucad/file-links';
 import { z } from 'zod';
-import { jsonCodec } from '#lib/zod.lib.js';
+import { jsonCodec } from '#zod.lib.js';
 
 const strictEnvironmentBoolean = (defaultValue: boolean) =>
   z.union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')]).default(defaultValue);

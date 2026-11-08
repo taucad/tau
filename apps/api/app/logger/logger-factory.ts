@@ -4,9 +4,9 @@ import process from 'node:process';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
-import { loggingRedactPaths, loggingRedactQueryPaths, logServiceProvider } from '#constants/app.constant.js';
-import type { LogServiceProvider } from '#constants/app.constant.js';
-import type { Environment } from '#config/environment.config.js';
+import { loggingRedactPaths, loggingRedactQueryPaths, logServiceProvider } from '@taucad/api-core/constants/app';
+import type { LogServiceProvider } from '@taucad/api-core/constants/app';
+import type { Environment } from '@taucad/api-core';
 
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity
 const pinoLevelToGoogleLoggingSeverityLookup = Object.freeze({

@@ -5,8 +5,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Environment } from '#config/environment.config.js';
-import { httpBodyLimit } from '#constants/http-body.constant.js';
+import type { Environment } from '@taucad/api-core';
+import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { absorbSocketErrors } from '#api/websocket/socket-error.js';
 
 export type WebSocketConnectionHandler = (socket: WebSocket, request: IncomingMessage) => void | Promise<void>;

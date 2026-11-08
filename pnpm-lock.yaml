@@ -2291,7 +2291,39 @@ importers:
 
   apps/libs/api-billing: {}
 
-  apps/libs/api-core: {}
+  apps/libs/api-core:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^11.2.0
+        version: 11.3.1
+      '@taucad/file-links':
+        specifier: workspace:*
+        version: link:../../../libs/file-links
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../../libs/telemetry
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      dotenv:
+        specifier: 'catalog:'
+        version: 17.4.2
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
 
   apps/libs/api-database: {}
 

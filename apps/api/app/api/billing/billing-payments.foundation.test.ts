@@ -29,7 +29,7 @@ import {
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingService } from '#api/billing/billing.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '#database/database.service.js';
 import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';

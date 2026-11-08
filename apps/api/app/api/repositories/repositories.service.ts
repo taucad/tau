@@ -20,8 +20,8 @@ import type {
   GitLabRepoTargetV1,
   RepositoryProviderId,
 } from '@taucad/share/repository-target';
-import type { Environment } from '#config/environment.config.js';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import type { Environment } from '@taucad/api-core';
+import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import { RedisService } from '#redis/redis.service.js';
 import type { ArchiveQueryDto, BranchesQueryDto, GithubBranchesResponse } from '#api/repositories/repositories.dto.js';
 

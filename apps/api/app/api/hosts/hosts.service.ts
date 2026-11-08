@@ -16,7 +16,7 @@ import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '#database/database.service.js';
 import { agentRun, hostDevice, project, user } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';

@@ -26,15 +26,15 @@ import {
 } from '#api/hosts/host-git-credential.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { staticAuthConfig } from '#config/auth-static.config.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { authInstanceKey } from '#constants/auth.constant.js';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import { DatabaseService } from '#database/database.service.js';
 import type { Database } from '#database/owner-lock.js';
 import { readProjectDeletion } from '#database/project-lifecycle.js';
 import * as schema from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
+import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
 import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
 
 /** Real HTTP controller, session lookup, SQL transactions, S3 adapter and MinIO CAS. */

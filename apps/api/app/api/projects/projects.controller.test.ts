@@ -11,7 +11,7 @@ import {
 import type { ConfigService } from '@nestjs/config';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '#database/database.service.js';
 import type { OwnerLockTransaction } from '#database/owner-lock.js';
 import { projectDeletion } from '#database/schema.js';

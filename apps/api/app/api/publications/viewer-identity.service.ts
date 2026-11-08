@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 
 @Injectable()

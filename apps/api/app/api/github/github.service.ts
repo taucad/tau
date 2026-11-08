@@ -19,7 +19,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '#database/database.service.js';
 import { githubConnection, githubRepositoryWrite } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';

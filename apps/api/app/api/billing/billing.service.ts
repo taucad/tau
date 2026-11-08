@@ -12,7 +12,7 @@ import {
   subscriptionExtension,
   user,
 } from '#database/schema.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { stripeReadClientKey } from '#api/billing/billing.constants.js';

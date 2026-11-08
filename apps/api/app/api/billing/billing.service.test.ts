@@ -6,7 +6,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BillingService } from '#api/billing/billing.service.js';
 import type { DatabaseService } from '#database/database.service.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { subscription, user, billingOwnerBinding, billingStripeCustomer } from '#database/schema.js';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
 

@@ -4,7 +4,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { IncomingMessage } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { RedisService } from '#redis/redis.service.js';
 import { attachHostDevice } from '#auth/auth.guard.js';
 import { gitRequestsPerUserPerWindow, gitRequestsPerWindow, quotaRefusalMarker } from '#api/git/git.constants.js';

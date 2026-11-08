@@ -6,7 +6,7 @@ import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { DatabaseService } from '#database/database.service.js';
 import { readProjectDeletion } from '#database/project-lifecycle.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import type { AgentEvidenceDeliveryOutcome } from '#telemetry/metrics.js';

@@ -6,7 +6,7 @@ import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '#database/database.module.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { AuthModule } from '#auth/auth.module.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ApiModule } from '#api/api.module.js';
 import { LoggerModule } from '#logger/logger.module.js';
 import { RedisModule } from '#redis/redis.module.js';

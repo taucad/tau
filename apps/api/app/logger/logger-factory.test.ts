@@ -7,7 +7,7 @@ import { pinoHttp } from 'pino-http';
 import type { Options } from 'pino-http';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { redactUrlQuery, useLoggerFactory } from '#logger/logger-factory.js';
 

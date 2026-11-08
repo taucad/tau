@@ -17,7 +17,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
 import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type {
   PublicationViewResponse,
   PublishRequest,

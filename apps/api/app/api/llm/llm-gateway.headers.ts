@@ -6,7 +6,7 @@ import { financialIdentitySchema } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
-import { httpHeader } from '#constants/http-header.constant.js';
+import { httpHeader } from '@taucad/api-core/constants/http-header';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
 const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);

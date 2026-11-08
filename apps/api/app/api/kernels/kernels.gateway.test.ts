@@ -12,7 +12,7 @@ import type { CommercialEntitlementsService } from '#api/entitlements/commercial
 import { MetricsService } from '#telemetry/metrics.js';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 type Harness = {
   gateway: KernelsGateway;

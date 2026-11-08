@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { FeedbackGrant, FeedbackGrants } from '@taucad/agent-observability/scorecard';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { Span } from '#telemetry/tracer.service.js';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';

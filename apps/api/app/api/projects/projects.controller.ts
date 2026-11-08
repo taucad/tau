@@ -13,7 +13,7 @@ import {
   Put,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { withOwnerLock } from '#database/owner-lock.js';
 import { and, count, desc, eq, or, isNull } from 'drizzle-orm';

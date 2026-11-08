@@ -6,7 +6,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { ToolName } from '@taucad/chat';
 import { filterProviderFacingToolNamesByModelSupport } from '@taucad/chat/schemas';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
-import type { Environment } from '#config/environment.config.ts';
+import type { Environment } from '@taucad/api-core';
 import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';

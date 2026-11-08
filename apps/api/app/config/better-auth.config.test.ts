@@ -6,7 +6,7 @@ import { getCookies } from 'better-auth/cookies';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { github as githubProvider } from 'better-auth/social-providers';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
 import type { EmailService } from '#email/email.service.js';

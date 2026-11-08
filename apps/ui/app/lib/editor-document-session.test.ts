@@ -345,6 +345,39 @@ describe('EditorDocumentSession library declarations', () => {
       }
     });
 
+    it('carries typing made while a conflict is being recorded when the file is then deleted', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content, contentChange } = service('one');
+        const first = Promise.withResolvers<EditorConflictOutcome>();
+        const record = vi
+          .fn<() => Promise<EditorConflictOutcome>>()
+          .mockReturnValueOnce(first.promise)
+          .mockResolvedValue({ status: 'recorded', revisionId: 'r2', line: 'main', into: 'main' });
+        const session = new EditorDocumentSession({
+          contentService: content,
+          projectId: 'p',
+          recordEditorConflict: record,
+        });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: ' A' });
+        /* Another writer changed the same line: the overlap is recorded. */
+        contentChange({ type: 'written', path: 'main.ts', data: bytes('one B'), source: 'user' });
+        expect(record).toHaveBeenCalledOnce();
+        edit(session, 'main.ts', { at: 5, insert: '!' });
+        const scheduled = session.scheduleSave('main.ts');
+        contentChange({ type: 'deleted', path: 'main.ts', source: 'user' });
+        first.resolve({ status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' });
+        await scheduled;
+
+        expect(record).toHaveBeenLastCalledWith({ path: 'main.ts', base: 'one', mine: 'one A!' });
+        expect(content.saveEditor).not.toHaveBeenCalled();
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('reports text in its window it cannot record when the file goes away', async () => {
       vi.useFakeTimers();
       try {

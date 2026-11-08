@@ -38,6 +38,8 @@ type PendingRebase = {
   base: Uint8Array<ArrayBuffer> | null;
   settled: PromiseWithResolvers<void>;
   recording?: boolean;
+  /** The text of a document removed while its record was in flight: the record carries it still. */
+  latest?: string;
 };
 
 const recordingProjects = new Map<string, number>();
@@ -49,6 +51,29 @@ export function isRecordingEditorConflict(projectId: string): boolean {
 
 export function subscribeEditorConflictRecords(listener: () => void): () => void {
   return recordingChanges.subscribe(listener);
+}
+
+/**
+ * Settles once no conflict record of the project is in flight, records that
+ * start while waiting included.
+ *
+ * @param projectId - The project.
+ */
+export async function editorConflictRecordsSettled(projectId: string): Promise<void> {
+  if (!isRecordingEditorConflict(projectId)) {
+    return;
+  }
+  const settled = Promise.withResolvers<void>();
+  const unsubscribe = recordingChanges.subscribe(() => {
+    if (!isRecordingEditorConflict(projectId)) {
+      settled.resolve();
+    }
+  });
+  try {
+    await settled.promise;
+  } finally {
+    unsubscribe();
+  }
 }
 
 export function refuseCloseWhileRecording(projectId: string): void {
@@ -589,12 +614,15 @@ export class EditorDocumentSession {
       try {
         let outcome = await record(input);
         let carried = mine;
-        let typed = this.#documents.get(this.#pathOf(pending) ?? path)?.text;
+        /* Typing during the record is carried by another, even once the file is gone. */
+        const typedNow = (): string | undefined =>
+          this.#documents.get(this.#pathOf(pending) ?? path)?.text ?? pending.latest;
+        let typed = typedNow();
         while (epoch === this.#epoch && outcome.status === 'recorded' && typed !== undefined && typed !== carried) {
           carried = typed;
           // oxlint-disable-next-line no-await-in-loop -- each record carries typing during the previous one.
           outcome = await record({ ...input, mine: carried });
-          typed = this.#documents.get(this.#pathOf(pending) ?? path)?.text;
+          typed = typedNow();
         }
         if (epoch !== this.#epoch) {
           pending.settled.resolve();
@@ -688,6 +716,11 @@ export class EditorDocumentSession {
 
   #remove(path: string): void {
     this.#cancelScheduled(path);
+    const recording = this.#rebases.get(path);
+    const removed = this.#documents.get(path);
+    if (recording?.recording === true && removed !== undefined) {
+      recording.latest = removed.text;
+    }
     this.#documents.delete(path);
     this.#holds.delete(path);
     this.#background.delete(path);

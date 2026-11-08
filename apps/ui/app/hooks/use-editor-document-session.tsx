@@ -7,7 +7,12 @@ import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { readLfsPointer } from '@taucad/revisions';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
+import {
+  EditorDocumentSession,
+  editorConflictRecordsSettled,
+  isRecordingEditorConflict,
+} from '#lib/editor-document-session.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
@@ -74,20 +79,29 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     };
   }, [contentService, editorRef, fileManagerRef, projectId]);
 
-  /* The close cut is a producer's: text in its debounce window, and every save
-   * already queued, is on disk before the session takes the close revision (D17). */
+  /* The close cut is a producer's: text in its debounce window, every save
+   * already queued and every overlap being recorded beside its file is settled
+   * before the session takes the close revision (D17). Bounded like the other
+   * close flushers, so a save that never settles names itself instead of
+   * holding the quit. */
   const flushEditorAtClose = useCallback(
     async (phase: FlushPhase): Promise<void> => {
       if (phase !== 'hidden' || !contentService) {
         return;
       }
-      try {
+      await confirmFlush(async () => {
         await contentService.settleEditorSaves();
-      } catch (error) {
-        throw new Error('Editor changes are not confirmed saved.', { cause: error });
-      }
+        /* A record that ends may save its rebased text, so the saves are settled again after it. */
+        while (isRecordingEditorConflict(projectId)) {
+          // oxlint-disable-next-line no-await-in-loop -- one round per record that started meanwhile.
+          await editorConflictRecordsSettled(projectId);
+          // oxlint-disable-next-line no-await-in-loop -- the record's own save, if it made one.
+          await contentService.settleEditorSaves();
+        }
+        return true;
+      }, 'Editor changes are not confirmed saved.');
     },
-    [contentService],
+    [contentService, projectId],
   );
   useFlushOnClose(flushEditorAtClose, { stage: 'producer' });
 

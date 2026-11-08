@@ -7,6 +7,8 @@ import { lfsPointerFor } from '@taucad/revisions';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { revisionClients } from '#services/revision-client-registry.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
+import type * as EditorDocumentSessionModule from '#lib/editor-document-session.js';
+import { slowWriteMilliseconds } from '#workbench-records/record-health.js';
 
 const editorRef = vi.hoisted(() => ({ send: vi.fn() }));
 const contentService = vi.hoisted(() => ({ current: undefined as FileContentService | undefined }));
@@ -19,6 +21,16 @@ const fileManager = vi.hoisted(() => ({
   getDirectoryStat: vi.fn(),
 }));
 
+/* The project's conflict records, which the close producer waits out. */
+const records = vi.hoisted(() => ({ inFlight: false, settled: undefined as PromiseWithResolvers<void> | undefined }));
+vi.mock('#lib/editor-document-session.js', async (importOriginal) => {
+  const original = await importOriginal<typeof EditorDocumentSessionModule>();
+  return {
+    ...original,
+    isRecordingEditorConflict: () => records.inFlight,
+    editorConflictRecordsSettled: async () => records.settled?.promise,
+  };
+});
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', editorRef }) }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ ...fileManager, contentService: contentService.current, treeService }),
@@ -105,6 +117,49 @@ describe('EditorDocumentSessionProvider close cut (D17)', () => {
     const flushProducers = await mountWithProducers(content);
 
     await expect(flushProducers()).rejects.toThrow('Editor changes are not confirmed saved.');
+  });
+
+  it('names unsaved editor changes instead of holding the close when a save never settles', async () => {
+    const content = mock<FileContentService>();
+    content.settleEditorSaves.mockReturnValue(Promise.withResolvers<void>().promise);
+    const flushProducers = await mountWithProducers(content);
+    vi.useFakeTimers();
+    try {
+      const flushing = flushProducers();
+      const failure = expect(flushing).rejects.toThrow('Editor changes are not confirmed saved.');
+      await vi.advanceTimersByTimeAsync(slowWriteMilliseconds);
+      await failure;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits out a conflict record in flight, then settles the saves it made', async () => {
+    const content = mock<FileContentService>();
+    content.settleEditorSaves.mockResolvedValue(undefined);
+    records.inFlight = true;
+    records.settled = Promise.withResolvers<void>();
+    try {
+      const flushProducers = await mountWithProducers(content);
+      let done = false;
+      const flushing = (async (): Promise<void> => {
+        await flushProducers();
+        done = true;
+      })();
+      await vi.waitFor(() => {
+        expect(content.settleEditorSaves).toHaveBeenCalledOnce();
+      });
+      expect(done).toBe(false);
+
+      records.inFlight = false;
+      records.settled.resolve();
+      await flushing;
+
+      expect(content.settleEditorSaves).toHaveBeenCalledTimes(2);
+    } finally {
+      records.inFlight = false;
+      records.settled = undefined;
+    }
   });
 });
 

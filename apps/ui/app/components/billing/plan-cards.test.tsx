@@ -135,4 +135,27 @@ describe('PlanCards', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
     expect(followPaymentRedirect).toHaveBeenCalledWith(action);
   });
+
+  it('should explain a pending subscription with no Checkout to open instead of sticking on Checkout pending', async () => {
+    followPaymentRedirect.mockReturnValueOnce(false);
+    createSubscriptionAction.mockRejectedValue(
+      new PaymentConflict({
+        state: 'creating',
+        ownerId: 'user-a',
+        subjectId: 'account-a',
+        environment: 'development',
+        redirectUrl: null,
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Checkout is still being prepared. Try again in a minute.',
+    );
+    expect(screen.getByRole('button', { name: 'Subscribe Now' })).toBeEnabled();
+  });
 });

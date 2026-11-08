@@ -131,11 +131,12 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       return;
     }
 
+    const ceiling = zipDownloadCeiling();
     toast.promise(
       /* `''` is the file manager's own root, which follows the selected
        * checkout: an absolute `/projects/<id>` is a foreign key to this
        * workspace-relative facade, not an alias of its root. */
-      async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...zipDownloadCeiling() }),
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...ceiling }),
       {
         loading: 'Creating ZIP archive…',
         success(blob) {
@@ -143,7 +144,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
           return 'ZIP downloaded successfully';
         },
         error(error: unknown) {
-          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error, ceiling)}`;
         },
       },
     );

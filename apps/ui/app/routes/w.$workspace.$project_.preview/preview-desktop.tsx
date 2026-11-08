@@ -41,9 +41,10 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
       return;
     }
 
+    const ceiling = zipDownloadCeiling();
     toast.promise(
       // The preview's file manager is rooted at this project; `''` is that root.
-      async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...zipDownloadCeiling() }),
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...ceiling }),
       {
         loading: 'Creating ZIP archive…',
         success(blob) {
@@ -51,7 +52,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
           return 'ZIP downloaded successfully';
         },
         error(error: unknown) {
-          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error, ceiling)}`;
         },
       },
     );

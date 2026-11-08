@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
+import { formatBytes } from '#lib/format-bytes.js';
+import { savableZipDownloadBytes, zipDownloadCeiling } from '#utils/zip-download.utils.js';
 import {
+  archiveTooLargeMessage,
   FileTreeDownloadError,
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
@@ -77,20 +80,31 @@ describe('file-tree-download-policy', () => {
     /* The archive's refusal crosses the bridge wire as a bare `Error` with a
      * `code`, and its message is the byte count in decimal; the user is told
      * the ceiling in their own units instead. */
-    it('should tell the user the folder is too large when the archive refuses its ceiling', () => {
+    it('should name the ceiling the archive was refused at', () => {
       const wire = Object.assign(new Error("Archive of '' exceeds its 268435456-byte ceiling."), {
         code: archiveTooLargeCode,
       });
+      const inMemory = zipDownloadCeiling({});
+      const savable = zipDownloadCeiling({ showSaveFilePicker: () => undefined });
 
-      expect(getFileTreeDownloadErrorMessage(wire)).toBe(
+      expect(getFileTreeDownloadErrorMessage(wire, inMemory)).toBe(
         'This folder is larger than the 256.0 MB a ZIP download can hold in this browser. Download a smaller folder instead.',
       );
       expect(
         getFileTreeDownloadErrorMessage(
           createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
+          savable,
         ),
-      ).toBe(
-        'This folder is larger than the 256.0 MB a ZIP download can hold in this browser. Download a smaller folder instead.',
+      ).toBe(archiveTooLargeMessage(savableZipDownloadBytes));
+      expect(archiveTooLargeMessage(savableZipDownloadBytes)).toContain(formatBytes(savableZipDownloadBytes));
+      expect(archiveTooLargeMessage(savableZipDownloadBytes)).not.toContain('256.0 MB');
+    });
+
+    it('should still say the folder is too large when the caller gives no ceiling', () => {
+      const wire = Object.assign(new Error('refused'), { code: archiveTooLargeCode });
+
+      expect(getFileTreeDownloadErrorMessage(wire)).toBe(
+        'This folder is larger than a ZIP download can hold in this browser. Download a smaller folder instead.',
       );
     });
   });

@@ -68,13 +68,14 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
     if (!project) {
       return;
     }
-    toast.promise(async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...zipDownloadCeiling() }), {
+    const ceiling = zipDownloadCeiling();
+    toast.promise(async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...ceiling }), {
       loading: 'Creating ZIP archive…',
       success(blob) {
         downloadBlob(blob, `${project.name}.zip`);
         return 'ZIP downloaded successfully';
       },
-      error: (reason: unknown) => `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(reason)}`,
+      error: (reason: unknown) => `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(reason, ceiling)}`,
     });
   }, [fileManager, project]);
   const renderTopbar = useCallback(

@@ -802,13 +802,14 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           return;
         }
         const folderName = path.split('/').pop() ?? 'folder';
-        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope, ...zipDownloadCeiling() }), {
+        const ceiling = zipDownloadCeiling();
+        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope, ...ceiling }), {
           loading: `Downloading ${folderName}...`,
           success(blob) {
             downloadBlob(blob, `${folderName}.zip`);
             return `Downloaded ${folderName}.zip`;
           },
-          error: getFileTreeDownloadErrorMessage,
+          error: (error: unknown) => getFileTreeDownloadErrorMessage(error, ceiling),
         });
       },
     }),

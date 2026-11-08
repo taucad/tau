@@ -1406,11 +1406,12 @@ export const ChatEditorFileTree = memo(function ({
       const name = path.split('/').pop() ?? path;
 
       if (isFolder) {
+        const ceiling = zipDownloadCeiling();
         toast.promise(
           async () => {
             let zipBlob: Blob;
             try {
-              zipBlob = await getZippedDirectory(path, zipDownloadCeiling());
+              zipBlob = await getZippedDirectory(path, ceiling);
             } catch (error) {
               throw createFileTreeDownloadError({
                 code: 'zip-generation-failed',
@@ -1431,7 +1432,7 @@ export const ChatEditorFileTree = memo(function ({
           {
             loading: `Downloading ${name}...`,
             success: `Downloaded ${name}.zip`,
-            error: getFileTreeDownloadErrorMessage,
+            error: (error: unknown) => getFileTreeDownloadErrorMessage(error, ceiling),
           },
         );
       } else {

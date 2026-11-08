@@ -49,7 +49,7 @@ const useLocationChipShown = (): boolean =>
  * @returns Whether to draw the placeholder.
  */
 const isModelNamePending = (model: ResolvedModel): boolean =>
-  ('isNamePending' in model && model.isNamePending === true) || model.name === '';
+  ((model as { readonly isNamePending?: boolean }).isNamePending ?? false) || model.name === '';
 
 /** The model trigger's resting face for a Tau model: glyph, name, level and chevron, as the agent sheet draws it. */
 function StaticModelTrigger(): React.JSX.Element {

@@ -1373,12 +1373,13 @@ export const FileEditor = memo(function ({
     throw new Error(`File '${filePath}' is not available to a viewer`);
   }, [contentService, filePath, textContent, binarySize]);
 
+  /* Typing is written once the debounce window closes (D17), or at once at a flush point. */
   const reportSave = useCallback(
     (path: string): void => {
       if (!documentSession) {
         return;
       }
-      const completion = documentSession.save(path);
+      const completion = documentSession.scheduleSave(path);
       if (handledSaveCompletion.current === completion) {
         return;
       }
@@ -1387,6 +1388,22 @@ export const FileEditor = memo(function ({
     },
     [documentSession],
   );
+
+  /* The pane's own flush points (D17): its editor losing focus, the pane hidden
+   * by a tab switch, and the pane closing. */
+  const flushPaneSave = useCallback((): void => {
+    const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
+    documentSession?.flushSaves(live?.path ?? filePath);
+  }, [documentSession, editorRef, filePath, paneId]);
+  /* A flush is idempotent, so one also running when the pane is shown again, or its path changes, is harmless. */
+  useEffect(() => {
+    if (!isPanelShown) {
+      flushPaneSave();
+    }
+    return () => {
+      flushPaneSave();
+    };
+  }, [isPanelShown, flushPaneSave]);
 
   const handleEditorApply = useCallback(
     (document: EditorDocument, transaction: DocumentTransaction): DocumentChange | undefined => {
@@ -1563,7 +1580,7 @@ export const FileEditor = memo(function ({
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
     >
-      <div className='flex h-full min-h-0 flex-1 flex-col'>
+      <div className='flex h-full min-h-0 flex-1 flex-col' onBlur={flushPaneSave}>
         {result.observation.status === 'closed' || result.observation.status === 'error' ? (
           <div role='status' className='flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1 text-xs'>
             <span>File updates unavailable</span>

@@ -31,7 +31,7 @@ import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   ChangeEvent,
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileProvenance,
@@ -85,9 +85,14 @@ const discriminatedResultUnion = <
  * call: `changedSince` takes the caller's index `epoch` and answers `epoch`,
  * `removed` and `rescan` (W6.3), which a v9 authority does not send, so a v9
  * peer is refused at the handshake rather than failing that call's schema.
+ * Version 11 lets a checked write name a digest precondition and answers the
+ * digest of what it wrote (charter D17), and adds `readFileWithDigest`, which
+ * answers a file's bytes and the authority's SHA-256 of those same bytes
+ * (W12). A v10 authority would refuse the digest as a malformed precondition,
+ * so the two are refused at the handshake.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 10;
+export const fileSystemBridgeProtocolVersion = 11;
 
 /**
  * Caller-side controls of a long bridge call (charter D14): an `AbortSignal`
@@ -129,6 +134,15 @@ export const maxReadManyBytes = 512 * 1024 * 1024;
  * @public
  */
 export const maxReadRangeBytes = 64 * 1024 * 1024;
+
+/**
+ * One file's bytes and the authority's SHA-256 of exactly those bytes, taken
+ * from one read: what a caller checks a later write against without hashing
+ * the bytes itself (charter D17).
+ *
+ * @public
+ */
+export type FileWithDigest = Readonly<{ data: Uint8Array<ArrayBuffer>; sha256: string }>;
 
 /**
  * What `readMany` answers for each path: its bytes, or `'missing'` when nothing
@@ -469,6 +483,8 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      */
     readMany?: (paths: readonly string[], options?: LongCall) => Promise<ReadManyWireRows>;
     readRange?: (path: string, offset: number, length: number) => Promise<Uint8Array<ArrayBuffer>>;
+    /* A file and its digest from one read (D17); derived from `readFile` where a host brings none. */
+    readFileWithDigest?: (path: string) => Promise<FileWithDigest>;
     /*
      * Pattern and content queries over the root's index (charter D14). A host
      * whose index answers them supplies its own; the bridge otherwise derives
@@ -595,11 +611,18 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
      * `EFENCED`, writing nothing, when the log is no longer the one the writer read.
      */
     appendFileFenced(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
-    writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+    /** A checked write; a precondition may name a digest the authority checks under its locks (D17). */
+    writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     deleteFileChecked(input: {
       path: string;
       preconditions: readonly FileWritePrecondition[];
     }): Promise<CheckedFileWriteResult>;
+    /**
+     * One file's bytes and the authority's SHA-256 of those same bytes, from one
+     * read (charter D17): the digest a caller's later checked write names. The
+     * bytes arrive transferred where the transport transfers (I2).
+     */
+    readFileWithDigest(path: string): Promise<FileWithDigest>;
     archive(path: string, options?: ArchiveOptions & LongCall): Promise<Blob>;
     contents(path: string, options?: ArchiveOptions & LongCall): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
     search(query: string, options?: SearchOptions & LongCall): Promise<FileStatEntry[]>;
@@ -1187,16 +1210,22 @@ const scopedReadFileOptionsSchema = z.looseObject({
   scope: workspaceScopeSchema,
 });
 const writePayloadSchema = z.union([z.string(), bytesSchema]);
-const checkedWriteInputSchema: z.ZodType<Omit<CheckedFileWrite, 'signal'>> = z.object({
+const sha256Schema = z.string().regex(/^[\da-f]{64}$/u);
+const checkedWriteInputSchema: z.ZodType<Omit<AuthorityCheckedFileWrite, 'signal'>> = z.object({
   path: z.string(),
   data: writePayloadSchema,
-  preconditions: z.array(z.object({ path: z.string(), expected: writePayloadSchema.nullable() })),
+  preconditions: z.array(
+    z.union([
+      z.object({ path: z.string(), expected: writePayloadSchema.nullable() }),
+      z.object({ path: z.string(), expectedSha256: sha256Schema }),
+    ]),
+  ),
 });
 const checkedWriteResultSchema: z.ZodType<CheckedFileWriteResult> = z.discriminatedUnion('status', [
-  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema }),
+  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema, sha256: sha256Schema.optional() }),
   z.object({
     status: z.literal('conflict'),
-    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable() })),
+    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable(), sha256: sha256Schema.optional() })),
   }),
 ]);
 const moveEditSchema = z.looseObject({ source: z.string(), target: z.string() });
@@ -1554,6 +1583,10 @@ const callSchemas = {
           rows.reduce((total, [, data]) => total + (data === 'missing' ? 0 : data.byteLength), 0) <= maxReadManyBytes,
         { message: `readMany answered more than ${String(maxReadManyBytes)} bytes` },
       ),
+  },
+  readFileWithDigest: {
+    args: z.tuple([rootedPathSchema]),
+    result: z.object({ data: bytesSchema, sha256: sha256Schema }),
   },
   readRange: {
     args: z.tuple([

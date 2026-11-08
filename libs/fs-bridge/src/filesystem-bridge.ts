@@ -4,6 +4,7 @@
 
 import {
   getEventOrigin,
+  isDigestPrecondition,
   isEventGloballyVisible,
   isWorkspaceMutationError,
   policyAtRoot,
@@ -19,7 +20,7 @@ import type {
   ChangeSet,
   ChangeSetWatchRequest,
   FileStat,
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   MkdirOptions,
   PathPolicy,
@@ -468,15 +469,19 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
     args[0] !== null &&
     typeof args[0] === 'object'
   ) {
-    const input = args[0] as CheckedFileWrite;
+    const input = args[0] as AuthorityCheckedFileWrite;
     return [
       {
         path: input.path,
         ...(method === 'writeFileChecked' ? { data: cloneWritePayloadForTransfer(input.data) } : {}),
-        preconditions: input.preconditions.map((precondition) => ({
-          path: precondition.path,
-          expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
-        })),
+        preconditions: input.preconditions.map((precondition) =>
+          isDigestPrecondition(precondition)
+            ? { path: precondition.path, expectedSha256: precondition.expectedSha256 }
+            : {
+                path: precondition.path,
+                expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
+              },
+        ),
       },
     ];
   }

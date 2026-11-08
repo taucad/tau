@@ -20,10 +20,19 @@ import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 const encoder = new TextEncoder();
 const parameterCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
 export const maxBackgroundDocuments = 10;
+/**
+ * How long typing waits before it is written (charter D17, EQ9): the first
+ * unsaved edit starts the window and later ones join it, so at most this much
+ * typing plus the write in flight is lost to a crash. Blur, close, tab switch
+ * and a cut write it at once.
+ */
+export const editorSaveDebounceMilliseconds = 250;
 /** Library declarations kept for reopening; held ones are never dropped. */
 export const maxDeclarations = 16;
 
 type SaveState = { path: string; completion: Promise<void>; settled: Promise<void> };
+/** A save waiting out the debounce window; `settled` follows the save it becomes. */
+type ScheduledSave = { timer: ReturnType<typeof setTimeout>; settled: PromiseWithResolvers<void> };
 type PendingRebase = {
   // oxlint-disable-next-line typescript/no-restricted-types -- checked-write absence sentinel.
   base: Uint8Array<ArrayBuffer> | null;
@@ -102,6 +111,7 @@ export class EditorDocumentSession {
   readonly #bases = new Map<string, Uint8Array<ArrayBuffer>>();
   readonly #saves = new Map<string, SaveState>();
   readonly #rebases = new Map<string, PendingRebase>();
+  readonly #scheduled = new Map<string, ScheduledSave>();
   /** Read-only library declaration text by path, most recently opened last. */
   readonly #declarations = new Map<string, string>();
   readonly #subscriptions: Array<() => void>;
@@ -119,6 +129,10 @@ export class EditorDocumentSession {
       }),
       config.contentService.onDidChangeOutcome((event) => {
         this.applyOutcomeChange(event);
+      }),
+      /* A cut settles the content service's saves first; typing still in the window joins them. */
+      config.contentService.addEditorSaveFlusher(() => {
+        this.flushSaves();
       }),
     ];
   }
@@ -234,6 +248,58 @@ export class EditorDocumentSession {
     return this.get(path)?.apply(transaction);
   }
 
+  /**
+   * Save the document once the debounce window closes (D17): the first call
+   * opens the window, later ones join it and share its promise, and the text
+   * written is the document's as the window closes.
+   *
+   * @param path - The document's path.
+   * @returns Settles with the save the window becomes.
+   */
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- callers compare shared save promises by identity.
+  public scheduleSave(path: string): Promise<void> {
+    const key = assertRootedPath(path);
+    if (!this.#documents.has(key) || this.#disposed) {
+      return Promise.reject(new Error(`No active document for ${key}`));
+    }
+    if (this.#declarations.has(key)) {
+      return Promise.reject(new Error(`${key} is a read-only library declaration`));
+    }
+    const existing = this.#scheduled.get(key);
+    if (existing) {
+      return existing.settled.promise;
+    }
+    const scheduled: ScheduledSave = {
+      timer: setTimeout(() => {
+        this.#flushScheduled(scheduled);
+      }, editorSaveDebounceMilliseconds),
+      settled: Promise.withResolvers<void>(),
+    };
+    this.#scheduled.set(key, scheduled);
+    return scheduled.settled.promise;
+  }
+
+  /**
+   * Write every save waiting out its window now, or only `path`'s: the flush
+   * points of D17 (blur, close, tab switch, cut). Synchronous: each document's
+   * text is in the content service's queue when this returns.
+   *
+   * @param path - One document's path; omitted, every document's.
+   */
+  public flushSaves(path?: string): void {
+    const key = path === undefined ? undefined : assertRootedPath(path);
+    for (const [scheduledPath, scheduled] of this.#scheduled) {
+      if (key === undefined || scheduledPath === key) {
+        this.#flushScheduled(scheduled);
+      }
+    }
+  }
+
+  /** Whether a save is waiting out its debounce window. */
+  public hasScheduledSave(path?: string): boolean {
+    return path === undefined ? this.#scheduled.size > 0 : this.#scheduled.has(assertRootedPath(path));
+  }
+
   /** Persist the current document through the filesystem's checked, bounded save queue. */
   // oxlint-disable-next-line @typescript-eslint/promise-function-async -- callers compare shared save promises by identity.
   public save(path: string): Promise<void> {
@@ -259,6 +325,8 @@ export class EditorDocumentSession {
   }
 
   public setProjectSession(projectId: string): void {
+    /* Text still in the window belongs to the old session's files: it is written there now. */
+    this.flushSaves();
     this.#epoch += 1;
     this.#projectId = projectId;
     this.#documents.clear();
@@ -281,6 +349,7 @@ export class EditorDocumentSession {
     if (this.#disposed) {
       return;
     }
+    this.flushSaves();
     this.#disposed = true;
     for (const unsubscribe of this.#subscriptions) {
       unsubscribe();
@@ -369,6 +438,35 @@ export class EditorDocumentSession {
       case 'directoryCopied': {
         break;
       }
+    }
+  }
+
+  #flushScheduled(scheduled: ScheduledSave): void {
+    clearTimeout(scheduled.timer);
+    let path: string | undefined;
+    for (const [candidate, entry] of this.#scheduled) {
+      if (entry === scheduled) {
+        path = candidate;
+      }
+    }
+    if (path === undefined) {
+      return;
+    }
+    this.#scheduled.delete(path);
+    if (!this.#documents.has(path) || this.#disposed) {
+      scheduled.settled.resolve();
+      return;
+    }
+    // oxlint-disable-next-line promise/prefer-await-to-then -- forward one settlement to another.
+    this.save(path).then(scheduled.settled.resolve).catch(scheduled.settled.reject);
+  }
+
+  #cancelScheduled(path: string): void {
+    const scheduled = this.#scheduled.get(path);
+    if (scheduled) {
+      clearTimeout(scheduled.timer);
+      this.#scheduled.delete(path);
+      scheduled.settled.resolve();
     }
   }
 
@@ -540,7 +638,7 @@ export class EditorDocumentSession {
     this.#documents.delete(oldPath);
     document.rename(newPath);
     this.#documents.set(newPath, document);
-    for (const map of [this.#holds, this.#background, this.#bases, this.#saves, this.#rebases]) {
+    for (const map of [this.#holds, this.#background, this.#bases, this.#saves, this.#rebases, this.#scheduled]) {
       // Maps have different value types; move the entry through a checked local key.
       if (map.has(oldPath)) {
         const value = map.get(oldPath);
@@ -557,6 +655,7 @@ export class EditorDocumentSession {
   }
 
   #remove(path: string): void {
+    this.#cancelScheduled(path);
     this.#documents.delete(path);
     this.#holds.delete(path);
     this.#background.delete(path);
@@ -599,6 +698,7 @@ export class EditorDocumentSession {
       const base = this.#bases.get(path);
       if (
         this.#saves.has(path) ||
+        this.#scheduled.has(path) ||
         this.#rebases.has(path) ||
         (document && base && document.text !== decodeTextFile(base))
       ) {

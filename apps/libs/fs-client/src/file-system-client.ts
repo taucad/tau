@@ -1,4 +1,4 @@
-import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat } from '@taucad/types';
+import type { AuthorityCheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat } from '@taucad/types';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   FileTreeNode,
@@ -111,7 +111,7 @@ export type FileSystemClient = {
   readFile(filepath: string, options: 'utf8' | { encoding: 'utf8' }): Promise<string>;
   readFile(filepath: string, options?: { encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(filepath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
-  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {
     path: string;
     preconditions: readonly FileWritePrecondition[];

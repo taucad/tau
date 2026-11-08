@@ -1,0 +1,5 @@
+---
+filesystem: minor
+---
+
+A checked write's precondition can name the SHA-256 its caller loaded a file at, `{ path, expectedSha256 }` (`FileDigestPrecondition`, `CheckedWritePrecondition`, `AuthorityCheckedFileWrite`, `isDigestPrecondition`), instead of the bytes: the pipeline reads and hashes the file under the write's locks, so a digest check carries no byte ceiling, and a provider that checks its own writes is handed the bytes the digest resolved to while those fit its check bound. A digest-checked result answers the digest of what it wrote (`sha256` on `applied` and `unchanged`), and a conflict answers the digest of the bytes it found. A malformed digest, or a digest and bytes naming the same path, is refused before any read. The rooted porcelain gains `writeFileCheckedDigest`, and a composed view routes a digest precondition to it, answering `ENOTSUP` where its root has none.

@@ -597,6 +597,32 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
     });
   });
 
+  describe('digest-checked writes (D17)', () => {
+    it("reads a file with the authority's digest, and checks a write against that digest", async () => {
+      const { proxy } = await open(transport);
+      const loaded = await proxy.readFileWithDigest('docs/readme.md');
+      expect(decoder.decode(loaded.data)).toBe('Read me.\n');
+      expect(loaded.sha256).toMatch(/^[\da-f]{64}$/u);
+
+      const applied = await proxy.writeFileChecked({
+        path: 'docs/readme.md',
+        data: 'Edited.\n',
+        preconditions: [{ path: 'docs/readme.md', expectedSha256: loaded.sha256 }],
+      });
+      expect(applied.status).toBe('applied');
+      const after = await proxy.readFileWithDigest('docs/readme.md');
+      expect(applied.status === 'applied' ? applied.sha256 : undefined).toBe(after.sha256);
+
+      const stale = await proxy.writeFileChecked({
+        path: 'docs/readme.md',
+        data: 'Lost.\n',
+        preconditions: [{ path: 'docs/readme.md', expectedSha256: loaded.sha256 }],
+      });
+      expect(stale).toMatchObject({ status: 'conflict', conflicts: [{ sha256: after.sha256 }] });
+      expect(decoder.decode(await proxy.readFile('docs/readme.md'))).toBe('Edited.\n');
+    });
+  });
+
   describe('readStream', () => {
     it('streams a file in pages, from an offset and for a length', async () => {
       const { proxy } = await open(transport);

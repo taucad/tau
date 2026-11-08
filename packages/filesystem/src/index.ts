@@ -25,7 +25,15 @@ export type {
   WatchRequest,
   WatchEvent,
 } from '#types.js';
-export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+export type {
+  AuthorityCheckedFileWrite,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  CheckedWritePrecondition,
+  FileDigestPrecondition,
+  FileWritePrecondition,
+} from '@taucad/types';
+export { isDigestPrecondition } from '#checked-write-precondition.js';
 export {
   maximumChangesetBytes,
   maximumChangesetEntries,

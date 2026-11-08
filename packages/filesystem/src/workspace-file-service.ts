@@ -1,6 +1,6 @@
 import { projectIdSchema } from '@taucad/types';
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
@@ -440,7 +440,7 @@ export class WorkspaceFileService {
 
   /** Check current bytes and replace one file inside the canonical mutation fence. */
   public async writeFileChecked(
-    input: CheckedFileWrite,
+    input: AuthorityCheckedFileWrite,
     context?: WorkspaceMutationContext,
   ): Promise<CheckedFileWriteResult> {
     const path = resolveAuthorityPath(input.path);

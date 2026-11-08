@@ -8,7 +8,12 @@ import type {
   OutcomeChangeEvent,
 } from '@taucad/fs-client/file-content-service';
 import type { EditorConflictOutcome } from '@taucad/revisions/revision-effects';
-import { EditorDocumentSession, isRecordingEditorConflict, maxDeclarations } from '#lib/editor-document-session.js';
+import {
+  EditorDocumentSession,
+  editorSaveDebounceMilliseconds,
+  isRecordingEditorConflict,
+  maxDeclarations,
+} from '#lib/editor-document-session.js';
 
 const bytes = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 const outcome = (text: string): FileContentResult => ({ kind: 'text', content: bytes(text) });
@@ -19,6 +24,7 @@ function service(initial: string): {
   outcomeChange: (event: OutcomeChangeEvent) => void;
 } {
   const content = mock<FileContentService>();
+  content.addEditorSaveFlusher.mockReturnValue(() => undefined);
   let contentChange = (_event: ContentChangeEvent): void => undefined;
   let outcomeChange = (_event: OutcomeChangeEvent): void => undefined;
   content.resolve.mockResolvedValue(outcome(initial));
@@ -242,5 +248,143 @@ describe('EditorDocumentSession library declarations', () => {
     session.openDeclaration(path, 'fn a() {}');
     session.setProjectSession('q');
     expect(session.hasDeclaration(path)).toBe(false);
+  });
+
+  describe('debounced saves (D17)', () => {
+    const edit = (session: EditorDocumentSession, path: string, change: { at: number; insert: string }): void => {
+      const { at, insert } = change;
+      const document = session.get(path)!;
+      session.apply(path, {
+        expectedVersion: document.version,
+        origin: 'view',
+        changes: [{ from: at, to: at, insert }],
+      });
+    };
+
+    it('writes once when the window closes, with the text as it then stands, and shares one promise', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content } = service('one');
+        const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: ' two' });
+        const first = session.scheduleSave('main.ts');
+        edit(session, 'main.ts', { at: 7, insert: ' three' });
+        const second = session.scheduleSave('main.ts');
+
+        expect(second).toBe(first);
+        vi.advanceTimersByTime(editorSaveDebounceMilliseconds - 1);
+        expect(content.saveEditor).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        await first;
+
+        expect(content.saveEditor).toHaveBeenCalledOnce();
+        expect(content.saveEditor).toHaveBeenCalledWith('main.ts', bytes('one two three'), bytes('one'));
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not let continuous typing hold the write past one window', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content } = service('one');
+        const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+        await session.acquire('main.ts');
+        for (let step = 0; step < 5; step += 1) {
+          edit(session, 'main.ts', { at: 3, insert: 'x' });
+          void session.scheduleSave('main.ts');
+          vi.advanceTimersByTime(editorSaveDebounceMilliseconds / 5);
+        }
+
+        expect(content.saveEditor).toHaveBeenCalledOnce();
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('writes at once at a flush point, for one path or for all', async () => {
+      const { content } = service('one');
+      const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+      await session.acquire('a.ts');
+      await session.acquire('b.ts');
+      edit(session, 'a.ts', { at: 3, insert: '!' });
+      edit(session, 'b.ts', { at: 3, insert: '?' });
+      const a = session.scheduleSave('a.ts');
+      const b = session.scheduleSave('b.ts');
+
+      session.flushSaves('a.ts');
+      expect(content.saveEditor).toHaveBeenCalledOnce();
+      expect(session.hasScheduledSave('b.ts')).toBe(true);
+      session.flushSaves();
+      await Promise.all([a, b]);
+
+      expect(content.saveEditor).toHaveBeenCalledTimes(2);
+      expect(session.hasScheduledSave()).toBe(false);
+      session.dispose();
+    });
+
+    it("registers with the content service so a cut's settle writes the window first", async () => {
+      const { content } = service('one');
+      let flusher: (() => void) | undefined;
+      vi.mocked(content.addEditorSaveFlusher).mockImplementation((flush) => {
+        flusher = flush;
+        return () => undefined;
+      });
+      const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+      await session.acquire('main.ts');
+      edit(session, 'main.ts', { at: 3, insert: '!' });
+      const pending = session.scheduleSave('main.ts');
+
+      flusher!();
+      await pending;
+
+      expect(content.saveEditor).toHaveBeenCalledWith('main.ts', bytes('one!'), bytes('one'));
+      session.dispose();
+    });
+
+    it('writes the window when the session is disposed, and drops it for a deleted file', async () => {
+      const { content, contentChange } = service('one');
+      const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+      await session.acquire('kept.ts');
+      await session.acquire('gone.ts');
+      edit(session, 'kept.ts', { at: 3, insert: '!' });
+      edit(session, 'gone.ts', { at: 3, insert: '!' });
+      const kept = session.scheduleSave('kept.ts');
+      const gone = session.scheduleSave('gone.ts');
+
+      contentChange({ type: 'deleted', path: 'gone.ts', source: 'user' });
+      await gone;
+      session.dispose();
+      await kept;
+
+      expect(content.saveEditor).toHaveBeenCalledOnce();
+      expect(content.saveEditor).toHaveBeenCalledWith('kept.ts', bytes('one!'), bytes('one'));
+    });
+
+    it('follows a rename while the window is open', async () => {
+      const { content, contentChange } = service('one');
+      const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+      await session.acquire('old.ts');
+      edit(session, 'old.ts', { at: 3, insert: '!' });
+      const pending = session.scheduleSave('old.ts');
+
+      contentChange({ type: 'renamed', oldPath: 'old.ts', newPath: 'new.ts' });
+      session.flushSaves('new.ts');
+      await pending;
+
+      expect(content.saveEditor).toHaveBeenCalledWith('new.ts', bytes('one!'), bytes('one'));
+      session.dispose();
+    });
+
+    it('refuses to schedule a save of a declaration or of no document', async () => {
+      const { content } = service('one');
+      const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+
+      await expect(session.scheduleSave('missing.ts')).rejects.toThrow('No active document');
+      session.dispose();
+    });
   });
 });

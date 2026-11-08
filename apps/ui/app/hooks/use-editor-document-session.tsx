@@ -42,6 +42,19 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     });
     // oxlint-disable-next-line react/set-state-in-effect -- a session subscribes to the project filesystem only after mount.
     setSession(next);
+    /* D17's flush points outside one pane: the window losing focus, the tab hidden
+     * or switched away from, and the page going away (which cannot await the write). */
+    const flush = (): void => {
+      next.flushSaves();
+    };
+    const flushWhenHidden = (): void => {
+      if (document.visibilityState === 'hidden') {
+        next.flushSaves();
+      }
+    };
+    globalThis.addEventListener('blur', flush);
+    globalThis.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flushWhenHidden);
     editorRef.send({
       type: 'registerMaterialiseModel',
       materialiseModel: async (path: string) => {
@@ -49,6 +62,9 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       },
     });
     return () => {
+      globalThis.removeEventListener('blur', flush);
+      globalThis.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
       editorRef.send({ type: 'registerMaterialiseModel', materialiseModel: undefined });
       next.dispose();
       clearEditorNavigation(projectId);

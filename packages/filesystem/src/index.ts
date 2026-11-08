@@ -41,6 +41,7 @@ export {
   changesetReceipt,
   inHandBytes,
   isBoundedChangeset,
+  isLargeObjectSource,
   isRefusal,
   splitChangeset,
 } from '#changeset.js';
@@ -58,6 +59,7 @@ export type {
   ChangesetPhase,
   ChangesetReceipt,
   ChangesetWriteData,
+  LargeObjectWriteSource,
 } from '#changeset.js';
 
 export { WorkspaceFileService } from '#workspace-file-service.js';

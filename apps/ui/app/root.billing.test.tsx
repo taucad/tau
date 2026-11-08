@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 
 const payment = vi.hoisted(() => ({
@@ -110,15 +111,16 @@ describe('billing payment return', () => {
     payment.recoverPaymentAction.mockResolvedValue(action);
     render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
-      expect(warning).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith('Checkout was not finished.', expect.anything());
     });
+    expect(warning).not.toHaveBeenCalled();
     expect(payment.recoverPaymentAction).toHaveBeenCalledOnce();
     expect(payment.recoverPaymentAction).toHaveBeenCalledWith(
       expect.objectContaining({ subjectId: 'account-a' }),
       'topup_1',
     );
     expect(payment.followPaymentRedirect).not.toHaveBeenCalled();
-    const options = warning.mock.calls[0]?.[1] as {
+    const options = vi.mocked(toast).mock.lastCall?.[1] as unknown as {
       action: { label: string; onClick: () => void };
     };
     expect(options.action.label).toBe('Resume Checkout');
@@ -126,7 +128,7 @@ describe('billing payment return', () => {
     expect(payment.followPaymentRedirect).toHaveBeenCalledWith(action);
   });
 
-  it('leaves a redirect that is not a purchase Checkout unrecovered on return', async () => {
+  it('says billing was updated for a returned portal action, with no Checkout to resume and nothing to recover', async () => {
     const portal = {
       actionId: 'portal_1',
       ownerId: 'user-a',
@@ -139,8 +141,9 @@ describe('billing payment return', () => {
     payment.getPaymentAction.mockResolvedValue(portal);
     render(returnAt('?payment_action=portal_1'));
     await waitFor(() => {
-      expect(warning).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith('Billing updated.');
     });
+    expect(warning).not.toHaveBeenCalled();
     expect(payment.recoverPaymentAction).not.toHaveBeenCalled();
   });
 

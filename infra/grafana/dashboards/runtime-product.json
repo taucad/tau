@@ -658,7 +658,7 @@
     {
       "title": "Entry Formats by Kernel",
       "type": "table",
-      "description": "§11 panel 35. Completed evaluates by entry file format (py, cs, kcl, scad, ts, step, stl, 3dm, …). Evaluates are edit-weighted: an editing session evaluates many times, so this is not documents opened. Population: the Population variable (default signed-in).",
+      "description": "§11 panel 35. Completed evaluates by entry file format (py, cs, kcl, scad, ts, step, stl, …). Evaluates are edit-weighted: an editing session evaluates many times, so this is not documents opened. Population: the Population variable (default signed-in).",
       "targets": [
         {
           "expr": "sum by (kernel_id, tau_runtime_entry_format) (increase(tau_runtime_entry_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",

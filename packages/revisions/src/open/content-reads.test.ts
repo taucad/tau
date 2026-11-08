@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { lfsPointerFor } from '#lfs.js';
+import { generatedGitattributesContent } from '#workspace-config.js';
 import type { LargeObjectLook } from '#large-object-fill.js';
 import type { ContentReadsDependencies } from '#open/content-reads.js';
 import { createContentReads, PendingError } from '#open/content-reads.js';
@@ -21,6 +22,8 @@ const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
 /* A checkout as a map of files, a store, and a fill the test drives. */
 const setup = (changes: Partial<ContentReadsDependencies> = {}) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([
+    /* Tau's block names the family, so the pointer is a placeholder (D16). */
+    ['.gitattributes', encoder.encode(generatedGitattributesContent(undefined))],
     ['main.scad', encoder.encode('cube(1);')],
     ['models/part.step', pointerBytes],
   ]);

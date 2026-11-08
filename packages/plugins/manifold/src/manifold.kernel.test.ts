@@ -535,6 +535,24 @@ describe('ManifoldWorker', () => {
       expectUnitNormals(primitives);
     });
 
+    it('labels normals on a setMaterial part that several glTF nodes share', async () => {
+      // The first node relabels the run material with NORMAL; the second must not read that as authored.
+      const primitives = await renderTriangles(`
+        import { GLTFNode, Manifold, setMaterial } from 'manifold-3d/manifoldCAD';
+        export default () => {
+          const part = setMaterial(Manifold.cube([10, 10, 10], true), { baseColorFactor: [1, 0, 0] });
+          return [0, 20].map((x) => {
+            const node = new GLTFNode();
+            node.manifold = part;
+            node.translation = [x, 0, 0];
+            return node;
+          });
+        };
+      `);
+      expect(primitives.length).toBeGreaterThan(0);
+      expectUnitNormals(primitives);
+    });
+
     it('appends normals after authored colour properties', async () => {
       const primitives = await renderTriangles(`
         import { GLTFNode, Manifold } from 'manifold-3d/manifoldCAD';

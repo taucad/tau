@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.0 (2026-11-08)
+
+### Features
+
+- feat(filesystem, revisions): Land desktop large objects by cloning them from the repository's store (W11.3) (#1564) (8a2e24c9a)
+- feat(billing): Expire plan credits when Pro ends (#1536) (bf5b12040)
+- feat(revisions): One .gitattributes-derived large-object rule on both legs, and native large-object read/store (W11.2) (#1561) (a98ac1f16)
+- feat(filesystem, revisions, ui): Stage a linked GitHub import in the worker and build its first revision from recorded blob ids (W7.3) (#1545) (4ad3a41e0)
+- feat(billing): Update billing terms and pass provider prices through (#1535) (3a1a77218)
+- feat(filesystem, ui, api): Import a GitHub archive through the worker's staging, measured once from its read-back (W7.2) (#1524) (c7cc6bdef)
+- feat(desktop): report desktop renderer errors to Sentry through main (#1525) (caa961bed)
+- feat(agent-tools, lsp-fs): Search and probe the Project Index instead of walking (W9) (#1523) (b38008c62)
+- feat(filesystem): Desktop parity with batched Node writes, an incremental native mint and lazy large objects (W11) (#1522) (56e03caeb)
+- feat(filesystem): Stream a disk import through staging on the compute worker (W7.1) (#1521) (f61685bf3)
+- feat(revisions): Capture from index changes, stream LFS downloads and pace mints (W6.4) (#1517) (9aa5546fc)
+- feat(ui): Staging browser tracing and Chromium crash/CSP reports (SB17, SB6) (#1516) (ddc45b47a)
+- feat(filesystem): Index removal records and a streaming file write (W6.3) (#1512) (0f54f34f1)
+- feat(ui): Report release health, one session per page load (SB8) (#1513) (d9ccad9fd)
+
+### Fixes
+
+- fix(api): Write the runtime.operation event without the request's fields (#1539) (020b9d3d5)
+- fix(picogk): Keep the PicoGK browser runtime at one address across deploys (#1567) (d280df612)
+- fix(ui): Scale the WASM integrity line with module size (#1569) (f4d29858f)
+- fix(billing): Treat a portal return as a billing update and close the checkout return defects (#1551) (62afa4b9a)
+- fix(manifold): Label normals on a setMaterial part that several glTF nodes share (#1534) (067e7cdfd)
+- fix: Close the kernel batching and budget audit findings (#1528) (bf8542254)
+- fix(viewer): send long frames as one event per 30 s window (#1532) (c6362d1e8)
+- fix(ui): stop the crash prompt claiming every reload was out of memory (#1533) (de6e364bb)
+- fix(api): keep a deleted project's agent traces until retention expires them (#1526) (5ec390f16)
+- fix(ui): serve csharp-language runtime as immutable (#1527) (e71fe2d37)
+- fix(native-process-core): Check sandbox prerequisites again before reporting one missing (#1506) (14dc15837)
+
+### Other changes
+
+- test(api): Run the live questions and task-list evals on any model; record Opus 5.5 (W7) (#1571) (c74172bff)
+- refactor(billing): Drop the retired refund intent table (#1566) (8f7a85dd2)
+- refactor(billing): Remove the operator refund commands (#1540) (0ce00c2e3)
+- test(api): Measure the asking-questions and task-tracking evals live (W7) (#1537) (c28d18805)
+
 ## 0.3.0 (2026-11-07)
 
 ### Features

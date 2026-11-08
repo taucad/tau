@@ -12,10 +12,19 @@
  */
 
 import { joinRelativePath } from '@taucad/utils/path';
-import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
-import { isRefusal } from '#changeset.js';
-import type { FileSystemProvider } from '#types.js';
+import type { BatchEntry, BatchOptions, BatchReceipt, LargeObjectWriteSource } from '#changeset.js';
+import { isLargeObjectSource, isRefusal } from '#changeset.js';
+
+import type { FileMode, FileSystemProvider } from '#types.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
+
+/** What a batch write may carry. */
+type BatchWriteData = Uint8Array<ArrayBuffer> | Blob | LargeObjectWriteSource;
+
+/** A batch entry whose write, if it is one, carries bytes or a staged blob. @internal */
+export type BytesBatchEntry =
+  | Exclude<BatchEntry, { op: 'write' }>
+  | Readonly<{ op: 'write'; path: string; data: Uint8Array<ArrayBuffer> | Blob; mode?: FileMode; create?: boolean }>;
 
 /** Writes one batch keeps in flight: enough to hide per-file latency, few enough to bound open handles. */
 export const batchConcurrency = 8;
@@ -61,13 +70,68 @@ export const mapRolling = async <Item, Result>(
 };
 
 /**
+ * Refuse a large-object write source on a provider that cannot resolve one
+ * (EQ13): an `EINVAL` refusal, raised before anything is written.
+ *
+ * @param data - A batch write's data.
+ * @returns The data, when it is bytes or a staged blob.
+ */
+export const bytesOrBlob = (data: BatchWriteData): Uint8Array<ArrayBuffer> | Blob => {
+  if (isLargeObjectSource(data)) {
+    throw errnoError('EINVAL', 'this provider cannot write a large object from a store', data.largeObject);
+  }
+  return data;
+};
+
+/**
  * Bytes of a batch write, read out of a staged `Blob` when need be.
  *
- * @param data - In-hand bytes or a staged blob.
+ * @param data - In-hand bytes or a staged blob; a large-object source is refused.
  * @returns The bytes.
  */
-export const batchBytes = async (data: Uint8Array<ArrayBuffer> | Blob): Promise<Uint8Array<ArrayBuffer>> =>
-  data instanceof Uint8Array ? data : new Uint8Array(await data.arrayBuffer());
+export const batchBytes = async (data: BatchWriteData): Promise<Uint8Array<ArrayBuffer>> => {
+  const held = bytesOrBlob(data);
+  if (held instanceof Uint8Array) {
+    return held;
+  }
+  const buffer = await held.arrayBuffer();
+  return new Uint8Array(buffer);
+};
+
+/**
+ * Split a batch around its large-object writes, for a provider that cannot
+ * resolve them: each is refused `EINVAL` and the rest run through `apply`.
+ *
+ * @param entries - The batch.
+ * @param apply - The provider's own batch over entries that carry bytes.
+ * @returns One receipt per entry, in entry order.
+ */
+export const refuseLargeObjectSources = async (
+  entries: readonly BatchEntry[],
+  apply: (entries: readonly BytesBatchEntry[]) => Promise<BatchReceipt[]>,
+): Promise<BatchReceipt[]> => {
+  const kept: BytesBatchEntry[] = [];
+  const positions: number[] = [];
+  const receipts = Array.from<BatchReceipt>({ length: entries.length });
+  for (const [index, entry] of entries.entries()) {
+    if (entry.op === 'write' && isLargeObjectSource(entry.data)) {
+      receipts[index] = {
+        outcome: 'failed',
+        error: errnoError('EINVAL', 'this provider cannot write a large object from a store', entry.path),
+      };
+    } else {
+      kept.push(entry as BytesBatchEntry);
+      positions.push(index);
+    }
+  }
+  if (kept.length > 0) {
+    const answered = await apply(kept);
+    for (const [position, receipt] of answered.entries()) {
+      receipts[positions[position]!] = receipt;
+    }
+  }
+  return receipts;
+};
 
 /**
  * Group a batch into tasks: each entry alone, except appends to one path, which
@@ -105,9 +169,9 @@ export const batchTasks = (entries: readonly BatchEntry[]): number[][] => {
  * @param options - Its abort signal and rolling window size (default {@link batchConcurrency}).
  * @returns One receipt per entry, in entry order.
  */
-export const runBatch = async (
-  entries: readonly BatchEntry[],
-  run: (entry: BatchEntry) => Promise<BatchReceipt>,
+export const runBatch = async <Entry extends BatchEntry = BatchEntry>(
+  entries: readonly Entry[],
+  run: (entry: Entry) => Promise<BatchReceipt>,
   options?: BatchOptions & Readonly<{ limit?: number }>,
 ): Promise<BatchReceipt[]> => {
   const limit = options?.limit ?? batchConcurrency;

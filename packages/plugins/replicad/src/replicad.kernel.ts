@@ -956,6 +956,8 @@ export const replicadKernel = defineKernel({
               }),
           });
         } finally {
+          // Render's OC calls get their own `oc.summary`, not the next evaluation's.
+          context.tracingSummary?.flush();
           renderOutputSpan.end({ renderMode });
         }
       });
@@ -1013,199 +1015,205 @@ export const replicadKernel = defineKernel({
   },
 
   async export(input, runtime, context) {
-    return context.libraryTrace.runInScope({
-      scope: 'export',
-      operation: async () => {
-        const { exportId, handle } = input;
-        const { shapes: entries, mechanism } = handle;
-        const emptyGltfExport = (format: 'glb' | 'gltf') => ({
-          files: [
-            createExportFile(
-              format,
-              format === 'glb' ? 'model.glb' : 'model.gltf',
-              asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
-            ),
-          ] as const,
-        });
-        const noGeometryExportError = (): never => {
-          throw new ReplicadBuildError([
-            { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
-          ]);
-        };
-        const stepExportError = (error: unknown): never => {
-          throw new ReplicadBuildError([
-            {
-              message: error instanceof Error ? error.message : String(error),
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ]);
-        };
-
-        switch (exportId) {
-          case 'glb':
-          case 'gltf': {
-            const { options, content } = input;
-            if (entries.length === 0) {
-              return emptyGltfExport(exportId);
-            }
-
-            const { coordinateSystem, unit } = options;
-            const namedShapes = entries.map((shapeConfig, index) => ({
-              ...shapeConfig,
-              name: resolveShapeName({
-                index,
-                name: shapeConfig.name,
-                source: 'generated',
-              }),
-            }));
-            const requested = resolveReplicadTessellation(namedShapes, {
-              tessellation: options.tessellation,
-              explicitDefaults: occtExplicitTessellationDefaults.export,
-            });
-            const { linearTolerance, angularTolerance } = requested;
-            const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
-              render(namedShapes, {
-                tessellation: { linearTolerance, angularTolerance },
-                collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
-                openCascade: context.openCascade,
-                tessellationInstancing: context.tessellationInstancing,
-                tracer: runtime.tracer,
-              }),
-            );
-            const temporaryShapes = renderedShapes.filter(
-              (shape): shape is GeometryReplicad => shape.format === 'replicad',
-            );
-
-            if (temporaryShapes.length === 0) {
-              return emptyGltfExport(exportId);
-            }
-
-            let mechanismIssues: KernelIssue[] = [];
-            const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
-              convertReplicadGeometriesToGltf({
-                images: handle.images,
-                textures: handle.textures,
-                samplers: handle.samplers,
-                geometries:
-                  content?.includeEdges === true
-                    ? temporaryShapes
-                    : temporaryShapes.map((geometry) => ({
-                        ...geometry,
-                        edges: { ...geometry.edges, lines: new Float32Array(0) },
-                      })),
-                format: exportId,
-                includeTauTopology: content?.includeTopology === true,
-                logger: runtime.logger,
-                coordinateSystem,
-                unit,
-                mechanism,
-                onMechanismIssues(issues) {
-                  mechanismIssues = issues;
-                },
-              }),
-            );
-            return {
-              files: [
-                createExportFile(exportId, exportId === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
-              ] as const,
-              issues: mechanismIssues,
-            };
-          }
-
-          case 'step': {
-            const { options } = input;
-            if (entries.length === 0) {
-              return noGeometryExportError();
-            }
-
-            const { coordinateSystem } = options;
-
-            // A drawing-only model is offered STEP only when every drawing bounds closed profiles (`offersFor`);
-            // it writes those region faces, sketched on XY at Z = 0, in place of the drawings.
-            const drawingOnly = entries.every(({ shape }) => isDrawingShape(shape));
-            let faced: NativeHandleEntry[] | undefined;
-            let rotated: NativeHandleEntry[] | undefined;
-            let stepBlob: Blob;
-            try {
-              if (drawingOnly) {
-                // Built one entry at a time so `finally` deletes the faces made before a later drawing throws.
-                faced = [];
-                for (const entry of entries) {
-                  faced.push({ ...entry, shape: drawingFaces(entry.shape) });
-                }
-              }
-              const source = faced ?? entries;
-              // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
-              // model in the OCCT heap until a finalizer runs.
-              rotated = coordinateSystem === 'y-up' ? source.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
-              stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
-                exportSTEP(context.openCascade, rotated ?? source, {
-                  phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
-                }),
-              );
-            } catch (error) {
-              return stepExportError(error);
-            } finally {
-              deleteExportCopies(rotated);
-              deleteExportCopies(faced);
-            }
-            const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
-            return { files: [createExportFile('step', 'assembly', stepBytes)] as const };
-          }
-
-          case 'stl': {
-            const { options } = input;
-            if (entries.length === 0) {
-              return noGeometryExportError();
-            }
-
-            const requested = resolveReplicadTessellation(entries, {
-              tessellation: options.tessellation,
-              explicitDefaults: occtExplicitTessellationDefaults.export,
-            });
-            const { linearTolerance, angularTolerance } = requested;
-            const angularToleranceRad = angularTolerance * (Math.PI / 180);
-            const { coordinateSystem } = options;
-
-            const rotated =
-              coordinateSystem === 'y-up'
-                ? entries.map((s) => ({
-                    ...s,
-                    shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
-                  }))
-                : undefined;
-
-            const result = await Promise.all(
-              (rotated ?? entries).map(async ({ shape, name }, index) => {
-                const bytes = await buildExportBytes(shape, {
-                  tolerance: linearTolerance,
-                  angularTolerance: angularToleranceRad,
-                  binary: options.binary,
-                });
-                return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
-              }),
-            ).finally(() => {
-              deleteExportCopies(rotated);
-            });
-            return { files: nonemptyExportFiles(result) };
-          }
-
-          default: {
-            const _exhaustive: never = exportId;
+    try {
+      return await context.libraryTrace.runInScope({
+        scope: 'export',
+        operation: async () => {
+          const { exportId, handle } = input;
+          const { shapes: entries, mechanism } = handle;
+          const emptyGltfExport = (format: 'glb' | 'gltf') => ({
+            files: [
+              createExportFile(
+                format,
+                format === 'glb' ? 'model.glb' : 'model.gltf',
+                asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
+              ),
+            ] as const,
+          });
+          const noGeometryExportError = (): never => {
+            throw new ReplicadBuildError([
+              { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+            ]);
+          };
+          const stepExportError = (error: unknown): never => {
             throw new ReplicadBuildError([
               {
-                message: `Unsupported export format: ${String(_exhaustive)}`,
-                code: 'KERNEL_CAPABILITY_MISSING',
+                message: error instanceof Error ? error.message : String(error),
+                code: 'RUNTIME',
                 type: 'runtime',
                 severity: 'error',
               },
             ]);
+          };
+
+          switch (exportId) {
+            case 'glb':
+            case 'gltf': {
+              const { options, content } = input;
+              if (entries.length === 0) {
+                return emptyGltfExport(exportId);
+              }
+
+              const { coordinateSystem, unit } = options;
+              const namedShapes = entries.map((shapeConfig, index) => ({
+                ...shapeConfig,
+                name: resolveShapeName({
+                  index,
+                  name: shapeConfig.name,
+                  source: 'generated',
+                }),
+              }));
+              const requested = resolveReplicadTessellation(namedShapes, {
+                tessellation: options.tessellation,
+                explicitDefaults: occtExplicitTessellationDefaults.export,
+              });
+              const { linearTolerance, angularTolerance } = requested;
+              const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
+                render(namedShapes, {
+                  tessellation: { linearTolerance, angularTolerance },
+                  collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
+                  openCascade: context.openCascade,
+                  tessellationInstancing: context.tessellationInstancing,
+                  tracer: runtime.tracer,
+                }),
+              );
+              const temporaryShapes = renderedShapes.filter(
+                (shape): shape is GeometryReplicad => shape.format === 'replicad',
+              );
+
+              if (temporaryShapes.length === 0) {
+                return emptyGltfExport(exportId);
+              }
+
+              let mechanismIssues: KernelIssue[] = [];
+              const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
+                convertReplicadGeometriesToGltf({
+                  images: handle.images,
+                  textures: handle.textures,
+                  samplers: handle.samplers,
+                  geometries:
+                    content?.includeEdges === true
+                      ? temporaryShapes
+                      : temporaryShapes.map((geometry) => ({
+                          ...geometry,
+                          edges: { ...geometry.edges, lines: new Float32Array(0) },
+                        })),
+                  format: exportId,
+                  includeTauTopology: content?.includeTopology === true,
+                  logger: runtime.logger,
+                  coordinateSystem,
+                  unit,
+                  mechanism,
+                  onMechanismIssues(issues) {
+                    mechanismIssues = issues;
+                  },
+                }),
+              );
+              return {
+                files: [
+                  createExportFile(exportId, exportId === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
+                ] as const,
+                issues: mechanismIssues,
+              };
+            }
+
+            case 'step': {
+              const { options } = input;
+              if (entries.length === 0) {
+                return noGeometryExportError();
+              }
+
+              const { coordinateSystem } = options;
+
+              // A drawing-only model is offered STEP only when every drawing bounds closed profiles (`offersFor`);
+              // it writes those region faces, sketched on XY at Z = 0, in place of the drawings.
+              const drawingOnly = entries.every(({ shape }) => isDrawingShape(shape));
+              let faced: NativeHandleEntry[] | undefined;
+              let rotated: NativeHandleEntry[] | undefined;
+              let stepBlob: Blob;
+              try {
+                if (drawingOnly) {
+                  // Built one entry at a time so `finally` deletes the faces made before a later drawing throws.
+                  faced = [];
+                  for (const entry of entries) {
+                    faced.push({ ...entry, shape: drawingFaces(entry.shape) });
+                  }
+                }
+                const source = faced ?? entries;
+                // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
+                // model in the OCCT heap until a finalizer runs.
+                rotated =
+                  coordinateSystem === 'y-up' ? source.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
+                stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
+                  exportSTEP(context.openCascade, rotated ?? source, {
+                    phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
+                  }),
+                );
+              } catch (error) {
+                return stepExportError(error);
+              } finally {
+                deleteExportCopies(rotated);
+                deleteExportCopies(faced);
+              }
+              const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
+              return { files: [createExportFile('step', 'assembly', stepBytes)] as const };
+            }
+
+            case 'stl': {
+              const { options } = input;
+              if (entries.length === 0) {
+                return noGeometryExportError();
+              }
+
+              const requested = resolveReplicadTessellation(entries, {
+                tessellation: options.tessellation,
+                explicitDefaults: occtExplicitTessellationDefaults.export,
+              });
+              const { linearTolerance, angularTolerance } = requested;
+              const angularToleranceRad = angularTolerance * (Math.PI / 180);
+              const { coordinateSystem } = options;
+
+              const rotated =
+                coordinateSystem === 'y-up'
+                  ? entries.map((s) => ({
+                      ...s,
+                      shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
+                    }))
+                  : undefined;
+
+              const result = await Promise.all(
+                (rotated ?? entries).map(async ({ shape, name }, index) => {
+                  const bytes = await buildExportBytes(shape, {
+                    tolerance: linearTolerance,
+                    angularTolerance: angularToleranceRad,
+                    binary: options.binary,
+                  });
+                  return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
+                }),
+              ).finally(() => {
+                deleteExportCopies(rotated);
+              });
+              return { files: nonemptyExportFiles(result) };
+            }
+
+            default: {
+              const _exhaustive: never = exportId;
+              throw new ReplicadBuildError([
+                {
+                  message: `Unsupported export format: ${String(_exhaustive)}`,
+                  code: 'KERNEL_CAPABILITY_MISSING',
+                  type: 'runtime',
+                  severity: 'error',
+                },
+              ]);
+            }
           }
-        }
-      },
-    });
+        },
+      });
+    } finally {
+      // Export's OC calls get their own `oc.summary`, not the next evaluation's.
+      context.tracingSummary?.flush();
+    }
   },
 
   serializeHandle({ handle }, runtime, context) {

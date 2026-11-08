@@ -2,11 +2,14 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const renderWithRootProviders = (component: React.ReactNode): ReturnType<typeof render> =>
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter>{component}</MemoryRouter>
+      <MemoryRouter>
+        <TooltipProvider>{component}</TooltipProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 
@@ -25,8 +28,21 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   HomeNewProjectComposerProvider: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='home-new-project-composer-provider'>{children}</div>
   ),
-  // The hero's native early input adopts into this actor, so the mock has to offer it too.
-  useChatComposer: () => ({ draftActorRef: { send: vi.fn() } }),
+  // The hero's native early input adopts into this actor, and its bar at rest reads the model.
+  useChatComposer: () => ({
+    draftActorRef: { send: vi.fn() },
+    model: {
+      model: {
+        id: 'm',
+        name: 'Model',
+        family: 'claude',
+        provider: { id: 'anthropic', name: 'Anthropic' },
+        isResolved: true,
+      },
+      effort: undefined,
+    },
+    execution: { execution: { kind: 'tau' } },
+  }),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }),

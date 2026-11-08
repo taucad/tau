@@ -106,7 +106,7 @@ describe('desktop publication', () => {
       join(bin, 'aws'),
       `#!/usr/bin/env node
 const fs = require('node:fs'); const path = require('node:path');
-const args = process.argv.slice(2); const op = args[3];
+const args = process.argv.slice(2); const op = args[args.indexOf('s3api') + 1];
 const value = (key) => args[args.indexOf(key) + 1];
 const key = value('--key'); const target = path.join(process.env.TEST_S3_ROOT, key);
 if (op === 'get-object') {

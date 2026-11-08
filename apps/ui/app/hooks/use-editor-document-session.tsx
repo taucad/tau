@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
@@ -71,6 +73,23 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       setSession((current) => (current === next ? undefined : current));
     };
   }, [contentService, editorRef, fileManagerRef, projectId]);
+
+  /* The close cut is a producer's: text in its debounce window, and every save
+   * already queued, is on disk before the session takes the close revision (D17). */
+  const flushEditorAtClose = useCallback(
+    async (phase: FlushPhase): Promise<void> => {
+      if (phase !== 'hidden' || !contentService) {
+        return;
+      }
+      try {
+        await contentService.settleEditorSaves();
+      } catch (error) {
+        throw new Error('Editor changes are not confirmed saved.', { cause: error });
+      }
+    },
+    [contentService],
+  );
+  useFlushOnClose(flushEditorAtClose, { stage: 'producer' });
 
   const fileManager = useMemo(
     () => ({

@@ -1,6 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { MockProxy } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { lfsPointerFor } from '@taucad/revisions';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
@@ -25,6 +26,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 const { EditorDocumentSessionProvider, useEditorLanguageEnvironment } =
   await import('#hooks/use-editor-document-session.js');
+const { UnloadProvider, useFlushProducers } = await import('#hooks/use-flush-on-close.js');
 
 const openFileCalls = (): unknown[] =>
   editorRef.send.mock.calls.map(([event]) => event as { type: string }).filter((event) => event.type === 'openFile');
@@ -33,6 +35,7 @@ async function mountEnvironment(): Promise<EditorLanguageEnvironment> {
   const content = mock<FileContentService>();
   content.onDidContentChange.mockReturnValue(() => undefined);
   content.onDidChangeOutcome.mockReturnValue(() => undefined);
+  content.addEditorSaveFlusher.mockReturnValue(() => undefined);
   contentService.current = content;
   let environment: EditorLanguageEnvironment | undefined;
   function Probe(): undefined {
@@ -40,15 +43,70 @@ async function mountEnvironment(): Promise<EditorLanguageEnvironment> {
     return undefined;
   }
   render(
-    <EditorDocumentSessionProvider>
-      <Probe />
-    </EditorDocumentSessionProvider>,
+    <UnloadProvider>
+      <EditorDocumentSessionProvider>
+        <Probe />
+      </EditorDocumentSessionProvider>
+    </UnloadProvider>,
   );
   await waitFor(() => {
     expect(environment).toBeDefined();
   });
   return environment!;
 }
+
+describe('EditorDocumentSessionProvider close cut (D17)', () => {
+  const mountWithProducers = async (content: MockProxy<FileContentService>): Promise<() => Promise<void>> => {
+    content.onDidContentChange.mockReturnValue(() => undefined);
+    content.onDidChangeOutcome.mockReturnValue(() => undefined);
+    content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+    contentService.current = content;
+    let flushProducers: (() => Promise<void>) | undefined;
+    function Probe(): undefined {
+      flushProducers = useFlushProducers();
+      return undefined;
+    }
+    render(
+      <UnloadProvider>
+        <EditorDocumentSessionProvider>
+          <Probe />
+        </EditorDocumentSessionProvider>
+      </UnloadProvider>,
+    );
+    await waitFor(() => {
+      expect(flushProducers).toBeDefined();
+    });
+    return flushProducers!;
+  };
+
+  it('settles every editor save as a producer, before the session takes the close revision', async () => {
+    const content = mock<FileContentService>();
+    const settled = Promise.withResolvers<void>();
+    content.settleEditorSaves.mockReturnValue(settled.promise);
+    const flushProducers = await mountWithProducers(content);
+
+    let done = false;
+    const flushing = (async (): Promise<void> => {
+      await flushProducers();
+      done = true;
+    })();
+    await waitFor(() => {
+      expect(content.settleEditorSaves).toHaveBeenCalledOnce();
+    });
+    expect(done).toBe(false);
+    settled.resolve();
+    await flushing;
+    expect(done).toBe(true);
+  });
+
+  it('names unsaved editor changes when a save cannot settle', async () => {
+    const content = mock<FileContentService>();
+    content.settleEditorSaves.mockRejectedValue(new Error('disk full'));
+    const flushProducers = await mountWithProducers(content);
+
+    await expect(flushProducers()).rejects.toThrow('Editor changes are not confirmed saved.');
+  });
+});
 
 describe('EditorDocumentSessionProvider navigation', () => {
   it.each([

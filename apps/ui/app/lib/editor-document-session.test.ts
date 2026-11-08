@@ -286,6 +286,82 @@ describe('EditorDocumentSession library declarations', () => {
       }
     });
 
+    const recorded = (): ReturnType<typeof vi.fn<() => Promise<EditorConflictOutcome>>> =>
+      vi.fn(
+        async (): Promise<EditorConflictOutcome> => ({
+          status: 'recorded',
+          revisionId: 'r1',
+          line: 'main',
+          into: 'main',
+        }),
+      );
+
+    it('records text still in its window as a conflict when the file is deleted, never as a saved success', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content, contentChange } = service('one');
+        const record = recorded();
+        const session = new EditorDocumentSession({
+          contentService: content,
+          projectId: 'p',
+          recordEditorConflict: record,
+        });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: ' two' });
+        const scheduled = session.scheduleSave('main.ts');
+        contentChange({ type: 'deleted', path: 'main.ts', source: 'user' });
+        await scheduled;
+
+        expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one', mine: 'one two' });
+        expect(content.saveEditor).not.toHaveBeenCalled();
+        expect(session.hasScheduledSave('main.ts')).toBe(false);
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('records text still in its window as a conflict when the file turns binary', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content, outcomeChange } = service('one');
+        const record = recorded();
+        const session = new EditorDocumentSession({
+          contentService: content,
+          projectId: 'p',
+          recordEditorConflict: record,
+        });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: '!' });
+        const scheduled = session.scheduleSave('main.ts');
+        outcomeChange({ path: 'main.ts', result: { kind: 'binary', size: 9, head: new Uint8Array([0]), revision: 2 } });
+        await scheduled;
+
+        expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one', mine: 'one!' });
+        expect(session.get('main.ts')).toBeUndefined();
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reports text in its window it cannot record when the file goes away', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content, contentChange } = service('one');
+        const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: '!' });
+        const scheduled = session.scheduleSave('main.ts');
+        contentChange({ type: 'deleted', path: 'main.ts', source: 'user' });
+
+        await expect(scheduled).rejects.toThrow('cannot record both versions');
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not let continuous typing hold the write past one window', async () => {
       vi.useFakeTimers();
       try {
@@ -345,7 +421,7 @@ describe('EditorDocumentSession library declarations', () => {
       session.dispose();
     });
 
-    it('writes the window when the session is disposed, and drops it for a deleted file', async () => {
+    it('writes the window when the session is disposed, and never writes it over a deleted file', async () => {
       const { content, contentChange } = service('one');
       const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
       await session.acquire('kept.ts');
@@ -356,7 +432,8 @@ describe('EditorDocumentSession library declarations', () => {
       const gone = session.scheduleSave('gone.ts');
 
       contentChange({ type: 'deleted', path: 'gone.ts', source: 'user' });
-      await gone;
+      /* No conflict recorder here: the text it could not keep is reported, not dropped as saved. */
+      await expect(gone).rejects.toThrow('cannot record both versions');
       session.dispose();
       await kept;
 

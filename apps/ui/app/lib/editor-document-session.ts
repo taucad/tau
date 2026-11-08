@@ -372,6 +372,7 @@ export class EditorDocumentSession {
     if (event.result.kind === 'text') {
       this.#adopt(event.path, event.result.content);
     } else if (event.result.kind !== 'orphaned' || !this.#holds.has(event.path)) {
+      this.#recordScheduled(event.path);
       this.#remove(event.path);
     }
   }
@@ -409,6 +410,8 @@ export class EditorDocumentSession {
         const document = this.#documents.get(event.path);
         if (pending && pending.recording !== true && document) {
           this.#recordConflict(event.path, pending, document.text);
+        } else {
+          this.#recordScheduled(event.path);
         }
         this.#remove(event.path);
         break;
@@ -420,6 +423,7 @@ export class EditorDocumentSession {
       case 'directoryDeleted': {
         for (const path of this.#documents.keys()) {
           if (path === event.path || path.startsWith(`${event.path}/`)) {
+            this.#recordScheduled(path);
             this.#remove(path);
           }
         }
@@ -459,6 +463,34 @@ export class EditorDocumentSession {
     }
     // oxlint-disable-next-line promise/prefer-await-to-then -- forward one settlement to another.
     this.save(path).then(scheduled.settled.resolve).catch(scheduled.settled.reject);
+  }
+
+  /**
+   * Text still in its debounce window when the file goes away (deleted, or now
+   * binary, too large or gone): it is held as an in-flight save's would be, and
+   * recorded as a conflict beside the file rather than dropped. The scheduled
+   * promise settles with the record, so a failure to record is reported.
+   */
+  #recordScheduled(path: string): void {
+    const scheduled = this.#scheduled.get(path);
+    const document = this.#documents.get(path);
+    if (scheduled === undefined || document === undefined) {
+      return;
+    }
+    clearTimeout(scheduled.timer);
+    this.#scheduled.delete(path);
+    const base = this.#bases.get(path) ?? null;
+    if (base !== null && decodeTextFile(base) === document.text) {
+      scheduled.settled.resolve();
+      return;
+    }
+    const pending = this.#rebases.get(path) ?? { base, settled: Promise.withResolvers<void>() };
+    this.#rebases.set(path, pending);
+    if (pending.recording !== true) {
+      this.#recordConflict(path, pending, document.text);
+    }
+    // oxlint-disable-next-line promise/prefer-await-to-then -- forward one settlement to another.
+    pending.settled.promise.then(scheduled.settled.resolve).catch(scheduled.settled.reject);
   }
 
   #cancelScheduled(path: string): void {

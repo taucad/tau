@@ -1,10 +1,12 @@
-import { createContext, useContext, useMemo, useSyncExternalStore } from 'react';
+import { useContext, useMemo, useSyncExternalStore } from 'react';
 import * as Cookies from 'es-cookie';
 import { Topic } from '@taucad/events';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isFunction } from '#utils/function.utils.js';
 import { serverVisiblePreferences } from '#constants/cookie.constants.js';
 import type { CookieName } from '#constants/cookie.constants.js';
+import { noServerPreferences, serverPreferencesContext } from '#hooks/server-preferences.js';
+import type { ServerPreferences } from '#hooks/server-preferences.js';
 
 type Listener = () => void;
 
@@ -42,12 +44,11 @@ const mirroredNames: ReadonlySet<string> = new Set(
 /** Days a mirrored preference cookie lives; each change renews it. */
 const mirrorLifetimeDays = 365;
 
-const mirrorAttributes = (): Cookies.CookieAttributes => ({
-  expires: mirrorLifetimeDays,
-  sameSite: 'lax',
+const mirrorAttributes = (): Cookies.CookieAttributes =>
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- `location` is absent outside a document.
-  secure: globalThis.location?.protocol === 'https:',
-});
+  globalThis.location?.protocol === 'https:'
+    ? { expires: mirrorLifetimeDays, sameSite: 'lax', secure: true }
+    : { expires: mirrorLifetimeDays, sameSite: 'lax' };
 
 /**
  * Keep a request cookie in step with the durable value: a mirrored preference rides requests as the same JSON it is
@@ -168,19 +169,6 @@ const preferenceStore = () => {
 export const store = preferenceStore();
 
 /**
- * The server-visible preferences the request carried, by storage name, as parsed JSON. The server renders with them
- * and the client hydrates with the same values, so a mirrored preference's first paint is final.
- */
-export type ServerPreferences = Readonly<Record<string, unknown>>;
-
-const noServerPreferences: ServerPreferences = {};
-
-const ServerPreferencesContext = createContext<ServerPreferences>(noServerPreferences);
-
-/** Supplies {@link useCookie}'s server snapshot: what the request's cookies said, from the root loader. */
-export const ServerPreferencesProvider = ServerPreferencesContext.Provider;
-
-/**
  * Read the server-visible preferences from a request's `Cookie` header. Values are untrusted, so only valid JSON is
  * kept and each consumer still validates its own value.
  *
@@ -216,7 +204,7 @@ export const readServerPreferences = (cookieHeader: string | undefined): ServerP
 export const useCookie = <T>(name: CookieName, defaultValue: T) => {
   const storageName = `${metaConfig.cookiePrefix}${name}`;
   // Only a mirrored preference has a server value; the request's cookie is the same JSON the store holds.
-  const serverValue = useContext(ServerPreferencesContext)[storageName] as T | undefined;
+  const serverValue = useContext(serverPreferencesContext)[storageName] as T | undefined;
   const [selector, update, remove] = useMemo(
     () => [
       (): T => store.get<T>(storageName) ?? defaultValue,

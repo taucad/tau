@@ -8,8 +8,9 @@ import { renderToString } from 'react-dom/server';
 import { dehydrateModelCatalog } from '#lib/model-catalog.server.js';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
-import { readServerPreferences, ServerPreferencesProvider, store } from '#hooks/use-cookie.js';
-import type { ServerPreferences } from '#hooks/use-cookie.js';
+import { readServerPreferences, store } from '#hooks/use-cookie.js';
+import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
+import type { ServerPreferences } from '#hooks/server-preferences.js';
 
 /* The server render and hydration of the model label (audit R3): the root loader's catalog and preference cookies. */
 

@@ -34,6 +34,7 @@ import type {
   InvocationEvidenceRecorder,
   ProviderAccountRefusal,
   ProviderTerminalFailure,
+  TurnTelemetry,
 } from '@taucad/api-llm-gateway';
 import { billableModelQualificationResolverKey } from '#billable-model-invocation.types.js';
 import type {
@@ -48,7 +49,6 @@ import type { QualifiedAdmissionInput, TerminalEvidence } from '#credit-ledger.t
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { llmAdmissionOutcomes } from '@taucad/telemetry';
 import { gatewayProviderLabel, inlineImageBytesOf, recordTurnStepCache } from '#turn-step-telemetry.js';
-import type { TurnTelemetry } from '@taucad/api-llm-gateway';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type { ObservedSettlement } from '#observed-settlement.js';
 

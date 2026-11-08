@@ -651,6 +651,11 @@ async function main(): Promise<void> {
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
             );
+            // Plan credit expires once every subscription on the account has ended (terms §3.3).
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.plan_expiry', async () =>
+              ledger.expireEndedPlanCredits({ environment: billingEnvironment, limit }),
+            );
             // Drains the notice outbox: renewal dunning and automatic-reload notices. A send failure leaves
             // the row pending with its own backoff rather than failing the pass; its last failure alerts.
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection

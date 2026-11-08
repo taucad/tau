@@ -18,9 +18,16 @@ name: Shell conformance
 # Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
 # head, on demand, and on a pull request only while it carries the `shell-conformance` label. They no
 # longer run on every `main` push or on every pull request that touches a shell path. The nightly watchdog
-# alerts the operator when a nightly is red or missing.
+# alerts the operator when a nightly is red or missing. `release-desktop-staging.yml` calls the rows on
+# the commit it is about to tag, so no desktop candidate exists without five green rows on its own commit.
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit the rows check out (a desktop candidate's commit)
+        type: string
+        required: true
   schedule:
     - cron: '17 2 * * *'
   pull_request:
@@ -37,7 +44,7 @@ env:
 concurrency:
   # Another label added to a pull request starts a run whose rows skip; its own group keeps it from
   # cancelling the rows already running for the `shell-conformance` label.
-  group: shell-conformance-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'shell-conformance' && '-other-label' || '' }}
+  group: shell-conformance-${{ inputs.ref && format('candidate-{0}', inputs.ref) || github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'shell-conformance' && '-other-label' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -64,6 +71,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -80,7 +88,8 @@ jobs:
         timeout-minutes: 85
         env:
           TAU_VM_DISTRO: ${{ matrix.distro }}
-        run: timeout --signal=TERM --kill-after=120s 80m bash packages/core/native-process/scripts/shell-conformance-vm.sh
+        # The receipts bind `GITHUB_SHA`; a caller's `ref` checks out another commit, so pass the one the rows test.
+        run: GITHUB_SHA="$(git rev-parse HEAD)" timeout --signal=TERM --kill-after=120s 80m bash packages/core/native-process/scripts/shell-conformance-vm.sh
 
       - name: Upload the receipt
         if: always()
@@ -112,6 +121,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -127,14 +137,14 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
-        run: pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
 
       - name: Run the shell service conformance target
         if: success() || failure()
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
-        run: pnpm nx run host:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance --skip-nx-cache
 
       # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
       - name: Run the shell qualification target
@@ -142,7 +152,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
-        run: pnpm nx run host:test:shell-qualification --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification --skip-nx-cache
 
       # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
       # until the operator's own-pty run, which this workflow never performs.
@@ -151,7 +161,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
-        run: pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
 
       - name: Upload the receipt
         if: always()

@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   prerelease:
-    name: Create the staging desktop prerelease
+    name: Select the staging desktop candidate
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
@@ -64,9 +64,11 @@ jobs:
     permissions:
       actions: read
       contents: read
-    environment:
-      name: release-pr
-      deployment: false
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      release: ${{ steps.selected.outputs.release }}
+      intel: ${{ steps.selected.outputs.intel }}
+      notarize: ${{ steps.selected.outputs.notarize }}
     steps:
       # Automatic candidates only: the nightly and a dispatch go ahead regardless.
       - name: Wait for the candidate in flight
@@ -123,17 +125,6 @@ jobs:
           fi
           echo "Releasing $sha, the newest main commit with green CI."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-      - name: Mint tau-release-bot token
-        id: bot
-        if: steps.inflight.outputs.busy != 'true'
-        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
-        with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
 
       - name: Checkout
         if: steps.inflight.outputs.busy != 'true'
@@ -202,16 +193,58 @@ jobs:
           fi
           echo "release=true" >> "$GITHUB_OUTPUT"
 
+  # Operator decision D3 (2026-11-08, Brain research/ci-throughput-review.md): the five shell
+  # conformance rows pass on the candidate's own commit before its tag exists, so release-build.yml,
+  # the installer candidates and route qualification only ever see a commit with green rows. A red
+  # row means no candidate this time; the next green commit, the nightly or a dispatch tries again.
+  shell:
+    name: Shell gate
+    needs: [prerelease]
+    if: needs.prerelease.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/shell-conformance.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+
+  tag:
+    name: Tag the staging desktop candidate
+    needs: [prerelease, shell]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prerelease.outputs.sha }}
+          persist-credentials: false
+
       - name: Create the tag and prerelease
-        if: steps.selected.outputs.release == 'true'
         id: release
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          TARGET: ${{ steps.target.outputs.sha }}
+          TARGET: ${{ needs.prerelease.outputs.sha }}
           RUN_NUMBER: ${{ github.run_number }}
-          INTEL: ${{ steps.selected.outputs.intel }}
-          NOTARIZE: ${{ steps.selected.outputs.notarize }}
+          RUN_ID: ${{ github.run_id }}
+          INTEL: ${{ needs.prerelease.outputs.intel }}
+          NOTARIZE: ${{ needs.prerelease.outputs.notarize }}
         run: |
           set -euo pipefail
           version=$(jq -r .version apps/desktop/package.json)
@@ -226,6 +259,8 @@ jobs:
           Staging build of the Tau desktop app from \`${TARGET}\` on \`main\`.
 
           It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is ${signing}. The channel feed advances only after a native OTA acceptance test.
+
+          Shell conformance gate: run ${RUN_ID}
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           # A draft, because a published release is immutable (go-live DEL-20):
@@ -247,11 +282,10 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
-        if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          ARCHES: ${{ steps.selected.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
-          SIGNING: ${{ steps.selected.outputs.notarize == 'true' && ', notarized' || '' }}
+          ARCHES: ${{ needs.prerelease.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
+          SIGNING: ${{ needs.prerelease.outputs.notarize == 'true' && ', notarized' || '' }}
         run: |
           {
             echo "Created the draft prerelease $TAG and its tag ($ARCHES$SIGNING)."

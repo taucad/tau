@@ -165,7 +165,11 @@ const walk = async (
  * between the two walks leaves the descriptor on another inode, and is refused.
  */
 const openProved = async (grant: ImportSourceGrant, relative: string, directory: boolean): Promise<FileHandle> => {
-  const { absolute } = await walk(grant, relative);
+  const { absolute, stats } = await walk(grant, relative);
+  /* A device, socket or FIFO is never opened: opening one can act on hardware or block. */
+  if (directory ? !stats.isDirectory() : !stats.isFile()) {
+    return refuse('EOPNOTSUPP', directory ? 'not a folder' : 'not a regular file', relative);
+  }
   const handle = await fs.open(absolute, directory ? directoryOpenFlags : sourceOpenFlags).catch((error: unknown) => {
     throw (error as NodeJS.ErrnoException).code === 'ELOOP'
       ? Object.assign(new Error(`ELOOP: refusing to follow a symbolic link in an import source: ${relative}`), {

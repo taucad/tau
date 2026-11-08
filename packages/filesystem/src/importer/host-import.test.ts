@@ -242,6 +242,16 @@ describe('a host-side import', () => {
     expect(staged.entries.map(({ path }) => path).toSorted()).toEqual(['main.ts', 'mesh.bin']);
   });
 
+  it('refuses a special file by its kind before opening it', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    /* Opening a FIFO for reading blocks until a writer comes; it is refused from the walk's lstat instead. */
+    execFileSync('mkfifo', [join(fixture.folder, 'pipe')]);
+    await expect(fixture.sources.read(grant, 'pipe', 64)).rejects.toMatchObject({ code: 'EOPNOTSUPP' });
+    const copied = await fixture.client.copyFromImportGrant(grant, [{ from: 'pipe', path: 'pipe-copy', size: 0 }]);
+    expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'EOPNOTSUPP' } });
+  });
+
   it('refuses a source outside what the person chose', async () => {
     const fixture = serve();
     const { grant } = folderGrant(fixture);

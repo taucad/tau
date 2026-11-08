@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Check, ChevronDown, FolderOpen, House, Plus, Settings, ShieldAlert, Unplug } from 'lucide-react';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
@@ -151,15 +151,22 @@ export function WorkspaceSelector({
   /* What the chip reads once the locations are known, remembered for the next load's first paint. */
   const shownKind = state.phase === 'ready' && state.shouldShowPicker ? state.value.kind : undefined;
   const shownLabel = state.phase === 'ready' && state.shouldShowPicker ? state.selectedOption.label : undefined;
+  /* Read, not watched: Home mounts two selectors with their own state, and one that re-wrote whenever
+   * the other's write changed the preference would ping-pong with it until React gives up. Each
+   * selector writes only when what it shows changes. */
+  const rememberedRef = useRef(remembered);
+  useEffect(() => {
+    rememberedRef.current = remembered;
+  }, [remembered]);
   useEffect(() => {
     if (
       shownKind !== undefined &&
       shownLabel !== undefined &&
-      (shownKind !== remembered.kind || shownLabel !== remembered.label)
+      (shownKind !== rememberedRef.current.kind || shownLabel !== rememberedRef.current.label)
     ) {
       setRemembered({ kind: shownKind, label: shownLabel });
     }
-  }, [remembered.kind, remembered.label, setRemembered, shownKind, shownLabel]);
+  }, [setRemembered, shownKind, shownLabel]);
 
   if (!state.shouldShowPicker) {
     return undefined;

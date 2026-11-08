@@ -408,7 +408,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   });
 
   /* (8) Screen-reader mode: the mirror inside the textbox plus the live region beside it. */
-  let accessibility: { push: (data: string) => void; dispose: () => void } | undefined;
+  let accessibility: { push: (data: string) => void; parsed: () => void; dispose: () => void } | undefined;
   const enableAccessibility = (): void => {
     if (accessibility) {
       return;
@@ -425,6 +425,9 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     mirror.schedule();
     accessibility = {
       push: announcer.push,
+      /* The mirror reads the buffer, not the canvas: a parsed write must refresh it even when no frame is drawn
+       * (a paused, throttled or rebuilding renderer fires no render event, and the mirror would keep stale rows). */
+      parsed: mirror.schedule,
       dispose() {
         for (const subscription of subscriptions) {
           subscription.dispose();
@@ -468,6 +471,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     const data = batch.length === 1 ? batch[0]!.data : batch.map((entry) => entry.data).join('');
     accessibility?.push(data);
     terminal.write(data, () => {
+      accessibility?.parsed();
       for (const entry of batch) {
         entry.painted?.();
       }

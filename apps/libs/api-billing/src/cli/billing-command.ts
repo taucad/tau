@@ -69,11 +69,37 @@ const createRecoveryNoticeTransport = (
   );
 };
 
+/** Long-running worker subcommands, which the platform keeps running as machines. */
+const continuousWorkerCommands = new Set(['billing-operations-worker', 'recover-llm-worker']);
+
+/** Resolves on the first SIGINT or SIGTERM. A pending promise alone does not keep Node running, so a timer does. */
+const waitForStopSignal = async (): Promise<void> =>
+  new Promise((resolve) => {
+    const keepAlive = setInterval(() => undefined, 2 ** 30);
+    const stop = (): void => {
+      clearInterval(keepAlive);
+      process.removeListener('SIGINT', stop);
+      process.removeListener('SIGTERM', stop);
+      resolve();
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+
 /** Protected billing entry in the API image; no HTTP server, dotenv or provider initialization. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  const cloudEnabled = String(process.env.TAU_CLOUD_ENABLED) === 'true';
+  /* A continuous worker with Cloud off has no work to do, so it idles until the platform stops it.
+   * Exiting instead crash-loops the machine until the platform's restart limit leaves it stopped, and
+   * restoring TAU_CLOUD_ENABLED does not start a stopped machine again (staging, 2026-11-07). */
+  if (!cloudEnabled && continuousWorkerCommands.has(args[0] ?? '')) {
+    console.log(JSON.stringify({ worker: args[0], state: 'idle', reason: 'TAU_CLOUD_ENABLED is not true' }));
+    await waitForStopSignal();
+    return;
+  }
   // `migrate` is the release command for the whole API schema, so a cloud-off deployment still needs it.
-  if (args[0] !== 'migrate' && String(process.env.TAU_CLOUD_ENABLED) !== 'true') {
+  if (args[0] !== 'migrate' && !cloudEnabled) {
     throw new Error('billing-command requires TAU_CLOUD_ENABLED=true');
   }
   registerBillableModelMeterContracts();

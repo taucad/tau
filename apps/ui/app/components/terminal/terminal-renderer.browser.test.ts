@@ -287,4 +287,22 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     created.setScreenReaderMode(true);
     expect(await mirrorText()).toContain('kept');
   });
+
+  it('refreshes the screen mirror from parsed output when no frame is drawn', async () => {
+    await create();
+    await write('before-stall\r\n');
+    expect(await mirrorText()).toContain('before-stall');
+    /* A throttled or occluded window draws no frame, so the renderer fires no render event. */
+    const frames = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(() => 0);
+    try {
+      /* Let a frame requested before the stall run out, so the render loop stops. */
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      await write('after-stall\r\n');
+      expect(await mirrorText()).toContain('after-stall');
+    } finally {
+      frames.mockRestore();
+    }
+  });
 });

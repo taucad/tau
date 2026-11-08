@@ -94,7 +94,7 @@ describe('billing database protections and real command', () => {
     expect(result.status, migrationDiagnostic).toBe(0);
   });
 
-  it('should refuse every billing command before opening a database when Cloud is disabled', () => {
+  it('should refuse one-shot billing commands before opening a database when Cloud is disabled', () => {
     const childEnvironment: Record<string, string | undefined> = {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
       PATH: process.env['PATH'],
@@ -113,6 +113,63 @@ describe('billing database protections and real command', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('billing-command requires TAU_CLOUD_ENABLED=true');
   });
+
+  it.each(['billing-operations-worker', 'recover-llm-worker'])(
+    'should keep the %s idle while Cloud is disabled and stop cleanly',
+    async (worker) => {
+      const childEnvironment: Record<string, string | undefined> = {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+        PATH: process.env['PATH'],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+        TAU_CLOUD_ENABLED: 'false',
+      };
+      // No database or provider configuration: an idle worker must not reach for either.
+      const child = spawn(
+        process.execPath,
+        [
+          resolve(import.meta.dirname, '../../dist/billing-command.js'),
+          worker,
+          '--environment',
+          'staging',
+          '--limit',
+          '100',
+          '--poll-milliseconds',
+          '5000',
+        ],
+        {
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- raw process environments contain strings before schema parsing
+          env: childEnvironment as NodeJS.ProcessEnv,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      try {
+        const [chunk] = (await once(child.stdout, 'data')) as unknown[];
+        expect(JSON.parse(String(chunk).split('\n')[0] ?? '')).toEqual({
+          worker,
+          state: 'idle',
+          reason: 'TAU_CLOUD_ENABLED is not true',
+        });
+        // A cloud-off worker stays up rather than exiting into the platform's restart limit.
+        await wait(500);
+        expect({ exitCode: child.exitCode, signalCode: child.signalCode }).toEqual({
+          exitCode: null,
+          signalCode: null,
+        });
+        child.kill('SIGTERM');
+        const [code, signal] = (await once(child, 'close')) as unknown[];
+        expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL');
+        }
+      }
+    },
+  );
 
   it('should run the credential-free recovery worker and stop cleanly', async () => {
     const childEnvironment: Record<string, string | undefined> = {};

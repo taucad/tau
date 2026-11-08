@@ -58,30 +58,32 @@ runs:
         # in step with its CHECKS.
         gates='["Validate workspace","Run affected tasks","API tests (Postgres + MinIO)","Billing contracts (no Stripe credentials)"]'
         gates_passed() {
-          local ci settled wait started finished
+          local ci wait job started status log
           ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$2&event=push&branch=main&per_page=1" \
             --jq '.workflow_runs[0].id // empty')
           [ -n "$ci" ] || return 1
-          # Every gate passed, and when each last completed. The wait job records a
-          # gate's conclusion only once all of them have completed, unless it gives up
-          # at its 340-minute deadline, when an unsettled gate reads `missing`.
-          settled=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
-            --jq '.jobs[] | {name, conclusion, completed_at}' | jq -rs --argjson gates "$gates" '
+          # Every gate passed in that commit's CI run.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
+            --jq '.jobs[] | {name, conclusion}' | jq -se --argjson gates "$gates" '
             [$gates[] as $g | first(.[] | select(.name == $g)) // null]
-            | if all(.[]; . != null and .conclusion == "success")
-              then map(.completed_at | fromdate) | max else empty end')
-          [ -n "$settled" ] || return 1
-          # A wait job still running, under 330 minutes in, polls again inside its
-          # deadline and records these conclusions. One that finished did so only if it
-          # finished in under 330 minutes (not at the deadline) and after the last gate
-          # settled: a gate re-run after it finished passed after it recorded `failure`.
+            | all(.[]; . != null and .conclusion == "success")' > /dev/null || return 1
           wait=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
             --jq '.jobs[] | select(.name == "Wait for CI checks" and .started_at != null)
-              | "\(.started_at | fromdate) \(.completed_at // "" | if . == "" then "" else fromdate end)"')
+              | "\(.id) \(.started_at | fromdate) \(.status)"')
+          # Not started yet: it will record what CI concluded.
           [ -n "$wait" ] || return 0
-          read -r started finished <<< "$wait"
-          [ $(( ${finished:-$(date +%s)} - started )) -lt $(( 330 * 60 )) ] || return 1
-          [ -z "$finished" ] || [ "$finished" -ge "$settled" ]
+          read -r job started status <<< "$wait"
+          if [ "$status" != completed ]; then
+            # Still waiting: it records a gate only once all have completed, so under 330
+            # minutes in, its next poll, inside the 340-minute deadline, records these.
+            [ $(( $(date +%s) - started )) -lt $(( 330 * 60 )) ]
+            return
+          fi
+          # Finished: read what it recorded, one `<check>: <conclusion>` line per gate.
+          log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs") || return 1
+          jq -r '.[]' <<< "$gates" | while IFS= read -r g; do
+            grep -qF " $g: success" <<< "$log" || exit 1
+          done
         }
         # In a called workflow the run is the caller's, so this is the staging.yml push run;
         # a manual dispatch looks at the runs started since it began.

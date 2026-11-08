@@ -7,6 +7,7 @@
  * ignored paths, modes it cannot tell). Every cut must hash to what a walk
  * hashes.
  */
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActor } from 'xstate';
 
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import type { FileSystemProvider } from '@taucad/filesystem';
+import type { ContentFacts, FileSystemProvider } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
@@ -45,7 +46,7 @@ const files = (count: number): Record<string, string> =>
     ]),
   );
 
-type Overrides = Partial<Pick<RevisionFileSystem, 'changedSince' | 'compareIndex'>>;
+type Overrides = Partial<Pick<RevisionFileSystem, 'changedSince' | 'compareIndex' | 'facts'>>;
 
 /* One root on disk (or in memory) behind a real WorkspaceFileService, so the rooted view carries its Project Index. */
 const fixture = async (
@@ -453,6 +454,100 @@ describe('a cut driven by an index whose provider reports no modes', () => {
 
     const { treeId } = await cut(at.actors);
 
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+});
+
+const blobOidOf = (content: string): string =>
+  createHash('sha1')
+    .update(`blob ${String(Buffer.byteLength(content))}\0`)
+    .update(content)
+    .digest('hex');
+
+describe('a first revision built from recorded blob ids (D12)', () => {
+  it('should take the ids the index holds for what the walk read, asking it to measure nothing', async () => {
+    const at = await fixture(files(10));
+    const asked: Array<Readonly<{ paths: readonly string[]; measure: boolean | undefined }>> = [];
+    /* A well-formed id of other bytes: had the walk hashed the file, the tree could not name it. */
+    const recorded = 'f'.repeat(40);
+    at.overrides.facts = async (paths, options) => {
+      asked.push({ paths, measure: options?.measure });
+      return new Map(
+        paths.includes('dir1/f1.txt') ? [['dir1/f1.txt', { contentKind: 'text', blobOid: recorded }]] : [],
+      );
+    };
+
+    const taken = await cut(at.actors);
+    const written = await mint(at);
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.measure).toBe(false);
+    expect(asked[0]?.paths).toContain('dir1/f1.txt');
+    expect(taken.treeId).not.toBe(await walkedTreeId(at.walking));
+    const tree = await at.port.listTree?.(revisionId(written));
+    expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
+  });
+
+  it("should take a committed import's recorded facts through the real Project Index", async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    const placed = await stat(outside(at, 'dir1/f1.txt'));
+    const recorded = 'e'.repeat(40);
+    const now = Date.now();
+    await mkdir(outside(at, '.tau'), { recursive: true });
+    await writeFile(
+      outside(at, '.tau/import.json'),
+      JSON.stringify({
+        version: 1,
+        operationId: 'req_import',
+        pin: { kind: 'zip', name: 'x', size: 1, entries: 1 },
+        at: now,
+        entries: [
+          {
+            path: 'dir1/f1.txt',
+            size: placed.size,
+            mtimeMs: placed.mtimeMs,
+            facts: { contentKind: 'text', blobOid: recorded, sha256: 'a'.repeat(64) },
+          },
+        ],
+      }),
+    );
+    at.reload();
+
+    const written = await mint(at);
+
+    const tree = await at.port.listTree?.(revisionId(written));
+    expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
+    expect(tree?.find(({ path }) => path === 'dir1/f6.txt')?.oid).toBe(blobOidOf(initial['dir1/f6.txt']!));
+  });
+
+  it("should hash to what a walk hashes when the recorded ids are the files' own", async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    at.overrides.facts = async (paths) =>
+      new Map(
+        paths.flatMap(
+          (path): Array<[string, ContentFacts]> =>
+            initial[path] === undefined ? [] : [[path, { contentKind: 'text', blobOid: blobOidOf(initial[path]) }]],
+        ),
+      );
+
+    const { treeId } = await cut(at.actors);
+
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should hash a file itself when the index has no id for it', async () => {
+    const at = await fixture(files(10));
+    let asked: readonly string[] = [];
+    at.overrides.facts = async (paths) => {
+      asked = paths;
+      return new Map();
+    };
+
+    const { treeId } = await cut(at.actors);
+
+    expect(asked.length).toBeGreaterThan(0);
     expect(treeId).toBe(await walkedTreeId(at.walking));
   });
 });

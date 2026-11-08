@@ -56,7 +56,7 @@ import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
-import { createTreeIdMemo } from '#tree-id-memo.js';
+import { createTreeIdMemo, recordBlobOid } from '#tree-id-memo.js';
 import type { TreeIdMemo } from '#tree-id-memo.js';
 import {
   conflictLabels,
@@ -1385,6 +1385,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @param captureOptions - This checkout's memos, whether reuse is safe, and the paths written since `last`.
    * @returns The complete versioned tree.
    */
+  /*
+   * D12: a walk's reads are hashed only where the index has no trusted blob id
+   * for them. A committed import's facts, measured once from the read-back of
+   * what it wrote (EQ6), are asked for after the read and taken for bytes of
+   * the size the walk listed, so the first revision of an import is built from
+   * those recorded ids and no file is hashed a second time (I2). The index
+   * answers only what it holds (`measure: false`): a file it has no id for is
+   * hashed by the memo as before, never read again here.
+   */
+  const recordedBlobOids = async (
+    rooted: RevisionFileSystem,
+    read: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+    stats: readonly FileStatEntry[] | undefined,
+  ): Promise<void> => {
+    if (rooted.facts === undefined || stats === undefined || read.size === 0 || (await formatOf()) !== 'sha1') {
+      return;
+    }
+    const sizes = new Map(stats.map(({ path, size }) => [path, size] as const));
+    const paths = [...read.keys()].filter((path) => sizes.get(path) === read.get(path)?.byteLength);
+    const facts = await rooted.facts(paths, { digests: ['blobOid'], measure: false }).catch(() => undefined);
+    for (const [path, { blobOid }] of facts ?? []) {
+      const content = read.get(path);
+      if (content !== undefined && blobOid !== undefined) {
+        recordBlobOid(content, 'sha1', blobOid);
+      }
+    }
+  };
+
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
     basisOf: () => Promise<ImmutableRevisionTree | undefined>,
@@ -1426,13 +1454,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         at === undefined || stats === undefined
           ? undefined
           : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
-      return captureRevisionTree(rooted, {
+      const read = new Map<string, Uint8Array<ArrayBuffer>>();
+      const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
         reuse: bypassMemo ? undefined : memoOptions.reuse,
-        onRead: memoOptions.onRead,
+        onRead: (path, content) => {
+          read.set(path, content);
+          memoOptions.onRead?.(path, content);
+        },
         ...(signal === undefined ? {} : { signal }),
       });
+      await recordedBlobOids(rooted, read, stats);
+      return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
      * whenever it has them; the index answers every other capture that has a `last` to start from. */

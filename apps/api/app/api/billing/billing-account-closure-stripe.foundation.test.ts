@@ -206,7 +206,7 @@ describe('owned Stripe closure and auth deletion', () => {
   });
 });
 
-/* Late-obligation fixture: one loopback provider for the retained subscription, invoice and refund legs. */
+/* Late-obligation fixture: one loopback provider for the retained subscription and invoice legs. */
 const lateStripeAccountId = 'acct_closure_late';
 const lateRequests: string[] = [];
 let lateSubscription: { readonly remoteId: string; readonly localId: string; readonly customerId: string } | undefined;
@@ -221,18 +221,6 @@ let lateInvoice:
       readonly periodEnd: number;
     }
   | undefined;
-let lateRefund:
-  | {
-      readonly chargeId: string;
-      readonly paymentIntentId: string;
-      readonly customerId: string;
-      readonly refundId: string;
-      readonly intentId: string;
-      readonly reversalCaseId: string;
-    }
-  | undefined;
-let lateRefundVisible = false;
-let lateRefundPosts = 0;
 
 const lateSubscriptionBody = (): unknown => ({
   id: lateSubscription?.remoteId,
@@ -250,24 +238,9 @@ const lateSubscriptionBody = (): unknown => ({
   },
 });
 
-const lateRefundBody = (): unknown => ({
-  id: lateRefund?.refundId,
-  object: 'refund',
-  amount: 250,
-  balance_transaction: 'txn_closure_refund',
-  charge: lateRefund?.chargeId,
-  currency: 'usd',
-  created: Math.floor(Date.now() / 1000),
-  customer: lateRefund?.customerId,
-  metadata: { tau_refund_intent_id: lateRefund?.intentId, tau_reversal_case_id: lateRefund?.reversalCaseId },
-  payment_intent: lateRefund?.paymentIntentId,
-  status: 'succeeded',
-});
-
 // oxlint-disable-next-line eslint/complexity -- one loopback fixture enumerates the distinct retained provider reads
 const lateBody = (method: string, url: URL): unknown => {
   const invoice = lateInvoice;
-  const refund = lateRefund;
   if (lateSubscription !== undefined && url.pathname === `/v1/subscriptions/${lateSubscription.remoteId}`) {
     if (method === 'DELETE') {
       lateCancelCount += 1;
@@ -385,41 +358,8 @@ const lateBody = (method: string, url: URL): unknown => {
       status: 'succeeded',
     };
   }
-  if (refund !== undefined && url.pathname === `/v1/payment_intents/${refund.paymentIntentId}`) {
-    return {
-      id: refund.paymentIntentId,
-      object: 'payment_intent',
-      amount: 500,
-      amount_received: 500,
-      created: Math.floor(Date.now() / 1000),
-      currency: 'usd',
-      customer: refund.customerId,
-      latest_charge: refund.chargeId,
-      livemode: false,
-      status: 'succeeded',
-    };
-  }
-  if (refund !== undefined && url.pathname === `/v1/charges/${refund.chargeId}`) {
-    return {
-      id: refund.chargeId,
-      object: 'charge',
-      amount: 500,
-      amount_captured: 500,
-      created: Math.floor(Date.now() / 1000),
-      currency: 'usd',
-      customer: refund.customerId,
-      livemode: false,
-      paid: true,
-      payment_intent: refund.paymentIntentId,
-      status: 'succeeded',
-    };
-  }
-  if (refund !== undefined && url.pathname === `/v1/refunds/${refund.refundId}`) {
-    return lateRefundBody();
-  }
   if (url.pathname === '/v1/refunds') {
-    const visible = lateRefundVisible && url.searchParams.get('charge') === refund?.chargeId;
-    return { object: 'list', data: visible ? [lateRefundBody()] : [], has_more: false, url: '/v1/refunds' };
+    return { object: 'list', data: [], has_more: false, url: '/v1/refunds' };
   }
   if (url.pathname === '/v1/disputes') {
     return { object: 'list', data: [], has_more: false, url: '/v1/disputes' };
@@ -431,12 +371,6 @@ const lateServer = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1');
   const method = request.method ?? '';
   lateRequests.push(`${method} ${url.pathname}`);
-  if (method === 'POST' && url.pathname === '/v1/refunds') {
-    lateRefundPosts += 1;
-    request.resume();
-    request.on('end', () => request.socket.destroy());
-    return;
-  }
   const body = lateBody(method, url);
   response.writeHead(typeof body === 'object' && body !== null && 'error' in body ? 404 : 200, {
     'content-type': 'application/json',
@@ -792,7 +726,7 @@ describe('retained obligations after closure and auth deletion', () => {
       },
       new BillingPolicyService({ database: runtimeDatabase }),
       lateLedger,
-      new BillingCashService({ database: runtimeDatabase }, lateStripe, lateStripe, lateLedger, {
+      new BillingCashService({ database: runtimeDatabase }, lateStripe, lateLedger, {
         environment: 'development',
         stripeAccountId: lateStripeAccountId,
         livemode: false,
@@ -825,95 +759,6 @@ describe('retained obligations after closure and auth deletion', () => {
     await expectTombstoneUnchanged({ ...tombstone, accountId });
     lateInvoice = undefined;
     lateSubscription = undefined;
-  });
-
-  it('releases and reverses a reviewed refund prepared before closure after the owner is deleted', async () => {
-    const id = randomUUID();
-    const authUserId = `closure-refund-${id}`;
-    await database
-      .insert(schema.user)
-      .values({ id: authUserId, name: 'Closure refund', email: `${authUserId}@example.test`, emailVerified: true });
-    const accountId = await lateLedger.ensureAccountBinding({ environment: 'development', authUserId });
-    const purchase = await seedPaidPurchase({
-      database,
-      accountId,
-      environment: 'development',
-      atoms: 1000n,
-      stripeAccountId: lateStripeAccountId,
-    });
-    await fulfillPaidFixture({
-      database,
-      ledger: lateLedger,
-      accountId,
-      causeId: purchase.purchaseId,
-      source: 'purchased',
-    });
-    const [reversalCase] = await database
-      .select()
-      .from(schema.billingReversalCase)
-      .where(eq(schema.billingReversalCase.purchaseId, purchase.purchaseId));
-    if (reversalCase === undefined) {
-      throw new Error('Paid cash did not open a reversal case');
-    }
-    const cash = new BillingCashService({ database: runtimeDatabase }, lateStripe, lateStripe, lateLedger, {
-      environment: 'development',
-      stripeAccountId: lateStripeAccountId,
-      livemode: false,
-    });
-    const prepared = await cash.prepareReviewedRefund({
-      environment: 'development',
-      accountId,
-      reversalCaseId: reversalCase.id,
-      requestedPrincipalMinor: '250',
-      requestedTaxMinor: '0',
-      approvedMaximumGrossMinor: '250',
-      reviewActorId: 'operator_fixture',
-      reviewedAt: new Date(),
-      reason: 'requested refund',
-      requestId: randomUUID(),
-    });
-    lateRefund = {
-      chargeId: purchase.proof.chargeId,
-      paymentIntentId: purchase.proof.paymentIntentId,
-      customerId: purchase.proof.paidEvidence.customerId,
-      refundId: `re_${id}`,
-      intentId: prepared.intentId,
-      reversalCaseId: reversalCase.id,
-    };
-    lateRefundVisible = false;
-    lateRefundPosts = 0;
-    // The operator's approved dispatch loses its response; the hold must survive closure.
-    await expect(
-      cash.executeReviewedRefund({
-        environment: 'development',
-        intentId: prepared.intentId,
-        reviewActorId: 'operator_fixture',
-        capability: {
-          qualification: 'protected-refund',
-          environment: 'development',
-          stripeAccountId: lateStripeAccountId,
-          livemode: false,
-        },
-      }),
-    ).rejects.toThrow();
-    const [reserved] = await database.select().from(schema.creditAccount).where(eq(schema.creditAccount.id, accountId));
-    expect(reserved).toMatchObject({ purchasedAtoms: 1000n, purchasedHeldAtoms: 500n });
-    const tombstone = await closeAndDeleteOwner({ authUserId, accountId, expectedCancellations: 0 });
-    lateRefundVisible = true;
-    await expect(
-      cash.recoverRefundIntent({ environment: 'development', intentId: prepared.intentId, maximumPages: 3 }),
-    ).resolves.toMatchObject({ status: 'applied', refundId: `re_${id}` });
-    expect(lateRefundPosts).toBe(1);
-    const [reversed] = await database.select().from(schema.creditAccount).where(eq(schema.creditAccount.id, accountId));
-    expect(reversed).toMatchObject({ purchasedAtoms: 500n, purchasedHeldAtoms: 0n });
-    const [intent] = await database
-      .select()
-      .from(schema.billingRefundIntent)
-      .where(eq(schema.billingRefundIntent.id, prepared.intentId));
-    expect(intent).toMatchObject({ state: 'succeeded', holdState: 'applied' });
-    await expectTombstoneUnchanged({ ...tombstone, accountId });
-    lateRefund = undefined;
-    lateRefundVisible = false;
   });
 });
 

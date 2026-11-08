@@ -8,7 +8,10 @@
 #
 # The bundle depends only on the PicoVoxel builder and the files the key hashes, so a prepared bundle
 # is cached under that key and a deploy that changed none of them reuses it without rebuilding the
-# archives.
+# archives. The key names PicoGK's own `package.json`, not the workspace `pnpm-lock.yaml`: the bundle
+# is .NET output and npm packages only run the staging scripts, so an unrelated lockfile change
+# (2026-11-08: #1523, #1525) must not rebuild it. A rebuild is byte-identical anyway (SourceLink is
+# off in `prepare-browser-host.mts`), so the key only saves CI time, never changes what ships.
 name: PicoGK browser host
 on:
   workflow_call:
@@ -43,7 +46,7 @@ jobs:
       - name: Key the bundle by everything that builds it
         id: key
         env:
-          FILES: ${{ hashFiles('packages/plugins/picogk/dotnet/**', 'packages/plugins/picogk/scripts/**', 'packages/plugins/picogk/src/**', 'packages/plugins/picogk/project.json', 'pnpm-lock.yaml', '.github/workflows/picogk-browser-host.yml') }}
+          FILES: ${{ hashFiles('packages/plugins/picogk/dotnet/**', 'packages/plugins/picogk/scripts/**', 'packages/plugins/picogk/src/**', 'packages/plugins/picogk/project.json', 'packages/plugins/picogk/package.json','.github/workflows/picogk-browser-host.yml') }}
         run: echo "key=picogk-browser-host-v1-$PICOVOXEL_REF-$PACKAGE_VERSION-$FILES" >> "$GITHUB_OUTPUT"
       - name: Look for a bundle prepared from the same inputs
         id: lookup

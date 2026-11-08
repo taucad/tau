@@ -18,6 +18,12 @@ export type ZipSource = Readonly<{
   name: string;
   /** Opens the entry's bytes; called once, when the writer reaches the entry. */
   open: () => Promise<ReadableStream<Uint8Array<ArrayBuffer>>>;
+  /**
+   * The entry's declared size, when known. An entry declared near 4 GiB or past
+   * it is written ZIP64 from its local header on, so a reader that streams the
+   * archive knows its descriptor holds 8-byte sizes.
+   */
+  size?: number;
 }>;
 
 const crcTable = ((): Uint32Array => {
@@ -40,7 +46,7 @@ const crcTable = ((): Uint32Array => {
  * @returns The updated value.
  * @public
  */
-export const crc32 = (crc: number, bytes: Uint8Array): number => {
+export const crc32 = (crc: number, bytes: Uint8Array<ArrayBuffer>): number => {
   let value = ~crc >>> 0;
   for (const byte of bytes) {
     value = crcTable[(value ^ byte) & 0xff]! ^ (value >>> 8);
@@ -51,6 +57,12 @@ export const crc32 = (crc: number, bytes: Uint8Array): number => {
 const encoder = new TextEncoder();
 /** The largest value a 32-bit ZIP field holds; at or past it, the ZIP64 field is read instead. */
 const zip32Maximum = 0xff_ff_ff_ff;
+/**
+ * A declared size at or past this is written ZIP64 from the local header on:
+ * deflate can grow incompressible bytes slightly, so the margin keeps an entry
+ * declared just under 4 GiB from overflowing a 32-bit descriptor.
+ */
+const zip64Declared = 0xf0_00_00_00;
 /** DOS date 1980-01-01, 00:00:00. */
 const dosDate = (0 << 9) | (1 << 5) | 1;
 const dosTime = 0;
@@ -60,8 +72,8 @@ const deflateMethod = 8;
 
 /** A little-endian record builder. */
 class Record {
+  public readonly bytes: Uint8Array<ArrayBuffer>;
   readonly #view: DataView;
-  readonly bytes: Uint8Array<ArrayBuffer>;
   #offset = 0;
 
   public constructor(length: number) {
@@ -87,21 +99,32 @@ class Record {
     return this;
   }
 
-  public raw(bytes: Uint8Array): this {
+  public raw(bytes: Uint8Array<ArrayBuffer>): this {
     this.bytes.set(bytes, this.#offset);
     this.#offset += bytes.byteLength;
     return this;
   }
 }
 
-/** What the central directory needs of one written entry. */
-type WrittenEntry = Readonly<{ name: Uint8Array; crc: number; compressed: number; size: number; offset: number }>;
+/** What the central directory needs of one written entry. @internal */
+export type WrittenEntry = Readonly<{
+  name: Uint8Array<ArrayBuffer>;
+  crc: number;
+  compressed: number;
+  size: number;
+  offset: number;
+  /** Whether the local header announced ZIP64, which fixes the descriptor's width. */
+  zip64: boolean;
+}>;
 
-const localHeader = (name: Uint8Array): Uint8Array<ArrayBuffer> =>
-  /* Sizes and CRC are zero here and follow the data in its descriptor (bit 3).
-   * Version 4.5, so a reader is ready for the ZIP64 descriptor an entry past
-   * 4 GiB writes. */
-  new Record(30 + name.byteLength)
+/** @internal */
+export const localHeader = (name: Uint8Array<ArrayBuffer>, zip64: boolean): Uint8Array<ArrayBuffer> => {
+  /* CRC and sizes follow the data in its descriptor (bit 3). A ZIP64 entry marks
+   * its sizes 0xffffffff and carries a zeroed ZIP64 extra, the sign that its
+   * descriptor's sizes are 8 bytes wide. */
+  const extraLength = zip64 ? 20 : 0;
+  const sizes = zip64 ? zip32Maximum : 0;
+  const record = new Record(30 + name.byteLength + extraLength)
     .u32(0x04_03_4b_50)
     .u16(45)
     .u16(generalPurposeFlags)
@@ -109,19 +132,26 @@ const localHeader = (name: Uint8Array): Uint8Array<ArrayBuffer> =>
     .u16(dosTime)
     .u16(dosDate)
     .u32(0)
-    .u32(0)
-    .u32(0)
+    .u32(sizes)
+    .u32(sizes)
     .u16(name.byteLength)
-    .u16(0)
-    .raw(name).bytes;
+    .u16(extraLength)
+    .raw(name);
+  if (zip64) {
+    record.u16(0x00_01).u16(16).u64(0).u64(0);
+  }
+  return record.bytes;
+};
 
-const dataDescriptor = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
-  const wide = entry.compressed >= zip32Maximum || entry.size >= zip32Maximum;
+/** @internal */
+export const dataDescriptor = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
+  const wide = entry.zip64 || entry.compressed >= zip32Maximum || entry.size >= zip32Maximum;
   const record = new Record(wide ? 24 : 16).u32(0x08_07_4b_50).u32(entry.crc);
   return (wide ? record.u64(entry.compressed).u64(entry.size) : record.u32(entry.compressed).u32(entry.size)).bytes;
 };
 
-const centralHeader = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
+/** @internal */
+export const centralHeader = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
   const wideFields = [entry.size, entry.compressed, entry.offset].filter((value) => value >= zip32Maximum);
   const extraLength = wideFields.length === 0 ? 0 : 4 + 8 * wideFields.length;
   const record = new Record(46 + entry.name.byteLength + extraLength)
@@ -153,7 +183,8 @@ const centralHeader = (entry: WrittenEntry): Uint8Array<ArrayBuffer> => {
   return record.bytes;
 };
 
-const endRecords = (count: number, directoryOffset: number, directorySize: number): Uint8Array<ArrayBuffer> => {
+/** @internal */
+export const endRecords = (count: number, directoryOffset: number, directorySize: number): Uint8Array<ArrayBuffer> => {
   const wide = count >= 0xff_ff || directoryOffset >= zip32Maximum || directorySize >= zip32Maximum;
   const end = new Record(22)
     .u32(0x06_05_4b_50)
@@ -205,19 +236,22 @@ export const zipStream = (
   let current:
     | {
         reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>;
-        name: Uint8Array;
+        name: Uint8Array<ArrayBuffer>;
         start: number;
         tally: { crc: number; size: number };
         compressed: number;
+        zip64: boolean;
       }
     | undefined;
   let finished = false;
 
   const open = async (source: ZipSource): Promise<Uint8Array<ArrayBuffer>> => {
     const name = encoder.encode(source.name);
-    const header = localHeader(name);
+    const zip64 = (source.size ?? 0) >= zip64Declared;
+    const header = localHeader(name, zip64);
     const tally = { crc: 0, size: 0 };
-    const counted = (await source.open()).pipeThrough(
+    const opened = await source.open();
+    const counted = opened.pipeThrough(
       new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
         transform: (chunk, controller) => {
           tally.crc = crc32(tally.crc, chunk);
@@ -232,60 +266,75 @@ export const zipStream = (
         Uint8Array<ArrayBuffer>
       >,
     );
-    current = { reader: deflated.getReader(), name, start: offset, tally, compressed: 0 };
+    current = { reader: deflated.getReader(), name, start: offset, tally, compressed: 0, zip64 };
     offset += header.byteLength;
     return header;
+  };
+
+  /* A failed entry or walk lets go of both, so neither is left suspended. */
+  const release = async (reason: unknown): Promise<void> => {
+    const reader = current?.reader;
+    current = undefined;
+    await reader?.cancel(reason).catch(() => undefined);
+    await iterator.return?.();
+  };
+
+  const step = async (controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>): Promise<void> => {
+    signal?.throwIfAborted();
+    if (finished) {
+      controller.close();
+      return;
+    }
+    if (current !== undefined) {
+      const { done, value } = await current.reader.read();
+      if (!done) {
+        current.compressed += value.byteLength;
+        offset += value.byteLength;
+        controller.enqueue(value);
+        return;
+      }
+      const entry: WrittenEntry = {
+        name: current.name,
+        crc: current.tally.crc,
+        compressed: current.compressed,
+        size: current.tally.size,
+        offset: current.start,
+        zip64: current.zip64,
+      };
+      current = undefined;
+      written.push(entry);
+      const descriptor = dataDescriptor(entry);
+      offset += descriptor.byteLength;
+      controller.enqueue(descriptor);
+      return;
+    }
+    const next = await iterator.next();
+    if (!next.done) {
+      controller.enqueue(await open(next.value));
+      return;
+    }
+    const directoryOffset = offset;
+    const headers = written.map((entry) => centralHeader(entry));
+    const directorySize = headers.reduce((total, header) => total + header.byteLength, 0);
+    for (const header of headers) {
+      controller.enqueue(header);
+    }
+    controller.enqueue(endRecords(written.length, directoryOffset, directorySize));
+    finished = true;
+    controller.close();
   };
 
   return new ReadableStream<Uint8Array<ArrayBuffer>>(
     {
       pull: async (controller) => {
-        signal?.throwIfAborted();
-        if (finished) {
-          controller.close();
-          return;
+        try {
+          await step(controller);
+        } catch (error) {
+          await release(error);
+          throw error;
         }
-        if (current !== undefined) {
-          const { done, value } = await current.reader.read();
-          if (!done) {
-            current.compressed += value.byteLength;
-            offset += value.byteLength;
-            controller.enqueue(value);
-            return;
-          }
-          const entry: WrittenEntry = {
-            name: current.name,
-            crc: current.tally.crc,
-            compressed: current.compressed,
-            size: current.tally.size,
-            offset: current.start,
-          };
-          current = undefined;
-          written.push(entry);
-          const descriptor = dataDescriptor(entry);
-          offset += descriptor.byteLength;
-          controller.enqueue(descriptor);
-          return;
-        }
-        const next = await iterator.next();
-        if (!next.done) {
-          controller.enqueue(await open(next.value));
-          return;
-        }
-        const directoryOffset = offset;
-        const headers = written.map(centralHeader);
-        const directorySize = headers.reduce((total, header) => total + header.byteLength, 0);
-        for (const header of headers) {
-          controller.enqueue(header);
-        }
-        controller.enqueue(endRecords(written.length, directoryOffset, directorySize));
-        finished = true;
-        controller.close();
       },
-      cancel: async (reason: unknown) => {
-        await current?.reader.cancel(reason);
-        await iterator.return?.();
-      },
+      cancel: release,
     },
     /* One chunk ahead: the reader's own pull paces the walk and the reads. */
     { highWaterMark: 1 },

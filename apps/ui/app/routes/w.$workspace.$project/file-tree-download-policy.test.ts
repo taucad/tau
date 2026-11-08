@@ -77,19 +77,19 @@ describe('file-tree-download-policy', () => {
     /* The archive's refusal crosses the bridge wire as a bare `Error` with a
      * `code`, and its message is the byte count in decimal; the user is told
      * the ceiling in their own units instead. */
-    it('should tell the user the archive ceiling when the archive refuses the size', () => {
+    it('should tell the user the folder is too large when the archive refuses its ceiling', () => {
       const wire = Object.assign(new Error("Archive of '' exceeds its 268435456-byte ceiling."), {
         code: archiveTooLargeCode,
       });
 
       expect(getFileTreeDownloadErrorMessage(wire)).toBe(
-        'This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.',
+        'This folder is larger than this ZIP download can hold. Download a smaller folder instead.',
       );
       expect(
         getFileTreeDownloadErrorMessage(
           createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
         ),
-      ).toBe('This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.');
+      ).toBe('This folder is larger than this ZIP download can hold. Download a smaller folder instead.');
     });
   });
 });

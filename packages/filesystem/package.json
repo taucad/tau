@@ -102,7 +102,6 @@
   "dependencies": {
     "@taucad/kinematics": "workspace:*",
     "@taucad/project-core": "workspace:*",
-    "jszip": "^3.10.1",
     "nanoid": "catalog:",
     "type-fest": "catalog:",
     "xstate": "catalog:"
@@ -114,6 +113,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "fast-check": "catalog:",
+    "jszip": "^3.10.1",
     "vitest": "catalog:",
     "zod": "catalog:"
   },

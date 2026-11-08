@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView } from '#composed-view.js';
-import { archive, contents, walk, withReadContentOps } from '#content-ops/index.js';
+import { archive, archiveStream, contents, walk, withReadContentOps } from '#content-ops/index.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
 import type { ComposedOverlayNode, ComposedViewOverlay } from '#composed-view.js';
 import type { ReadContentOps, WalkEntry } from '#content-ops/index.js';
@@ -152,6 +152,80 @@ describe('archive', () => {
 
     await expect(archive(provider, '', { maxBytes: 1024 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
     expect(readFile).not.toHaveBeenCalled();
+  });
+
+  /** A surface that streams its files, counting what each stream hands out. */
+  const streaming = (provider: MemoryProvider, grow = 0): { surface: MemoryProvider; streamed: string[] } => {
+    const streamed: string[] = [];
+    const surface = Object.assign(Object.create(provider) as MemoryProvider, {
+      readFile: vi.fn(async () => {
+        throw new Error('the archive reads a streaming surface by stream');
+      }),
+      readFileStream: (path: string): ReadableStream<Uint8Array<ArrayBuffer>> => {
+        streamed.push(path);
+        let sent = false;
+        return new ReadableStream({
+          pull: async (controller) => {
+            if (sent) {
+              controller.close();
+              return;
+            }
+            sent = true;
+            const bytes = await provider.readFile(path);
+            const grown = new Uint8Array(bytes.byteLength + grow);
+            grown.set(bytes);
+            controller.enqueue(grown);
+          },
+        });
+      },
+    });
+    return { surface, streamed };
+  };
+
+  it('should read through readFileStream where the surface has one', async () => {
+    const { surface, streamed } = streaming(await seeded(tree));
+
+    expect(await archived(await archive(surface, 'src'))).toEqual({
+      'nested/deep.ts': tree['src/nested/deep.ts'],
+      'part.ts': tree['src/part.ts'],
+    });
+    expect(streamed.sort()).toEqual(['src/nested/deep.ts', 'src/part.ts']);
+  });
+
+  it('should hold no ceiling of its own', async () => {
+    const provider = await seeded({ 'large.bin': 'x' });
+    /* Declared past the 256 MiB the in-memory archive used to refuse at. */
+    const declared = Object.assign(Object.create(provider) as MemoryProvider, {
+      stat: async (path: string) => ({ ...(await provider.stat(path)), size: 300 * 1024 * 1024 }),
+    });
+
+    const blob = await archive(declared, '');
+
+    expect(blob.type).toBe('application/zip');
+    expect(await archived(blob)).toEqual({ 'large.bin': 'x' });
+  });
+
+  it('should refuse a file that grew past its declared size while it streamed', async () => {
+    const { surface } = streaming(await seeded({ 'a.txt': 'x'.repeat(1000) }), 100);
+
+    await expect(archive(surface, '', { maxBytes: 1050 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+  });
+
+  it('should stream the archive a chunk at a time', async () => {
+    const reader = archiveStream(await seeded(tree), '').getReader();
+    const first = await reader.read();
+
+    expect(first.done).toBe(false);
+    expect(new DataView(first.value!.buffer).getUint32(0, true)).toBe(0x04_03_4b_50);
+    await reader.cancel();
+  });
+
+  it('should answer the abort reason when its signal aborts', async () => {
+    const controller = new AbortController();
+    const reason = new Error('download cancelled');
+    controller.abort(reason);
+
+    await expect(archive(await seeded(tree), '', { signal: controller.signal })).rejects.toBe(reason);
   });
 });
 

@@ -1,0 +1,5 @@
+---
+filesystem: minor
+---
+
+`archive` streams (S14): content-ops writes its own ZIP (`zipStream`, `crc32`, `ZipSource`), deflating each file as it is read, through `readFileStream` where the surface has one, with its CRC-32 and sizes in a data descriptor after it, ZIP64 where a size, an offset or the entry count needs it (and from the local header on for an entry declared near 4 GiB), UTF-8 names and the DOS epoch on every entry, so one tree always archives to the same bytes. `archiveStream` answers the archive as a `ReadableStream`, and `archive` gathers it into a `Blob` one `archiveBlobBatchBytes` (1 MiB) batch at a time, so script memory holds that batch and one entry in flight, never the tree. The 256 MiB default ceiling is gone with `archiveByteCeiling`: `maxBytes` remains for a caller that wants one, refusing by a file's declared size before it is opened and by the bytes actually read as they pass. `archive` accepts an `ArchiveFileSystem` (a `ContentFileSystem` that may have `readFileStream`). JSZip is no longer a runtime dependency.

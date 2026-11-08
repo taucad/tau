@@ -691,7 +691,7 @@ beforeAll(async () => {
     },
     policy,
     ledger,
-    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, fixtureStripe, ledger, {
+    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, ledger, {
       environment: 'development',
       stripeAccountId,
       livemode: false,

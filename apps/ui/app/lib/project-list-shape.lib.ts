@@ -163,12 +163,17 @@ const createProjectListShapeStore = () => {
       // Best effort: the cookie below still carries the count.
     }
     if (typeof document !== 'undefined') {
-      Cookies.set(projectListCountCookieName, String(shape.count), {
-        path: '/',
-        sameSite: 'lax',
-        expires: cookieLifetimeDays,
-        ...(globalThis.location.protocol === 'https:' ? { secure: true } : {}),
-      });
+      const count = String(shape.count);
+      if (globalThis.location.protocol === 'https:') {
+        Cookies.set(projectListCountCookieName, count, {
+          path: '/',
+          sameSite: 'lax',
+          expires: cookieLifetimeDays,
+          secure: true,
+        });
+      } else {
+        Cookies.set(projectListCountCookieName, count, { path: '/', sameSite: 'lax', expires: cookieLifetimeDays });
+      }
     }
     notify();
   };

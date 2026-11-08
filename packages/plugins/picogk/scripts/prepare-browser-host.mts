@@ -70,6 +70,22 @@ const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes)
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, 'utf8')) as unknown;
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const projectRoot = resolve(import.meta.dirname, '../dotnet/Tau.PicoGK.Browser');
+/**
+ * Global properties that make the publish byte-identical across commits and checkouts. The SDK's source
+ * control queries put the workspace's commit into each assembly (SourceLink in the PDB, whose id seeds the
+ * deterministic MVID, which the AOT image embeds), so an unrelated commit changed PicoGK.dll, the worker,
+ * dotnet.native.wasm and dotnet.js, and with them the bundle's content address. They flow to the PicoGK
+ * project reference too. `csharp-language`'s preparation pins the same set.
+ */
+const reproducible = [
+  '-p:Deterministic=true',
+  '-p:ContinuousIntegrationBuild=true',
+  '-p:EnableSourceLink=false',
+  '-p:EnableSourceControlManagerQueries=false',
+  '-p:IncludeSourceRevisionInInformationalVersion=false',
+  '-p:DeterministicSourcePaths=false',
+  `-p:PathMap=${workspaceRoot}/=/_/`,
+];
 const names = ['float-trig.o', 'libblosc.a', 'libopenvdb.a', 'libtbb.a', 'libz.a', 'picogk.26.2.a'];
 /**
  * The fields a serial and a threaded archive must agree on. Each archive already proves its own
@@ -164,6 +180,7 @@ const prepareVariant = async (
       `-p:TauPicoGKArchiveRoot=${join(archiveRoot, 'native')}`,
       `-p:TauPicoGKGeneratorPath=${inputs.generatorPath}`,
       `-p:TauPicoGKRetentionProps=${inputs.retentionProps}`,
+      ...reproducible,
     ],
     { cwd: projectRoot, stdio: 'inherit', env: await emscriptenEnvironment(config.outputRoot) },
   );

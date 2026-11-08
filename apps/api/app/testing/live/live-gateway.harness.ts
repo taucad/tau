@@ -21,6 +21,7 @@ import type {
 } from '@taucad/agent-host';
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
+import { toolName } from '@taucad/chat/constants';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import type { KernelId } from '@taucad/types/constants';
 import { authInstanceKey } from '#constants/auth.constant.js';
@@ -248,6 +249,28 @@ export const createLiveToolRegistry = (options: {
         isError: true,
       },
   };
+};
+
+/**
+ * Tools that only look. A live check that stops before modelling answers these
+ * with {@link emptyProjectRead}, so the turn reaches the decision under test
+ * instead of ending on its first skill or directory read.
+ */
+export const lookingTools: ReadonlySet<string> = new Set<string>([
+  toolName.useSkill,
+  toolName.readFile,
+  toolName.listDirectory,
+  toolName.grep,
+  toolName.globSearch,
+  toolName.getParameters,
+  toolName.revisions,
+  toolName.webSearch,
+]);
+
+/** The answer to a looking tool in a check that starts from an empty project. */
+export const emptyProjectRead: HostToolResult = {
+  content: { success: true, message: 'This check starts from an empty project; there is nothing to read yet.' },
+  isError: false,
 };
 
 /** A booted in-process gateway and the credential its transport authenticates with. */

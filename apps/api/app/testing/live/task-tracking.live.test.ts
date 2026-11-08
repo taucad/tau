@@ -12,10 +12,13 @@ import type { RpcFileSystem } from '@taucad/chat/rpc';
 import {
   createLiveSession,
   createLiveToolRegistry,
+  emptyProjectRead,
   hasLiveCredential,
   liveCadSystemPrompt,
   liveCredentialName,
+  liveRepeats,
   liveSessionModel,
+  lookingTools,
   runWithRateLimitRetry,
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
@@ -39,23 +42,6 @@ import { expectCompleted, runUsage, textOf, toolCalls } from '#testing/live/live
 
 const modelId = 'anthropic-claude-haiku-5.5';
 
-/** Tools that only look: the turn may use them before its list without having started the work. */
-const lookingTools = new Set<string>([
-  toolName.useSkill,
-  toolName.readFile,
-  toolName.listDirectory,
-  toolName.grep,
-  toolName.globSearch,
-  toolName.getParameters,
-  toolName.revisions,
-  toolName.webSearch,
-]);
-
-const nothingYet: HostToolResult = {
-  content: { success: true, message: 'This check starts from an empty project; there is nothing to read yet.' },
-  isError: false,
-};
-
 const stopHere: HostToolResult = {
   content: {
     success: false,
@@ -67,6 +53,7 @@ const stopHere: HostToolResult = {
 
 describe.skipIf(!hasLiveCredential(modelId))(
   `task list on ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
+  { repeats: liveRepeats },
   () => {
     let gateway: LiveGateway;
     let root: string;
@@ -94,7 +81,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
             const output = await handleWriteTodos(updateTodosInputSchema.parse(invocation.input), fileSystem);
             return { content: output as unknown as JsonValue, isError: !output.success };
           }
-          return lookingTools.has(invocation.toolName) ? nothingYet : stopHere;
+          return lookingTools.has(invocation.toolName) ? emptyProjectRead : stopHere;
         };
         const session = await createLiveSession({
           gateway,
@@ -120,9 +107,20 @@ describe.skipIf(!hasLiveCredential(modelId))(
         chatId,
         'Build a wall-mounted headphone hook in main.ts: a mounting plate with two countersunk screw holes, a curved arm, and a lip at the end so the headphones cannot slide off. Then check it renders and export it as an STL.',
       );
+      const lists = toolCalls(snapshot.messages, toolName.updateTodos);
+      const firstWritten = lists[0] === undefined ? undefined : updateTodosInputSchema.safeParse(lists[0].content).data;
+      console.log(
+        `[todos-live] metric ${JSON.stringify({
+          row: 'todos-multi-step',
+          modelId,
+          path: todoListPath(chatId),
+          items: firstWritten?.items.map((item) => item.title) ?? null,
+          tools: toolCalls(snapshot.messages).map((call) => call.toolName),
+          ...runUsage(snapshot),
+        })}`,
+      );
 
       expectCompleted(snapshot);
-      const lists = toolCalls(snapshot.messages, toolName.updateTodos);
       expect(lists.length, 'the agent should keep a task list for this request').toBeGreaterThanOrEqual(1);
 
       const firstList = snapshot.messages.indexOf(lists[0]!);
@@ -148,18 +146,6 @@ describe.skipIf(!hasLiveCredential(modelId))(
       for (const message of snapshot.messages.filter((row) => row.role === 'assistant')) {
         expect(textOf(message), 'the reply never surfaces the chat id').not.toContain(chatId);
       }
-
-      const output = toolCalls(snapshot.messages).length;
-      console.log(
-        `[todos-live] metric ${JSON.stringify({
-          row: 'todos-multi-step',
-          modelId,
-          path: todoListPath(chatId),
-          items: written.items.map((item) => item.title),
-          toolCalls: output,
-          ...runUsage(snapshot),
-        })}`,
-      );
     });
   },
 );

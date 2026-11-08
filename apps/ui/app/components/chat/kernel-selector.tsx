@@ -83,3 +83,21 @@ export function KernelSelector({
     </div>
   );
 }
+
+/**
+ * The new-project composer's kernel chips, centred over the box. Static data and light markup, so
+ * Home serves them with the page rather than with the composer's chunk (R2).
+ */
+export function NewProjectKernelChips({
+  kernel,
+  onKernelChange,
+}: {
+  readonly kernel: KernelProvider;
+  readonly onKernelChange: (kernel: KernelProvider) => void;
+}): React.JSX.Element {
+  return (
+    <div className='flex justify-center'>
+      <KernelSelector selectedKernel={kernel} onKernelChange={onKernelChange} />
+    </div>
+  );
+}

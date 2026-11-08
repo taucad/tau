@@ -32,6 +32,7 @@ import {
   getEnabledSlashCommandItems,
 } from '#components/chat/tiptap/slash-command-suggestion.js';
 import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
+import { chatComposerPlaceholder } from '#components/chat/chat-input-styles.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import type {
   ContextSuggestionItem,
@@ -224,7 +225,7 @@ export function useChatEditor({
   slashCommandItems,
   onSlashCommand,
   onContextAction,
-  placeholder = 'Ask Tau to build anything...',
+  placeholder = chatComposerPlaceholder,
   initialText,
 }: UseChatEditorOptions): UseChatEditorReturn {
   'use no memo';

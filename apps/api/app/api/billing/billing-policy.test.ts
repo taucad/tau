@@ -266,7 +266,7 @@ describe('commercial policy', () => {
     }
   });
 
-  it('should require 30 days notice for every rate increase and allow an immediate decrease', () => {
+  it('should pass a provider price rise through at once and require 30 days notice for a markup rise', () => {
     const previous: CommercialPolicy = {
       ...launchPolicy(),
       rates: [
@@ -307,17 +307,39 @@ describe('commercial policy', () => {
       routes: [{ ...increase.routes[0]!, rateIds: ['rate-p3'] }],
     };
 
+    // The provider raised its price; the markup is unchanged, so the rise passes through at once.
     expect(() => {
       validatePolicyActivationNotice({ previous, next: increase, announcedAt, effectiveAt: announcedAt });
+    }).not.toThrow();
+    // Tau raising its own markup on the same provider price needs the notice.
+    const markupRise: CommercialPolicy = { ...previous, policyVersion: 'P2', markupBps: previous.markupBps + 1000 };
+    expect(() => {
+      validatePolicyActivationNotice({ previous, next: markupRise, announcedAt, effectiveAt: announcedAt });
     }).toThrow('30 days');
     expect(() => {
       validatePolicyActivationNotice({
         previous,
-        next: increase,
+        next: markupRise,
         announcedAt,
         effectiveAt: new Date('2026-10-05T00:00:00.000Z'),
       });
     }).not.toThrow();
+    // So does a retail override that raises the price.
+    const overrideRise: CommercialPolicy = {
+      ...previous,
+      policyVersion: 'P2',
+      rates: [
+        {
+          ...previous.rates[0]!,
+          rateId: 'rate-override',
+          retailOverride: { numeratorCreditAtoms: '999999999', denominatorUnits: '1' },
+        },
+      ],
+      routes: [{ ...previous.routes[0]!, rateIds: ['rate-override'] }],
+    };
+    expect(() => {
+      validatePolicyActivationNotice({ previous, next: overrideRise, announcedAt, effectiveAt: announcedAt });
+    }).toThrow('30 days');
     expect(() => {
       validatePolicyActivationNotice({ previous: increase, next: decrease, announcedAt, effectiveAt: announcedAt });
     }).not.toThrow();
@@ -364,19 +386,28 @@ describe('commercial policy', () => {
         route('route-v1-long-context', 'sku-v1:long-context', ['rate-long-context']),
       ],
     };
-    // Re-pointing the route id at a dearer sibling is the same repricing by another name.
+    // Re-pointing the route id at a sibling with a higher markup is the same repricing by another name.
     const repointed: CommercialPolicy = {
       ...previous,
       policyVersion: 'P2',
-      rates: [rate('rate-p1', '9'), rate('rate-v2', '27')],
-      routes: [route('route-v1', 'sku-v1', ['rate-p1']), route('route-v1-v2', 'sku-v1:v2', ['rate-v2'])],
+      rates: [rate('rate-p1', '9'), rate('rate-v2', '9')],
+      routes: [
+        route('route-v1', 'sku-v1', ['rate-p1']),
+        { ...route('route-v1-v2', 'sku-v1:v2', ['rate-v2']), markupBps: previous.markupBps + 1000 },
+      ],
     };
     // So is bumping the meter contract id, which used to make every term of every route new at once.
     const remetered: CommercialPolicy = {
       ...previous,
       policyVersion: 'P2',
-      rates: [rate('rate-p2', '27', 'meter-v2')],
-      routes: [{ ...route('route-v1', 'sku-v1', ['rate-p2']), meterContractId: 'meter-v2' }],
+      rates: [rate('rate-p2', '9', 'meter-v2')],
+      routes: [
+        {
+          ...route('route-v1', 'sku-v1', ['rate-p2']),
+          meterContractId: 'meter-v2',
+          markupBps: previous.markupBps + 1000,
+        },
+      ],
     };
 
     expect(() => {

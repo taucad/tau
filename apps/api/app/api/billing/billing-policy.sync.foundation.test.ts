@@ -38,15 +38,9 @@ const headSchema = z.object({
   pendingActivationId: z.string().nullable(),
 });
 
-const raiseFirstRate = (routes: typeof billableModelRouteMeters, multiplier: bigint) => [
-  {
-    ...routes[0]!,
-    rates: routes[0]!.rates.map((rate, index) =>
-      index === 0 ? { ...rate, numeratorPicoUsd: rate.numeratorPicoUsd * multiplier } : rate,
-    ),
-  },
-  ...routes.slice(1),
-];
+/* A provider price rise now passes straight through, so the notice rule is exercised by Tau's own
+ * markup rising over the same routes. */
+const raiseMarkup = (bps: number) => ({ ...overlay, markupBps: overlay.markupBps + bps });
 
 describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL foundation', () => {
   const clients: postgres.Sql[] = [];
@@ -67,6 +61,8 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
   };
   const sync = async (routes: typeof billableModelRouteMeters): Promise<PolicySyncResult> =>
     syncPolicy(service, database, { environment, overlay, replica, routes });
+  const syncWithMarkup = async (routes: typeof billableModelRouteMeters, bps: number): Promise<PolicySyncResult> =>
+    syncPolicy(service, database, { environment, overlay: raiseMarkup(bps), replica, routes });
   const peerDatabase = () => drizzle(clients[1]!, { schema });
   const peer = () => new BillingPolicyService({ database: peerDatabase() });
 
@@ -109,12 +105,13 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
     expect(afterRetirement.policy.fleet.meterContractIds).not.toContain(dropped.meterContractId);
   });
 
-  it('schedules a rate rise 30 days out, then replaces that pending activation with a newer one', async () => {
+  it('schedules a markup rise 30 days out, then replaces that pending activation with a newer one', async () => {
     const effectiveBefore = await service.selectEffectivePolicy({ environment, replica });
     const clockRows = await database.execute(sql`select transaction_timestamp() as "now"`);
     const { now: databaseNow } = z.object({ now: z.coerce.date() }).parse(clockRows[0]);
 
-    const scheduled = await sync(raiseFirstRate(retired, 2n));
+    // A provider price rise passes straight through; Tau's own markup rise is what waits for notice.
+    const scheduled = await syncWithMarkup(retired, 1000);
     expect(scheduled.status).toBe('published');
     if (scheduled.status !== 'published') {
       throw new Error('expected a publication');
@@ -126,7 +123,7 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
     const duringNotice = await service.selectEffectivePolicy({ environment, replica });
     expect(duringNotice.activationId).toBe(effectiveBefore.activationId);
 
-    const replaced = await sync(raiseFirstRate(retired, 3n));
+    const replaced = await syncWithMarkup(retired, 2000);
     expect(replaced.status).toBe('published');
     expect(replaced.activationId).not.toBe(scheduled.activationId);
     const replacedHead = await readHead();
@@ -177,14 +174,15 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
 
   /* A concurrent *rise* collides on the job key rather than on the head: each racer reads the
    * database clock for itself, so their `effectiveAt` values and request hashes differ. */
-  it('lets exactly one of two concurrent syncs schedule the same rate rise', async () => {
-    const routes = raiseFirstRate(catalogue.slice(0, -2), 2n);
+  it('lets exactly one of two concurrent syncs schedule the same markup rise', async () => {
+    const routes = catalogue.slice(0, -2);
+    const raised = raiseMarkup(1000);
     const [left, right] = await Promise.all([
-      sync(routes),
-      syncPolicy(peer(), peerDatabase(), { environment, overlay, replica, routes }),
+      syncWithMarkup(routes, 1000),
+      syncPolicy(peer(), peerDatabase(), { environment, overlay: raised, replica, routes }),
     ]);
 
-    const { contentHash } = composeTariff({ overlay, routes });
+    const { contentHash } = composeTariff({ overlay: raised, routes });
     expect([left.status, right.status]).toContain('published');
     expect(left.activationId).toBe(right.activationId);
     expect(left.contentHash).toBe(contentHash);
@@ -242,15 +240,15 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
     expect(clearedHead.currentActivationId).toBe(superseded.activationId);
   });
 
-  it('cancels a scheduled rise that the code table reverts before it activates', async () => {
+  it('cancels a scheduled markup rise that the overlay reverts before it activates', async () => {
     const reverted = catalogue.slice(0, -4);
     const effectiveBefore = await service.selectEffectivePolicy({ environment, replica });
-    const scheduled = await sync(raiseFirstRate(reverted, 4n));
+    const scheduled = await syncWithMarkup(reverted, 3000);
     expect(scheduled.status).toBe('published');
     const scheduledHead = await readHead();
     expect(scheduledHead.pendingActivationId).toBe(scheduled.activationId);
 
-    // The code table goes back to the tariff that is already effective.
+    // The overlay goes back to the tariff that is already effective.
     const result = await sync(reverted);
     expect(result).toEqual({
       status: 'unchanged',

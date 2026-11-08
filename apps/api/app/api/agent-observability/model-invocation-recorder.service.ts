@@ -10,7 +10,7 @@ import { EvidenceIngressService } from '#api/agent-observability/evidence-ingres
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
-import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
+import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
 
 /** Recordings one process may have in flight; past it, an attempt goes unrecorded and is counted. */
 export const attemptRecordingsInFlight = 16;

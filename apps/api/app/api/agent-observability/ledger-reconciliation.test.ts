@@ -5,7 +5,7 @@ import { langfuseObservation, pseudonymKey } from '#api/agent-observability/lang
 import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
 import type { LedgerSettlement } from '#api/agent-observability/ledger-reconciliation.js';
 import { reconcileLedger } from '#api/agent-observability/ledger-reconciliation.js';
-import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
+import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
 import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');

@@ -3,8 +3,8 @@ import { mock } from 'vitest-mock-extended';
 import { HttpStatus } from '@nestjs/common';
 import { convertToModelMessages, DefaultChatTransport, readUIMessageStream } from 'ai';
 import { ChatService } from '#api/chat/chat.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import type { ModelInvocationIntent, ModelInvocationService } from '#api/llm/model-invocation.types.js';
+import { LlmGatewayError } from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent, ModelInvocationService } from '@taucad/api-llm-gateway';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 

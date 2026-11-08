@@ -7,7 +7,10 @@ import type { DatabaseService } from '@taucad/api-database';
 
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance: no usage, then
  * `error` and `response.failed`. Staging sent the same shape for GPT-6 Luna on 2026-10-09 (FD-12). */
-const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
+const exhaustedCapture = readFileSync(
+  new URL('../../../../libs/api-llm-gateway/src/provider-account-stream.fixture.sse', import.meta.url),
+  'utf8',
+);
 
 const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 

@@ -15,7 +15,7 @@ import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import { environmentSchemaBase } from '@taucad/api-core';
 import { HostsService } from '@taucad/api-hosts';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
+import { LlmGatewayAuthGuard } from '@taucad/api-llm-gateway';
 import { authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 

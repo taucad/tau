@@ -3,12 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import { contractId, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import type {
-  ModelInvocationIntent,
-  ModelInvocationResult,
-  ModelInvocationService,
-} from '#api/llm/model-invocation.types.js';
+import { LlmGatewayError } from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';

@@ -13,7 +13,7 @@ import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtension
 import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
 import { ApiModule } from '#api/api.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
-import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
+import { DirectModelInvocationService } from '@taucad/api-llm-gateway';
 import { StorageAccountingScheduler } from '#api/storage-accounting/storage-accounting.scheduler.js';
 
 /**

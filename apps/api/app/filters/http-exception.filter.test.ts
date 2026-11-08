@@ -5,7 +5,7 @@ import { HttpException, HttpStatus, Logger, ServiceUnavailableException } from '
 import * as otelApi from '@opentelemetry/api';
 import type { HealthCheckResult } from '@nestjs/terminus';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { LlmGatewayError } from '@taucad/api-llm-gateway';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
 import { reportServerError } from '@taucad/api-observability/sentry';
 import type * as SentryModule from '@taucad/api-observability/sentry';

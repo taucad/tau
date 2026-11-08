@@ -7,12 +7,16 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Environment } from '@taucad/api-core';
 import type { HostsService } from '@taucad/api-hosts';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import type { ModelInvocationIntent } from '#api/llm/model-invocation.types.js';
-import { LlmGatewayAuthGuard, readLlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
-import { readSingleHeader, validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
+import {
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayError,
+  LlmGatewayService,
+  readLlmGatewayPrincipal,
+  readSingleHeader,
+  validateAnthropicHeaders,
+} from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent } from '@taucad/api-llm-gateway';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): FastifyRequest =>

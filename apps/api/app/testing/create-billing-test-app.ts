@@ -9,7 +9,7 @@ import { getEnvironment } from '@taucad/api-core';
 import { TelemetryModule } from '@taucad/api-observability';
 import { RedisModule } from '@taucad/api-redis';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
-import { AuthModule } from '@taucad/api-auth';
+import { AuthModule } from '@taucad/api-auth/module';
 import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';

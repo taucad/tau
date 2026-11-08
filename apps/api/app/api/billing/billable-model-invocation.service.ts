@@ -1,5 +1,25 @@
 import { countBillableModelInput } from '#api/billing/billable-model-input-count.js';
-import { maximumModelRequestBytes } from '#api/billing/billable-model-request.js';
+import {
+  billingAccountClosedError,
+  billingAccountRestrictedError,
+  classifyUpstreamRefusal,
+  cloudProviderAccountMessage,
+  cloudUpstreamRefusalMessage,
+  createProviderAccountFrameFilter,
+  errorDiagnostic,
+  invocationEvidenceRecorderToken,
+  isBillingAccountClosed,
+  isBillingAccountRestricted,
+  isContextWindowRefusal,
+  isGatewayProviderId,
+  LlmGatewayError,
+  maximumModelRequestBytes,
+  modelRoutePausedError,
+  readUpstreamRefusal,
+  recognizeProviderAccountRefusal,
+  textMarker,
+  upstreamRetryAfterSeconds,
+} from '@taucad/api-llm-gateway';
 import { createHmac } from 'node:crypto';
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,28 +29,12 @@ import {
   CreditLedgerService,
   recordSettledGenAiUsage,
 } from '#api/billing/credit-ledger.service.js';
-import {
-  billingAccountClosedError,
-  billingAccountRestrictedError,
-  isBillingAccountClosed,
-  isBillingAccountRestricted,
-  LlmGatewayError,
-  modelRoutePausedError,
-} from '#api/llm/llm-gateway.error.js';
-import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
-import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
-import {
-  classifyUpstreamRefusal,
-  cloudUpstreamRefusalMessage,
-  isContextWindowRefusal,
-  readUpstreamRefusal,
-  upstreamRetryAfterSeconds,
-} from '#api/llm/upstream-refusal.js';
-import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
-import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
-import { errorDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
-import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
-import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
+import type {
+  GatewayProviderId,
+  InvocationEvidenceRecorder,
+  ProviderAccountRefusal,
+  ProviderTerminalFailure,
+} from '@taucad/api-llm-gateway';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
 import type {
   BillableInvocationEvidenceCollector,
@@ -43,7 +47,7 @@ import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
-import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
+import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
@@ -153,7 +157,9 @@ export class BillableModelInvocationService {
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly shutdown?: ShutdownService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
-    @Optional() private readonly evidenceRecorder?: ModelInvocationEvidenceRecorder,
+    @Optional()
+    @Inject(invocationEvidenceRecorderToken)
+    private readonly evidenceRecorder?: InvocationEvidenceRecorder<ObservedSettlement>,
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {

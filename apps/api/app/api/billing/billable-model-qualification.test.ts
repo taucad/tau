@@ -14,8 +14,7 @@ import type {
   BillableProviderWire,
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, LlmGatewayError, modelList } from '@taucad/api-llm-gateway';
 
 const adapter = mock<BillableModelProviderAdapter>();
 const resolver = new CodeOwnedBillableModelQualificationResolver({

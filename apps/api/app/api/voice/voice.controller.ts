@@ -17,7 +17,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { dictationMaxAudioBytes } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
 import { AuthGuard, OptionalAuth, OptionalUser, User } from '@taucad/api-auth';
-import { invocationSignal } from '#api/llm/llm-gateway.headers.js';
+import { invocationSignal } from '@taucad/api-llm-gateway';
 import { VoiceService } from '#api/voice/voice.service.js';
 
 const audioContentType = 'audio/wav';

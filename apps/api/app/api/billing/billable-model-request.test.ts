@@ -9,8 +9,8 @@ import {
   billableModelInputBound,
   billableModelRequestSchema,
   safeParseBillableModelRequest,
-} from '#api/billing/billable-model-request.js';
-import type { BillableModelRequest } from '#api/billing/billable-model-request.js';
+} from '@taucad/api-llm-gateway';
+import type { BillableModelRequest } from '@taucad/api-llm-gateway';
 import type {
   BillableModelProviderAdapter,
   BillableProviderWire,

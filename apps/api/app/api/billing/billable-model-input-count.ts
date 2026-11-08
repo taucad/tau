@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { financialEnvironmentSchema } from '@taucad/billing';
-import { safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
+import { safeParseBillableModelRequest } from '@taucad/api-llm-gateway';
 import type { BillingEnvironment, InputCountEvidence } from '@taucad/api-database/schema/billing.types';
 
 const countModels = new Set([

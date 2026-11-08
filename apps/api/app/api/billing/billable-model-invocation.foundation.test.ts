@@ -34,7 +34,13 @@ import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import {
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayError,
+  LlmGatewayService,
+  modelInvocationServiceKey,
+} from '@taucad/api-llm-gateway';
 import {
   CodeOwnedBillableModelQualificationResolver,
   registerBillableModelMeterContracts,
@@ -48,10 +54,6 @@ import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HostsService } from '@taucad/api-hosts';
 import { DatabaseService } from '@taucad/api-database';

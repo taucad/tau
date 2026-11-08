@@ -7,7 +7,7 @@ import {
   gatewayModelRoutes,
   isFundedGatewayProviderId,
   isGatewayProviderConfigured,
-} from '#api/providers/provider-gateway.js';
+} from '@taucad/api-llm-gateway';
 
 const routeProvider = new Map(
   gatewayModelRoutes()

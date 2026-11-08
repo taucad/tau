@@ -10,7 +10,7 @@ import { ChatMessagesValidationPipe } from '#api/chat/chat.dto.js';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
 import { Span } from '@taucad/api-observability';
 import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
-import { assertNoQuery, invocationSignal, readHint } from '#api/llm/llm-gateway.headers.js';
+import { assertNoQuery, invocationSignal, readHint } from '@taucad/api-llm-gateway';
 
 /**
  * The two secondary generators are all that remain of `POST /v1/chat`.

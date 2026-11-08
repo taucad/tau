@@ -85,7 +85,7 @@ export const GenAiToolStatus = {
  * `cache_read / (input + cache_read)`. Without splitting cache reads out of
  * `input` the ratio is skewed for providers that report cache reads inside the
  * raw `input_tokens` count (Anthropic, Vertex AI Gemini); see
- * `apps/api/app/api/providers/provider.service.ts` (`Provider.inputTokensIncludesCacheReadTokens`).
+ * `apps/libs/api-llm-gateway/src/providers/provider.service.ts` (`Provider.inputTokensIncludesCacheReadTokens`).
  *
  * @public
  */

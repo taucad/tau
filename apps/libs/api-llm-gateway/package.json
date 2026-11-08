@@ -30,5 +30,38 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@ai-sdk/langchain": "2.0.181",
+    "@langchain/anthropic": "catalog:",
+    "@langchain/cerebras": "catalog:",
+    "@langchain/core": "catalog:",
+    "@langchain/google-vertexai": "catalog:",
+    "@langchain/ollama": "catalog:",
+    "@langchain/openai": "catalog:",
+    "@langchain/xai": "catalog:",
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-hosts": "workspace:*",
+    "@taucad/api-lifecycle": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "ai": "catalog:",
+    "better-auth": "catalog:",
+    "fastify": "catalog:",
+    "ollama": "^0.5.18",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:"
   }
 }

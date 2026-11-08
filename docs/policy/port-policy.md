@@ -43,7 +43,7 @@ All port assignments must match the table below. Never introduce a new port with
 | 9001  | MinIO console                     | Infra    | `infra/docker-compose.yml` (loopback)                                         |
 | 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml` (loopback)                                         |
 | 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/libs/api-observability/src/otel.ts`, `apps/api/fly.prod.toml`           |
-| 11434 | Ollama (local LLM)                | Dev      | `apps/api/app/api/providers/provider.service.ts`                              |
+| 11434 | Ollama (local LLM)                | Dev      | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`                 |
 
 Named localhost previews share the Portless proxy. Their backend ports are allocated by
 Portless from 4000–4999 and passed through `PORT`; do not reserve a fixed port per guide.

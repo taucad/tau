@@ -19,7 +19,7 @@ export const httpHeader = {
   /** Atomic create-only saved-preview backfill from browser clients. */
   ifNoneMatch: 'if-none-match',
   // Gateway pass-through headers for the Anthropic-compatible LLM surface
-  // (allowlisted and validated in apps/api/app/api/llm/llm-gateway.headers.ts).
+  // (allowlisted and validated in apps/libs/api-llm-gateway/src/llm-gateway.headers.ts).
   anthropicVersion: 'anthropic-version',
   anthropicBeta: 'anthropic-beta',
   /**
@@ -49,7 +49,7 @@ export const httpHeader = {
    * the turn belongs to, so its receipt can be filtered by them on `/usage`.
    * Both are opaque owner-scoped ids, optional on every request, dropped rather
    * than refused when malformed (`readHint` in
-   * `apps/api/app/api/llm/llm-gateway.headers.ts`).
+   * `apps/libs/api-llm-gateway/src/llm-gateway.headers.ts`).
    *
    * Like `git-protocol` above, their value here is that CORS derives its
    * allow-list from this record: omit them and the browser answers the preflight

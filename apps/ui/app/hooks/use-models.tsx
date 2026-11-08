@@ -5,7 +5,7 @@ import { reasoningLevels } from '@taucad/chat/constants';
 import { cadAgentExecutionSchema } from '@taucad/chat/schemas';
 /* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
-import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
+import type { Model as ApiModel } from '../../../libs/api-llm-gateway/src/models/model.schema.js';
 /* oxlint-enable import/extensions -- Re-enable project import checks. */
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';

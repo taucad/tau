@@ -5,7 +5,7 @@ import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '@taucad/api-database';
 import { StorageModule } from '#storage/storage.module.js';
-import { AuthModule } from '@taucad/api-auth';
+import { AuthModule } from '@taucad/api-auth/module';
 import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
 import type { Environment } from '@taucad/api-core';
 import { ApiModule } from '#api/api.module.js';

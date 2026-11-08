@@ -4,7 +4,7 @@ import type {
   BillableProviderWire,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { NormalizedMeterItem, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
-import { providerFailureOf } from '#api/llm/provider-account-stream.js';
+import { providerFailureOf } from '@taucad/api-llm-gateway';
 
 type Usage = {
   input?: bigint;

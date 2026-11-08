@@ -5,8 +5,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import { providerDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
+import { LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
 import {
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
@@ -97,7 +96,10 @@ const exhaustedProviderBody = {
   },
 };
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance. */
-const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
+const exhaustedCapture = readFileSync(
+  new URL('../../../../libs/api-llm-gateway/src/provider-account-stream.fixture.sse', import.meta.url),
+  'utf8',
+);
 
 /** One admitted operation whose supplier answer each test sets (a refusal, a stream or a success). */
 const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {

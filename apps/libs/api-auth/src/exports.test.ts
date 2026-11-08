@@ -9,6 +9,9 @@ describe('package exports', () => {
   it('pins the public @taucad/api-auth surface', () => {
     expect(packageJson.exports).toEqual({
       '.': './src/index.ts',
+      './config/auth-static': './src/config/auth-static.config.ts',
+      './config/better-auth': './src/config/better-auth.config.ts',
+      './module': './src/auth.module.ts',
       './package.json': './package.json',
     });
   });

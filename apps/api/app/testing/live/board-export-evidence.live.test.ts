@@ -8,7 +8,7 @@ import { createNodeEventLog } from '@taucad/agent-host/node';
 import type { HostToolInvocation, HostToolResult } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import { z } from 'zod';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, modelList } from '@taucad/api-llm-gateway';
 import {
   createLiveSession,
   createLiveToolRegistry,

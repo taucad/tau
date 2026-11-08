@@ -16,7 +16,7 @@ import { errorCategory } from '@taucad/types/constants';
 import type { ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { LlmGatewayError } from '@taucad/api-llm-gateway';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 import { fundedRetryAfterSeconds } from '#filters/http-exception.filter.js';

@@ -11,7 +11,7 @@ import type {
   ModelInvocationResult,
   ModelInvocationSurface,
   ModelProviderWire,
-} from '#api/llm/model-invocation.types.js';
+} from '@taucad/api-llm-gateway';
 
 export const billableModelQualificationResolverKey = Symbol('billableModelQualificationResolver');
 

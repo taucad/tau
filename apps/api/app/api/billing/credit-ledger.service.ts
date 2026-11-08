@@ -26,7 +26,9 @@ import {
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '@taucad/api-database';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
+import { invocationEvidenceRecorderToken } from '@taucad/api-llm-gateway';
+import type { InvocationEvidenceRecorder } from '@taucad/api-llm-gateway';
+import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -428,7 +430,9 @@ export class CreditLedgerService {
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly metrics?: MetricsService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
-    @Optional() private readonly evidenceRecorder?: ModelInvocationEvidenceRecorder,
+    @Optional()
+    @Inject(invocationEvidenceRecorderToken)
+    private readonly evidenceRecorder?: InvocationEvidenceRecorder<ObservedSettlement>,
   ) {}
 
   /** Creates stable financial identity before a financial transaction takes the account lock. */

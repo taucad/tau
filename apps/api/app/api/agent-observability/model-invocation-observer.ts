@@ -1,10 +1,5 @@
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import type {
-  ModelInvocationIntent,
-  ModelInvocationResult,
-  ModelInvocationService,
-} from '#api/llm/model-invocation.types.js';
-import { resolveGatewayModelRoute } from '#api/providers/provider-gateway.js';
+import { LlmGatewayError, resolveGatewayModelRoute } from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { ProviderStreamFacts } from '#api/agent-observability/provider-stream-facts.js';

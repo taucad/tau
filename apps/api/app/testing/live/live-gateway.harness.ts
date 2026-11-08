@@ -28,12 +28,15 @@ import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
 import { HostsService } from '@taucad/api-hosts';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import { ModelInvocationModule } from '#api/llm/model-invocation.module.js';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
-import type { ModelListEntry } from '#api/models/model.constants.js';
+import {
+  isModelListEntryEnabled,
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayService,
+  modelList,
+} from '@taucad/api-llm-gateway';
+import { ModelInvocationModule } from '#composition/model-invocation.module.js';
+import type { ModelListEntry } from '@taucad/api-llm-gateway';
 
 /**
  * In-process live model gateway for provider suites.

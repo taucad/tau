@@ -15,7 +15,7 @@ import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recove
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { resolveBillingCollection } from '#api/billing/billing-collection.js';
 import { EmailModule, EmailService } from '@taucad/api-email';
-import { ModelModule } from '#api/models/model.module.js';
+import { LlmGatewayAuthGuard, ModelModule } from '@taucad/api-llm-gateway';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
@@ -24,7 +24,6 @@ import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingAttemptController } from '#api/billing/billing-attempt.controller.js';
 import { HostsModule } from '@taucad/api-hosts';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';

@@ -667,6 +667,20 @@ describe('FileContentService', () => {
       await expect(saving).rejects.toBe(failure);
     });
 
+    it('should settle a path on its latest save when a refused write is saved again', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused).mockResolvedValue(undefined);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      /* The editor's rebase: once the write is refused, its merged text is saved again. */
+      const resaved = (async () => {
+        await saving.catch(async () => service.saveEditor('main.ts', new Uint8Array([1, 2])));
+      })();
+
+      await expect(service.settleEditorSaves()).resolves.toBeUndefined();
+      await resaved;
+      expect(vi.mocked(proxy.writeFile).mock.calls.at(-1)?.[1]).toEqual(new Uint8Array([1, 2]));
+    });
+
     it('should settle only once an edit made during a move is written at the destination', async () => {
       const move = Promise.withResolvers<FileStat>();
       vi.mocked(proxy.move).mockReturnValueOnce(move.promise);

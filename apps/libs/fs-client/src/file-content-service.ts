@@ -697,19 +697,44 @@ export class FileContentService {
    * mid-queue records the first keystroke alone (D80). An edit made during a
    * move, rename or delete waits on that mutation's barrier instead.
    *
+   * Each path settles on its latest save: a write refused as a conflict that
+   * its editor rebased and saved again settles on that save, not on the refusal.
+   *
    * @returns Promise settled once no editor write is outstanding.
-   * @throws The first write's failure once every write has settled, a refused
+   * @throws The latest failure of a path whose last write failed, a refused
    *   write included: that edit is not on disk, so a cut now would not hold it.
    */
   public async settleEditorSaves(): Promise<void> {
     this.#editorSaveFlush.emit(undefined);
-    const outcomes = await Promise.allSettled([
-      ...[...this.editorSaves.values()].map(async (state) => state.completion),
-      ...this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
-    ]);
-    const failed = outcomes.find((outcome) => outcome.status === 'rejected');
+    const barriers = await Promise.allSettled(
+      this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
+    );
+    const failures = new Map<string, unknown>();
+    const seen = new Set<EditorSaveState>();
+    let round = [...this.editorSaves.entries()];
+    while (round.length > 0) {
+      for (const [, state] of round) {
+        seen.add(state);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each round waits on the saves the previous one's failures started.
+      const outcomes = await Promise.allSettled(round.map(async ([, state]) => state.completion));
+      for (const [index, [path]] of round.entries()) {
+        const outcome = outcomes[index];
+        if (outcome?.status === 'rejected') {
+          failures.set(path, outcome.reason);
+        } else {
+          failures.delete(path);
+        }
+      }
+      /* A failed path saved again since (its editor rebased onto the file) settles on that save. */
+      round = [...this.editorSaves.entries()].filter(([path, state]) => failures.has(path) && !seen.has(state));
+    }
+    const barrierFailure: unknown = barriers.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    )?.reason;
+    const failed: unknown = barrierFailure ?? [...failures.values()][0];
     if (failed !== undefined) {
-      throw failed.reason instanceof Error ? failed.reason : new Error(String(failed.reason));
+      throw failed instanceof Error ? failed : new Error('An editor save failed.', { cause: failed });
     }
   }
 

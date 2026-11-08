@@ -11,7 +11,7 @@ describe('tauPlanCatalog', () => {
     const [free, pro] = tauPlanCatalog;
     expect(free?.features).toContain('Buy credits any time — 100 credits per US$1');
     expect(pro?.features).toContain('2,000 credits every month');
-    expect(pro?.features).toContain('Unused plan credits roll over, up to 4,000');
+    expect(pro?.features).toContain('Unused plan credits carry over while subscribed, up to 4,000');
     const allFeatures = tauPlanCatalog.flatMap((entry) => entry.features).join('\n');
     expect(allFeatures).not.toMatch(/priority/i);
     expect(allFeatures).not.toMatch(/basic cad generation|advanced cad generation/i);

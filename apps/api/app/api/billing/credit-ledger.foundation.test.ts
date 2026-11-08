@@ -20,6 +20,7 @@ import {
   billingReversalCase,
   creditAccount,
   creditOperation,
+  creditTransaction,
   supplierCostEvidence,
   user,
 } from '#database/schema.js';
@@ -870,6 +871,43 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       .from(creditAccount)
       .where(eq(creditAccount.id, promoFixture.accountId));
     expect(promoAccount).toMatchObject({ promoAtoms: 20n, planAtoms: 50n, purchasedAtoms: 0n, debtAtoms: 0n });
+  });
+
+  it('should expire only unheld plan credit once when a subscription ends', async () => {
+    const fixture = await createFixture({ promoAtoms: 0n, planAtoms: 50_000n, purchasedAtoms: 70_000n });
+    const admitted = await firstLedger.admitOperation(admission(fixture, 'attempt-expiry', 20_000n));
+    expect(admitted).toMatchObject({ status: 'admitted', authorized: { planAtoms: 20_000n, purchasedAtoms: 0n } });
+    const subscriptionId = `subscription-${randomUUID()}`;
+    const expire = async () =>
+      firstDatabase.transaction(async (tx) =>
+        firstLedger.expirePlanCredits({ accountId: fixture.accountId, subscriptionId, occurredAt: new Date() }, tx),
+      );
+
+    expect(await expire()).toBe(true);
+    expect(await expire()).toBe(false);
+
+    const [account] = await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
+    expect(account).toMatchObject({
+      promoAtoms: 0n,
+      planAtoms: 20_000n,
+      planHeldAtoms: 20_000n,
+      purchasedAtoms: 70_000n,
+      debtAtoms: 0n,
+    });
+    const expiries = await firstDatabase
+      .select()
+      .from(creditTransaction)
+      .where(and(eq(creditTransaction.accountId, fixture.accountId), eq(creditTransaction.kind, 'plan_expiry')));
+    expect(expiries).toEqual([
+      expect.objectContaining({
+        id: `plan_expiry:${subscriptionId}:${account?.revision}`,
+        revision: account?.revision,
+        planDeltaAtoms: -30_000n,
+        accountDeltaAtoms: -30_000n,
+        debtDeltaAtoms: 0n,
+        balanceAfterAtoms: 90_000n,
+      }),
+    ]);
   });
 
   it('should reject unpaid purchase grants and validate paid replay payloads', async () => {

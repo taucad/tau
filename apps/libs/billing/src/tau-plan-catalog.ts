@@ -80,7 +80,7 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
     features: [
       'Everything in Free',
       '2,000 credits every month',
-      'Unused plan credits roll over, up to 4,000',
+      'Unused plan credits carry over while subscribed, up to 4,000',
       'Pro kernels (Zoo / KCL, metered)',
       'Hosted design verification (Coming Soon)',
       'Private & unlisted share links',

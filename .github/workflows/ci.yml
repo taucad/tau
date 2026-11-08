@@ -58,6 +58,7 @@ jobs:
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
+      standalone: ${{ steps.plan.outputs.standalone }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,18 +81,23 @@ jobs:
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
           browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
+          # `tag:ci:standalone` marks the projects whose source the standalone oracles execute
+          # (`check-standalone-project.ts` runs the CLI from source and imports the UI's project
+          # factory); Nx marks each affected when any dependency of it changes.
+          standalone=$(pnpm nx show projects --affected --projects tag:ci:standalone --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
+          echo "Affected standalone-oracle projects: $standalone"
           {
             echo "browser-projects=$browser"
             echo "apps<<EOF"
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples"; do
+          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples" "standalone=$standalone"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -302,82 +308,16 @@ jobs:
           path: out/reports/
           retention-days: 14
 
-  # Standalone-project oracles (native dependency charter W23, D34, I14; go-live row PRJ-1): every
-  # template Tau creates runs outside Tau with its ecosystem's own toolchain, from the files in the
-  # project folder, and produces the geometry Tau exports for the same project.
-  # `scripts/src/check-standalone-project.ts` creates each project with the UI's factory and its
-  # fixture (`libs/tau-examples/src/standalone/<kernel>/`), copies it to a bare directory outside the
-  # checkout, installs it with the native tool only (`npm ci --ignore-scripts`, `uv sync --locked`,
-  # `dotnet restore --locked-mode`; nothing for OpenSCAD and KCL), runs it with the native runner and
-  # compares the volume with `tau export` of the same project (1e-6 relative). One job per ecosystem;
-  # a row that diverges fails its job with both measurements in the step summary. Not required
-  # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs on macOS
-  # when the native projects are affected and on every push to `main`, as the native-darwin row does.
+  # Standalone-project oracles, in `standalone-projects.yml` (also nightly). Only when the plan
+  # finds a project they execute affected, and on every push to `main`.
   standalone:
-    name: Standalone projects (${{ matrix.ecosystem }})${{ matrix.ecosystem == 'kcl' && ' [quarantined]' || '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        ecosystem: [npm, pypi, none, kcl]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      # KCL: Tau's export reaches Zoo through Tau Cloud's proxy, never the local API this workflow sets.
-      TAU_API_URL: ${{ matrix.ecosystem != 'kcl' && 'http://localhost:4000' || '' }}
-      TAU_WEBSOCKET_URL: ${{ matrix.ecosystem != 'kcl' && 'ws://localhost:4001' || '' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      - name: Install uv
-        if: matrix.ecosystem == 'pypi'
-        run: |
-          pipx install uv==0.12.20
-          uv --version
-
-      - name: Install OpenSCAD
-        if: matrix.ecosystem == 'none'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
-          openscad --version
-
-      # Restore the Zoo CLI setup and KCL execution once renewable CI credentials are provisioned.
-      - name: Report Zoo KCL quarantine
-        if: matrix.ecosystem == 'kcl'
-        run: |
-          echo '::notice title=Zoo/KCL quarantined::Skipped pending Zoo credentials and renewable Tau Pro CI authentication.'
-          echo 'Zoo/KCL standalone comparison is quarantined, not qualified. Restore execution after CI authentication is provisioned.' >> "$GITHUB_STEP_SUMMARY"
-
-      # `tau prepare build123d` seals the closure inside the native sandbox, as on a user's machine.
-      - name: Setup Linux sandbox prerequisites
-        if: matrix.ecosystem == 'pypi'
-        uses: ./.github/actions/setup-linux-sandbox
-
-      - name: Check every template outside Tau
-        if: matrix.ecosystem != 'kcl'
-        env:
-          ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
-          TAU_AUTH_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
-        run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
-
-      # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`
-      # unmodified and installs and bundles the same tree.
-      - name: Check package-lock.json parity with npm ci
-        if: ${{ !cancelled() && matrix.ecosystem == 'npm' }}
-        env:
-          TAU_NPM_LIVE_TESTS: 'true'
-        run: |
-          set -o pipefail
-          pnpm exec vitest run --root apps/runtime-e2e src/package-lock-parity.test.ts | tee "$RUNNER_TEMP/parity.log"
-          grep -q '"parity":"npm-ci"' "$RUNNER_TEMP/parity.log"
+    name: Standalone projects
+    needs: [plan]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.standalone == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    uses: ./.github/workflows/standalone-projects.yml
+    secrets: inherit
 
   # The required check. It passes only when the plan and every affected lane passed, and the
   # browser and GeoSpec example-contract lanes too when this run needed them.

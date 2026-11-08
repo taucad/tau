@@ -35,7 +35,7 @@ import {
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';
-import type { GitRemoteCredential } from '#remotes.js';
+import type { GitRemoteCredential, RemoteTransportContext } from '#remotes.js';
 import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
@@ -304,10 +304,31 @@ describe('remoteTransportError', () => {
       );
 
     expect(refused('Write access to repository not granted.\n')).toMatchObject({
-      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      code: 'REMOTE_FORBIDDEN',
       message: 'Write access to repository not granted.',
     });
-    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe('The remote rejected the saved credentials.');
+    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe(
+      'GitHub refused access to this repository for the connected account.',
+    );
+  });
+
+  /* W7.3 review: GitHub's 403 to a live token is the repository's access withdrawn, which no reconnect restores. */
+  it('classes a GitHub 403 as access withdrawn, and only an expired token or a 401 as a credential to grant again', () => {
+    const answer = (statusCode: number, response: string, context: Partial<RemoteTransportContext> = {}) =>
+      remoteTransportError(
+        Object.assign(new Error(`HTTP Error: ${String(statusCode)}`), { data: { statusCode, response } }),
+        { remote: 'github-1', ...context },
+      ).code;
+
+    expect(answer(403, 'Repository access blocked.\n')).toBe('REMOTE_FORBIDDEN');
+    expect(answer(403, '', { authenticate: 'Bearer error="invalid_token"' })).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    expect(answer(403, 'The token has expired.\n')).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    expect(answer(403, '{"code":"GITHUB_RECONNECT_REQUIRED","message":"Reconnect GitHub."}')).toBe(
+      'REMOTE_REAUTHORIZATION_REQUIRED',
+    );
+    expect(answer(401, 'Bad credentials')).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    /* Another host's 403 is still a credential its person can grant again. */
+    expect(answer(403, 'Forbidden', { remote: 'origin' })).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
   });
 
   /* D77: GitHub answers a revoked grant with a sentence about passwords. */

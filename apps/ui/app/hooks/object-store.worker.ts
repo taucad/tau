@@ -128,6 +128,8 @@ const objectStoreWorker = {
     staging?: { readonly operationId: string };
     /** `false` when the staged import carries its own workbench layout. */
     seedWorkbench?: boolean;
+    /** The authored `tau.json` bytes the commit writes when they declare `manifest` exactly (W7.3). */
+    manifestBytes?: Uint8Array<ArrayBuffer>;
     storage: PendingProjectStorage;
   }): Promise<PendingCreateProjectOperation> {
     const timestamp = Date.now();
@@ -159,6 +161,7 @@ const objectStoreWorker = {
               options.deferInitialView ? undefined : project.assets.main.entryPath,
             ),
       ...(options.staging === undefined ? {} : { staging: options.staging }),
+      ...(options.manifestBytes === undefined ? {} : { manifestBytes: options.manifestBytes }),
       ...(chat === undefined ? {} : { chat }),
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({

@@ -71,6 +71,8 @@ export {
 export type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 export {
   discardStagedImport,
+  importControlDirectory,
+  stagedControlDirectory,
   importOwnerPath,
   importResidentBytes,
   importStagingDirectory,
@@ -80,6 +82,7 @@ export {
   importStagingStaleMilliseconds,
   importTargetAttempts,
   ownsImportTarget,
+  placeStagedControl,
   readStagedImport,
   releaseStagedImport,
   stageImport,

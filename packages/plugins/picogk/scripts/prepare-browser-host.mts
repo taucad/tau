@@ -164,6 +164,14 @@ const prepareVariant = async (
       `-p:TauPicoGKArchiveRoot=${join(archiveRoot, 'native')}`,
       `-p:TauPicoGKGeneratorPath=${inputs.generatorPath}`,
       `-p:TauPicoGKRetentionProps=${inputs.retentionProps}`,
+      /* The bundle is published under its content digest, so it must not vary with the Tau commit.
+       * SourceLink (on by default) writes the commit into each PDB; the deterministic MVID and PE
+       * stamp hash the PDB id, and AOT carries the MVIDs into dotnet.native.wasm, so every commit
+       * minted a new digest from identical sources (2026-11-08). Global properties reach the staged
+       * PicoGK project too, which sits outside this directory's Directory.Build.props. */
+      '-p:EnableSourceLink=false',
+      '-p:EnableSourceControlManagerQueries=false',
+      '-p:IncludeSourceRevisionInInformationalVersion=false',
     ],
     { cwd: projectRoot, stdio: 'inherit', env: await emscriptenEnvironment(config.outputRoot) },
   );

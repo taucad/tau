@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createInlineImportDecoder,
+  createInlineImportMeasurer,
   importStagingDirectory,
   importStagingStaleMilliseconds,
   planImport,
@@ -11,7 +12,12 @@ import {
   stageImport,
   zipImportSource,
 } from '@taucad/filesystem/importer';
-import type { ImportDecoder, ImportStagingPort } from '@taucad/filesystem/importer';
+import type {
+  HostImportCopyReceipt,
+  HostImportSourcePort,
+  ImportDecoder,
+  ImportStagingPort,
+} from '@taucad/filesystem/importer';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { BatchEntry } from '@taucad/filesystem';
 import {
@@ -681,5 +687,86 @@ describe('the import channel', () => {
       expect(await provider.exists(importStagingDirectory('req_refused'))).toBe(false);
       expect(await provider.exists('gear')).toBe(false);
     });
+  });
+});
+
+describe('a source chosen on the desktop host', () => {
+  /* A host that holds one granted folder: it lists and previews by grant, and copies into the staging itself. */
+  const hostFolder: Record<string, string> = { 'main.scad': 'cube(1);', 'lib/gear.scad': 'module g() {}' };
+  const encoder = new TextEncoder();
+  const sources: HostImportSourcePort = {
+    list: async (grant, path) => {
+      expect(grant).toBe('grant-bracket');
+      const prefix = path === '' ? '' : `${path}/`;
+      const names = new Map<string, 'file' | 'dir'>();
+      for (const file of Object.keys(hostFolder)) {
+        if (file.startsWith(prefix)) {
+          const [name, ...rest] = file.slice(prefix.length).split('/');
+          names.set(name!, rest.length > 0 ? 'dir' : 'file');
+        }
+      }
+      return [...names].map(([name, kind]) => ({
+        name,
+        kind,
+        size: kind === 'file' ? encoder.encode(hostFolder[`${prefix}${name}`]).byteLength : 0,
+        mtimeMs: 1,
+      }));
+    },
+    read: async (_grant, path, maximumBytes) => encoder.encode(hostFolder[path]).slice(0, maximumBytes),
+  };
+
+  const connectHost = (provider: MemoryProvider, hostSources?: () => Promise<HostImportSourcePort | undefined>) => {
+    const measure = createInlineImportMeasurer();
+    const copied: string[] = [];
+    const port: ImportStagingPort = {
+      ...portOf(provider),
+      copyHost: async (_grant, entries) =>
+        Promise.all(
+          entries.map(async ({ from, path }) => {
+            const bytes = encoder.encode(hostFolder[from]);
+            copied.push(from);
+            await provider.writeFile(path, bytes);
+            const { size: _, ...facts } = await measure(bytes, bytes.byteLength);
+            const applied: HostImportCopyReceipt = { outcome: 'applied', facts };
+            return applied;
+          }),
+        ),
+    };
+    const session = openImportSession({
+      postMessage: (message: { port: MessagePort }) => {
+        serveImportChannel(message.port, {
+          importStaging: async () => port,
+          decode: vi.fn(createInlineImportDecoder()),
+          policy: tauPathPolicy,
+          ...(hostSources === undefined ? {} : { hostSources }),
+        });
+      },
+    } as unknown as Pick<Worker, 'postMessage'>);
+    sessions.push(session);
+    return { session, copied };
+  };
+
+  it('plans by grant, previews through the host, and stages what the host copied', async () => {
+    const provider = new MemoryProvider();
+    const { session, copied } = connectHost(provider, async () => sources);
+    const listing = await session.plan({
+      kind: 'host',
+      grants: [{ grant: 'grant-bracket', name: 'Bracket', kind: 'directory' }],
+    });
+    expect(listing.name).toBe('Bracket');
+    expect(listing.files.map(({ path }) => path).toSorted()).toEqual(['lib/gear.scad', 'main.scad']);
+    const preview = await session.preview(['main.scad'], 1024);
+    expect(new TextDecoder().decode(preview['main.scad']!.content)).toBe('cube(1);');
+    const staged = await session.stage('req_host', scope, { target: 'Bracket' });
+    expect(staged.files).toBe(2);
+    expect(copied.toSorted()).toEqual(['lib/gear.scad', 'main.scad']);
+    expect(new TextDecoder().decode(await provider.readFile('Bracket/main.scad'))).toBe('cube(1);');
+  });
+
+  it('refuses a host source where no host holds one', async () => {
+    const { session } = connectHost(new MemoryProvider());
+    await expect(
+      session.plan({ kind: 'host', grants: [{ grant: 'grant-bracket', name: 'Bracket', kind: 'directory' }] }),
+    ).rejects.toThrow(/cannot import a folder/u);
   });
 });

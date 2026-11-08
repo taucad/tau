@@ -1,6 +1,6 @@
 /** Electron Open With queue captured before app readiness and consumed by the import route. */
 
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 
 import type { DesktopOpenFile } from '#shared/quick-look.js';
@@ -9,6 +9,8 @@ type OpenFileQueueOptions = {
   readonly extensions: readonly string[];
   readonly maxBytes: number;
   readonly maxFiles: number;
+  /** Mint the import grant the services host copies the file by (W7.4): the bytes stay on the host. */
+  readonly grant: (path: string) => Promise<Readonly<{ grant: string; name: string }>>;
 };
 
 type OpenFileQueue = {
@@ -52,11 +54,8 @@ export const createOpenFileQueue = (options: OpenFileQueueOptions): OpenFileQueu
               `Tau refused opened file outside the 1–${String(options.maxBytes)} byte limit: ${basename(path)}`,
             );
           }
-          const bytes = Uint8Array.from(await readFile(canonical));
-          if (bytes.byteLength > options.maxBytes) {
-            throw new Error(`Opened file grew beyond the byte limit: ${basename(path)}`);
-          }
-          return { name: basename(path), bytes };
+          const { grant } = await options.grant(canonical);
+          return { name: basename(path), grant };
         }),
       );
     },

@@ -3,6 +3,7 @@ import type { AnyActorRef, EnqueueObject } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { listDataTransfer, listFileList } from '#utils/file-reader.utils.js';
 import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
+import type { HostImportGrant } from '@taucad/filesystem/importer';
 import { findMainFile } from '#routes/import.$/import.utils.js';
 
 /**
@@ -48,6 +49,8 @@ type ImportDiskEventInternal =
   | { type: 'processFiles'; files: FileList | File[] }
   | { type: 'processDataTransfer'; items: DataTransferItemList }
   | { type: 'processDirectoryHandle'; handle: FileSystemDirectoryHandle }
+  /** A folder or files a person chose on the desktop host: its grants, copied into the staging by the host (W7.4). */
+  | { type: 'processHost'; grants: readonly HostImportGrant[] }
   | { type: 'processZip'; file: File }
   | { type: 'updateProgress'; processed: number; total: number }
   | { type: 'selectMainFile'; file: string }
@@ -95,6 +98,11 @@ const readDirectoryHandleActor = fromSafeAsync<
   { handle: FileSystemDirectoryHandle; plan: ImportPlanner }
 >(async ({ input }) => planned(input.plan, { kind: 'directory', handle: input.handle }));
 
+/** A desktop pick or open-with: the grants cross to the worker, whose host lists and later copies them. */
+const readHostActor = fromSafeAsync<FilesReadResult, { grants: readonly HostImportGrant[]; plan: ImportPlanner }>(
+  async ({ input }) => planned(input.plan, { kind: 'host', grants: input.grants }),
+);
+
 /**
  * Create project actor - placeholder that should be provided by the route:
  * it stages the planned source and creates the project from the staging.
@@ -115,6 +123,7 @@ const importDiskActors = {
   readFilesActor,
   readDataTransferActor,
   readDirectoryHandleActor,
+  readHostActor,
   extractZipActor,
   createProjectActor,
 } as const;
@@ -222,6 +231,9 @@ export const importDiskMachine = setup({
         processDirectoryHandle: {
           target: 'readingDirectoryHandle',
         },
+        processHost: {
+          target: 'readingHost',
+        },
         processZip: {
           target: 'extracting',
         },
@@ -271,6 +283,22 @@ export const importDiskMachine = setup({
           assertEvent(event, 'processDirectoryHandle');
 
           return { handle: event.handle, plan: context.plan };
+        },
+        onDone: {
+          target: 'selectingMainFile',
+        },
+        onError: ({ event }, enq) => fail(event.error, enq),
+      },
+      on: readingHandlers,
+    },
+    readingHost: {
+      entry: () => ({ context: { error: undefined } }),
+      invoke: {
+        src: 'readHostActor',
+        input({ event, context }) {
+          assertEvent(event, 'processHost');
+
+          return { grants: event.grants, plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',

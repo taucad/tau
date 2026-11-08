@@ -15,6 +15,7 @@ import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '#machines/import-staging.js';
+import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '#machines/import-staging.js';
 import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
@@ -611,9 +612,10 @@ export default function ImportRoute(): React.JSX.Element {
         }
         setActiveMode('disk');
         setLocalOperation('read');
+        /* Grants, not bytes: the desktop host copies the opened files into the staging itself (W7.4). */
         diskActorRef.send({
-          type: 'processFiles',
-          files: opened.map((file) => new File([file.bytes], file.name)),
+          type: 'processHost',
+          grants: opened.map(({ grant, name }): HostImportGrant => ({ grant, name, kind: 'file' })),
         });
         clearDesktopOpen(false);
       } catch (error) {
@@ -754,6 +756,22 @@ export default function ImportRoute(): React.JSX.Element {
     },
     [diskActorRef],
   );
+
+  /* Desktop: the native picker mints a grant, and the host copies the folder into the staging itself (W7.4). */
+  const handleHostFolderPick = useCallback(async (): Promise<void> => {
+    try {
+      const picked = await desktopBridge()?.dialog.selectImportFolder();
+      if (picked === undefined) {
+        return;
+      }
+      setActiveMode('disk');
+      setLocalOperation('read');
+      diskActorRef.send({ type: 'processHost', grants: [{ ...picked, kind: 'directory' }] });
+    } catch (error) {
+      diskActorRef.send({ type: 'externalError', error: error instanceof Error ? error : new Error(String(error)) });
+    }
+  }, [diskActorRef]);
+  const isDesktopHost = desktopBridge() !== undefined;
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
     const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
@@ -907,6 +925,7 @@ export default function ImportRoute(): React.JSX.Element {
     diskState.matches('reading') ||
     diskState.matches('readingDataTransfer') ||
     diskState.matches('readingDirectoryHandle') ||
+    diskState.matches('readingHost') ||
     diskState.matches('extracting') ||
     diskState.matches('selectingMainFile') ||
     diskState.matches('creating');
@@ -941,13 +960,15 @@ export default function ImportRoute(): React.JSX.Element {
     (diskState.matches('reading') ||
       diskState.matches('readingDataTransfer') ||
       diskState.matches('readingDirectoryHandle') ||
+      diskState.matches('readingHost') ||
       diskState.matches('extracting') ||
       diskState.matches('creating'))
   ) {
     const isReading =
       diskState.matches('reading') ||
       diskState.matches('readingDataTransfer') ||
-      diskState.matches('readingDirectoryHandle');
+      diskState.matches('readingDirectoryHandle') ||
+      diskState.matches('readingHost');
     const isCreating = diskState.matches('creating');
 
     return (
@@ -1251,6 +1272,13 @@ export default function ImportRoute(): React.JSX.Element {
                 <UploadCard
                   onDataTransfer={handleDataTransfer}
                   onDirectoryHandleSelected={handleDirectoryHandleSelected}
+                  {...(isDesktopHost
+                    ? {
+                        onPickHostFolder: () => {
+                          void handleHostFolderPick();
+                        },
+                      }
+                    : {})}
                   onFilesSelected={handleFilesSelected}
                   onFolderSelected={handleFolderSelected}
                   onZipSelected={handleZipSelected}

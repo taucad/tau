@@ -320,15 +320,21 @@ export type DesktopBridge = {
      * `AbortError` is normalized to.
      */
     selectDirectory(options?: { readonly id?: string }): Promise<string | undefined>;
+    /**
+     * Native folder picker for an import (W7.4): the folder is copied, not
+     * opened in place, so it is not admitted as a root. Resolves to the grant
+     * the host minted for it and the folder's name, never its path (I6), or
+     * `undefined` when the user cancels.
+     */
+    selectImportFolder(): Promise<{ readonly grant: string; readonly name: string } | undefined>;
   };
   readonly openFiles: {
-    /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<
-      ReadonlyArray<{
-        readonly bytes: Uint8Array<ArrayBuffer>;
-        readonly name: string;
-      }>
-    >;
+    /**
+     * Consume the files the operating system opened with Tau, each as the
+     * grant the host minted for it: the host copies them into an import's
+     * staging itself (W7.4), so their bytes never cross to the page.
+     */
+    consume(): Promise<ReadonlyArray<{ readonly grant: string; readonly name: string }>>;
   };
   readonly generatedImages: {
     read(path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }>;

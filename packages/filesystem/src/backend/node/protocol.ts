@@ -23,10 +23,13 @@ import { maximumChangesetEntries } from '#changeset.js';
  * row carries content facts only when already known (I3); version 10 adds
  * `applyBatch`, one changeset phase per request, fsynced once per directory (D16);
  * version 11 lets a batch write name a large object by its id, for the host to
- * clone from the root's store, and answers its verified id (EQ13).
+ * clone from the root's store, and answers its verified id (EQ13); version 12
+ * adds the import of a source a person chose on the host (W7.4): its listing
+ * and preview by an opaque grant, and `importCopy`, which copies its files into
+ * a root host-side and answers the facts hashed from what landed (D12, I6).
  * @public
  */
-export const nodeFsProtocolVersion = 11;
+export const nodeFsProtocolVersion = 12;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -111,6 +114,24 @@ const batchEntrySchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('move'), from: rootedPathSchema, to: rootedPathSchema, replace: z.boolean().optional() }),
   z.object({ op: z.literal('mkdir'), path: rootedPathSchema, recursive: z.boolean().optional() }),
 ]);
+/* A grant is an opaque token the host minted when a person chose a source: never a host path (I6). */
+const importGrantSchema = z.string().regex(/^[\w-]{8,128}$/u);
+/* A path inside a granted source, as the importer spells it: relative, `/`-separated, `''` for the source itself. */
+const importSourcePathSchema = z
+  .string()
+  .max(4096)
+  .refine(
+    (value) =>
+      value === '' || value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'),
+    {
+      message: 'An import source path is relative and plain.',
+    },
+  );
+/** Bytes one `importSourceRead` reply carries at most. @internal */
+export const maximumImportSourceReadBytes = streamChunkSize * 16;
+/** Files one `importCopy` request may carry: a changeset's own ceiling. @internal */
+export const maximumImportCopyEntries = maximumChangesetEntries;
+
 /** Entries one `applyBatch` request may carry: a changeset's own ceiling. @internal */
 export const maximumBatchRequestEntries = maximumChangesetEntries;
 
@@ -203,6 +224,31 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('rename'), from: z.string(), to: z.string() }),
   z.object({ ...rooted, op: z.literal('watch'), request: watchRequestSchema }),
   z.object({ ...versioned, op: z.literal('unwatch') }),
+  /* Rootless: a granted source is the host's to resolve, whatever root the import lands in. */
+  z.object({ ...versioned, op: z.literal('importSourceList'), grant: importGrantSchema, path: importSourcePathSchema }),
+  z.object({
+    ...versioned,
+    op: z.literal('importSourceRead'),
+    grant: importGrantSchema,
+    path: importSourcePathSchema,
+    position: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /* One bounded range a reply carries; a longer preview is read a range at a time. */
+    maximumBytes: z.number().int().nonnegative().max(maximumImportSourceReadBytes),
+  }),
+  z.object({
+    ...rooted,
+    op: z.literal('importCopy'),
+    grant: importGrantSchema,
+    entries: z
+      .array(
+        z.object({
+          from: importSourcePathSchema,
+          path: rootedPathSchema,
+          size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        }),
+      )
+      .max(maximumImportCopyEntries),
+  }),
 ]);
 
 /** One request frame. @public */
@@ -226,6 +272,32 @@ const batchReceiptSchema = z.object({
 
 /** One batch receipt as it crosses the port. @internal */
 export type NodeFsBatchReceipt = z.infer<typeof batchReceiptSchema>;
+
+/* What a host copy measured from the one read of what landed: the facts an import records (EQ6). */
+const importCopyReceiptSchema = batchReceiptSchema.extend({
+  facts: z
+    .object({
+      contentKind: z.enum(['text', 'binary']),
+      lineCount: z.number().int().nonnegative().optional(),
+      blobOid: z.string().regex(/^[\da-f]{40}$/u),
+      sha256: z.string().regex(/^[\da-f]{64}$/u),
+    })
+    .optional(),
+});
+
+/** One import copy receipt as it crosses the port. @internal */
+export type NodeFsImportCopyReceipt = z.infer<typeof importCopyReceiptSchema>;
+
+/* One row of a granted directory: a symlink or special entry is named so the importer can count it, never followed. */
+const importSourceRowSchema = z.object({
+  name: z.string().min(1),
+  kind: z.enum(['file', 'dir', 'symlink', 'other']),
+  size: z.number().int().nonnegative(),
+  mtimeMs: z.number(),
+});
+
+/** One row of a granted source's listing. @public */
+export type NodeFsImportSourceRow = z.infer<typeof importSourceRowSchema>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),
@@ -281,6 +353,9 @@ export const nodeFsResultSchemas = {
   rename: z.undefined(),
   watch: z.undefined(),
   unwatch: z.undefined(),
+  importSourceList: z.array(importSourceRowSchema),
+  importSourceRead: bytesSchema,
+  importCopy: z.array(importCopyReceiptSchema),
 } as const satisfies Record<NodeFsRequest['op'], z.ZodType>;
 
 /**

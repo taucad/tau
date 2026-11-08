@@ -240,6 +240,32 @@ describe('createServicesHost — concern ports', () => {
     expect(port.start).toHaveBeenCalled();
   });
 
+  it('resolves only the import grants main last sent, and never admits their folders as roots', () => {
+    const { host, serve } = hostHarness();
+    host.handleMessage(frame({ type: 'allowRoots', roots: [homeRoot] }));
+    host.handleMessage(
+      frame({
+        type: 'importGrants',
+        grants: [
+          { grant: 'grant-folder', path: '/Users/someone/Bracket', kind: 'directory' },
+          { grant: 'grant-relative', path: 'relative/path', kind: 'directory' },
+          { grant: 'grant-odd', path: '/Users/someone/x', kind: 'socket' },
+        ],
+      }),
+    );
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+    const [, options] = serve.mock.calls[0] as unknown as [
+      unknown,
+      { allowRoot: (root: string) => boolean; importSource: (grant: string) => unknown },
+    ];
+    expect(options.importSource('grant-folder')).toEqual({ path: '/Users/someone/Bracket', kind: 'directory' });
+    expect(options.importSource('grant-relative')).toBeUndefined();
+    expect(options.importSource('grant-odd')).toBeUndefined();
+    expect(options.allowRoot('/Users/someone/Bracket')).toBe(false);
+    host.handleMessage(frame({ type: 'importGrants', grants: [] }));
+    expect(options.importSource('grant-folder')).toBeUndefined();
+  });
+
   it('serves a main-only runtime filesystem as an exact rooted authority client', async () => {
     const bridge = { emit: vi.fn(), dispose: vi.fn() };
     type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;

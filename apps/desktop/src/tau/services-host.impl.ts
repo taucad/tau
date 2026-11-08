@@ -444,6 +444,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * wire: a write names an object, not a path (I6).
    */
   const largeObjectStores = new Map<string, string>();
+  /**
+   * The sources a person chose to import (W7.4), by the grant main minted
+   * when they chose them: the renderer names a grant, and the host lists and
+   * copies the source by it, so no host path for an import ever comes from
+   * the renderer (I6). Replaced whole by each `importGrants` frame.
+   */
+  let importGrants = new Map<string, Readonly<{ path: string; kind: 'directory' | 'file' }>>();
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One `projectHost` actor per workspace root (W6 RH-S5), outliving every
@@ -1240,6 +1247,23 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const handleControlFrame = (frame: Record<string, unknown>): void => {
     switch (frame['type']) {
+      case 'importGrants': {
+        const next = new Map<string, Readonly<{ path: string; kind: 'directory' | 'file' }>>();
+        for (const entry of (frame['grants'] as readonly unknown[] | undefined) ?? []) {
+          const { grant, path, kind } = (entry ?? {}) as { grant?: unknown; path?: unknown; kind?: unknown };
+          if (
+            typeof grant === 'string' &&
+            typeof path === 'string' &&
+            isAbsolute(path) &&
+            (kind === 'directory' || kind === 'file')
+          ) {
+            next.set(grant, { path, kind });
+          }
+        }
+        importGrants = next;
+        log('import-grants-updated', { count: importGrants.size });
+        return;
+      }
       case 'allowRoots': {
         trustedRoots.clear();
         for (const root of (frame['roots'] as readonly string[] | undefined) ?? []) {
@@ -1777,6 +1801,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           const stop = serve(toNodeFsPort(port), {
             allowRoot: isTrustedRoot,
             policy: tauPathPolicy,
+            importSource: (grant) => importGrants.get(grant),
             ...(authority ? { authority } : {}),
           }).close;
           let stopped: Promise<void> | undefined;

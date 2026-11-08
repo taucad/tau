@@ -5,6 +5,9 @@
  */
 
 export { drainNodeFsProviderWatchClosures, NodeFsProvider } from '#backend/node/provider.js';
+export type { ImportCopyFacts, ImportCopyReceipt, ImportFileCopy } from '#backend/node/provider.js';
+export { listImportSource, readImportSource, resolveImportSourcePath } from '#backend/node/import-source.js';
+export type { ImportSourceGrant } from '#backend/node/import-source.js';
 export { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '#backend/node/authority-writer-lock.js';
 export type { AcquireNodeAuthorityWriterInput, NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 export { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';

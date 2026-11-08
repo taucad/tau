@@ -58,6 +58,7 @@ import {
   generatedImageIpcChannel,
   isQuickLookEnabled,
   openFilesIpcChannel,
+  selectImportFolderIpcChannel,
   quickLookIpcChannels,
 } from '#shared/quick-look.js';
 import type {
@@ -345,6 +346,8 @@ contextBridge.exposeInMainWorld('tau', {
   dialog: {
     selectDirectory: async (options?: { id?: string }): Promise<string | undefined> =>
       (await ipcRenderer.invoke('tau:select-directory', options)) as string | undefined,
+    selectImportFolder: async (): Promise<{ grant: string; name: string } | undefined> =>
+      (await ipcRenderer.invoke(selectImportFolderIpcChannel)) as { grant: string; name: string } | undefined,
   },
   openFiles: {
     consume: async (): Promise<DesktopOpenFile[]> =>

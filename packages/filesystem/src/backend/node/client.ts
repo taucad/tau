@@ -26,11 +26,18 @@ import type {
   WatchRequest,
 } from '#types.js';
 import type { NodeFsPort } from '#backend/node/port.js';
-import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type {
+  NodeFsImportCopyReceipt,
+  NodeFsImportSourceRow,
+  NodeFsRequest,
+  NodeFsResponse,
+  NodeFsWatchEvent,
+} from '#backend/node/protocol.js';
 import {
   maximumHashFilesPaths,
   nodeFsProtocolVersion,
   nodeFsResponseSchema,
+  maximumImportSourceReadBytes,
   nodeFsResultSchemas,
   parseNodeFsFrame,
 } from '#backend/node/protocol.js';
@@ -387,6 +394,36 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
     );
   }
 
+  /**
+   * Copy files of a source a person chose on the host into this root,
+   * host-side (W7.4): the host resolves each `from` inside the grant it
+   * minted, lands the file as a batch write does, and answers the facts it
+   * hashed from what landed. No byte crosses the port. A lost reply answers
+   * every entry `uncertain`.
+   *
+   * @param grant - The opaque grant the host minted for the source.
+   * @param entries - Each file's path inside the source, its path in this root, and the size it was listed at.
+   * @returns One receipt per entry, in order.
+   */
+  public async copyFromImportGrant(
+    grant: string,
+    entries: ReadonlyArray<Readonly<{ from: string; path: string; size: number }>>,
+  ): Promise<NodeFsImportCopyReceipt[]> {
+    for (const entry of entries) {
+      this._assertRootedPath(entry.path);
+    }
+    const answered = await this._channel
+      .request({ root: this._root, op: 'importCopy', grant, entries: entries.map((entry) => ({ ...entry })) })
+      .then(
+        (receipts) => ({ receipts }),
+        (error: unknown) => ({ lost: error }),
+      );
+    if ('lost' in answered) {
+      return entries.map(() => ({ outcome: 'uncertain', error: { message: String(answered.lost) } }));
+    }
+    return answered.receipts;
+  }
+
   public async writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> {
     this._assertRootedPath(input.path);
     for (const precondition of input.preconditions) {
@@ -600,5 +637,69 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
 
   protected async mkdirSingle(path: string): Promise<void> {
     await this._channel.request({ root: this._root, op: 'mkdir', path });
+  }
+}
+
+/**
+ * The sources a person chose on the host for an import, as the importer asks
+ * about them (W7.4): one directory's rows, or a preview of one file, by the
+ * opaque grant the host minted. Paths are relative to the source; the host
+ * resolves them (I6).
+ *
+ * @public
+ */
+export class NodeFsImportSources {
+  private readonly _channel: NodeFsChannel;
+
+  /** @param channel - Shared connection to the host. */
+  public constructor(channel: NodeFsChannel) {
+    this._channel = channel;
+  }
+
+  /**
+   * One directory of a granted source.
+   *
+   * @param grant - The source's grant.
+   * @param path - The directory inside it, `''` for the source itself.
+   * @returns Its rows: name, kind, size and modification time.
+   */
+  public async list(grant: string, path: string): Promise<NodeFsImportSourceRow[]> {
+    return this._channel.request({ op: 'importSourceList', grant, path });
+  }
+
+  /**
+   * The first bytes of one file of a granted source.
+   *
+   * @param grant - The source's grant.
+   * @param path - The file inside it.
+   * @param maximumBytes - The most bytes answered.
+   * @returns The bytes.
+   */
+  public async read(grant: string, path: string, maximumBytes: number): Promise<Uint8Array<ArrayBuffer>> {
+    /* A range per reply, so a preview of any size crosses in bounded frames. */
+    const parts: Array<Uint8Array<ArrayBuffer>> = [];
+    let position = 0;
+    while (position < maximumBytes) {
+      // oxlint-disable-next-line no-await-in-loop -- a file is read one range after another.
+      const part = await this._channel.request({
+        op: 'importSourceRead',
+        grant,
+        path,
+        position,
+        maximumBytes: Math.min(maximumImportSourceReadBytes, maximumBytes - position),
+      });
+      if (part.byteLength === 0) {
+        break;
+      }
+      parts.push(part);
+      position += part.byteLength;
+    }
+    const bytes = new Uint8Array(position);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    return bytes;
   }
 }

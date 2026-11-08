@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,15 +14,25 @@ afterEach(() => {
 });
 
 describe('createOpenFileQueue', () => {
-  it('captures supported absolute paths once and returns bounded bytes', async () => {
+  it('captures supported absolute paths once and returns a grant for each, never its bytes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tau-open-file-'));
     temporary.push(root);
     const path = join(root, 'part.mesh.xml');
     writeFileSync(path, new Uint8Array([1, 2, 3]));
-    const queue = createOpenFileQueue({ extensions: ['mesh.xml'], maxBytes: 3, maxFiles: 2 });
+    const granted: string[] = [];
+    const queue = createOpenFileQueue({
+      extensions: ['mesh.xml'],
+      maxBytes: 3,
+      maxFiles: 2,
+      grant: async (canonical) => {
+        granted.push(canonical);
+        return { grant: 'grant-0001', name: 'part.mesh.xml' };
+      },
+    });
 
     expect(queue.enqueue([path, path, join(root, 'ignored.txt')])).toBe(1);
-    await expect(queue.consume()).resolves.toEqual([{ name: 'part.mesh.xml', bytes: new Uint8Array([1, 2, 3]) }]);
+    await expect(queue.consume()).resolves.toEqual([{ name: 'part.mesh.xml', grant: 'grant-0001' }]);
+    expect(granted).toEqual([realpathSync(path)]);
     expect(queue.hasPending()).toBe(false);
   });
 
@@ -31,7 +41,12 @@ describe('createOpenFileQueue', () => {
     temporary.push(root);
     const path = join(root, 'part.glb');
     writeFileSync(path, new Uint8Array([1, 2]));
-    const queue = createOpenFileQueue({ extensions: ['glb'], maxBytes: 1, maxFiles: 1 });
+    const queue = createOpenFileQueue({
+      extensions: ['glb'],
+      maxBytes: 1,
+      maxFiles: 1,
+      grant: async () => ({ grant: 'grant-0001', name: 'part.glb' }),
+    });
     queue.enqueue([path]);
 
     await expect(queue.consume()).rejects.toThrow('byte limit');

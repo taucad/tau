@@ -31,7 +31,11 @@ export type QuickLookUsdzRequest = {
   readonly displayName: string;
 };
 
+/** A file the operating system opened with Tau, as the import grant main minted for it (W7.4): never its bytes or path. */
 export type DesktopOpenFile = {
-  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly grant: string;
   readonly name: string;
 };
+
+/** The import folder picker (W7.4): resolves to a grant and the folder's name, never its path. */
+export const selectImportFolderIpcChannel = 'tau:select-import-folder';

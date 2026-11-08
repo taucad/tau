@@ -12,13 +12,12 @@ description: >-
 # deployed first.
 #
 # When this deploy comes from a `staging.yml` push run, a newer run that is still going
-# supersedes it as well, once that run's plan has passed, every check its `Wait for CI
-# checks` job gates deploys on has passed in its commit's `ci.yml` push run (and that
-# job recorded, or will record, those passes), and its deploy job for this app has not
-# ended without deploying. Its plan diffs the app against the last commit staging recorded
-# (`staging-deploy-history`), which this unpublished commit is not, so it deploys this
-# change too, or the app is unchanged since that record and there is nothing to
-# publish. A newer run whose CI is still going or failed does not supersede: its
+# supersedes it as well, once that run's plan has passed, its `Wait for CI checks` job
+# has finished and recorded every deploy gate as passed, and its deploy job for this
+# app has not ended without deploying. Its plan diffs the app against the last commit
+# staging recorded (`staging-deploy-history`), which this unpublished commit is not, so
+# it deploys this change too, or the app is unchanged since that record and there is
+# nothing to publish. A newer run whose gates are unrecorded or failed does not supersede: its
 # deploy jobs skip on a red check, so deferring to it left staging on an older commit
 # until the next green push (2026-11-08: #1527 passed CI, skipped for c6362d1e8f, whose
 # CI then failed). Publishing this commit first costs one extra deploy at most; waiting
@@ -58,28 +57,14 @@ runs:
         # in step with its CHECKS.
         gates='["Validate workspace","Run affected tasks","API tests (Postgres + MinIO)","Billing contracts (no Stripe credentials)"]'
         gates_passed() {
-          local ci wait job started status log
-          ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$2&event=push&branch=main&per_page=1" \
-            --jq '.workflow_runs[0].id // empty')
-          [ -n "$ci" ] || return 1
-          # Every gate passed in that commit's CI run.
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
-            --jq '.jobs[] | {name, conclusion}' | jq -se --argjson gates "$gates" '
-            [$gates[] as $g | first(.[] | select(.name == $g)) // null]
-            | all(.[]; . != null and .conclusion == "success")' > /dev/null || return 1
-          wait=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name == "Wait for CI checks" and .started_at != null)
-              | "\(.id) \(.started_at | fromdate) \(.status)"')
-          # Not started yet: it will record what CI concluded.
-          [ -n "$wait" ] || return 0
-          read -r job started status <<< "$wait"
-          if [ "$status" != completed ]; then
-            # Still waiting: it records a gate only once all have completed, so under 330
-            # minutes in, its next poll, inside the 340-minute deadline, records these.
-            [ $(( $(date +%s) - started )) -lt $(( 330 * 60 )) ]
-            return
-          fi
-          # Finished: read what it recorded, one `<check>: <conclusion>` line per gate.
+          local job log
+          # Its `Wait for CI checks` job has finished and recorded every gate as passed,
+          # one `<check>: <conclusion>` line each in its log. Until it has, what it will
+          # record is unproven (a gate can be re-run after its last poll, or it can give
+          # up at its deadline), so this older deploy goes ahead.
+          job=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name == "Wait for CI checks" and .status == "completed") | .id')
+          [ -n "$job" ] || return 1
           log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs") || return 1
           jq -r '.[]' <<< "$gates" | while IFS= read -r g; do
             grep -qF " $g: success" <<< "$log" || exit 1
@@ -111,10 +96,9 @@ runs:
               and any(.[]; .name == $plan and .conclusion == "success")
               and (any(.[]; deploy and .conclusion != null) | not) then "coming"
             else "none" end')
-          # A newer run only takes this deploy over once its deploy gates will pass: every
-          # check its `Wait for CI checks` job reads has passed in that commit's `ci.yml`
-          # push run, and that job recorded, or will record, those passes.
-          if [ "$verdict" = coming ] && ! gates_passed "$run_id" "$sha"; then
+          # A newer run only takes this deploy over once its `Wait for CI checks` job has
+          # finished and recorded every deploy gate as passed.
+          if [ "$verdict" = coming ] && ! gates_passed "$run_id"; then
             continue
           fi
           case "$verdict" in

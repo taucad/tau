@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { processTable } from '#shell/process-tree.js';
+import { processTable, terminationDeadline } from '#shell/process-tree.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
@@ -467,26 +467,31 @@ describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
     expect(await output).toBe('done\n');
   });
 
-  it('should reject settlement when an owned process survives termination', async () => {
-    const root = { pid: 0 };
-    const lying = await custodial({
-      processTable: async () => {
-        const rows = await processTable();
-        return [
-          ...rows.filter((row) => row.pid !== root.pid),
-          { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
-        ];
-      },
-    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
-    if (lying.status !== 'started') {
-      throw new Error('expected a started launch');
-    }
-    const pipes = pipesOf(lying.process);
-    const printed = await text(pipes.stdout);
-    root.pid = Number(printed.trim());
+  it(
+    'should reject settlement when an owned process survives termination',
+    async () => {
+      const root = { pid: 0 };
+      const lying = await custodial({
+        processTable: async () => {
+          const rows = await processTable();
+          return [
+            ...rows.filter((row) => row.pid !== root.pid),
+            { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
+          ];
+        },
+      }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
+      if (lying.status !== 'started') {
+        throw new Error('expected a started launch');
+      }
+      const pipes = pipesOf(lying.process);
+      const printed = await text(pipes.stdout);
+      root.pid = Number(printed.trim());
 
-    await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
-  }, 20_000);
+      await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
+      /* A survivor is reported only once the whole termination deadline has passed. */
+    },
+    terminationDeadline + 15_000,
+  );
 });
 
 describe.runIf(process.platform === 'linux')('createSandboxShellProvider terminal', () => {

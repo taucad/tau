@@ -26,7 +26,7 @@ import {
   sandboxRuntimeJavaAgent,
   sandboxRuntimeSeccomp,
 } from '#native-sandbox.js';
-import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import { terminateOwnedProcesses, terminationDeadline, trackDescendants } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
 import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
@@ -141,8 +141,8 @@ export type SandboxShellProviderOptions = Readonly<{
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
-/** How long termination may take before survivors are reported. */
-const terminationMilliseconds = 5000;
+/** How long termination may take before survivors are reported (see {@link terminationDeadline}). */
+const terminationMilliseconds = terminationDeadline;
 
 /** The util-linux `setsid`, which makes the session's own PTY the controlling terminal that `bwrap --new-session` dropped. */
 const linuxSetsid = '/usr/bin/setsid';

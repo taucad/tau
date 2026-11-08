@@ -3,9 +3,9 @@ import { repositoryLocator } from '#api/git/store/locator.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import type { Database } from '#database/owner-lock.js';
+import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import type { Database } from '@taucad/api-database/owner-lock';
 import {
   project,
   projectCollaborator,
@@ -16,7 +16,7 @@ import {
   publication,
   publicationAccess,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import type { RepositoryLocator } from '#api/git/store/port.js';
 
 export type ProjectDeletionStatus = { projectId: string; state: 'active' | 'deleting' | 'deleted'; deletedAt?: string };

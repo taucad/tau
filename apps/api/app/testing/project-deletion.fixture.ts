@@ -2,9 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import process from 'node:process';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import type { Database } from '#database/owner-lock.js';
-import * as schema from '#database/schema.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import * as schema from '@taucad/api-database/schema';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 
 /** Refuse the shared developer database even when the integration config loads it. */
 export const assertDeletionDatabase = (connection: string | undefined): string => {

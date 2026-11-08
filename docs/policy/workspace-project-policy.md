@@ -3,9 +3,10 @@ title: 'Workspace Project Policy'
 description: 'Placement, tagging, layering, generation, and dependency rules for Tau workspace projects and private application libraries.'
 status: active
 created: '2026-08-22'
-updated: '2026-08-22'
+updated: '2026-11-08'
 related:
   - docs/research/ui-feature-library-architecture-blueprint.md
+  - docs/research/api-module-layout-blueprint.md
   - docs/research/workspace-license-boundary-migration.md
   - docs/policy/library-api-policy.md
   - docs/policy/public-surface-policy.md
@@ -21,16 +22,17 @@ Nx caches, validates, and schedules work at project boundaries. Consistent place
 
 ## Placement Router
 
-| Code being created                                    | Placement                 | Required tags                             | Build           |
-| ----------------------------------------------------- | ------------------------- | ----------------------------------------- | --------------- |
-| Published npm package                                 | `packages/<name>`         | `scope:shared type:package`               | tsdown          |
-| Apache capability shared by multiple apps or packages | `libs/<name>`             | `scope:shared type:lib`                   | tsdown          |
-| Private capability used by both UI and API            | `apps/libs/<name>`        | `scope:shared type:app-lib layer:<layer>` | source-consumed |
-| UI feature, primitives, or data access                | `apps/libs/<name>`        | `scope:ui type:app-lib layer:<layer>`     | source-consumed |
-| Development tooling                                   | `tools/<name>`            | `scope:shared type:tool`                  | tsdown          |
-| Kernel or transcoder plugin                           | `packages/plugins/<name>` | `scope:shared type:package`               | tsdown          |
-| Deployable app                                        | `apps/<name>`             | `scope:<app> type:app layer:feature`      | app-specific    |
-| One-off script                                        | `scripts/`                | none                                      | none            |
+| Code being created                                    | Placement                 | Required tags                                     | Build           |
+| ----------------------------------------------------- | ------------------------- | ------------------------------------------------- | --------------- |
+| Published npm package                                 | `packages/<name>`         | `scope:shared type:package`                       | tsdown          |
+| Apache capability shared by multiple apps or packages | `libs/<name>`             | `scope:shared type:lib`                           | tsdown          |
+| Private capability used by both UI and API            | `apps/libs/<name>`        | `scope:shared type:app-lib layer:<layer>`         | source-consumed |
+| UI feature, primitives, or data access                | `apps/libs/<name>`        | `scope:ui type:app-lib layer:<layer>`             | source-consumed |
+| Private API server capability                         | `apps/libs/api-<name>`    | `scope:api type:app-lib layer:<layer> api:<name>` | source-consumed |
+| Development tooling                                   | `tools/<name>`            | `scope:shared type:tool`                          | tsdown          |
+| Kernel or transcoder plugin                           | `packages/plugins/<name>` | `scope:shared type:package`                       | tsdown          |
+| Deployable app                                        | `apps/<name>`             | `scope:<app> type:app layer:feature`              | app-specific    |
+| One-off script                                        | `scripts/`                | none                                              | none            |
 
 ## Rules
 
@@ -52,6 +54,10 @@ Layer dependencies flow in one direction:
 | `util`        | `util`                                 |
 
 **Enforced by**: `validate-project-tags` and `@nx/enforce-module-boundaries`.
+
+API server libraries (`apps/libs/api-<name>`) also carry exactly one `api:<name>` tag. Equal layers leave them unordered, so `eslint.config.mjs` gives each one the API libraries it may depend on, all pointing one way: `billing → llm-gateway → hosts → auth → {database, email, redis} → lifecycle → observability → core`. A library never depends on the `api` app; the app composes them and binds one library's port to another's implementation.
+
+**Enforced by**: `validate-project-tags` (tag and no library-to-app graph edge) and `@nx/enforce-module-boundaries` (`api:<name>` constraints).
 
 ### 3. Keep App Libraries Source-Consumed
 
@@ -87,6 +93,8 @@ Create workspace projects with the package generator. Hand-written project confi
 ```bash
 pnpm nx g ./tools/workspace-plugin/generators.json:package billing-ui \
   --scope=apps/libs --scope-tag=ui --layer=feature --react
+pnpm nx g ./tools/workspace-plugin/generators.json:package api-billing \
+  --scope=apps/libs --scope-tag=api --layer=feature
 ```
 
 ### 9. Charter Deployable Apps

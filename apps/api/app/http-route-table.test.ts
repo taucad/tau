@@ -11,10 +11,10 @@ import type { TestingModule } from '@nestjs/testing';
 import { mockDeep } from 'vitest-mock-extended';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
-import { AuthModule } from '#auth/auth.module.js';
-import { isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
-import { getEnvironment } from '#config/environment.config.js';
+import { isOptionalAuth, isPublicAuth } from '@taucad/api-auth';
+import { AuthModule } from '@taucad/api-auth/module';
+import { DatabaseService } from '@taucad/api-database';
+import { getEnvironment } from '@taucad/api-core';
 
 /**
  * HTTP surface guard. Pins every route the API serves (method, versioned path,

@@ -9,7 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { commitLease } from '#api/git/store/commit.js';

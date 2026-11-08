@@ -14,8 +14,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { hostDeviceOf } from '#auth/auth.guard.js';
+import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
 import { FileLinksService } from '#storage/file-links.service.js';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import {
@@ -32,7 +31,7 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryObjectKey } from '#api/git/store/repository-key.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 const catalogueWindowSeconds = 60;
 

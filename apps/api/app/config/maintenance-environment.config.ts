@@ -1,6 +1,6 @@
 import process from 'node:process';
 import type { z } from 'zod';
-import { environmentSchemaBase, withWorktreeDatabases } from '#config/environment.config.js';
+import { environmentSchemaBase, withWorktreeDatabases } from '@taucad/api-core';
 
 /**
  * The configuration the maintenance command boots with (north star DC4).

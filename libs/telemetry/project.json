@@ -10,7 +10,7 @@
         "default",
         "^production",
         "{workspaceRoot}/infra/grafana/**/*",
-        "{workspaceRoot}/apps/api/app/telemetry/otel.ts",
+        "{workspaceRoot}/apps/libs/api-observability/src/otel.ts",
         "{workspaceRoot}/packages/agent-host/src/harness/tools.ts",
         "{workspaceRoot}/libs/types/src/constants/kernel.constants.ts",
         "{workspaceRoot}/packages/*/agent/skills.json",

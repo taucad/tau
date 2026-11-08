@@ -29,9 +29,10 @@ const pendingDeclaration: Readonly<Record<string, string>> = {};
  * `process.*` and need no reporter), so their names are read from that source.
  */
 const processInstruments = [
-  ...readFileSync(path.resolve(import.meta.dirname, '../../../apps/api/app/telemetry/otel.ts'), 'utf8').matchAll(
-    /createObservable(?<kind>Counter|Gauge)\(\s*'(?<name>process\.[\w.]+)'/gu,
-  ),
+  ...readFileSync(
+    path.resolve(import.meta.dirname, '../../../apps/libs/api-observability/src/otel.ts'),
+    'utf8',
+  ).matchAll(/createObservable(?<kind>Counter|Gauge)\(\s*'(?<name>process\.[\w.]+)'/gu),
 ].map(({ groups }) => toPrometheusName(groups!['name']!, groups!['kind'] === 'Counter' ? 'counter' : 'gauge'));
 
 const declared = new Set([

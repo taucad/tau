@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- NestJS decorators are factories */
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { CollaboratorsController, InvitationsController } from '#api/collaboration/collaboration.controller.js';
 import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';

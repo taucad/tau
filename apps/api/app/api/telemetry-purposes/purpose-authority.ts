@@ -1,10 +1,7 @@
 import type { BillingTier } from '@taucad/billing';
-import type {
-  PurposeRefusal,
-  TelemetryPurpose,
-  TelemetryPurposeState,
-} from '#api/telemetry-purposes/telemetry-purpose.schema.js';
-import { telemetryPurposes } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { PurposeRefusal, TelemetryPurposeState } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
+import { telemetryPurposes } from '@taucad/api-database/schema/telemetry-purpose.types';
 
 /** One recorded decision, as stored: immutable, with the notice it was taken against. */
 export type RecordedPurposeDecision = Readonly<{

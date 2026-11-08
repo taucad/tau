@@ -1,0 +1,7 @@
+{
+  "name": "api-llm-gateway",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-llm-gateway",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:llm-gateway"]
+}

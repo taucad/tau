@@ -10,10 +10,10 @@ import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.j
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import { reportReadinessFailure } from '#telemetry/sentry.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import { reportReadinessFailure } from '@taucad/api-observability/sentry';
 
-vi.mock('#telemetry/sentry.js', () => ({ reportReadinessFailure: vi.fn() }));
+vi.mock('@taucad/api-observability/sentry', () => ({ reportReadinessFailure: vi.fn() }));
 
 describe('HealthController', () => {
   let controller: HealthController;

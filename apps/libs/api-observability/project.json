@@ -1,0 +1,7 @@
+{
+  "name": "api-observability",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-observability",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:util", "api:observability"]
+}

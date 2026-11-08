@@ -7,12 +7,12 @@ import type { Auth } from 'better-auth';
 import type { WebSocket } from 'ws';
 import { KernelsGateway } from '#api/kernels/kernels.gateway.js';
 import type { KernelsService } from '#api/kernels/kernels.service.js';
-import type { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
+import type { DevWebSocketService } from '@taucad/api-lifecycle';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 type Harness = {
   gateway: KernelsGateway;

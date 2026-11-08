@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
-import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
-import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
-import { agentEvidenceOutbox, agentEvidenceReceipt, agentEvidenceSource } from '#database/schema.js';
+import type { Database, OwnerLockTransaction } from '@taucad/api-database/owner-lock';
+import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import { agentEvidenceOutbox, agentEvidenceReceipt, agentEvidenceSource } from '@taucad/api-database/schema';
 import { lockEvidencePrincipal, readEvidenceErasure } from '#api/agent-observability/evidence-erasure.js';
 
 /** Protection of one source, strictest last. */

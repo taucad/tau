@@ -2,7 +2,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { HttpException } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { MemoryInFlightRegistry } from '#api/git/routing/in-flight.js';
 import type { InFlightRegistry } from '#api/git/routing/in-flight.js';
 import {

@@ -4,11 +4,11 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import * as schema from '#database/schema.js';
-import { project, projectGitRoute, user } from '#database/schema.js';
-import { databaseReachable } from '#testing/database-reachable.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
+import * as schema from '@taucad/api-database/schema';
+import { project, projectGitRoute, user } from '@taucad/api-database/schema';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 import { defaultRoute, isFrozen } from '#api/git/routing/route.js';
 import {
   freezeAll,

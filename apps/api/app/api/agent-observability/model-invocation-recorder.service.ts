@@ -1,16 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { billingOwnerBinding } from '#database/schema.js';
-import type { Environment } from '#config/environment.config.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import { billingOwnerBinding } from '@taucad/api-database/schema';
+import type { Environment } from '@taucad/api-core';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
-import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
 
 /** Recordings one process may have in flight; past it, an attempt goes unrecorded and is counted. */
 export const attemptRecordingsInFlight = 16;

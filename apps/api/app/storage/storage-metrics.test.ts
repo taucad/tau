@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs and outputs use PascalCase fields */
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { ServiceOutputTypes } from '@aws-sdk/client-s3';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
 
 const storageClient = (respond: () => { output: ServiceOutputTypes; response: unknown }) => {

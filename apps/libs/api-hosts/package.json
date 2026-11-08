@@ -1,0 +1,58 @@
+{
+  "name": "@taucad/api-hosts",
+  "version": "0.1.0-beta.0",
+  "description": "API host devices, cloud hosts and host relay",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-hosts"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-hosts#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./host-frame-relay": "./src/host-frame-relay.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-lifecycle": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/api-redis": "workspace:*",
+    "better-auth": "catalog:",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "ioredis": "^5.11.1",
+    "nestjs-zod": "^5.4.0",
+    "ws": "catalog:"
+  }
+}

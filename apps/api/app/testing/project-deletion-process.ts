@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import { assertDeletionDatabase } from '#testing/project-deletion.fixture.js';
 

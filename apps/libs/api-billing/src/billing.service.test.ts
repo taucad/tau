@@ -1,0 +1,204 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Configuration keys mirror the environment contract. */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock, mockDeep } from 'vitest-mock-extended';
+import type Stripe from 'stripe';
+import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { BillingService } from '#billing.service.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { Environment } from '@taucad/api-core';
+import type { subscription, user, billingOwnerBinding, billingStripeCustomer } from '@taucad/api-database/schema';
+import { resolveDefaultCard } from '#resolve-default-card.js';
+
+vi.mock('#resolve-default-card.js', () => ({ resolveDefaultCard: vi.fn() }));
+const now = new Date('2026-09-06T12:00:00Z');
+type SubscriptionRow = typeof subscription.$inferSelect;
+
+const row = (fields: Partial<SubscriptionRow> = {}): SubscriptionRow => ({
+  ...mock<SubscriptionRow>(),
+  id: 'sub_local',
+  accountId: 'account-a',
+  environment: 'development',
+  customerBindingId: 'customer-a',
+  plan: 'pro',
+  status: 'active',
+  paidThrough: new Date('2026-10-01T00:00:00Z'),
+  failedRenewalInvoiceId: null,
+  graceEndsAt: null,
+  cancelAtPeriodEnd: false,
+  offerSnapshot: mock<NonNullable<SubscriptionRow['offerSnapshot']>>(),
+  ...fields,
+});
+
+const createService = (rows: SubscriptionRow[], bound = true, environment: Partial<Environment> = {}) => {
+  vi.useFakeTimers();
+  vi.setSystemTime(now);
+  const database = mockDeep<DatabaseService>();
+  database.database.query.user.findFirst.mockResolvedValue(
+    mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: null }),
+  );
+  database.database.query.billingOwnerBinding.findFirst.mockResolvedValue(
+    bound
+      ? mock<typeof billingOwnerBinding.$inferSelect>({
+          id: 'binding-a',
+          accountId: 'account-a',
+          authUserId: 'user-a',
+          environment: 'development',
+          revokedAt: null,
+        })
+      : undefined,
+  );
+  database.database.query.subscription.findMany.mockResolvedValue(rows);
+  database.database.query.billingStripeCustomer.findFirst.mockResolvedValue(
+    mock<typeof billingStripeCustomer.$inferSelect>({ stripeCustomerId: 'cus_owned' }),
+  );
+  const config = new ConfigService<Environment, true>({
+    BILLING_ENVIRONMENT: 'development',
+    STRIPE_READ_SECRET_KEY: 'rk_test_fixture',
+    STRIPE_ACCOUNT_ID: 'acct_fixture',
+    STRIPE_LIVEMODE: false,
+    ...environment,
+  });
+  const service = new BillingService(database, config, mockDeep<Stripe>());
+  vi.mocked(resolveDefaultCard).mockResolvedValue(undefined);
+  return { database, service };
+};
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
+
+describe('owned paid access deadlines', () => {
+  it('grants nothing to an unbound user or to an active label without an earned deadline', async () => {
+    const unbound = createService([row()], false);
+    expect(await unbound.service.getEntitlements('user-a')).toMatchObject({ tier: 'free' });
+    expect(unbound.database.database.query.subscription.findMany).not.toHaveBeenCalled();
+    expect(vi.mocked(resolveDefaultCard)).not.toHaveBeenCalled();
+    const expired = createService([row({ paidThrough: new Date('2026-08-01T00:00:00Z') })]);
+    expect(await expired.service.getEntitlements('user-a')).toMatchObject({ tier: 'free' });
+  });
+
+  it('retains earned access after cancellation and despite an unavailable saved card', async () => {
+    const { service } = createService([row({ status: 'canceled', cancelAtPeriodEnd: true })]);
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'pro',
+      status: 'canceled',
+      hasPaymentMethod: false,
+      paidThrough: new Date('2026-10-01T00:00:00Z'),
+    });
+  });
+
+  it('uses fixed grace once the paid-through deadline has passed', async () => {
+    const expired = createService([
+      row({
+        status: 'past_due',
+        paidThrough: new Date('2026-08-01T00:00:00Z'),
+        failedRenewalInvoiceId: 'in_failed',
+        graceEndsAt: new Date('2026-08-08T00:00:00Z'),
+      }),
+    ]);
+    expect(await expired.service.getEntitlements('user-a')).toMatchObject({ tier: 'free', status: 'past_due' });
+    const current = createService([
+      row({
+        status: 'past_due',
+        paidThrough: new Date('2026-09-01T00:00:00Z'),
+        failedRenewalInvoiceId: 'in_current',
+        graceEndsAt: new Date('2026-09-08T00:00:00Z'),
+      }),
+    ]);
+    expect(await current.service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', status: 'past_due' });
+  });
+
+  it('reads fresh financial state on every projection without Redis authority', async () => {
+    const { service, database } = createService([row()]);
+    const paid = await service.getEntitlements('user-a');
+    expect(paid.tier).toBe('pro');
+    database.database.query.subscription.findMany.mockResolvedValue([row({ paidThrough: null })]);
+    const expired = await service.getEntitlements('user-a');
+    expect(expired.tier).toBe('free');
+    expect(database.database.query.subscription.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses only the stable Customer for advisory card display', async () => {
+    const { service } = createService([row()]);
+    vi.mocked(resolveDefaultCard).mockResolvedValue({ id: 'pm_owned', brand: 'visa', last4: '4242' });
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'pro',
+      hasPaymentMethod: true,
+      paymentMethod: { brand: 'visa', last4: '4242' },
+      trainingConsent: false,
+    });
+    expect(vi.mocked(resolveDefaultCard)).toHaveBeenCalledWith(expect.anything(), 'cus_owned');
+  });
+
+  it('keeps a paid plan out of training until the user opts in themselves', async () => {
+    const { service, database } = createService([row()]);
+    database.database.query.user.findFirst.mockResolvedValue(
+      mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: new Date('2026-10-29T00:00:00Z') }),
+    );
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', trainingConsent: true });
+  });
+
+  it('refuses unknown plan names and treats their free fallback like a paid plan for training', async () => {
+    const { service, database } = createService([row({ plan: 'unknown' })]);
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      trainingConsent: false,
+    });
+    database.database.query.user.findFirst.mockResolvedValue(
+      mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: new Date('2026-10-29T00:00:00Z') }),
+    );
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', trainingConsent: true });
+  });
+
+  it("retains an assured free account's stored preference", async () => {
+    const { service } = createService([]);
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', trainingConsent: true });
+  });
+});
+
+/*
+ * Charter D23: the free tier's sync ships in code and stays shut until the
+ * go-live checklist opens it. Every server gate (push, register, publish) and
+ * the browser's plan read this projection, so this is the one switch.
+ */
+describe('free-tier sync gate (D23)', () => {
+  it('should keep a free account off Tau Cloud sync while the gate is unset', async () => {
+    const { service } = createService([], false);
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: false,
+    });
+  });
+
+  /* F1: the flag is inert in production until the go-live commit deletes the clause. */
+  it('should ignore the gate under NODE_ENV=production and say so once', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    /* ConfigService reads process.env before its own values, and vitest sets NODE_ENV=test. */
+    vi.stubEnv('NODE_ENV', 'production');
+    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
+
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', canSyncFiles: false });
+    await service.getEntitlements('user-a');
+    expect(warn.mock.calls.filter(([message]) => String(message).includes('TAU_FREE_TIER_SYNC_ENABLED'))).toHaveLength(
+      1,
+    );
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('should let a free account sync and publish once the deployment opens the gate', async () => {
+    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: true,
+      canUseProKernels: false,
+    });
+  });
+
+  it('should leave a paid account syncing whatever the gate says', async () => {
+    const { service } = createService([row()], true, { TAU_FREE_TIER_SYNC_ENABLED: false });
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', canSyncFiles: true });
+  });
+});

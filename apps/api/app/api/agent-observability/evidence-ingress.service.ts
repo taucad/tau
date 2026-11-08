@@ -14,17 +14,17 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { parseEvidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
-import { DatabaseService } from '#database/database.service.js';
-import type { Environment } from '#config/environment.config.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { AgentEvidenceAdmissionAttributes } from '#telemetry/metrics.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import type { Environment } from '@taucad/api-core';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceAdmissionAttributes } from '@taucad/api-observability/metrics';
+import { Span } from '@taucad/api-observability';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import type { EvidenceSealKey } from '#api/agent-observability/evidence-seal.js';
-import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
+import type { CloudHostReporter } from '@taucad/api-hosts';
 
 /** Submissions one principal may have in flight in one process. */
 export const evidenceConcurrencyPerPrincipal = 4;

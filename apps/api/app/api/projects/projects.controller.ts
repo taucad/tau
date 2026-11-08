@@ -13,13 +13,13 @@ import {
   Put,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
-import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
-import { withOwnerLock } from '#database/owner-lock.js';
+import type { Environment } from '@taucad/api-core';
+import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { and, count, desc, eq, or, isNull } from 'drizzle-orm';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { DatabaseService } from '#database/database.service.js';
-import { project, projectCollaborator, projectDeletion } from '#database/schema.js';
+import { UseAuth, User } from '@taucad/api-auth';
+import { DatabaseService } from '@taucad/api-database';
+import { project, projectCollaborator, projectDeletion } from '@taucad/api-database/schema';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -29,7 +29,7 @@ import {
   projectRegistrationsPerOwnerPerDay,
   registeredProjectLimitPerOwner,
 } from '#api/git/git.constants.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 
 /**

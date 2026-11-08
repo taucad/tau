@@ -2,17 +2,17 @@ import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { inArray } from 'drizzle-orm';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { project, projectCollaborator, user } from '#database/schema.js';
-import type { DatabaseService } from '#database/database.service.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import * as schema from '@taucad/api-database/schema';
+import { project, projectCollaborator, user } from '@taucad/api-database/schema';
+import type { DatabaseService } from '@taucad/api-database';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
 /**

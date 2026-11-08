@@ -17,7 +17,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
 import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import type {
   PublicationViewResponse,
   PublishRequest,
@@ -37,7 +37,7 @@ import {
 } from '#api/publications/publication-materializer.js';
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
@@ -45,20 +45,18 @@ import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { ReadLease } from '#api/git/git.service.js';
-import { DatabaseService } from '#database/database.service.js';
-import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
-import { EmailService } from '#email/email.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { buildPublicationViewUrl, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { RedisService } from '#redis/redis.service.js';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
 import type { StorageTier } from '#storage/object-storage.service.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import { buildPublicationViewUrl } from '#email/email-link-builder.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** The shared placeholder card image every publication starts with. */
 const defaultOgImageKey = 'defaults/og.png';

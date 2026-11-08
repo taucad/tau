@@ -33,13 +33,13 @@ import type { MaterializerDependencies } from '#api/publications/publication-mat
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
 
 // Lifecycle interleavings use real PostgreSQL in publication-deletion.integration.test.ts.
 // These unit fixtures retain their existing statement-level data stubs.
-vi.mock('#database/project-lifecycle.js', () => ({
+vi.mock('@taucad/api-database/project-lifecycle', () => ({
   assertProjectActive: vi.fn(),
   assertActiveProjectLocked: vi.fn(),
 }));

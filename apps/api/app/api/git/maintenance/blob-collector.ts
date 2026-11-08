@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { blobRef } from '#database/schema.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { blobRef } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';

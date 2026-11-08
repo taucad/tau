@@ -13,6 +13,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import type { SkillMetadata } from '@taucad/chat';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
@@ -326,7 +327,7 @@ describe('PluginsRoute', () => {
     const provider = new MemoryProvider();
     await provider.writeFile(path, '{}\n');
     const paths = new WorkspacePathResolver('/home');
-    const proxy = mock<ComposedViewClient>();
+    const proxy = withAuthorityDigest(mock<ComposedViewClient>());
     proxy.readFile.mockImplementation(async (absolutePath) => {
       const relativePath = paths.toRelativePath(absolutePath);
       if (relativePath === undefined) {
@@ -423,7 +424,7 @@ describe('PluginsRoute', () => {
     const provider = new MemoryProvider();
     await provider.writeFile(path, '{}\n');
     const paths = new WorkspacePathResolver('/home');
-    const proxy = mock<ComposedViewClient>();
+    const proxy = withAuthorityDigest(mock<ComposedViewClient>());
     proxy.readFile.mockImplementation(async (absolute) => {
       const relative = paths.toRelativePath(absolute);
       if (relative === undefined) {

@@ -49,9 +49,14 @@ class RacedProvider extends MemoryProvider {
   public async writeFileChecked(input: Parameters<CheckedWrite>[0]): ReturnType<CheckedWrite> {
     await this._race();
     const conflicts = [];
-    for (const { path, expected } of input.preconditions) {
+    for (const precondition of input.preconditions) {
+      const { path } = precondition;
       // oxlint-disable-next-line no-await-in-loop -- A test double over one in-memory file.
       const actual = (await this.exists(path)) ? await this.readFile(path) : null;
+      if (!('expected' in precondition)) {
+        throw new Error('This test double checks byte preconditions only.');
+      }
+      const { expected } = precondition;
       const wanted = typeof expected === 'string' ? new TextEncoder().encode(expected) : expected;
       if (actual === null || wanted === null ? actual !== wanted : decoder.decode(actual) !== decoder.decode(wanted)) {
         conflicts.push({ path, actual });

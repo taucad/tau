@@ -14,6 +14,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
@@ -176,7 +177,7 @@ describe('usePromptSkillsCatalog', () => {
       const provider = new MemoryProvider();
       await provider.writeFile(path, skillMarkdown('cached', 'Original cached description'));
       const paths = new WorkspacePathResolver('/project');
-      const proxy = mock<ComposedViewClient>();
+      const proxy = withAuthorityDigest(mock<ComposedViewClient>());
       let heldRead: Promise<void> | undefined;
       let acknowledge: () => void = () => undefined;
       const ready = new Promise<void>((resolve) => {
@@ -281,7 +282,7 @@ describe('usePromptSkillsCatalog', () => {
     const path = '.agents/skills/alpha/SKILL.md';
     const provider = new MemoryProvider();
     await provider.writeFile(path, skillMarkdown('alpha', 'Shared ready authority'));
-    const proxy = mock<ComposedViewClient>();
+    const proxy = withAuthorityDigest(mock<ComposedViewClient>());
     const paths = new WorkspacePathResolver('/project');
     proxy.readFile.mockImplementation(async (absolute) => {
       const relative = paths.toRelativePath(absolute);
@@ -341,7 +342,7 @@ describe('usePromptSkillsCatalog', () => {
     const path = '.agents/skills/alpha/SKILL.md';
     const provider = new MemoryProvider();
     await provider.writeFile(path, skillMarkdown('alpha', 'Recovered authority'));
-    const proxy = mock<ComposedViewClient>();
+    const proxy = withAuthorityDigest(mock<ComposedViewClient>());
     const paths = new WorkspacePathResolver('/project');
     proxy.readFile.mockImplementation(async (absolute) => {
       const relative = paths.toRelativePath(absolute);

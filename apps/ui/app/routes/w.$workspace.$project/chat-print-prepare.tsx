@@ -1,5 +1,6 @@
 import type { MachineSettingsProvenance } from '@taucad/runtime/machine/settings';
 import { Loader } from '@taucad/ui/components/loader';
+import { FileTooLargeError } from '@taucad/fs-client/file-content-errors';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
@@ -837,7 +838,16 @@ export const usePrintPrepare = ({
       /* Named by its bytes, as job imports are (blueprint D5), so a later slice never rewrites what a request names. */
       controller.signal.throwIfAborted();
       const path = `.tau/artifacts/${hex}/${fileName}`;
-      const isHeld = (await fileManager.exists(path)) && (await sha256Bytes(await fileManager.readFile(path))) === hex;
+      /* Read raw (L3 D-3): a held artifact of another size is not this one, and is replaced. */
+      const held = (await fileManager.exists(path))
+        ? await fileManager.readRawBytes(path, { sizeLimit: file.bytes.byteLength }).catch((error: unknown) => {
+            if (error instanceof FileTooLargeError) {
+              return undefined;
+            }
+            throw error;
+          })
+        : undefined;
+      const isHeld = held !== undefined && (await sha256Bytes(held)) === hex;
       controller.signal.throwIfAborted();
       if (!isHeld) {
         await fileManager.writeFiles({ [path]: { content: file.bytes } });

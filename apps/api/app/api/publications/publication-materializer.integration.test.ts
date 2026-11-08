@@ -22,6 +22,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -39,7 +40,11 @@ import {
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
+import type {
+  ObjectStorageServiceContract,
+  PutBlobResult,
+  PutBlobStreamArgs,
+} from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 
 // Real lifecycle lock interleavings live in publication-deletion.integration.test.ts.
@@ -57,6 +62,8 @@ vi.mock('#database/project-lifecycle.js', () => ({ assertProjectActive: vi.fn() 
 const realGit: MaterializerDependencies['git'] = async (directory, args, stdin) => {
   const result = spawnSync('git', [...args], {
     cwd: directory,
+    /* Past one batch of blob bytes; the storage worker's runner buffers without a cap. */
+    maxBuffer: 64 * 1024 * 1024,
     ...(stdin === undefined ? {} : { input: stdin }),
   });
   if (result.status !== 0) {
@@ -163,22 +170,107 @@ const writerStub = (
 /** Storage that remembers every blob it was given, keyed as the CDN keys it. */
 const createRecordingStorage = (
   lfsObjects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map(),
-  options: { readonly failWrites?: boolean; readonly failReads?: boolean } = {},
+  options: {
+    readonly failWrites?: boolean;
+    readonly failReads?: boolean;
+    /** LFS objects the store holds without the checksum it verified on write (pre-checksum uploads). */
+    readonly unverified?: boolean;
+    /** A store that refuses a server-side copy between these buckets. */
+    readonly refuseCopies?: boolean;
+  } = {},
 ): Readonly<{
   dependencies: MaterializerDependencies;
   written: Map<string, Uint8Array<ArrayBuffer>>;
   read: string[];
+  copied: Array<Readonly<{ from: string; to: string }>>;
+  streamed: Array<Readonly<{ key: string; checksumSha256: string | undefined }>>;
+  /** The most puts, copies and streams this store had in flight at once. */
+  peakInFlight: () => number;
+  /** The puts, copies and streams in flight now. */
+  inFlightNow: () => number;
+  /** Every body a read handed out, so a test can see it let go. */
+  bodies: Readable[];
 }> => {
   const written = new Map<string, Uint8Array<ArrayBuffer>>();
   const read: string[] = [];
+  const copied: Array<Readonly<{ from: string; to: string }>> = [];
+  const streamed: Array<Readonly<{ key: string; checksumSha256: string | undefined }>> = [];
+  const contentTypes = new Map<string, string>();
+  const bodies: Readable[] = [];
+  let inFlight = 0;
+  let peak = 0;
+  const writing = async <Value>(body: () => Promise<Value>): Promise<Value> => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    try {
+      /* A turn of the event loop, so writes started together overlap. */
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+      return await body();
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  const held = (key: string): Uint8Array<ArrayBuffer> | undefined => lfsObjects.get(key) ?? written.get(key);
   const storage: ObjectStorageServiceContract = {
-    putBlob: vi.fn(async (args): Promise<PutBlobResult> => {
-      if (options.failWrites === true) {
-        throw new Error('object storage is unavailable');
-      }
-      written.set(`${args.namespace}/${args.key}`, new Uint8Array(Buffer.from(args.body as Uint8Array<ArrayBuffer>)));
-      return { lost: false, etag: 'etag', alreadyExisted: false };
-    }),
+    putBlob: vi.fn(
+      async (args: Parameters<ObjectStorageServiceContract['putBlob']>[0]): Promise<PutBlobResult> =>
+        writing(async () => {
+          if (options.failWrites === true) {
+            throw new Error('object storage is unavailable');
+          }
+          written.set(`${args.namespace}/${args.key}`, new Uint8Array(Buffer.from(args.body)));
+          contentTypes.set(`${args.namespace}/${args.key}`, args.contentType);
+          return { lost: false, etag: 'etag', alreadyExisted: false };
+        }),
+    ),
+    /* A streamed put the store verifies against its checksum, as R2 does. */
+    putBlobStream: vi.fn(
+      async (args: PutBlobStreamArgs): Promise<PutBlobResult> =>
+        writing(async () => {
+          if (options.failWrites === true) {
+            throw new Error('object storage is unavailable');
+          }
+          const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+          for await (const chunk of args.body) {
+            chunks.push(new Uint8Array(chunk as Uint8Array<ArrayBuffer>));
+          }
+          const bytes = new Uint8Array(Buffer.concat(chunks));
+          if (bytes.byteLength !== args.contentLength) {
+            throw new Error('the stream ended short of its content length');
+          }
+          if (
+            args.checksumSha256 !== undefined &&
+            createHash('sha256').update(bytes).digest('base64') !== args.checksumSha256
+          ) {
+            throw Object.assign(new Error('checksum mismatch'), { name: 'BadDigest' });
+          }
+          written.set(`${args.namespace}/${args.key}`, bytes);
+          contentTypes.set(`${args.namespace}/${args.key}`, args.contentType);
+          streamed.push({ key: `${args.namespace}/${args.key}`, checksumSha256: args.checksumSha256 });
+          return { lost: false, etag: 'etag', alreadyExisted: false };
+        }),
+    ),
+    copyObject: vi.fn(async (args: Parameters<NonNullable<ObjectStorageServiceContract['copyObject']>>[0]) =>
+      writing(async () => {
+        if (options.refuseCopies === true) {
+          throw Object.assign(new Error('copy between these buckets is not supported'), { name: 'NotImplemented' });
+        }
+        if (args.sourceIfMatch !== undefined && args.sourceIfMatch !== 'etag') {
+          throw Object.assign(new Error('precondition failed'), { name: 'PreconditionFailed' });
+        }
+        const from = `${args.source.namespace}/${args.source.key}`;
+        const to = `${args.destination.namespace}/${args.destination.key}`;
+        const bytes = held(from);
+        if (bytes === undefined) {
+          throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
+        }
+        written.set(to, bytes);
+        contentTypes.set(to, args.contentType);
+        copied.push({ from, to });
+      }),
+    ),
     deleteBlobs: vi.fn(async () => ({ deleted: 0 })),
     listObjects: vi.fn(async function* listObjectsStub() {
       yield* [];
@@ -189,23 +281,38 @@ const createRecordingStorage = (
         /* A store that is there but cannot answer: not a missing object. */
         throw Object.assign(new Error('object storage timed out'), { name: 'TimeoutError' });
       }
-      const stored = lfsObjects.get(`${args.namespace}/${args.key}`) ?? written.get(`${args.namespace}/${args.key}`);
+      const stored = held(`${args.namespace}/${args.key}`);
       if (stored === undefined) {
         throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
       }
+      const bytes = args.range === undefined ? stored : stored.subarray(args.range.start, args.range.end + 1);
+      const body = Readable.from([Buffer.from(bytes)]);
+      bodies.push(body);
       return {
-        body: Readable.from([Buffer.from(stored)]),
+        body,
         contentType: 'application/octet-stream',
         etag: 'etag',
       };
     }),
     /* The bytes the bucket already holds, which is what the publish path skips
        re-uploading — and what a collector can remove underneath it. */
-    headBlob: vi.fn(async (args: Parameters<ObjectStorageServiceContract['headBlob']>[0]) =>
-      written.has(`${args.namespace}/${args.key}`) || lfsObjects.has(`${args.namespace}/${args.key}`)
-        ? { contentType: 'application/octet-stream', size: 0, etag: 'etag', cacheControl: '' }
-        : undefined,
-    ),
+    headBlob: vi.fn(async (args: Parameters<ObjectStorageServiceContract['headBlob']>[0]) => {
+      const key = `${args.namespace}/${args.key}`;
+      const bytes = held(key);
+      if (bytes === undefined) {
+        return undefined;
+      }
+      /* The checksum R2 records for a whole-object upload that carried one,
+         which every LFS upload does (it is signed with the oid). */
+      const vouched = args.checksum === true && !(options.unverified === true && lfsObjects.has(key));
+      return {
+        contentType: contentTypes.get(key) ?? 'application/octet-stream',
+        size: bytes.byteLength,
+        etag: 'etag',
+        cacheControl: '',
+        ...(vouched ? { checksumSha256: createHash('sha256').update(bytes).digest('base64') } : {}),
+      };
+    }),
     deleteBlob: vi.fn(async () => undefined),
     presignGet: vi.fn(async () => 'https://example.invalid/get'),
     presignPut: vi.fn(async () => 'https://example.invalid/put'),
@@ -220,6 +327,11 @@ const createRecordingStorage = (
   return {
     written,
     read,
+    copied,
+    streamed,
+    peakInFlight: () => peak,
+    inFlightNow: () => inFlight,
+    bodies,
     dependencies: {
       storage: storage as unknown as MaterializerDependencies['storage'],
       databaseService: {} as unknown as MaterializerDependencies['databaseService'],
@@ -505,7 +617,7 @@ describe('publication materializer against real git', () => {
     );
     /* Only the pre-D24 key, which is what a project the relocation has not
        reached yet still has. */
-    const { dependencies, written } = createRecordingStorage(
+    const { dependencies, written, copied, streamed } = createRecordingStorage(
       new Map([[`blobs/${gitLfsObjectKey('proj_lfs_legacy', oid)}`, objectBytes]]),
     );
 
@@ -524,6 +636,14 @@ describe('publication materializer against real git', () => {
     );
 
     expect(written.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(objectBytes))}`)).toStrictEqual(objectBytes);
+    /* A legacy key's checksum is never trusted: the object streams under the oid, never copied. */
+    expect(copied).toStrictEqual([]);
+    expect(streamed).toStrictEqual([
+      {
+        key: `blobs/${blobKeyFromSha256Hex(oid)}`,
+        checksumSha256: createHash('sha256').update(objectBytes).digest('base64'),
+      },
+    ]);
   });
 
   /* Red pin b. */
@@ -586,6 +706,315 @@ describe('publication materializer against real git', () => {
 
     expect(failure).not.toBeInstanceOf(NotFoundException);
     expect(failure).toMatchObject({ message: 'object storage timed out' });
+  });
+
+  describe('without holding the version (W12.2)', () => {
+    const pointerTo = (bytes: Uint8Array<ArrayBuffer>, size = bytes.byteLength): Uint8Array<ArrayBuffer> =>
+      utf8(
+        `version https://git-lfs.github.com/spec/v1\noid sha256:${sha256HexFromBytes(bytes)}\nsize ${String(size)}\n`,
+      );
+    const publish = async (
+      dependencies: MaterializerDependencies,
+      directory: string,
+      projectId: string,
+    ): Promise<Awaited<ReturnType<typeof materializePublication>>> =>
+      materializePublication(
+        dependencies,
+        {
+          publicationId: `pub_${projectId}`,
+          projectId,
+          ownerId: 'user_w4c',
+          directory,
+          tag: 'v1',
+          visibility: 'public',
+          entryPath: 'main.ts',
+        },
+        writerStub(),
+      );
+    /** An LFS object held at the tenant key, with the pointer that names it. */
+    const lfsFixture = async (
+      projectId: string,
+      objectBytes: Uint8Array<ArrayBuffer>,
+      path = 'part.step',
+    ): Promise<{ lease: RepositoryLease; objects: Map<string, Uint8Array<ArrayBuffer>>; key: string }> => {
+      const lease = await leaseFor(
+        seed(
+          new Map([
+            ['main.ts', utf8('// entry\n')],
+            [path, pointerTo(objectBytes)],
+          ]),
+        ),
+        projectId,
+      );
+      const key = `tenants/${tenantLfsObjectKey('user_w4c', projectId, sha256HexFromBytes(objectBytes))}`;
+      return { lease, objects: new Map([[key, objectBytes]]), key };
+    };
+
+    it('should copy an LFS object into the publication store without reading its bytes', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'C'.repeat(4096)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects, key } = await lfsFixture('proj_copy', objectBytes);
+      const storage = createRecordingStorage(objects);
+
+      await publish(storage.dependencies, lease.directory, 'proj_copy');
+
+      const blob = `blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(objectBytes))}`;
+      expect(storage.copied).toStrictEqual([{ from: key, to: blob }]);
+      expect(storage.read).not.toContain(key);
+      expect(storage.streamed).toStrictEqual([]);
+      expect(storage.written.get(blob)).toStrictEqual(objectBytes);
+    });
+
+    it('should stream an LFS object the store does not vouch for, under the oid as its checksum', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'U'.repeat(4096)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_unverified', objectBytes);
+      const storage = createRecordingStorage(objects, { unverified: true });
+
+      await publish(storage.dependencies, lease.directory, 'proj_unverified');
+
+      const blob = `blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(objectBytes))}`;
+      expect(storage.copied).toStrictEqual([]);
+      expect(storage.streamed).toStrictEqual([
+        { key: blob, checksumSha256: createHash('sha256').update(objectBytes).digest('base64') },
+      ]);
+      expect(storage.written.get(blob)).toStrictEqual(objectBytes);
+    });
+
+    it('should stream an LFS object when the store refuses the copy', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'R'.repeat(4096)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_refused_copy', objectBytes);
+      const storage = createRecordingStorage(objects, { refuseCopies: true });
+
+      await publish(storage.dependencies, lease.directory, 'proj_refused_copy');
+
+      const blob = `blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(objectBytes))}`;
+      expect(storage.streamed.map((entry) => entry.key)).toStrictEqual([blob]);
+      expect(storage.written.get(blob)).toStrictEqual(objectBytes);
+    });
+
+    it('should refuse a pointer naming an object over the per-file ceiling before touching storage', async () => {
+      const lease = await leaseFor(
+        seed(
+          new Map([
+            ['main.ts', utf8('// entry\n')],
+            ['huge.step', pointerTo(utf8('stand-in'), 30 * 1024 * 1024)],
+          ]),
+        ),
+        'proj_huge_pointer',
+      );
+      const storage = createRecordingStorage();
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_huge_pointer')).rejects.toMatchObject({
+        response: { code: 'FILE_TOO_LARGE' },
+      });
+      expect(storage.dependencies.storage.headBlob).not.toHaveBeenCalled();
+      expect(storage.read).toStrictEqual([]);
+    });
+
+    it('should refuse LFS objects past the publication total from their pointers before locating any', async () => {
+      const twentyMebibytes = 20 * 1024 * 1024;
+      const lease = await leaseFor(
+        seed(
+          new Map([
+            ['main.ts', utf8('// entry\n')],
+            ['a.step', pointerTo(utf8('a'), twentyMebibytes)],
+            ['b.step', pointerTo(utf8('b'), twentyMebibytes)],
+            ['c.step', pointerTo(utf8('c'), twentyMebibytes)],
+          ]),
+        ),
+        'proj_total_pointers',
+      );
+      const storage = createRecordingStorage();
+      const resolve = vi.spyOn(storage.dependencies, 'resolveLfsObject');
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_total_pointers')).rejects.toMatchObject({
+        response: { code: 'PAYLOAD_TOO_LARGE' },
+      });
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a pointer whose object the store holds at another size', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'S'.repeat(512)}\nEND-ISO-10303-21;\n`);
+      const lease = await leaseFor(
+        seed(
+          new Map([
+            ['main.ts', utf8('// entry\n')],
+            ['part.step', pointerTo(objectBytes, objectBytes.byteLength + 1)],
+          ]),
+        ),
+        'proj_short_object',
+      );
+      const storage = createRecordingStorage(
+        new Map([
+          [
+            `tenants/${tenantLfsObjectKey('user_w4c', 'proj_short_object', sha256HexFromBytes(objectBytes))}`,
+            objectBytes,
+          ],
+        ]),
+      );
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_short_object')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(storage.copied).toStrictEqual([]);
+    });
+
+    it('should check an LFS thumbnail by its first twelve bytes', async () => {
+      const webp = new Uint8Array(4096);
+      webp.set([0x52, 0x49, 0x46, 0x46, 0xf8, 0x0f, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+      const { lease, objects, key } = await lfsFixture('proj_lfs_thumb', webp, 'thumbnail.webp');
+      const storage = createRecordingStorage(objects);
+
+      const materialized = await publish(storage.dependencies, lease.directory, 'proj_lfs_thumb');
+
+      expect(storage.dependencies.storage.getBlob).toHaveBeenCalledWith(
+        expect.objectContaining({ key: key.slice('tenants/'.length), range: { start: 0, end: 11 } }),
+      );
+      expect(materialized.thumbnailKey).toBe(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(webp))}`);
+
+      const notWebp = await lfsFixture('proj_lfs_thumb_bad', utf8('x'.repeat(64)), 'thumbnail.webp');
+      const refusing = createRecordingStorage(notWebp.objects);
+      await expect(publish(refusing.dependencies, notWebp.lease.directory, 'proj_lfs_thumb_bad')).rejects.toMatchObject(
+        { response: { code: 'INVALID_THUMBNAIL_WEBP' } },
+      );
+      expect(refusing.dependencies.storage.putBlob).not.toHaveBeenCalled();
+    });
+
+    /** Four 3 MiB git blobs (12 MiB, past one batch), and a runner that records each `cat-file`'s objects. */
+    const batchedFixture = async (
+      projectId: string,
+    ): Promise<{
+      lease: RepositoryLease;
+      files: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+      counting: (dependencies: MaterializerDependencies) => {
+        dependencies: MaterializerDependencies;
+        batches: number[][];
+      };
+    }> => {
+      const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', utf8('// entry\n')]]);
+      for (const name of ['a', 'b', 'c', 'd']) {
+        files.set(`assets/${name}.bin`, new Uint8Array(randomBytes(3 * 1024 * 1024)));
+      }
+      const lease = await leaseFor(seed(files), projectId);
+      const sizes = new Map<string, number>();
+      return {
+        lease,
+        files,
+        counting: (dependencies) => {
+          const batches: number[][] = [];
+          return {
+            batches,
+            dependencies: {
+              ...dependencies,
+              git: async (cwd, args, stdin) => {
+                const output = await realGit(cwd, args, stdin);
+                if (args[0] === 'ls-tree') {
+                  for (const record of new TextDecoder().decode(output).split('\0')) {
+                    const fields = record.split('\t')[0]?.trim().split(/\s+/u) ?? [];
+                    sizes.set(fields[2] ?? '', Number(fields[3]));
+                  }
+                }
+                if (args[0] === 'cat-file') {
+                  batches.push(
+                    (stdin ?? '')
+                      .split('\n')
+                      .filter((line) => line !== '')
+                      .map((objectId) => sizes.get(objectId) ?? 0),
+                  );
+                }
+                return output;
+              },
+            },
+          };
+        },
+      };
+    };
+    const batchLimit = 8 * 1024 * 1024;
+
+    it('should read git blobs in bounded batches, and re-read only what it did not keep', async () => {
+      const { lease, files, counting } = await batchedFixture('proj_batches');
+      const storage = createRecordingStorage();
+      const { dependencies, batches } = counting(storage.dependencies);
+
+      await publish(dependencies, lease.directory, 'proj_batches');
+
+      /* Two batches to describe 12 MiB, then one to write the two blobs past what was kept. */
+      expect(batches).toHaveLength(3);
+      for (const batch of batches) {
+        expect(batch.reduce((sum, size) => sum + size, 0)).toBeLessThanOrEqual(batchLimit);
+      }
+      for (const bytes of files.values()) {
+        expect(storage.written.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(bytes))}`)).toStrictEqual(bytes);
+      }
+    });
+
+    it('should not read git again for blobs the store already holds', async () => {
+      const { lease, files, counting } = await batchedFixture('proj_batches_held');
+      const storage = createRecordingStorage();
+      for (const bytes of files.values()) {
+        storage.written.set(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(bytes))}`, bytes);
+      }
+      const { dependencies, batches } = counting(storage.dependencies);
+
+      await publish(dependencies, lease.directory, 'proj_batches_held');
+
+      expect(batches).toHaveLength(2);
+      expect(storage.dependencies.storage.putBlob).toHaveBeenCalledTimes(1);
+    });
+
+    it('should copy an LFS object only while it is still the object its HEAD vouched for', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'E'.repeat(1024)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_copy_etag', objectBytes);
+      const storage = createRecordingStorage(objects);
+
+      await publish(storage.dependencies, lease.directory, 'proj_copy_etag');
+
+      expect(storage.dependencies.storage.copyObject).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceIfMatch: 'etag' }),
+      );
+    });
+
+    it('should let go of an LFS object read when its streamed put is refused', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'D'.repeat(1024)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_destroyed_body', objectBytes);
+      const storage = createRecordingStorage(objects, { unverified: true, failWrites: true });
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_destroyed_body')).rejects.toThrow(
+        'object storage is unavailable',
+      );
+      expect(storage.bodies.length).toBeGreaterThan(0);
+      expect(storage.bodies.every((body) => body.destroyed)).toBe(true);
+    });
+
+    it('should stop taking uploads at the first failure and raise it once those started have settled', async () => {
+      const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', utf8('// entry\n')]]);
+      for (let index = 0; index < 16; index += 1) {
+        files.set(`src/failing-${String(index)}.ts`, utf8(`export const failing = ${String(index)};\n`));
+      }
+      const lease = await leaseFor(seed(files), 'proj_failing_lanes');
+      const storage = createRecordingStorage(new Map(), { failWrites: true });
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_failing_lanes')).rejects.toThrow(
+        'object storage is unavailable',
+      );
+
+      /* One put per lane, each failing: no lane took another, and none is still writing. */
+      expect(storage.dependencies.storage.putBlob).toHaveBeenCalledTimes(4);
+      expect(storage.inFlightNow()).toBe(0);
+    });
+
+    it('should write a bounded number of blobs at once', async () => {
+      const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', utf8('// entry\n')]]);
+      for (let index = 0; index < 16; index += 1) {
+        files.set(`src/file-${String(index)}.ts`, utf8(`export const value = ${String(index)};\n`));
+      }
+      const lease = await leaseFor(seed(files), 'proj_bounded');
+      const storage = createRecordingStorage();
+
+      await publish(storage.dependencies, lease.directory, 'proj_bounded');
+
+      expect(storage.peakInFlight()).toBeGreaterThan(1);
+      expect(storage.peakInFlight()).toBeLessThanOrEqual(4);
+    });
   });
 
   /* Red pin b2. */

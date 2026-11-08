@@ -1,4 +1,4 @@
-import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat } from '@taucad/types';
+import type { AuthorityCheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat } from '@taucad/types';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   FileTreeNode,
@@ -55,7 +55,10 @@ export type ScopedStorageClient = {
   readShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
   readFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
-  getZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /**
@@ -85,7 +88,10 @@ export type WorkspaceAuthorityClient = Pick<
   readScopedFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readScopedFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
   readScopedShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
-  getScopedZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getScopedZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /**
@@ -111,7 +117,7 @@ export type FileSystemClient = {
   readFile(filepath: string, options: 'utf8' | { encoding: 'utf8' }): Promise<string>;
   readFile(filepath: string, options?: { encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(filepath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
-  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {
     path: string;
     preconditions: readonly FileWritePrecondition[];

@@ -9,6 +9,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute, Rendering } from '@taucad/runtime';
@@ -230,7 +231,7 @@ const preferenceFaultFixture = async () => {
   const provider = new MemoryProvider();
   await provider.writeFile(path, JSON.stringify({ shouldDownload: true, zipMultiple: false }));
   const paths = new WorkspacePathResolver('/project');
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   proxy.readFile.mockImplementation(async (absolute) => {
     const relative = paths.toRelativePath(absolute);
     if (relative === undefined) {

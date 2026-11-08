@@ -5,6 +5,7 @@ import knownRed from './baseline/known-red.json' with { type: 'json' };
 import { networkKind } from './counters.ts';
 /* oxlint-disable no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases. */
 import {
+  countsAsFixtureRead,
   evaluateGate,
   measuredRow,
   p75,
@@ -57,6 +58,13 @@ describe('scenarioTable', () => {
     for (const gate of knownRed.gates) {
       expect(gate.limit, gate.id).toBe(limits.get(gate.id));
     }
+  });
+
+  it("should count S19's authority reads of fixture files only, so the concurrent save cannot move the gate", () => {
+    const fixturePaths = new Map([['src/a.ts', 'text']]);
+
+    expect(countsAsFixtureRead(fixturePaths, 'src/a.ts')).toBe(true);
+    expect(countsAsFixtureRead(fixturePaths, 'src/s19-save.ts')).toBe(false);
   });
 
   it('should record an atHead value per engine and profile for every known-red gate', () => {

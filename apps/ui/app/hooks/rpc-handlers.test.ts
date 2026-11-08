@@ -199,15 +199,20 @@ function createMockTreeService(tree?: Map<string, FileEntry>) {
 type MockTreeService = ReturnType<typeof createMockTreeService>;
 
 function createMockFileManager() {
+  const readFile = vi
+    .fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>()
+    .mockRejectedValue(new FileNotFoundError('missing', { path: workbenchPaths.entries }));
   return {
     fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: '/projects/proj-test' } }) },
     workbenchFiles: {
       writeFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['writeFileChecked']>(),
       deleteFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['deleteFileChecked']>(),
     },
-    readFile: vi
-      .fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>()
-      .mockRejectedValue(new FileNotFoundError('missing', { path: workbenchPaths.entries })),
+    readFile,
+    /* The raw path (D17) answers an owned copy of what this fake's `readFile` is told to answer, binaries included. */
+    readRawBytes: vi.fn<(path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>>(
+      async (path) => new Uint8Array(await readFile(path)),
+    ),
     writeFile: vi
       .fn<(path: string, data: Uint8Array<ArrayBuffer>, options: { source: string }) => Promise<void>>()
       .mockResolvedValue(undefined),
@@ -385,6 +390,15 @@ describe('rpc-handlers', () => {
       expect(result).toEqual(bytes);
       result[0] = 42;
       expect(bytes[0]).toBe(0);
+    });
+
+    it('reads a binary artifact intact through the raw path at the binary read limit (L3 D-3)', async () => {
+      const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 0, 0xff, 0x80]);
+      mockFm.readFile.mockResolvedValue(glb);
+      mockFm.stat.mockResolvedValue({ ...textFileStat(), size: glb.byteLength });
+
+      await expect(fileSystem.readBinaryFile('exports/part.glb')).resolves.toEqual(glb);
+      expect(mockFm.readRawBytes).toHaveBeenCalledWith('exports/part.glb', { sizeLimit: 256 * 1024 * 1024 });
     });
 
     it('rejects foreign paths and oversized binary reads before reading content', async () => {

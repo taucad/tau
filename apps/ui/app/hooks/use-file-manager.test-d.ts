@@ -175,7 +175,10 @@ describe('useFileManager surface', () => {
     expectTypeOf<Scoped>().toHaveProperty('readFile');
     expectTypeOf<Scoped>().toHaveProperty('getZippedDirectory');
     expectTypeOf<Parameters<Scoped['readShallowDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
-    expectTypeOf<Parameters<Scoped['getZippedDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
+    expectTypeOf<Parameters<Scoped['getZippedDirectory']>[1]>().toEqualTypeOf<{
+      readonly scope: WorkspaceScope;
+      readonly maxBytes?: number;
+    }>();
     expectTypeOf<Scoped>().not.toHaveProperty('writeFile');
   });
 

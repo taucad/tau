@@ -166,7 +166,14 @@ const mockSessionApply = vi.fn((path: string, transaction: DocumentTransaction):
 );
 const mockSessionSave = vi.fn(async (_path: string): Promise<void> => undefined);
 const mockSessionGet = vi.fn((path: string): EditorDocument | undefined => mockDocuments.get(path));
-const mockSession = { apply: mockSessionApply, save: mockSessionSave, get: mockSessionGet };
+const mockSessionFlush = vi.fn((_path?: string): void => undefined);
+/* Typing schedules a debounced save (D17); `mockSessionSave` stands for that schedule. */
+const mockSession = {
+  apply: mockSessionApply,
+  scheduleSave: mockSessionSave,
+  flushSaves: mockSessionFlush,
+  get: mockSessionGet,
+};
 
 vi.mock('#hooks/use-editor-document-session.js', () => ({
   useEditorDocumentSession: () => mockSession,
@@ -1217,6 +1224,39 @@ describe('FileEditor routing', () => {
       await userEvent.click(screen.getByTestId('trigger-undo'));
       expect(document.text).toBe('hello');
       expect(mockSessionSave).toHaveBeenCalledWith(document.path);
+    });
+  });
+
+  describe('save flush points (D17)', () => {
+    const textPane = (path: string): void => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path }];
+      mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
+      mockResolveViewer.mockReturnValue(() => <input data-testid='pane-input' />);
+    };
+
+    it('flushes the live path when focus leaves the pane', async () => {
+      textPane('src/renamed.ts');
+      render(<FileEditor paneId='pane-1' filePath='src/original.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('pane-input'));
+      mockSessionFlush.mockClear();
+      await userEvent.tab();
+      await userEvent.click(document.body);
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/renamed.ts');
+    });
+
+    it('flushes when the pane is hidden by a tab switch', () => {
+      textPane('src/main.ts');
+      const hidden = { ...mockPanelApi, isVisible: false } as unknown as IDockviewPanelProps['api'];
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={hidden} />);
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/main.ts');
+    });
+
+    it('flushes when the pane closes', () => {
+      textPane('src/main.ts');
+      const { unmount } = render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      expect(mockSessionFlush).not.toHaveBeenCalled();
+      unmount();
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/main.ts');
     });
   });
 });

@@ -186,12 +186,17 @@ const createRecordingStorage = (
   streamed: Array<Readonly<{ key: string; checksumSha256: string | undefined }>>;
   /** The most puts, copies and streams this store had in flight at once. */
   peakInFlight: () => number;
+  /** The puts, copies and streams in flight now. */
+  inFlightNow: () => number;
+  /** Every body a read handed out, so a test can see it let go. */
+  bodies: Readable[];
 }> => {
   const written = new Map<string, Uint8Array<ArrayBuffer>>();
   const read: string[] = [];
   const copied: Array<Readonly<{ from: string; to: string }>> = [];
   const streamed: Array<Readonly<{ key: string; checksumSha256: string | undefined }>> = [];
   const contentTypes = new Map<string, string>();
+  const bodies: Readable[] = [];
   let inFlight = 0;
   let peak = 0;
   const writing = async <Value>(body: () => Promise<Value>): Promise<Value> => {
@@ -252,6 +257,9 @@ const createRecordingStorage = (
         if (options.refuseCopies === true) {
           throw Object.assign(new Error('copy between these buckets is not supported'), { name: 'NotImplemented' });
         }
+        if (args.sourceIfMatch !== undefined && args.sourceIfMatch !== 'etag') {
+          throw Object.assign(new Error('precondition failed'), { name: 'PreconditionFailed' });
+        }
         const from = `${args.source.namespace}/${args.source.key}`;
         const to = `${args.destination.namespace}/${args.destination.key}`;
         const bytes = held(from);
@@ -278,8 +286,10 @@ const createRecordingStorage = (
         throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
       }
       const bytes = args.range === undefined ? stored : stored.subarray(args.range.start, args.range.end + 1);
+      const body = Readable.from([Buffer.from(bytes)]);
+      bodies.push(body);
       return {
-        body: Readable.from([Buffer.from(bytes)]),
+        body,
         contentType: 'application/octet-stream',
         etag: 'etag',
       };
@@ -320,6 +330,8 @@ const createRecordingStorage = (
     copied,
     streamed,
     peakInFlight: () => peak,
+    inFlightNow: () => inFlight,
+    bodies,
     dependencies: {
       storage: storage as unknown as MaterializerDependencies['storage'],
       databaseService: {} as unknown as MaterializerDependencies['databaseService'],
@@ -605,7 +617,7 @@ describe('publication materializer against real git', () => {
     );
     /* Only the pre-D24 key, which is what a project the relocation has not
        reached yet still has. */
-    const { dependencies, written } = createRecordingStorage(
+    const { dependencies, written, copied, streamed } = createRecordingStorage(
       new Map([[`blobs/${gitLfsObjectKey('proj_lfs_legacy', oid)}`, objectBytes]]),
     );
 
@@ -624,6 +636,14 @@ describe('publication materializer against real git', () => {
     );
 
     expect(written.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(objectBytes))}`)).toStrictEqual(objectBytes);
+    /* A legacy key's checksum is never trusted: the object streams under the oid, never copied. */
+    expect(copied).toStrictEqual([]);
+    expect(streamed).toStrictEqual([
+      {
+        key: `blobs/${blobKeyFromSha256Hex(oid)}`,
+        checksumSha256: createHash('sha256').update(objectBytes).digest('base64'),
+      },
+    ]);
   });
 
   /* Red pin b. */
@@ -939,6 +959,47 @@ describe('publication materializer against real git', () => {
 
       expect(batches).toHaveLength(2);
       expect(storage.dependencies.storage.putBlob).toHaveBeenCalledTimes(1);
+    });
+
+    it('should copy an LFS object only while it is still the object its HEAD vouched for', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'E'.repeat(1024)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_copy_etag', objectBytes);
+      const storage = createRecordingStorage(objects);
+
+      await publish(storage.dependencies, lease.directory, 'proj_copy_etag');
+
+      expect(storage.dependencies.storage.copyObject).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceIfMatch: 'etag' }),
+      );
+    });
+
+    it('should let go of an LFS object read when its streamed put is refused', async () => {
+      const objectBytes = utf8(`ISO-10303-21;\n${'D'.repeat(1024)}\nEND-ISO-10303-21;\n`);
+      const { lease, objects } = await lfsFixture('proj_destroyed_body', objectBytes);
+      const storage = createRecordingStorage(objects, { unverified: true, failWrites: true });
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_destroyed_body')).rejects.toThrow(
+        'object storage is unavailable',
+      );
+      expect(storage.bodies.length).toBeGreaterThan(0);
+      expect(storage.bodies.every((body) => body.destroyed)).toBe(true);
+    });
+
+    it('should stop taking uploads at the first failure and raise it once those started have settled', async () => {
+      const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', utf8('// entry\n')]]);
+      for (let index = 0; index < 16; index += 1) {
+        files.set(`src/failing-${String(index)}.ts`, utf8(`export const failing = ${String(index)};\n`));
+      }
+      const lease = await leaseFor(seed(files), 'proj_failing_lanes');
+      const storage = createRecordingStorage(new Map(), { failWrites: true });
+
+      await expect(publish(storage.dependencies, lease.directory, 'proj_failing_lanes')).rejects.toThrow(
+        'object storage is unavailable',
+      );
+
+      /* One put per lane, each failing: no lane took another, and none is still writing. */
+      expect(storage.dependencies.storage.putBlob).toHaveBeenCalledTimes(4);
+      expect(storage.inFlightNow()).toBe(0);
     });
 
     it('should write a bounded number of blobs at once', async () => {

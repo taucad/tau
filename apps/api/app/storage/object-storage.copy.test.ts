@@ -92,6 +92,20 @@ describe('ObjectStorageService.copyObject', () => {
     expect(copy?.headers['cache-control']).toBe('public, max-age=31536000, immutable');
   });
 
+  it('should require the source ETag it was given', async () => {
+    const store = await copyingStore();
+    closers.push(store.close);
+
+    await store.storage.copyObject({
+      source: { namespace: 'tenants', key: 'owner/lfs/project/ab/cd/abcd', tier: 'private' },
+      destination: { namespace: 'blobs', key: 'ab/cd/abcd', tier: 'public' },
+      contentType: 'application/octet-stream',
+      sourceIfMatch: 'abc123',
+    });
+
+    expect(store.received[0]?.headers['x-amz-copy-source-if-match']).toBe('"abc123"');
+  });
+
   it('should encode each segment of the source key', async () => {
     const store = await copyingStore();
     closers.push(store.close);

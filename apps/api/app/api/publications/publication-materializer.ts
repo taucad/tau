@@ -340,7 +340,7 @@ export type PublishedFile = Readonly<{
   source:
     | Readonly<{ kind: 'git'; objectId: string }>
     /** `verified` when the store reports the oid as the checksum it checked on write. */
-    | Readonly<{ kind: 'lfs'; location: LfsLocation; verified: boolean }>;
+    | Readonly<{ kind: 'lfs'; location: LfsLocation; verified: boolean; etag: string }>;
 }>;
 
 /** A tagged tree, described: every file, and the git bytes kept for the uploads. */
@@ -389,15 +389,27 @@ const forEachLimited = async <Item>(
   work: (item: Item) => Promise<void>,
 ): Promise<void> => {
   let next = 0;
+  /* The first failure stops every lane taking another item, and is raised only
+     once the items already started have settled: a failed publish rolls back its
+     references, so nothing may still be writing into the store after it. */
+  const failures: unknown[] = [];
   const lane = async (): Promise<void> => {
-    while (next < items.length) {
+    while (failures.length === 0 && next < items.length) {
       const item = items[next] as Item;
       next += 1;
-      // oxlint-disable-next-line no-await-in-loop -- each lane runs its items in turn; the lanes run together.
-      await work(item);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each lane runs its items in turn; the lanes run together.
+        await work(item);
+      } catch (error) {
+        failures.push(error);
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => lane()));
+  if (failures.length > 0) {
+    // oxlint-disable-next-line typescript/only-throw-error -- the first failure, as it was raised.
+    throw failures[0];
+  }
 };
 
 const fileTooLarge = (path: string): BadRequestException =>
@@ -626,13 +638,13 @@ const lfsObjectNotUploaded = (): NotFoundException =>
  *
  * @param dependencies - Storage and the LFS resolver.
  * @param object - Whose storage and project, the pointer's oid and size.
- * @returns The location, and whether the store vouches for the oid as its checksum.
+ * @returns The location, whether the store vouches for the oid as its checksum, and the ETag it holds.
  * @throws NotFoundException When the object never arrived, or arrived at another size.
  */
 const locateLfsObject = async (
   dependencies: MaterializerDependencies,
   object: Readonly<{ projectId: string; ownerId: string; oid: string; size: number }>,
-): Promise<Readonly<{ location: LfsLocation; verified: boolean }>> => {
+): Promise<Readonly<{ location: LfsLocation; verified: boolean; etag: string }>> => {
   /* Where the object actually is: the tenant key every upload now lands at
      (D24), or the pre-D24 key under `blobs/` for a project whose objects have
      not been relocated yet. One resolver, the LFS endpoint's own, so a
@@ -647,7 +659,11 @@ const locateLfsObject = async (
   if (held === undefined || held.size !== object.size) {
     throw lfsObjectNotUploaded();
   }
-  return { location, verified: held.checksumSha256 === base64Sha256(object.oid) };
+  /* Only a tenant key's writers pin the checksum to the oid (the LFS endpoint
+     signs each upload with it); a legacy key's checksum is never trusted, so
+     its object streams under the oid instead (git-lfs.service.ts). */
+  const verified = location.namespace === 'tenants' && held.checksumSha256 === base64Sha256(object.oid);
+  return { location, verified, etag: held.etag };
 };
 
 /**
@@ -708,7 +724,14 @@ const putLfsBlob = async (
   const cacheControl = cacheControlFor(destination.tier);
   if (file.source.verified) {
     try {
-      await storage.copyObject({ source: file.source.location, destination: target, contentType, cacheControl });
+      /* Copied only if the object is still the one its HEAD vouched for. */
+      await storage.copyObject({
+        source: file.source.location,
+        destination: target,
+        contentType,
+        cacheControl,
+        ...(file.source.etag === '' ? {} : { sourceIfMatch: file.source.etag }),
+      });
       return;
     } catch (error) {
       if (isS3ObjectMissing(error)) {
@@ -727,14 +750,20 @@ const putLfsBlob = async (
     }
     throw lfsObjectNotUploaded();
   }
-  await storage.putBlobStream({
-    ...target,
-    body: stored.body,
-    contentLength: file.sizeBytes,
-    contentType,
-    cacheControl,
-    checksumSha256: base64Sha256(file.sha),
-  });
+  try {
+    await storage.putBlobStream({
+      ...target,
+      body: stored.body,
+      contentLength: file.sizeBytes,
+      contentType,
+      cacheControl,
+      checksumSha256: base64Sha256(file.sha),
+    });
+  } catch (error) {
+    /* A refused put leaves the read open: let go of it rather than the socket. */
+    stored.body.destroy();
+    throw error;
+  }
 };
 
 /**

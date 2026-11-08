@@ -137,6 +137,8 @@ export type CopyObjectArgs = Readonly<{
   destination: StoredObjectLocation;
   contentType: string;
   cacheControl?: string;
+  /** The source's ETag the copy requires (`x-amz-copy-source-if-match`); a moved source refuses with 412. */
+  sourceIfMatch?: string;
   signal?: AbortSignal;
 }>;
 
@@ -818,6 +820,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         MetadataDirective: 'REPLACE',
         ContentType: args.contentType,
         ...(args.cacheControl === undefined ? {} : { CacheControl: args.cacheControl }),
+        ...(args.sourceIfMatch === undefined ? {} : { CopySourceIfMatch: `"${args.sourceIfMatch}"` }),
       }),
       { abortSignal: args.signal },
     );

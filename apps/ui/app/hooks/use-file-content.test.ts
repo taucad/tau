@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -33,7 +34,7 @@ function fixture() {
     .fn()
     .mockReturnValueOnce({ ready: ready.promise, closed: closed.promise, unsubscribe: vi.fn() })
     .mockReturnValue({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() });
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   const readFile = proxy.readFile.mockResolvedValue(new TextEncoder().encode('safe base'));
   const channel = new WorkerChangeChannel({ transport: { listen: () => () => undefined, watchReady } });
   const service = new FileContentService({

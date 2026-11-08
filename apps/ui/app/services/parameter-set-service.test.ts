@@ -70,7 +70,11 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
   const writeFileChecked = async (input: WriteInput) => {
     writeAttempts.push(input);
     await (nextWriteGates.shift() ?? gate);
-    const conflict = input.preconditions.find(({ path, expected }) => !sameBytes(files.get(path), expected));
+    /* The parameter store checks bytes; it never names a digest. */
+    const conflict = input.preconditions.find(
+      (precondition) =>
+        !('expected' in precondition) || !sameBytes(files.get(precondition.path), precondition.expected),
+    );
     if (conflict !== undefined) {
       const actual = files.get(conflict.path);
       return {

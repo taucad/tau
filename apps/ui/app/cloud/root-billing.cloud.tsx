@@ -12,7 +12,12 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { ENV } from '#environment.config.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
-import { followPaymentRedirect, getPaymentAction, recoverPaymentAction } from '#lib/billing-payment-client.js';
+import {
+  cancelPaymentAction,
+  followPaymentRedirect,
+  getPaymentAction,
+  recoverPaymentAction,
+} from '#lib/billing-payment-client.js';
 import {
   FinancialSessionProvider,
   FinancialSessionScope,
@@ -62,10 +67,14 @@ const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): R
 const returnSettleAttempts = 10;
 const returnSettleIntervalMilliseconds = 2000;
 const settlingStates = new Set(['redirect_required', 'processing', 'funds_received']);
-// Only a purchase Checkout can settle from its own session; a reload-setup Checkout's SetupIntent is qualified
-// by the sweep directly, so there is nothing to recover on its return.
-const purchaseCheckoutPurposes = new Set(['manual_topup', 'subscription_checkout']);
+// A purchase Checkout settles from its own session on recovery; a card-setup Checkout's recovery reads the session
+// to tell a finished setup (still being confirmed) from one the customer left.
+const recoverablePurposes = new Set(['manual_topup', 'subscription_checkout', 'reload_setup']);
 const paymentActionParameter = stringParameter();
+const billingReturnParameter = stringParameter();
+// Stripe tells billing about a portal change by webhook, so the plan is re-read a few times after the return.
+const portalRefreshDelaysMilliseconds = [2000, 5000, 10_000, 20_000];
+const billingUpdatedMessage = 'Billing updated.';
 const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 /** Whether billing has yet to hear how the payment ended, which settles the action without the customer. */
@@ -76,9 +85,51 @@ const isAwaitingOutcome = (action: WirePaymentAction): boolean =>
 
 /** Whether the action may still settle on its own, so the return keeps re-reading it for a while. */
 const isSettling = (action: WirePaymentAction): boolean =>
-  settlingStates.has(action.state) || isAwaitingOutcome(action);
+  action.purpose !== 'billing_portal' &&
+  // An open card setup was left by the customer; only they can finish it.
+  !(action.purpose === 'reload_setup' && action.state === 'redirect_required') &&
+  (settlingStates.has(action.state) || isAwaitingOutcome(action));
+
+/** Whether a read failed because the action is not this account's, as after signing in as someone else. */
+const isNotFound = (error: unknown): boolean => error instanceof Error && error.message.endsWith(' 404');
+
+/**
+ * A portal visit moves no money, so its return is not a payment to inspect: it says billing was updated and re-reads
+ * the plan, credits and saved card while Stripe's webhook catches up.
+ */
+const useCloudPortalReturn = (): void => {
+  const { userId } = useBillingSession();
+  const queryClient = useQueryClient();
+  const [billingReturn, clearBillingReturn] = useSearchParameter('billing_return', billingReturnParameter);
+  const [returned] = useState(billingReturn === 'portal');
+  const announced = useRef(false);
+  const clearBillingReturnRef = useRef(clearBillingReturn);
+  useEffect(() => {
+    clearBillingReturnRef.current = clearBillingReturn;
+  }, [clearBillingReturn]);
+  useEffect(() => {
+    if (!returned || userId === undefined || announced.current) {
+      return;
+    }
+    announced.current = true;
+    clearBillingReturnRef.current('');
+    toast(billingUpdatedMessage);
+    void queryClient.invalidateQueries({ queryKey: ['billing'] });
+    const timers = portalRefreshDelaysMilliseconds.map((refreshDelayMilliseconds) =>
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['billing'] });
+      }, refreshDelayMilliseconds),
+    );
+    return () => {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+    };
+  }, [queryClient, returned, userId]);
+};
 
 export const useCloudPaymentActionReturn = (): void => {
+  useCloudPortalReturn();
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const financialSession = useFinancialSession();
   const queryClient = useQueryClient();
@@ -107,9 +158,11 @@ export const useCloudPaymentActionReturn = (): void => {
     const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
     let active = true;
     const announce = (action: WirePaymentAction): string | number | undefined => {
-      if (action.state === 'fulfilled' || action.state === 'completed') {
-        // Balance, plan and saved card all changed; cached entitlements would otherwise stay Free for minutes.
-        void queryClient.invalidateQueries({ queryKey: ['billing'] });
+      // Balance, plan and saved card may all have changed; cached entitlements would otherwise lag for minutes.
+      void queryClient.invalidateQueries({ queryKey: ['billing'] });
+      if (action.purpose === 'billing_portal') {
+        // A portal visit from before portal returns carried their own marker: nothing to continue or resume.
+        return toast(billingUpdatedMessage);
       }
       switch (action.state) {
         case 'fulfilled': {
@@ -128,22 +181,51 @@ export const useCloudPaymentActionReturn = (): void => {
           return toast('Payment received. Credits are still being added.');
         }
         case 'processing': {
-          return toast('Payment is still processing.');
+          // A finished card setup reads processing until billing confirms the card.
+          return toast(
+            action.purpose === 'reload_setup'
+              ? 'Confirming your card for automatic reload.'
+              : 'Payment is still processing.',
+          );
         }
         case 'redirect_required': {
           if (action.purpose === 'reload_setup') {
-            // A finished card setup reads redirect_required until the billing worker confirms it, so the
-            // re-check below offers to continue only if it is still open when that runs out.
-            return toast('Confirming your card for automatic reload.');
+            // Recovery read the Session as still open: the customer left the card setup before finishing it.
+            return toast.warning('Card setup for automatic reload was not finished.', {
+              action: {
+                label: 'Continue setup',
+                onClick: () => {
+                  if (active && binding.financialSession.isCurrent()) {
+                    followPaymentRedirect(action);
+                  }
+                },
+              },
+            });
           }
+          // The customer came back without paying, which is their choice: offer both ways on, not a warning.
           // eslint-disable-next-line tau-lint/no-engineering-vocabulary-in-copy -- Stripe Checkout is the payment product's own name, not a revision checkout.
-          return toast.warning('Checkout is ready to continue.', {
+          return toast('Checkout was not finished.', {
             action: {
               label: 'Resume Checkout',
               onClick: () => {
                 if (active && binding.financialSession.isCurrent()) {
                   followPaymentRedirect(action);
                 }
+              },
+            },
+            cancel: {
+              label: 'Cancel payment',
+              onClick: async () => {
+                if (!active || !binding.financialSession.isCurrent()) {
+                  return;
+                }
+                try {
+                  await cancelPaymentAction({ ...binding, subjectId: action.subjectId }, action.actionId);
+                  toast('Payment canceled.');
+                } catch {
+                  toast.warning('Could not cancel the payment. Open Add credits to try again.');
+                }
+                void queryClient.invalidateQueries({ queryKey: ['billing'] });
               },
             },
           });
@@ -191,25 +273,16 @@ export const useCloudPaymentActionReturn = (): void => {
     };
     /** Replaces the neutral toast of a card setup or payment the re-check never saw confirmed with a warning. */
     const warnUnsettled = (action: WirePaymentAction, neutralToast: string | number | undefined): void => {
-      const isSetupOpen = action.purpose === 'reload_setup' && action.state === 'redirect_required';
-      if (!isSetupOpen && !isAwaitingOutcome(action)) {
+      const isSetupConfirming = action.purpose === 'reload_setup' && action.state === 'processing';
+      if (!isSetupConfirming && !isAwaitingOutcome(action)) {
         return;
       }
       if (neutralToast !== undefined) {
         toast.dismiss(neutralToast);
       }
-      if (isSetupOpen) {
-        // The customer left the card setup before finishing it, or billing has yet to confirm it.
-        toast.warning('Automatic reload is waiting for card setup.', {
-          action: {
-            label: 'Continue setup',
-            onClick: () => {
-              if (active && binding.financialSession.isCurrent()) {
-                followPaymentRedirect(action);
-              }
-            },
-          },
-        });
+      if (isSetupConfirming) {
+        // The card setup finished in Checkout; billing has yet to confirm the card, and needs nothing from the customer.
+        toast.warning('Automatic reload is still confirming your card. Check back in a few minutes.');
       } else {
         // Billing is still waiting on Stripe; nothing here needs the customer, so the toast says so.
         toast.warning('Billing has not confirmed your payment yet. Check back in a few minutes.');
@@ -221,7 +294,7 @@ export const useCloudPaymentActionReturn = (): void => {
         if (
           active &&
           action.state === 'redirect_required' &&
-          purchaseCheckoutPurposes.has(action.purpose) &&
+          recoverablePurposes.has(action.purpose) &&
           binding.financialSession.isCurrent()
         ) {
           // A paid Checkout whose webhook has not arrived settles from Stripe's own session on recovery;
@@ -247,8 +320,14 @@ export const useCloudPaymentActionReturn = (): void => {
           if (!active) {
             return;
           }
-          // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
-          const settled = await getPaymentAction(binding, actionId);
+          // A card setup is re-read through recovery, which reads its Session: a plain read cannot tell a finished
+          // setup awaiting confirmation from one the customer left.
+          const settled =
+            action.purpose === 'reload_setup'
+              ? // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
+                await recoverPaymentAction({ ...binding, subjectId: action.subjectId }, actionId)
+              : // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
+                await getPaymentAction(binding, actionId);
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup may run during the await above.
           if (!active) {
             return;
@@ -264,11 +343,15 @@ export const useCloudPaymentActionReturn = (): void => {
         }
         // The re-check is over: a card setup or payment it never saw confirmed now needs the customer.
         warnUnsettled(action, toastId);
-      } catch {
+      } catch (error) {
         if (active) {
           // A failed check must not leave the parameter to re-run on every reload.
           clearReturnedActionRef.current('');
-          toast.warning('Could not check the returned payment.');
+          toast.warning(
+            isNotFound(error)
+              ? 'This payment belongs to a different account. Sign in to that account to see it.'
+              : 'Could not check the returned payment.',
+          );
         }
       }
     };

@@ -89,7 +89,7 @@ export function UserButton({
 }: UserButtonProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, localization, plugins, Link } = useAuth();
 
-  const { data: session, isPending: sessionPending } = useSession(authClient);
+  const { data: session } = useSession(authClient);
   const isCompact = size === 'sm';
 
   const userLinks = links?.flatMap((link, index) => {
@@ -122,17 +122,18 @@ export function UserButton({
             className={cn('font-normal', size === 'default' && 'h-auto py-2.5', className)}
             size={isCompact ? 'sm' : 'lg'}
           >
-            {(session ?? sessionPending) ? (
+            {/* Until a session is known the row is the signed-out one, a neutral avatar and "Account",
+                which the server can render too: no skeleton stage, and a signed-in session only fills
+                the avatar and name into the same box (home page loading audit, R7). */}
+            {session ? (
               <UserView isCompact={isCompact} />
             ) : (
               <>
-                <UserAvatar className={cn(isCompact && 'size-4 text-[10px]')} />
+                <UserAvatar className={cn(isCompact && 'size-4 text-[10px]')} isPending={false} />
 
                 <div className='grid flex-1 text-left text-sm leading-tight'>{localization.auth.account}</div>
               </>
             )}
-            {/* The pending view is only skeletons: keep the trigger named while the session loads. */}
-            {!session && sessionPending ? <span className='sr-only'>{localization.auth.account}</span> : null}
 
             {isCompact ? null : <ChevronsUpDown className='ml-auto' />}
           </Button>

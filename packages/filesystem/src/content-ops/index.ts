@@ -14,8 +14,10 @@
  * @module
  */
 
-export { archive, archiveByteCeiling, archiveTooLargeCode } from '#content-ops/archive.js';
-export type { ArchiveOptions } from '#content-ops/archive.js';
+export { archive, archiveBlobBatchBytes, archiveStream, archiveTooLargeCode } from '#content-ops/archive.js';
+export type { ArchiveFileSystem, ArchiveOptions } from '#content-ops/archive.js';
+export { crc32, zipStream } from '#content-ops/zip-writer.js';
+export type { ZipSource } from '#content-ops/zip-writer.js';
 export { contents } from '#content-ops/contents.js';
 export type { ContentFileSystem } from '#content-ops/contents.js';
 export { withReadContentOps } from '#content-ops/read-ops.js';

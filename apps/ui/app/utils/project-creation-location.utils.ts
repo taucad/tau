@@ -48,7 +48,7 @@ export const projectLocationDescriptor = (location: ProjectLocationDisplay): Pro
 export const projectLocationFullLabel = (descriptor: ProjectLocationDescriptor): string =>
   `${descriptor.label} ${descriptor.detail}`;
 
-export const projectCreationLocationAccessibleName = (descriptor: ProjectLocationDescriptor): string =>
+export const projectCreationLocationAccessibleName = (descriptor: Pick<ProjectLocationDescriptor, 'label'>): string =>
   `Create in ${descriptor.label}`;
 
 export const projectCreationLocationErrorCopy = (

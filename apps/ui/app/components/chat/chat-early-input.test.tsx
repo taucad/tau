@@ -3,7 +3,20 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input.js';
+import {
+  chatComposerEditorTextClassName,
+  chatComposerFrameClassName,
+  chatComposerPlaceholder,
+} from '#components/chat/chat-input-styles.js';
+
+/** Run the served input's inline script the way the browser does at first paint: in place, after its input. */
+const runEarlyScript = (container: HTMLElement): void => {
+  const served = container.querySelector('script')!;
+  const script = document.createElement('script');
+  script.textContent = served.textContent;
+  served.replaceWith(script);
+};
 
 const send = vi.hoisted(() => vi.fn());
 const draftActorRef = { send };
@@ -143,6 +156,96 @@ describe('Home early input', () => {
         text: 'Typed before the composer arrived',
         adoptedEdit: true,
       });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  /* R2: the native input sits in the rich composer's own box — frame, text inset and placeholder — over its bar. */
+  it('should serve the input inside the composer frame, over the bar it is given', () => {
+    const bars: EarlyChatInputBarState[] = [];
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <ChatEarlyInput
+        bar={(state) => {
+          bars.push(state);
+          return <div data-testid='bar'>Bar</div>;
+        }}
+      >
+        {() => null}
+      </ChatEarlyInput>,
+    );
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    const frame = input.parentElement!.parentElement!;
+    expect(frame).toHaveClass(...chatComposerFrameClassName.split(' '), 'rounded-2xl');
+    expect(input).toHaveClass(...chatComposerEditorTextClassName.split(' '));
+    expect(input).toHaveAttribute('placeholder', chatComposerPlaceholder);
+    expect(frame.lastElementChild).toHaveAttribute('data-testid', 'bar');
+    expect(bars).toEqual([{ isEmpty: true }]);
+  });
+
+  it('should reserve the bar when it is given none', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<ChatEarlyInput>{() => null}</ChatEarlyInput>);
+    const frame = within(container).getByRole('textbox').parentElement!.parentElement!;
+    expect(frame.lastElementChild).toHaveClass('h-7');
+  });
+
+  /* R11: focus at first paint, from the served script, unless something already holds it. */
+  it.each([
+    { enableAutoFocus: true, isClaimed: false, isFocused: true },
+    { enableAutoFocus: true, isClaimed: true, isFocused: false },
+    { enableAutoFocus: false, isClaimed: false, isFocused: false },
+  ])(
+    'should take focus at first paint when enableAutoFocus=$enableAutoFocus and focus claimed=$isClaimed',
+    ({ enableAutoFocus, isClaimed, isFocused }) => {
+      const other = document.createElement('button');
+      document.body.append(other);
+      const container = document.createElement('div');
+      container.innerHTML = renderToString(
+        <ChatEarlyInput enableAutoFocus={enableAutoFocus}>{() => null}</ChatEarlyInput>,
+      );
+      document.body.append(container);
+      try {
+        if (isClaimed) {
+          other.focus();
+        }
+        runEarlyScript(container);
+        expect(document.activeElement === within(container).getByRole('textbox')).toBe(isFocused);
+      } finally {
+        container.remove();
+        other.remove();
+      }
+    },
+  );
+
+  it('should tell the bar when the input holds text, including text typed before hydration', async () => {
+    const bars: EarlyChatInputBarState[] = [];
+    const content = (
+      <ChatEarlyInput
+        isHostReady={false}
+        bar={(state) => {
+          bars.push(state);
+          return null;
+        }}
+      >
+        {() => null}
+      </ChatEarlyInput>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    input.value = 'A hinge';
+    const root = hydrateRoot(container, content);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(bars.at(-1)).toEqual({ isEmpty: false });
     } finally {
       await act(async () => {
         root.unmount();

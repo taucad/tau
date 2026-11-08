@@ -58,7 +58,6 @@ export const mimeTypes = {
   usdz: 'model/vnd.usdz+zip',
 
   // Other
-  '3dm': 'application/x-3dm',
   ac: 'application/x-ac3d',
   amf: 'application/x-amf',
   ase: 'application/x-ase',

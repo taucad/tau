@@ -34,6 +34,20 @@ import { stripeReadKey, subscriptionOfSession } from '#support/stripe.js';
 /** A Checkout payment, its settlement and a portal round trip each take up to a minute. */
 const rowTimeout = 360_000;
 
+/** The toasts a portal return raised, once its "Billing updated." note shows or ten seconds pass. */
+const waitForPortalReturnToasts = async (page: Browsing['page']): Promise<string[]> => {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one page
+    const shown = await toasts(page);
+    if (shown.some((text) => text.includes('Billing updated.'))) {
+      return shown;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one page
+    await delay(500);
+  }
+  return toasts(page);
+};
+
 const readEntitlements = async (account: Account): Promise<WireEntitlements> =>
   ok(await account.api.request('GET', '/v1/billing/entitlements'), wireEntitlementsSchema);
 
@@ -144,8 +158,8 @@ describe('Pro subscription', () => {
       expect(credits.balance?.planGrantCreditAtoms).toBe('20000000');
       expect(manage).toBe(true);
       if (!shown.some((text) => text.includes('Tau Pro is active.'))) {
-        // The return page says "Tau Pro is active." only for a `completed` action; a paid subscription projects
-        // `fulfilled` with its plan grant, so the customer reads "2000 credits added." instead.
+        // A paid subscription settles as `fulfilled` with its plan grant, which the return announces as
+        // "Tau Pro is active. … added to your monthly credits."; any other toast means the return misread it.
         return { outcome: 'fail', defect: 'unclassified', evidence: [...evidence, 'no "Tau Pro is active." toast'] };
       }
       return { outcome: 'pass', evidence };
@@ -209,24 +223,32 @@ describe('Pro subscription', () => {
       await portal.cancelAtPeriodEnd();
       evidence.push(await screenshot(page, 'pr-04-portal-canceled'));
       const returned = await portal.returnToApp();
+      const returnUrl = page.url();
       const { entitlements, seconds } = await waitForEntitlements(
         account,
         ({ cancelAtPeriodEnd }) => cancelAtPeriodEnd,
       );
+      // A portal visit is not a payment: the return says billing was updated and never offers a Checkout.
+      const shown = await waitForPortalReturnToasts(page);
       const settings = billingSettings(page);
       await settings.open();
       const banner = settings.cancellationBanner();
       // The plan card and its banner render once the entitlements query answers, after the credit balance shows.
       const bannerText = (await isShown(banner, 30_000)) ? await visibleText(banner) : 'no banner';
       evidence.push(
-        `returned by ${returned}`,
+        `returned by ${returned} to ${new URL(returnUrl).search}`,
+        `toasts ${JSON.stringify(shown)}`,
         `${describeEntitlements(entitlements)} ${seconds} s after the return`,
         `banner "${bannerText}"`,
         await screenshot(page, 'pr-04-banner'),
       );
       expect(entitlements.cancelAtPeriodEnd).toBe(true);
       expect(entitlements.tier).toBe('pro');
-      expect(bannerText).toMatch(/^Pro until .+ reactivate any time from Manage Subscription\.$/u);
+      expect(new URL(returnUrl).searchParams.get('billing_return')).toBe('portal');
+      expect(new URL(returnUrl).searchParams.has('payment_action')).toBe(false);
+      expect(shown.some((text) => text.includes('Billing updated.'))).toBe(true);
+      expect(shown.some((text) => text.includes('Resume Checkout'))).toBe(false);
+      expect(bannerText).toMatch(/^Pro until .+ reactivate any time from Manage subscription\.$/u);
       return { outcome: 'pass', evidence };
     }),
     rowTimeout,
@@ -247,15 +269,18 @@ describe('Pro subscription', () => {
       await portal.renew();
       evidence.push(await screenshot(page, 'pr-05-portal-renewed'));
       const returned = await portal.returnToApp();
+      const returnUrl = page.url();
       const { entitlements, seconds } = await waitForEntitlements(
         account,
         ({ cancelAtPeriodEnd }) => !cancelAtPeriodEnd,
       );
+      const shown = await waitForPortalReturnToasts(page);
       await settings.open();
       await settings.waitForPlan();
       const isBannerShown = await settings.cancellationBanner().isVisible();
       evidence.push(
-        `returned by ${returned}`,
+        `returned by ${returned} to ${new URL(returnUrl).search}`,
+        `toasts ${JSON.stringify(shown)}`,
         `${describeEntitlements(entitlements)} ${seconds} s after the return`,
         `banner ${isBannerShown ? 'still shown' : 'gone'}`,
         await screenshot(page, 'pr-05-renewed'),
@@ -263,6 +288,9 @@ describe('Pro subscription', () => {
       expect(entitlements.cancelAtPeriodEnd).toBe(false);
       expect(entitlements.tier).toBe('pro');
       expect(isBannerShown).toBe(false);
+      expect(new URL(returnUrl).searchParams.get('billing_return')).toBe('portal');
+      expect(shown.some((text) => text.includes('Billing updated.'))).toBe(true);
+      expect(shown.some((text) => text.includes('Resume Checkout'))).toBe(false);
       return { outcome: 'pass', evidence };
     }),
     rowTimeout,

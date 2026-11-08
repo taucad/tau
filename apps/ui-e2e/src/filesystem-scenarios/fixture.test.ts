@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { headSniffByteLength, seemsBinary } from '@taucad/filesystem/content-metadata';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 /* oxlint-disable no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases. */
 import {
@@ -109,6 +110,48 @@ describe('fixtureBytes', () => {
     expect(same(fixtureBytes(edited, later), fixtureBytes(edited, 0))).toBe(false);
     expect(fixtureBytes(edited, later).byteLength).toBe(edited.size);
     expect(same(fixtureBytes(edited, later - 1), fixtureBytes(edited, 0))).toBe(true);
+  });
+
+  it("should start every binary with its format's real header, judged binary by the head sniff (S12)", () => {
+    const signatures: Record<string, number[]> = {
+      png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+      glb: [0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0],
+      '3mf': [0x50, 0x4b, 0x03, 0x04],
+      sldprt: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1],
+    };
+    /* Both recorded profiles, so every format the fixture draws is covered. */
+    const binaries = [fixtureProfiles.small, fixtureProfiles.full].flatMap(({ scale }) =>
+      planFixture({ seed: defaultFixtureSeed, scale }).entries.filter((entry) => entry.kind === 'binary'),
+    );
+    const extensions = new Set(binaries.map((entry) => entry.path.slice(entry.path.lastIndexOf('.') + 1)));
+
+    expect([...extensions].sort()).toEqual(['3mf', 'glb', 'png', 'sldprt', 'stl']);
+    for (const entry of binaries) {
+      const head = fixtureBytes({ ...entry, size: Math.min(entry.size, headSniffByteLength) });
+      const extension = entry.path.slice(entry.path.lastIndexOf('.') + 1);
+      const signature = signatures[extension];
+      if (signature === undefined) {
+        expect(new TextDecoder().decode(head.subarray(0, 5))).not.toBe('solid');
+      } else {
+        expect([...head.subarray(0, signature.length)]).toEqual(signature);
+      }
+      expect(seemsBinary(head)).toBe(true);
+    }
+    /* The header depends on the format and size, never the revision, so the head judged at revision 0 stands. */
+    const edited = binaries.filter((candidate) => candidate.size <= 64 * 1024 && candidate.revisions.length > 1);
+    expect(edited.length).toBeGreaterThan(0);
+    for (const entry of edited) {
+      const first = fixtureBytes(entry, 0).subarray(0, headSniffByteLength);
+      expect(seemsBinary(first)).toBe(true);
+      expect(same(first, fixtureBytes(entry, entry.revisions.at(-1)).subarray(0, first.length))).toBe(false);
+      expect(seemsBinary(fixtureBytes(entry, entry.revisions.at(-1)).subarray(0, headSniffByteLength))).toBe(true);
+    }
+  });
+
+  it('should keep text files text to the head sniff', () => {
+    for (const entry of plan.entries.filter((candidate) => candidate.kind === 'text').slice(0, 200)) {
+      expect(seemsBinary(fixtureBytes({ ...entry, size: Math.min(entry.size, headSniffByteLength) }))).toBe(false);
+    }
   });
 
   it('should write an LFS pointer for a large object before its fill', () => {

@@ -18,7 +18,8 @@ import type {
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import { isRefusal } from '#changeset.js';
-import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
+import { applyEntryWithPrimitives, refuseLargeObjectSources, runBatch } from '#backend/batch.js';
+import type { BytesBatchEntry } from '#backend/batch.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
 import {
@@ -41,7 +42,7 @@ import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
 
-type BatchWrite = Extract<BatchEntry, { op: 'write' }>;
+type BatchWrite = Extract<BytesBatchEntry, { op: 'write' }>;
 
 /** A batch write's file handle, opened before its bytes; `createdFile` when the batch made it. */
 type OpenedFile = Readonly<{
@@ -660,71 +661,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
     this._assertReady();
-    const directories = new Map<string, Promise<FileSystemDirectoryHandle>>();
-    const openForWrite = async (path: string): Promise<FileSystemDirectoryHandle> => {
-      if (path === '') {
-        return this._rootHandle;
-      }
-      let pending = directories.get(path);
-      if (pending === undefined) {
-        const separator = path.lastIndexOf('/');
-        const parent = separator === -1 ? '' : path.slice(0, separator);
-        const name = path.slice(separator + 1);
-        pending = (async () => {
-          const handle = await openForWrite(parent);
-          try {
-            return await handle.getDirectoryHandle(name, { create: true });
-          } catch (error) {
-            throw hasDomName(error, 'TypeMismatchError') ? this._enotdir(path) : error;
-          }
-        })();
-        directories.set(path, pending);
-      }
-      return pending;
-    };
-    const creates = entries.filter((entry): entry is BatchWrite => entry.op === 'write' && entry.create === true);
-    const checks =
-      this._uncommitted === undefined || creates.length === 0
-        ? undefined
-        : this._checkAndRecordCreates({
-            uncommitted: this._uncommitted,
-            creates,
-            openForWrite,
-            signal: options?.signal,
-          });
-    const receipts = await runBatch(
-      entries,
-      async (entry) => {
-        if (entry.op !== 'write') {
-          return applyEntryWithPrimitives(this, entry);
-        }
-        if (entry.create !== true) {
-          return this._applyBatchWrite(entry, openForWrite);
-        }
-        if (checks !== undefined) {
-          return this._applyCheckedCreate(entry, await checks.next(entry));
-        }
-        if (this._stageCreates) {
-          const destination = await this._findCreateTarget(entry, openForWrite);
-          return 'outcome' in destination ? destination : this._stageSiblingCreate(entry, destination);
-        }
-        return this._applyBatchWrite(entry, openForWrite);
-      },
-      options,
-    );
-    this._forgetBatchFileHandles(entries);
-    const kept = await checks?.settled();
-    if (kept !== undefined && this._uncommitted !== undefined) {
-      /* Every writable of the batch has closed: the creates have settled. A
-       * record left behind is harmless: its files hold their bytes. */
-      try {
-        await deleteUncommittedRecord(this._uncommitted.store, kept);
-      } catch (error) {
-        workerTimings.count('uncommitted.deleteFailed');
-        console.error('[filesystem] A settled uncommitted-changeset record is still kept.', error);
-      }
-    }
-    return receipts;
+    return refuseLargeObjectSources(entries, async (held) => this._applyBytesBatch(held, options));
   }
 
   /**
@@ -2124,5 +2061,83 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         await this.writeFile(`${destination}/${entryName}`, bytes);
       }
     }
+  }
+
+  /**
+   * {@link applyBatch} over entries that carry their bytes.
+   *
+   * @param entries - One phase's entries, none a large-object source.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  private async _applyBytesBatch(
+    entries: readonly BytesBatchEntry[],
+    options: BatchOptions | undefined,
+  ): Promise<BatchReceipt[]> {
+    const directories = new Map<string, Promise<FileSystemDirectoryHandle>>();
+    const openForWrite = async (path: string): Promise<FileSystemDirectoryHandle> => {
+      if (path === '') {
+        return this._rootHandle;
+      }
+      let pending = directories.get(path);
+      if (pending === undefined) {
+        const separator = path.lastIndexOf('/');
+        const parent = separator === -1 ? '' : path.slice(0, separator);
+        const name = path.slice(separator + 1);
+        pending = (async () => {
+          const handle = await openForWrite(parent);
+          try {
+            return await handle.getDirectoryHandle(name, { create: true });
+          } catch (error) {
+            throw hasDomName(error, 'TypeMismatchError') ? this._enotdir(path) : error;
+          }
+        })();
+        directories.set(path, pending);
+      }
+      return pending;
+    };
+    const creates = entries.filter((entry): entry is BatchWrite => entry.op === 'write' && entry.create === true);
+    const checks =
+      this._uncommitted === undefined || creates.length === 0
+        ? undefined
+        : this._checkAndRecordCreates({
+            uncommitted: this._uncommitted,
+            creates,
+            openForWrite,
+            signal: options?.signal,
+          });
+    const receipts = await runBatch(
+      entries,
+      async (entry) => {
+        if (entry.op !== 'write') {
+          return applyEntryWithPrimitives(this, entry);
+        }
+        if (entry.create !== true) {
+          return this._applyBatchWrite(entry, openForWrite);
+        }
+        if (checks !== undefined) {
+          return this._applyCheckedCreate(entry, await checks.next(entry));
+        }
+        if (this._stageCreates) {
+          const destination = await this._findCreateTarget(entry, openForWrite);
+          return 'outcome' in destination ? destination : this._stageSiblingCreate(entry, destination);
+        }
+        return this._applyBatchWrite(entry, openForWrite);
+      },
+      options,
+    );
+    this._forgetBatchFileHandles(entries);
+    const kept = await checks?.settled();
+    if (kept !== undefined && this._uncommitted !== undefined) {
+      /* Every writable of the batch has closed: the creates have settled. A
+       * record left behind is harmless: its files hold their bytes. */
+      try {
+        await deleteUncommittedRecord(this._uncommitted.store, kept);
+      } catch (error) {
+        workerTimings.count('uncommitted.deleteFailed');
+        console.error('[filesystem] A settled uncommitted-changeset record is still kept.', error);
+      }
+    }
+    return receipts;
   }
 }

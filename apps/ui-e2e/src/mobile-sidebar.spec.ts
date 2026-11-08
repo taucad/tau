@@ -154,7 +154,7 @@ test.each([
 
     // SB-02: New project is a 44px row, and a coarse pointer gets no keyboard chip.
     const newProject = await target.evaluateLocator(
-      sidebarSheet().getByRole('link', { name: /New Project/u }),
+      sidebarSheet().getByRole('link', { name: /New project/u }),
       (link) => {
         const button = link.querySelector<HTMLElement>('[data-slot="sidebar-menu-button"]');
         if (!button) {
@@ -169,7 +169,7 @@ test.each([
       },
     );
     expect(newProject.height).toBeGreaterThanOrEqual(44);
-    expect(newProject.shown).toEqual(['New Project']);
+    expect(newProject.shown).toEqual(['New project']);
 
     // A tap in the strip beside the sheet closes it.
     await target.mouseClick(sheet.x + sheet.width + tapOut / 2, viewport.height / 2);

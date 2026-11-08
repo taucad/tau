@@ -585,6 +585,13 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       });
     });
 
+    it('takes an options argument passed as undefined as none, as a relayed provider passes it', async () => {
+      const { proxy } = await open(transport, 'agent', files);
+      const rows = await proxy.statTree('', undefined);
+      expect(rows.map(({ path }) => path)).toContain('lib/part.ts');
+      await expect(proxy.pendingPaths(['lib/part.ts'], undefined)).resolves.toEqual([]);
+    });
+
     it("masks what changed by the connection's view", async () => {
       const { proxy } = await open(transport, 'agent', { ...files, '.git/HEAD': 'ref: refs/heads/main\n' });
       const rows = await proxy.statTree('');
@@ -594,6 +601,32 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       expect(changedFiles).toContain('lib/part.ts');
       expect(changedFiles.some((path) => path.startsWith('.git'))).toBe(false);
       expect(changedFiles.every((path) => visible.has(path))).toBe(true);
+    });
+  });
+
+  describe('digest-checked writes (D17)', () => {
+    it("reads a file with the authority's digest, and checks a write against that digest", async () => {
+      const { proxy } = await open(transport);
+      const loaded = await proxy.readFileWithDigest('docs/readme.md');
+      expect(decoder.decode(loaded.data)).toBe('Read me.\n');
+      expect(loaded.sha256).toMatch(/^[\da-f]{64}$/u);
+
+      const applied = await proxy.writeFileChecked({
+        path: 'docs/readme.md',
+        data: 'Edited.\n',
+        preconditions: [{ path: 'docs/readme.md', expectedSha256: loaded.sha256 }],
+      });
+      expect(applied.status).toBe('applied');
+      const after = await proxy.readFileWithDigest('docs/readme.md');
+      expect(applied.status === 'applied' ? applied.sha256 : undefined).toBe(after.sha256);
+
+      const stale = await proxy.writeFileChecked({
+        path: 'docs/readme.md',
+        data: 'Lost.\n',
+        preconditions: [{ path: 'docs/readme.md', expectedSha256: loaded.sha256 }],
+      });
+      expect(stale).toMatchObject({ status: 'conflict', conflicts: [{ sha256: after.sha256 }] });
+      expect(decoder.decode(await proxy.readFile('docs/readme.md'))).toBe('Edited.\n');
     });
   });
 

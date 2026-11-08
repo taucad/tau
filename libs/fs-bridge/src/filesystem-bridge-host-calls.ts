@@ -1,6 +1,6 @@
 /**
  * Calls the bridge answers on the host's side of the wire when the handler set
- * does not bring its own: `hashFiles`, `readMany`, `readRange`, `glob`, `grep`
+ * does not bring its own: `hashFiles`, `readMany`, `readRange`, `readFileWithDigest`, `glob`, `grep`
  * and `indexStats` — and the wire form of `apply`'s receipt.
  *
  * Each is derived from the connection's own `readFile` (and `readFileStream`
@@ -17,6 +17,7 @@ import type {
   FactsOptions,
   FactsWireRows,
   FileSystemBridgeChangeset,
+  FileWithDigest,
   GlobOptions,
   GrepMatch,
   GrepOptions,
@@ -181,6 +182,15 @@ const hostReadMany =
       }
     });
     return rows;
+  };
+
+/** One read, its bytes transferred and the authority's digest of them beside (D17). */
+const hostReadFileWithDigest =
+  (read: ReadBytes) =>
+  async (path: string): Promise<FileWithDigest> => {
+    const data = await read(path);
+    const sha256 = await sha256Bytes(data);
+    return { data: ownedForTransfer(path, data), sha256 };
   };
 
 const hostReadRange =
@@ -506,6 +516,7 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(
     ...(typeof own['hashFiles'] === 'function' ? {} : { hashFiles: hostHashFiles(read) }),
     ...(typeof own['readMany'] === 'function' ? {} : { readMany: hostReadMany(read) }),
     ...(typeof own['readRange'] === 'function' ? {} : { readRange: hostReadRange(read, stream) }),
+    ...(typeof own['readFileWithDigest'] === 'function' ? {} : { readFileWithDigest: hostReadFileWithDigest(read) }),
     ...derivedIndexCalls(own, handlers, { read, worker: options?.grepMatcherWorker }),
     apply: typeof own['apply'] === 'function' ? hostApply((own['apply'] as Apply).bind(handlers)) : refuseApply,
     facts: typeof own['facts'] === 'function' ? hostFacts((own['facts'] as Facts).bind(handlers)) : refuseIndexQuery,

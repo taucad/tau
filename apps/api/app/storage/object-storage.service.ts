@@ -123,10 +123,30 @@ export type HeadBlobResult = {
 };
 
 /** One object in a prefix listing, keyed relative to its namespace. */
+/** One object located by namespace, key and tier. */
+export type StoredObjectLocation = Readonly<{ namespace: StorageNamespace; key: string; tier?: StorageTier }>;
+
+/**
+ * A server-side copy between any two locations on one account: across
+ * namespaces and across the tier buckets. The store moves the bytes, so the
+ * caller reads none of them. The copy takes the metadata given here rather than
+ * the source's.
+ */
+export type CopyObjectArgs = Readonly<{
+  source: StoredObjectLocation;
+  destination: StoredObjectLocation;
+  contentType: string;
+  cacheControl?: string;
+  /** The source's ETag the copy requires (`x-amz-copy-source-if-match`); a moved source refuses with 412. */
+  sourceIfMatch?: string;
+  signal?: AbortSignal;
+}>;
+
 export type ListedObject = { key: string; bytes: number; modifiedAt: Date | undefined };
 
 export type ObjectStorageServiceContract = {
   putBlob(args: PutBlobArgs): Promise<PutBlobResult>;
+  putBlobStream?(args: PutBlobStreamArgs): Promise<PutBlobResult>;
   getBlob(args: {
     namespace: StorageNamespace;
     key: string;
@@ -214,6 +234,7 @@ export type ObjectStorageServiceContract = {
     destinationKey: string;
     tier?: StorageTier;
   }): Promise<void>;
+  copyObject?(args: CopyObjectArgs): Promise<void>;
   listBlobs?(args: {
     namespace: StorageNamespace;
     keyPrefix: string;
@@ -772,6 +793,36 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     const destination = this.resolveKey(args.namespace, args.destinationKey).resolvedKey;
     await this.client.send(
       new CopyObjectCommand({ Bucket: bucket, Key: destination, CopySource: `${bucket}/${source}` }),
+    );
+  }
+
+  /**
+   * Copy one object to another location on this account, server-side.
+   *
+   * Unlike {@link copyBlob} it crosses namespaces and tier buckets, and it
+   * replaces the copy's metadata with `contentType` and `cacheControl`.
+   *
+   * @param args - Source, destination and the copy's metadata.
+   */
+  public async copyObject(args: CopyObjectArgs): Promise<void> {
+    const sourceBucket = this.resolveBucket(args.source.tier);
+    const source = this.resolveKey(args.source.namespace, args.source.key).resolvedKey;
+    const destination = this.resolveKey(args.destination.namespace, args.destination.key).resolvedKey;
+    const encodedSource = source
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    await this.client.send(
+      new CopyObjectCommand({
+        Bucket: this.resolveBucket(args.destination.tier),
+        Key: destination,
+        CopySource: `${sourceBucket}/${encodedSource}`,
+        MetadataDirective: 'REPLACE',
+        ContentType: args.contentType,
+        ...(args.cacheControl === undefined ? {} : { CacheControl: args.cacheControl }),
+        ...(args.sourceIfMatch === undefined ? {} : { CopySourceIfMatch: `"${args.sourceIfMatch}"` }),
+      }),
+      { abortSignal: args.signal },
     );
   }
 

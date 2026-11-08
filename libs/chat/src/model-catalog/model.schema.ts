@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { reasoningLevels } from '@taucad/chat/constants';
-import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
+import { reasoningLevels } from '#constants/index.js';
+import { modelFamilySchema, providerIdSchema } from '#model-catalog/provider.schema.js';
 
 export const modelSupportSchema = z.object({
   /*

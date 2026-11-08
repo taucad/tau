@@ -35,6 +35,7 @@ import { createWorkerFileSystemProxy } from '@taucad/runtime/worker';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { archiveBlobBatchBytes, archiveStream } from '@taucad/filesystem/content-ops';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
@@ -440,6 +441,91 @@ const agentFileSystem = (live: RootedFileSystem, tally: AgentTally): RpcFileSyst
   return createProviderRpcFileSystem({ provider: counted, mutations: new ResourceQueue({ timings: workerTimings }) });
 };
 
+/**
+ * S14: the whole project through content-ops' streaming archive, over the
+ * user-masked composed view the file manager archives, gathered into a Blob a
+ * batch at a time as `archive()` gathers it.
+ *
+ * What the archive holds at once is its gathered batch plus the input it has
+ * pulled since it last gave bytes back (an entry in flight through the
+ * deflater); `residentPeak` is the most of both at any output chunk, measured
+ * against the largest file the archive read.
+ *
+ * @param live - The project's rooted view.
+ * @returns The archive's figures.
+ */
+const archiveProject = async (
+  live: RootedFileSystem,
+): Promise<
+  Readonly<{
+    archivedFiles: number;
+    sourceBytes: number;
+    archiveBytes: number;
+    largestFile: number;
+    residentPeak: number;
+    residentCeiling: number;
+  }>
+> => {
+  const view = composeView({ filesystem: live }, { consumer: 'user', policy: tauPathPolicy });
+  const tally = { files: 0, sourceBytes: 0, largestFile: 0, sinceOutput: 0 };
+  const streaming = new Proxy(view, {
+    get: (target, property, receiver) => {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (property === 'readFileStream' && typeof value === 'function') {
+        return (path: string, options?: unknown): ReadableStream<Uint8Array<ArrayBuffer>> => {
+          tally.files += 1;
+          let fileBytes = 0;
+          const source = (value as (...values: unknown[]) => ReadableStream<Uint8Array<ArrayBuffer>>).apply(target, [
+            path,
+            options,
+          ]);
+          return source.pipeThrough(
+            new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+              transform: (chunk, controller) => {
+                fileBytes += chunk.byteLength;
+                tally.sourceBytes += chunk.byteLength;
+                tally.sinceOutput += chunk.byteLength;
+                tally.largestFile = Math.max(tally.largestFile, fileBytes);
+                controller.enqueue(chunk);
+              },
+            }),
+          );
+        };
+      }
+      return typeof value === 'function' ? (value as (...values: unknown[]) => unknown).bind(target) : value;
+    },
+  }) satisfies ComposedView;
+  if (view.readFileStream === undefined) {
+    throw new Error('The project view cannot stream its files, so S14 would measure whole reads.');
+  }
+  const reader = archiveStream(streaming, '').getReader();
+  let blob = new Blob([]);
+  let batch: Array<Uint8Array<ArrayBuffer>> = [];
+  let batchBytes = 0;
+  let residentPeak = 0;
+  // oxlint-disable-next-line no-await-in-loop -- The archive is read in order, one chunk at a time.
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    residentPeak = Math.max(residentPeak, batchBytes + tally.sinceOutput + next.value.byteLength);
+    tally.sinceOutput = 0;
+    batch.push(next.value);
+    batchBytes += next.value.byteLength;
+    if (batchBytes >= archiveBlobBatchBytes) {
+      blob = new Blob([blob, ...batch]);
+      batch = [];
+      batchBytes = 0;
+    }
+  }
+  blob = new Blob([blob, ...batch]);
+  return {
+    archivedFiles: tally.files,
+    sourceBytes: tally.sourceBytes,
+    archiveBytes: blob.size,
+    largestFile: tally.largestFile,
+    residentPeak,
+    residentCeiling: Math.ceil(1.2 * tally.largestFile),
+  };
+};
+
 const grepAndGlob = async (
   live: RootedFileSystem,
 ): Promise<
@@ -487,9 +573,9 @@ const grepAndGlob = async (
  * What the listings' content facts may read (D4): each file's head, and a
  * file whose head reads as text, within the line-count cap, once more in full.
  * Every file of the project counts, the manifest the import added included; a
- * path the fixture does not name is taken as text. A fixture binary is seeded
- * noise, so its head is judged as production judges it: the import wrote
- * revision 0, whose first bytes do not depend on the size. Taken after the
+ * path the fixture does not name is taken as text. A fixture binary starts
+ * with its format's real header, which holds a NUL within the smallest planned
+ * size, so its head is judged as production judges it, at any size or revision. Taken after the
  * measured window: its `statTree` opens the root's index, which the scenario
  * itself never needs.
  */
@@ -515,6 +601,9 @@ const listingByteCeiling = async (live: RootedFileSystem): Promise<number> => {
 let probe:
   | { stop: () => void; done: Promise<void>; latencies: number[]; reads: number; invalidations: number; events: number }
   | undefined;
+
+/** Closes the open `save-with-reads` window, once the page's grep has returned. */
+let grepDone: (() => void) | undefined;
 
 /* S19's viewer: one read every 20 ms, and at least 40 reads a sample, so its p95 is never just the maximum. */
 const s19ReadInterval = 20;
@@ -934,19 +1023,27 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'agent-write': {
       return agentTurns(live, projectId);
     }
+    case 'archive': {
+      return measure(async () => archiveProject(live));
+    }
     case 'grep-glob': {
       const measured = await measure(async () => grepAndGlob(live));
       return { ...measured, extra: { ...measured.extra, listingByteCeiling: await listingByteCeiling(live) } };
     }
-    case 'grep-with-save-and-reads': {
+    case 'save-with-reads': {
+      /* S19's authority side: the viewer's reads and the save, while the page runs
+       * grep and glob over a bridge port as the agent host does (never this thread);
+       * the window closes when the page says its grep returned (`grep-done`). */
+      const grepped = Promise.withResolvers<void>();
+      grepDone = grepped.resolve;
       return measure(async () => {
         startProbe(projectId, s19ReadInterval);
-        const grepping = grepAndGlob(live);
         await quiet(parameters['saveDelay'] ?? 20);
         const saveStart = performance.now();
         await live.writeFile('src/s19-save.ts', saveText(saveSize, 19));
         const saveLatency = performance.now() - saveStart;
-        const grep = await grepping;
+        await grepped.promise;
+        grepDone = undefined;
         /* Info only, never gated: how many reads the grep window itself held. */
         const readsDuringGrep = probeReads();
         /* A p95 over a dozen reads is the slowest one: the viewer keeps reading
@@ -957,8 +1054,6 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         }
         const reads = await stopProbe();
         return {
-          grepDuration: grep.grepDuration,
-          authorityReads: grep.authorityReads,
           saveLatency,
           readP95: percentile(reads.latencies, 0.95),
           readMax: Math.max(0, ...reads.latencies),
@@ -1084,6 +1179,27 @@ const handle = async (command: WorkerCommand): Promise<unknown> => {
     }
     case 'probe-stop': {
       return stopProbe();
+    }
+    case 'connect': {
+      bridgeConnections.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            v: fileSystemBridgeProtocolVersion,
+            type: filesystemBridgeConnectMessageType,
+            port: command.port,
+            root: `/projects/${command.projectId}`,
+            consumer: 'working-copy',
+          },
+        }),
+      );
+      return true;
+    }
+    case 'grep-done': {
+      if (grepDone === undefined) {
+        throw new Error('No save-with-reads window is open.');
+      }
+      grepDone();
+      return true;
     }
   }
 };

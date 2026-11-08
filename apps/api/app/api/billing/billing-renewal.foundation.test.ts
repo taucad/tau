@@ -219,7 +219,7 @@ describe('billing renewal native foundation', { concurrent: false }, () => {
       },
       policy,
       ledger,
-      new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
+      new BillingCashService({ database: runtimeDatabase }, stripe, ledger, {
         environment: 'development',
         stripeAccountId,
         livemode: false,

@@ -18,7 +18,12 @@ import type { RevisionPort } from '#revision-port.js';
 import { createNativeGitAdapter } from '#native-git-adapter.js';
 import { createNativeGitRevisionPort } from '#node/index.js';
 import { NativeGitError } from '#native-git.types.js';
-import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
 
 const execute = promisify(execFile);
 const createdAt = Date.UTC(2026, 7, 28, 12, 0, 0);
@@ -334,21 +339,24 @@ nativeGitIntegration('native Git adapter integration', () => {
   /*
    * G0-9 on the disk leg: `init` is also the open seam
    * (`revision-effects.ensureStore` calls it once per authority, and `git init`
-   * is skipped for a store that is already here), so a project created by an
-   * older build is migrated on its next open — and a project already current is
-   * not rewritten, which a pinned mtime is the only way to observe here.
+   * is skipped for a store that is already here). The setup files are created,
+   * never merged into (D16): an existing ignore file keeps its stale block, the
+   * attributes file is created beside it, and a project already current is not
+   * rewritten, which a pinned mtime is the only way to observe here.
    */
-  it('should migrate a stale generated block on open and then leave both files alone', async () => {
+  it('should leave an existing ignore file as written on open, create the attributes file, and then leave both alone', async () => {
     const ignorePath = join(repositoryPath, generatedIgnorePath);
     const attributesPath = join(repositoryPath, generatedGitattributesPath);
-    await writeFile(
-      ignorePath,
-      `# mine\n*.log\n# BEGIN Tau generated — derived content is never versioned\n/.git/\n/.jj/\n/.tau/binding.json\nnode_modules/\n# END Tau generated\n`,
-    );
+    const stale = `# mine\n*.log\n# BEGIN Tau generated — derived content is never versioned\n/.git/\n/.jj/\n/.tau/binding.json\nnode_modules/\n# END Tau generated\n`;
+    await writeFile(ignorePath, stale);
 
     await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
 
-    expect(await readFile(ignorePath, 'utf8')).toBe(generatedIgnoreContent('# mine\n*.log\n'));
+    expect(await readFile(ignorePath, 'utf8')).toBe(stale);
+    expect(await readFile(attributesPath, 'utf8')).toBe(generatedGitattributesContent(undefined));
+    expect(await readFile(join(repositoryPath, '.git', 'info', 'exclude'), 'utf8')).toContain(
+      generatedIgnoreContent(undefined),
+    );
     const pinned = Date.UTC(2020, 0, 1);
     await utimes(ignorePath, new Date(pinned), new Date(pinned));
     await utimes(attributesPath, new Date(pinned), new Date(pinned));
@@ -811,6 +819,8 @@ exec git "$@"
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        /* The repository was `git init`ed before Tau saw it, so the tree's own block is what names the family (D16). */
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['models/bracket.step', bytes],
         ['src/part.ts', 'export const part = 1;\n'],
       ]),
@@ -843,8 +853,8 @@ exec git "$@"
     expect(tree?.get('models/bracket.step')).toEqual(bytes);
     expect(tree?.get('models/bracket.step')?.byteLength).toBe(5 * 1024 * 1024);
 
-    // The generated attributes file is what makes a stock clone resolve it.
-    expect(await readFile(join(repositoryPath, '.gitattributes'), 'utf8')).toContain(
+    // The recorded attributes file is what makes a stock clone resolve it.
+    expect(await git(repositoryPath, 'show', `${recorded}:.gitattributes`)).toContain(
       '*.step filter=lfs diff=lfs merge=lfs -text',
     );
   }, 60_000);
@@ -860,7 +870,7 @@ exec git "$@"
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
-        ['.gitattributes', await readFile(join(repositoryPath, '.gitattributes'), 'utf8')],
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['notes.txt', notes],
         ['models/big.step', model],
         ['small.txt', 'a line\n'],
@@ -904,7 +914,10 @@ exec git "$@"
     const bytes = Uint8Array.from(randomBytes(2 * 1024 * 1024));
     const first = await port.writeRevision({
       parents: [],
-      tree: new ImmutableRevisionTree([['models/bracket.step', bytes]]),
+      tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+        ['models/bracket.step', bytes],
+      ]),
       provenance: { source: 'user', actorId: 'lfs', createdAt },
       summary: { generated: 'Large object' },
     });
@@ -912,7 +925,10 @@ exec git "$@"
 
     const second = await port.writeRevision({
       parents: [revisionId(first.commitId)],
-      tree: new ImmutableRevisionTree([['models/bracket.step', pointerText]]),
+      tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+        ['models/bracket.step', pointerText],
+      ]),
       provenance: { source: 'user', actorId: 'lfs', createdAt },
       summary: { generated: 'Un-smudged checkout' },
     });

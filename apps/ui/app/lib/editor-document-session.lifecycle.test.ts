@@ -18,6 +18,7 @@ function fixture(initial = 'base'): {
   outcomeChange(event: OutcomeChangeEvent): void;
 } {
   const content = mock<FileContentService>();
+  content.addEditorSaveFlusher.mockReturnValue(() => undefined);
   const outcomes = new Map<string, FileContentResult>();
   let contentListener = (_event: ContentChangeEvent): void => undefined;
   let outcomeListener = (_event: OutcomeChangeEvent): void => undefined;

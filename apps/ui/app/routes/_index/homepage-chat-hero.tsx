@@ -2,7 +2,7 @@ import { NavLink } from 'react-router';
 import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { HomeChatComposer } from '#routes/_index/home-chat-composer.js';
 import { Separator } from '@taucad/ui/components/separator';
-import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
+import { buttonVariants } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 
 /**
@@ -28,11 +28,13 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
           <Separator />
         </div>
         <div className='flex justify-center'>
-          <NavLink to='/projects/new' tabIndex={-1}>
+          {/* A plain secondary action beside the composer, not a second call to action (R15). */}
+          <NavLink to='/projects/new' className={buttonVariants({ variant: 'outline' })}>
             {({ isPending }) => (
-              <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
-                {isPending ? <Loader /> : 'Build from code'}
-              </InteractiveHoverButton>
+              <span aria-busy={isPending} className='flex items-center gap-2'>
+                {isPending ? <Loader /> : null}
+                Build from code
+              </span>
             )}
           </NavLink>
         </div>

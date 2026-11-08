@@ -27,6 +27,7 @@ export type {
   NodeFsRootScope,
   NodeFsServer,
 } from '#backend/node/host.js';
+export { repositoryLargeObjectStore } from '#backend/node/large-object-store.js';
 export { toNodeFsPort } from '#backend/node/port.js';
 export type { EmitterPort, NodeFsPort } from '#backend/node/port.js';
 export { nodeFsProtocolVersion } from '#backend/node/protocol.js';

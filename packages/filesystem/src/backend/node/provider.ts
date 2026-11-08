@@ -31,8 +31,8 @@ import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } 
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { applyEntryWithPrimitives, mapRolling, runBatch } from '#backend/batch.js';
-import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
-import { isRefusal } from '#changeset.js';
+import type { BatchEntry, BatchOptions, BatchReceipt, LargeObjectWriteSource } from '#changeset.js';
+import { isLargeObjectSource, isRefusal } from '#changeset.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type {
@@ -99,6 +99,8 @@ type StagedWrite = {
   readonly permissions: number | undefined;
   data?: Uint8Array<ArrayBuffer>;
   streamed?: Readonly<{ size: number; sha256: string }>;
+  /** A clone of a stored large object, hashed through its own handle before the rename: that handle's identity, which the published entry is checked against instead of a second read. */
+  cloned?: Readonly<{ dev: bigint; ino: bigint }>;
   retainedHandle?: FileHandle;
   written?: BigIntStats;
   /** Set once the rename is attempted: a rename that throws may still have published (rename-then-throw). */
@@ -405,19 +407,11 @@ const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly
  * @public
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
-  public readonly capabilities: ProviderCapabilities = {
-    persistent: true,
-    writable: true,
-    quotaBased: false,
-    durability: 'transactional-rewrite',
-    trustworthyMtime: true,
-    externallyEdited: true,
-    streamsWrites: true,
-    movesInPlace: true,
-  };
+  public readonly capabilities: ProviderCapabilities;
 
   private readonly _base: string;
   private readonly _policy: PathPolicy | undefined;
+  private readonly _largeObjectStore: (() => string | undefined) | undefined;
   private _realBaseCache: Promise<string> | undefined;
 
   private readonly _openSubscriptions = new Set<() => void>();
@@ -431,12 +425,34 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * (D6, G0-6). This backend is the only one that can hold a symlink and the
    * only layer that knows where one points, so it refuses a laundered spelling
    * for every consumer above it; the policy is injected because the core never
-   * imports the registry.
+   * imports the registry. `largeObjectStore` is the repository's LFS object
+   * directory this root's large objects come from (EQ13): given, a write may
+   * name an object by its id and it is cloned from there. A function is asked
+   * per write, so an authority that admits and releases roots answers for now.
    */
-  public constructor(basePath: string, options?: { readonly policy?: PathPolicy }) {
+  public constructor(
+    basePath: string,
+    options?: {
+      readonly policy?: PathPolicy;
+      readonly largeObjectStore?: string | (() => string | undefined);
+    },
+  ) {
     super();
     this._base = path.resolve(basePath);
     this._policy = options?.policy;
+    const store = options?.largeObjectStore;
+    this._largeObjectStore = typeof store === 'string' ? () => store : store;
+    this.capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: false,
+      durability: 'transactional-rewrite',
+      trustworthyMtime: true,
+      externallyEdited: true,
+      streamsWrites: true,
+      movesInPlace: true,
+      ...(store === undefined ? {} : { largeObjectSources: true }),
+    };
     entryObservers.set(this, createEntryObserver({ root: this._base, policy: this._policy }));
     boundedReads.set(this, async (rooted, maximumBytes) => this._readBounded(rooted, maximumBytes));
     boundedListings.set(this, async (rooted, limits) => this._listBounded(rooted, limits));
@@ -1441,10 +1457,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
         madeParent = (await fs.mkdir(path.dirname(target), { recursive: true })) !== undefined;
         prepared = await this._prepareWrite(entry.path, target, entry.mode);
-        await this._fillTemporary(
-          prepared,
-          entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
-        );
+        await (isLargeObjectSource(entry.data)
+          ? this._cloneTemporary(prepared, entry.data)
+          : this._fillTemporary(
+              prepared,
+              entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
+            ));
         const write: Pending = { index, entry, staged: prepared, madeParent };
         return write;
       } catch (error) {
@@ -1503,6 +1521,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           outcome: 'applied',
           kind: 'file',
           ...(write.entry.create === true ? { created: true } : {}),
+          /* Verified by the one hash of the sibling before its rename (I2). */
+          ...(isLargeObjectSource(write.entry.data)
+            ? { largeObject: { largeObject: write.entry.data.largeObject, size: write.entry.data.size } }
+            : {}),
         };
       } catch (error) {
         refuse(write.index, error, write.madeParent || write.staged.renaming === true);
@@ -1608,6 +1630,82 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   /**
+   * Fill the temp sibling from the repository's large-object store (EQ13):
+   * `copyFile` with `COPYFILE_FICLONE`, so the file shares the object's extents
+   * where the file system can clone (APFS, btrfs, XFS) and is copied where it
+   * cannot, then the sibling's mode, one fsync, and one hash through the
+   * sibling's own handle before anything is renamed (I2): a corrupt object
+   * fails the write as a refusal, its sibling removed and the target as it
+   * was. The store is the authority's, resolved here by the object's id: no
+   * `.git` path is ever named by the caller (I6).
+   *
+   * @param staged - The prepared write.
+   * @param source - The object's id and size.
+   */
+  private async _cloneTemporary(staged: StagedWrite, source: LargeObjectWriteSource): Promise<void> {
+    const store = this._largeObjectStore?.();
+    if (store === undefined) {
+      throw this._errno('EINVAL', 'this root has no large-object store', staged.rootedPath);
+    }
+    if (!/^[\da-f]{64}$/u.test(source.largeObject) || !Number.isSafeInteger(source.size) || source.size < 0) {
+      throw this._errno('EINVAL', 'not a large-object id and size', staged.rootedPath);
+    }
+    const object = path.join(store, source.largeObject.slice(0, 2), source.largeObject.slice(2, 4), source.largeObject);
+    const stored = await fs.stat(object).catch((error: unknown) => {
+      throw (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? this._errno('ENOENT', 'the large object is not in the store', staged.rootedPath)
+        : error;
+    });
+    if (!stored.isFile() || stored.size !== source.size) {
+      throw this._errno('EINVAL', 'the stored large object is not the size its pointer names', staged.rootedPath);
+    }
+    /* A copy takes the object's mode, which Git LFS stores read-only: the file
+     * takes its own, or the mode a new file gets under the process's umask,
+     * read from the sibling's own name created as `_fillTemporary` creates a
+     * file (Node offers no race-free way to read the umask itself). */
+    const permissions = staged.permissions ?? (await this._newFileMode(staged.temporaryPath));
+    /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
+    // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
+    await fs.copyFile(object, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    /* Before it is opened for writing: a read-only copy could not be. */
+    await fs.chmod(staged.temporaryPath, permissions);
+    const handle = await fs.open(staged.temporaryPath, 'r+');
+    if (process.platform === 'win32') {
+      staged.retainedHandle = handle;
+    }
+    try {
+      await handle.sync();
+      if (!(await publishedDigestEquals(handle, { size: source.size, sha256: source.largeObject }))) {
+        throw this._errno('EINVAL', 'the stored large object does not hash to its id', staged.rootedPath);
+      }
+      const { dev, ino } = await handle.stat({ bigint: true });
+      staged.cloned = { dev, ino };
+    } finally {
+      if (staged.retainedHandle === undefined) {
+        await handle.close();
+      }
+    }
+  }
+
+  /**
+   * The permission bits a new file gets here: created exclusively at `name`
+   * with `0o666`, so the kernel applies the umask, read back, and removed.
+   *
+   * @param name - A name this write owns and nothing else uses yet.
+   * @returns The new file's permission bits.
+   */
+  private async _newFileMode(name: string): Promise<number> {
+    const probe = await fs.open(name, 'wx', 0o666);
+    try {
+      const { mode } = await probe.stat();
+      return mode % 0o1000;
+    } finally {
+      await probe.close();
+      await fs.unlink(name);
+    }
+  }
+
+  /**
    * Rename the synced temp sibling over its target, refusing a swapped parent or a symlink target.
    *
    * @param staged - A filled write.
@@ -1664,6 +1762,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    */
   private async _verifyPublished(staged: StagedWrite): Promise<void> {
     const { rootedPath, admittedTarget, data, streamed, written } = staged;
+    if (staged.cloned !== undefined) {
+      /* Its bytes were hashed through the sibling's handle before the rename,
+       * and a rename keeps the inode: the entry at the path is verified when
+       * it is that very file (the hashed handle's device and inode), and is
+       * never read again. Any other entry there is not known to be these
+       * bytes, so the write is uncertain rather than applied. */
+      const published = await fs.lstat(admittedTarget, { bigint: true }).catch(() => undefined);
+      const known = staged.cloned.ino > 0n;
+      if (known && (published?.dev !== staged.cloned.dev || published.ino !== staged.cloned.ino)) {
+        throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
+      }
+      return;
+    }
     const verification = await fs.open(admittedTarget, verificationReadFlags);
     try {
       const verified =

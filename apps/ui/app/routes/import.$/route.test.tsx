@@ -33,7 +33,15 @@ const getRepository = vi.hoisted(() =>
 );
 const listFiles = vi.hoisted(() => vi.fn(async (): Promise<Array<{ path: string; size: number }>> => []));
 /* The file-manager worker's import channel: what the route asked it to plan. */
-const importChannel = vi.hoisted(() => ({ plan: vi.fn() }));
+const importChannel = vi.hoisted(() => ({
+  plan: vi.fn(),
+  stage: vi.fn(async (_operationId: string, _scope: unknown, options: { target: string }) => ({
+    files: 1,
+    bytes: 1,
+    inPlace: false,
+    target: options.target,
+  })),
+}));
 const listBranches = vi.hoisted(() =>
   vi.fn<GitHubApiClient['listBranches']>(async () => ({ branches: [], hasMore: false, endCursor: undefined })),
 );
@@ -76,13 +84,31 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 vi.mock('#machines/import-staging.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ImportStagingModule>()),
-  openImportSession: () => ({ plan: importChannel.plan, close: () => undefined }),
+  openImportSession: () => ({
+    plan: importChannel.plan,
+    stage: importChannel.stage,
+    handOff: async () => undefined,
+    release: async () => undefined,
+    discard: async () => undefined,
+    sweep: async () => [],
+    close: () => undefined,
+  }),
 }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({ projects: [...slugs.byId.keys()].map((id) => ({ id })) }),
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ createProject: projects.create, getProjects: async () => [] }),
+  useProjectManager: () => ({
+    createProject: projects.create,
+    getProjects: async () => [],
+    prepareImportStaging: async () => ({
+      location: { kind: 'home' },
+      scope: { backend: 'opfs' },
+      providerBasePath: 'part',
+      owned: [],
+    }),
+    ownsImportStaging: async () => false,
+  }),
 }));
 vi.mock('#hooks/use-project-creation-location-error.js', () => ({ useProjectCreationLocationError: () => vi.fn() }));
 vi.mock('#hooks/use-project-slug-route.js', () => ({
@@ -164,6 +190,8 @@ const selection = {
   ],
   manifest,
 } satisfies GithubRepositorySelection;
+/* What the page hands the worker for a linked import: plain data, no bytes of the repository. */
+const linkedRequest = { name: 'octo/part', targetBranch: 'main' };
 const picked: { selection: GithubRepositorySelection } = { selection };
 
 const renderImport = async (url = '/import'): Promise<void> => {
@@ -636,7 +664,7 @@ describe('ImportRoute GitHub card', () => {
       manifest: legacyBytes,
       connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
     };
-    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
     projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
       id,
       slugs: { workspaceSlug: 'home', projectSlug: 'part' },
@@ -662,7 +690,7 @@ describe('ImportRoute GitHub card', () => {
       ...selection,
       connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
     };
-    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
     projects.create.mockImplementationOnce(async ({ id }: { id: string }) => {
       /* Discovery lists the new project before the route has left the review. */
       slugs.byId.set(id, { workspaceSlug: 'home', projectSlug: 'part' });
@@ -681,5 +709,59 @@ describe('ImportRoute GitHub card', () => {
     });
     expect(await screen.findByRole('button', { name: 'Importing and linking…' })).toBeDisabled();
     expect(screen.queryByText('This repository is already a project on this device.')).not.toBeInTheDocument();
+  });
+
+  it('should have the worker fetch and stage a linked repository, creating the project from that staging (D12, I6)', async () => {
+    const user = userEvent.setup();
+    picked.selection = {
+      ...selection,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    expect(importChannel.stage.mock.calls[0]?.[2]).toMatchObject({ target: 'part', linked: linkedRequest });
+    const created = projects.create.mock.calls[0]?.[0] as {
+      files: Record<string, unknown>;
+      staging?: { operationId: string; providerBasePath: string };
+    };
+    /* The page hands over no file, and no `.git`: the commit takes them from the staging. */
+    expect(created.files).toEqual({});
+    expect(created.staging).toMatchObject({
+      operationId: importChannel.stage.mock.calls[0]?.[0],
+      providerBasePath: 'part',
+    });
+  });
+
+  it("should headline a taken branch the worker's fetch refused over the import channel (R4)", async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
+    importChannel.stage.mockRejectedValueOnce(
+      new ImportChannelError(
+        'Remote branch audit-g1 already names another revision.',
+        undefined,
+        'REMOTE_REF_CONFLICT',
+      ),
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    const branch = screen.getByRole('textbox', { name: 'Local and sync branch' });
+    await user.clear(branch);
+    await user.type(branch, 'audit-g1');
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    expect(await screen.findByRole('alert', { name: 'This branch name is taken on GitHub' })).toBeInTheDocument();
+    expect(projects.create).not.toHaveBeenCalled();
   });
 });

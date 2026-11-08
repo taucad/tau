@@ -48,8 +48,10 @@ import type {
   ImportSource,
   ImportStagingPort,
   ImportStagingProgress,
+  StagedImport,
 } from '@taucad/filesystem/importer';
 import type { PathPolicy, StorageRootConfig } from '@taucad/filesystem';
+import type { LinkedImportRequest } from '#machines/import-linked.js';
 
 /** The message type the file-manager worker answers with an import channel. */
 export const importConnectMessageType = 'importConnect';
@@ -133,7 +135,16 @@ export type ImportSession = Readonly<{
   stage: (
     operationId: string,
     scope: StorageRootConfig,
-    options: Readonly<{ target: string; onProgress?: (progress: ImportStagingProgress) => void }>,
+    options: Readonly<{
+      target: string;
+      onProgress?: (progress: ImportStagingProgress) => void;
+      /**
+       * A linked repository to fetch and stage instead of the plan: the
+       * worker's revisions authority fetches it into the staging, so neither
+       * its objects nor its files reach the page (I6).
+       */
+      linked?: LinkedImportRequest;
+    }>,
   ) => Promise<ImportStaged>;
   /**
    * Hand a staging to the create that will journal it: the session no longer
@@ -157,7 +168,14 @@ export type ImportSession = Readonly<{
 
 type Request =
   | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor; root?: string }>
-  | Readonly<{ id: number; type: 'stage'; operationId: string; scope: StorageRootConfig; target: string }>
+  | Readonly<{
+      id: number;
+      type: 'stage';
+      operationId: string;
+      scope: StorageRootConfig;
+      target: string;
+      linked?: LinkedImportRequest;
+    }>
   | Readonly<{ id: number; type: 'handOff'; operationId: string }>
   | Readonly<{ id: number; type: 'release'; operationId: string }>
   | Readonly<{ id: number; type: 'preview'; paths: readonly string[]; maximumBytes: number }>
@@ -170,7 +188,7 @@ type Answer = Readonly<{
   progress?: ImportStagingProgress;
   downloaded?: ImportDownloadProgress;
   result?: unknown;
-  error?: Readonly<{ message: string; reason?: ImportRefusalReason }>;
+  error?: Readonly<{ message: string; reason?: ImportRefusalReason; code?: string }>;
 }>;
 
 /**
@@ -184,15 +202,20 @@ export class ImportChannelError extends Error {
   /** The policy's reason, when the limits or path policy refused. */
   public readonly reason: ImportRefusalReason | undefined;
 
+  /** A revisions failure's code (`RevisionPortError`), when a linked import's fetch or bootstrap refused. */
+  public readonly code: string | undefined;
+
   /**
    * Carry a worker's refusal to the page.
    *
    * @param message - The worker's sentence.
    * @param reason - The policy's reason, when there is one.
+   * @param code - A revisions failure's code, when there is one.
    */
-  public constructor(message: string, reason?: ImportRefusalReason) {
+  public constructor(message: string, reason?: ImportRefusalReason, code?: string) {
     super(message);
     this.reason = reason;
+    this.code = code;
   }
 }
 
@@ -451,6 +474,25 @@ export const serveImportChannel = (
     /** The read-back measure: the compute worker's, or inline WebCrypto where there is none. */
     measure?: ImportMeasurer;
     policy: PathPolicy;
+    /**
+     * Stage a linked repository: the worker's revisions authority fetches it
+     * into the staging and stages its tree (`stageLinkedImport`, I6). Injected
+     * so the page's half of this module never loads the Git engine. Without
+     * it a linked stage is refused.
+     */
+    stageLinked?: (
+      input: Readonly<{
+        port: ImportStagingPort;
+        operationId: string;
+        request: LinkedImportRequest;
+        target: string;
+        decode: ImportDecoder;
+        measure?: ImportMeasurer;
+        policy: PathPolicy;
+        signal: AbortSignal;
+        onProgress: (progress: ImportStagingProgress) => void;
+      }>,
+    ) => Promise<StagedImport>;
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
@@ -514,6 +556,51 @@ export const serveImportChannel = (
       latestPlan = undefined;
     }
   };
+  /* Stage the plan, or a linked repository the worker fetches instead (I6). */
+  const stage = async (request: Extract<Request, { type: 'stage' }>): Promise<void> => {
+    const { linked } = request;
+    const { stageLinked } = dependencies;
+    if (linked === undefined && plan === undefined) {
+      throw new Error('Nothing is planned to stage.');
+    }
+    if (linked !== undefined && stageLinked === undefined) {
+      throw new Error('This worker cannot fetch a linked repository.');
+    }
+    const staging = await dependencies.importStaging(request.scope);
+    if (!owned.has(request.operationId)) {
+      const { operationId } = request;
+      const lease = await holdLease(operationId, async () => touchStagedImport(staging, operationId));
+      owned.set(operationId, { scope: request.scope, release: lease, kept: false });
+    }
+    const common = {
+      port: staging,
+      operationId: request.operationId,
+      decode: dependencies.decode,
+      ...measuring,
+      target: request.target,
+      signal: abort.signal,
+      onProgress: (progress: ImportStagingProgress): void => {
+        answer({ id: request.id, progress });
+      },
+    };
+    let staged: StagedImport;
+    if (linked !== undefined && stageLinked !== undefined) {
+      staged = await stageLinked({ ...common, request: linked, policy: dependencies.policy });
+    } else if (plan === undefined) {
+      throw new Error('Nothing is planned to stage.');
+    } else {
+      staged = await stageImport({ ...common, plan });
+    }
+    answer({
+      id: request.id,
+      result: {
+        files: staged.entries.length,
+        bytes: staged.bytes,
+        inPlace: staged.inPlace !== undefined,
+        target: staged.target ?? request.target,
+      } satisfies ImportStaged,
+    });
+  };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
       case 'plan': {
@@ -530,36 +617,7 @@ export const serveImportChannel = (
         return;
       }
       case 'stage': {
-        if (plan === undefined) {
-          throw new Error('Nothing is planned to stage.');
-        }
-        const staging = await dependencies.importStaging(request.scope);
-        if (!owned.has(request.operationId)) {
-          const { operationId } = request;
-          const lease = await holdLease(operationId, async () => touchStagedImport(staging, operationId));
-          owned.set(operationId, { scope: request.scope, release: lease, kept: false });
-        }
-        const staged = await stageImport({
-          port: staging,
-          operationId: request.operationId,
-          plan,
-          decode: dependencies.decode,
-          ...measuring,
-          target: request.target,
-          signal: abort.signal,
-          onProgress: (progress) => {
-            answer({ id: request.id, progress });
-          },
-        });
-        answer({
-          id: request.id,
-          result: {
-            files: staged.entries.length,
-            bytes: staged.bytes,
-            inPlace: staged.inPlace !== undefined,
-            target: staged.target ?? request.target,
-          } satisfies ImportStaged,
-        });
+        await stage(request);
         return;
       }
       case 'handOff': {
@@ -649,7 +707,17 @@ export const serveImportChannel = (
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const reason = isImportRefusal(error) ? (error as { reason?: ImportRefusalReason }).reason : undefined;
-        answer({ id: request.id, error: { message, ...(reason === undefined ? {} : { reason }) } });
+        /* A linked import's revisions refusal keeps its code, so the review can say which (a taken branch, a moved one). */
+        const code =
+          error instanceof Error &&
+          error.name === 'RevisionPortError' &&
+          typeof (error as { code?: unknown }).code === 'string'
+            ? (error as { code: string }).code
+            : undefined;
+        answer({
+          id: request.id,
+          error: { message, ...(reason === undefined ? {} : { reason }), ...(code === undefined ? {} : { code }) },
+        });
       }
     })();
     if (tracked) {
@@ -695,6 +763,8 @@ export const createFromStagedImport = async <Location, Created>(
     create: (staging: Readonly<{ operationId: string; providerBasePath: string }>) => Promise<Created>;
     owns: (operationId: string) => Promise<boolean>;
     onProgress?: (progress: ImportStagingProgress) => void;
+    /** A linked repository the worker fetches and stages instead of the session's plan. */
+    linked?: LinkedImportRequest;
   }>,
 ): Promise<Created> => {
   const { session, target, operationId } = input;
@@ -704,6 +774,7 @@ export const createFromStagedImport = async <Location, Created>(
     staged = await session.stage(operationId, target.scope, {
       target: target.providerBasePath,
       ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
+      ...(input.linked === undefined ? {} : { linked: input.linked }),
     });
     await session.handOff(operationId);
   } catch (error) {
@@ -758,7 +829,7 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     if (error === undefined) {
       held.call.resolve(result);
     } else {
-      held.call.reject(new ImportChannelError(error.message, error.reason));
+      held.call.reject(new ImportChannelError(error.message, error.reason, error.code));
     }
   });
   port.start();
@@ -809,8 +880,11 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
         signal.removeEventListener('abort', cancel);
       }
     },
-    stage: async (operationId, scope, { target, onProgress }) =>
-      ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress === undefined ? {} : { onProgress }),
+    stage: async (operationId, scope, { target, onProgress, linked }) =>
+      ask<ImportStaged>(
+        { type: 'stage', operationId, scope, target, ...(linked === undefined ? {} : { linked }) },
+        onProgress === undefined ? {} : { onProgress },
+      ),
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),
     release: async (operationId) => ask<undefined>({ type: 'release', operationId }),
     preview: async (paths, maximumBytes) =>

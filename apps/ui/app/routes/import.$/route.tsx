@@ -198,7 +198,10 @@ const linkedImportRefusal = (
     };
   }
   const sourceBranch = selection.branch.name;
-  if (!(error instanceof RevisionPortError) || error.code !== 'REMOTE_REF_CONFLICT') {
+  /* The worker fetches a linked import, so its refusal arrives over the import channel with its code. */
+  const code =
+    error instanceof RevisionPortError ? error.code : error instanceof ImportChannelError ? error.code : undefined;
+  if (!(error instanceof Error) || code !== 'REMOTE_REF_CONFLICT') {
     return undefined;
   }
   /* Another branch already holds the chosen name; the reviewed branch itself moving is a change, not a taken name. */
@@ -810,11 +813,28 @@ export default function ImportRoute(): React.JSX.Element {
             : serializeProjectManifest(projectToManifest(projectData)),
           mainFile: linkedMainFile,
         });
-        const created = await projectManager.createProject({
-          id: projectId,
-          project: projectData,
-          files: prepared.files,
-          chat: false,
+        /* The worker fetches the branch into the staging and stages its tree; the page holds none of it (D12, I6). */
+        const target = await projectManager.prepareImportStaging(projectData.name);
+        const created = await createFromStagedImport({
+          session: await importSession(),
+          target,
+          operationId: generatePrefixedId(idPrefix.request),
+          owns: projectManager.ownsImportStaging,
+          linked: prepared.request,
+          create: async (staging) =>
+            projectManager.createProject({
+              id: projectId,
+              project: projectData,
+              files: {},
+              chat: false,
+              location: target.location,
+              staging: {
+                ...staging,
+                carriesWorkbenchLayout: linkedSelection.files.some(
+                  ({ path: listed }) => listed === workbenchLayoutPath,
+                ),
+              },
+            }),
         });
         githubProjectBinding.set(created.id, {
           connectionId: linkedSelection.connection.id,
@@ -834,6 +854,7 @@ export default function ImportRoute(): React.JSX.Element {
       setLinkedBusy(false);
     }
   }, [
+    importSession,
     linkedMainFile,
     linkedSelection,
     linkedSyncChats,

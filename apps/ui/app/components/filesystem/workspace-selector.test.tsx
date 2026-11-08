@@ -57,6 +57,13 @@ const renderPicker = (
   );
 };
 
+const renderPickerWithResult = (state: CapableReadyState): ReturnType<typeof render> =>
+  render(
+    <TooltipProvider>
+      <WorkspaceSelector state={state} variant='toolbar' />
+    </TooltipProvider>,
+  );
+
 beforeAll(() => {
   globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -68,22 +75,66 @@ describe('WorkspaceSelector', () => {
     expect(screen.queryByText('Create in')).not.toBeInTheDocument();
   });
 
-  it.each(['toolbar', 'field'] as const)('renders a disabled %s placeholder while capable state loads', (variant) => {
-    render(
-      <WorkspaceSelector
-        state={{
-          phase: 'loading',
-          hasWebAccessCapability: true,
-          shouldShowPicker: true,
-          options: [],
-          canCreate: false,
-        }}
-        variant={variant}
-      />,
-    );
-    const trigger = screen.getByRole('button', { name: 'Loading project locations' });
-    expect(trigger).toBeDisabled();
-    expect(trigger.querySelector('svg')).toHaveClass('size-3.5');
+  const loadingState: ProjectCreationLocationState = {
+    phase: 'loading',
+    hasWebAccessCapability: true,
+    shouldShowPicker: true,
+    options: [],
+    canCreate: false,
+  };
+
+  /* R8: while the locations load the chip already reads the remembered location, with its own glyph and
+   * finish, so arriving data changes neither its text nor its width. It is inert until then. */
+  it.each(['toolbar', 'field'] as const)(
+    'draws the remembered %s chip, inert, while capable state loads',
+    (variant) => {
+      globalThis.localStorage.clear();
+      const { container, unmount } = render(<WorkspaceSelector state={loadingState} variant={variant} />);
+      expect(screen.queryByText('Loading locations…')).not.toBeInTheDocument();
+      const pending = container.querySelector('button')!;
+      expect(pending).toHaveTextContent('Home');
+      expect(pending.closest('[inert]')).not.toBeNull();
+      const pendingMarkup = pending.outerHTML;
+      unmount();
+
+      render(
+        <TooltipProvider>
+          <WorkspaceSelector state={readyState()} variant={variant} />
+        </TooltipProvider>,
+      );
+      const ready = screen.getByRole('button', { name: 'Create in Home' });
+      /* The same element, apart from the popover wiring the ready chip gains. */
+      const settled = ready.cloneNode(true) as HTMLElement;
+      const pendingButton = document.createElement('div');
+      pendingButton.innerHTML = pendingMarkup;
+      delete (pendingButton.firstElementChild as HTMLElement).dataset['slot'];
+      for (const attribute of ['aria-haspopup', 'aria-expanded', 'aria-controls', 'data-state', 'data-slot']) {
+        settled.removeAttribute(attribute);
+      }
+      expect(settled.outerHTML).toBe(pendingButton.innerHTML);
+    },
+  );
+
+  it('remembers the shown location and draws it on the next load', async () => {
+    globalThis.localStorage.clear();
+    const workshop = readyState({
+      value: { kind: 'workspace', workspaceId: 'wsp_workshop' },
+      selectedOption: {
+        location: { kind: 'workspace', workspaceId: 'wsp_workshop' },
+        status: 'connected',
+        label: 'Workshop',
+        detail: 'on your disk',
+      },
+    });
+    const { unmount } = renderPickerWithResult(workshop);
+    expect(screen.getByRole('button', { name: 'Create in Workshop' })).toBeInTheDocument();
+    unmount();
+
+    const { container } = render(<WorkspaceSelector state={loadingState} variant='toolbar' />);
+    await waitFor(() => {
+      expect(container.querySelector('button')).toHaveTextContent('Workshop');
+    });
+    globalThis.localStorage.clear();
   });
 
   it('matches the composer’s ghost pill and explains the storage choice', async () => {

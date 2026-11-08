@@ -65,6 +65,7 @@ import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-t
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
 import { createRevisionCompute } from '#machines/revision-compute.js';
+import { linkedImportPort, stageLinkedImport } from '#machines/import-linked.js';
 import { importConnectMessageType, serveImportChannel } from '#machines/import-staging.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
@@ -769,6 +770,18 @@ self.addEventListener(
         /* Each written file's one hash, from its read-back, on the compute worker (EQ6, I2). */
         measure: async (bytes, expectedSize) => revisionCompute.measureImportBytes(bytes, expectedSize),
         policy: tauPathPolicy,
+        /* A linked repository is fetched here, into the staging, by the revisions authority: `.git` never reaches the page (I6). */
+        stageLinked: async (input) =>
+          stageLinkedImport({
+            ...input,
+            revisions: (gitDirectory) =>
+              linkedImportPort({
+                provider: input.port.provider,
+                gitDirectory,
+                request: input.request,
+                compute: revisionCompute,
+              }),
+          }),
       });
       return;
     }

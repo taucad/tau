@@ -8,6 +8,7 @@ import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { toast } from '#components/ui/sonner.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
@@ -475,7 +476,8 @@ describe('ProjectCommandPaletteItems', () => {
     });
     /* `''` is this provider's root. An absolute spelling is a foreign key to
      * the workspace-relative facade and never reaches the authority. */
-    expect(getZippedDirectory).toHaveBeenCalledWith('', { versionedOnly: true });
+    /* The archive's own ceiling is gone; the download passes the one this browser can hold. */
+    expect(getZippedDirectory).toHaveBeenCalledWith('', { versionedOnly: true, ...zipDownloadCeiling() });
     expect(downloadBlob.mock.calls[0]?.[1]).toBe('test-project.zip');
   });
 

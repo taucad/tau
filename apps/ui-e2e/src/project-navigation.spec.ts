@@ -533,7 +533,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
   await target.expectVisible(chatTrigger, 60_000);
 
   const searchButton = selectors.getByRole('button', { name: 'Search', exact: true });
-  const newProjectButton = selectors.getByRole('link', { name: /New Project/u });
+  const newProjectButton = selectors.getByRole('link', { name: /New project/u });
   await target.expectVisible(searchButton);
   await target.expectVisible(newProjectButton);
   const headerControlMetrics = await target.evaluate(() => {
@@ -541,7 +541,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
       button.textContent.trim().startsWith('Search'),
     );
     const newProject = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')].find((button) =>
-      button.textContent.includes('New Project'),
+      button.textContent.includes('New project'),
     );
     /* `ProjectsLabel` appends a `N live` count beside the word whenever a
      * project is open (`project-navigation.tsx:427-430`), so the label reads

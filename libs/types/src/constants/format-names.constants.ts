@@ -11,11 +11,6 @@ type FormatConfiguration = {
  * @public
  */
 export const formatConfigurations = {
-  '3dm': {
-    name: '3D Manufacturing (3DM)',
-    description:
-      'Developed by Robert McNeel & Associates as the native format of its NURBS modeler, facilitating the exchange of NURBS geometry in industrial design and architecture.',
-  },
   '3ds': {
     name: '3D Studio (3DS)',
     description:

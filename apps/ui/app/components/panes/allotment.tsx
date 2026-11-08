@@ -11,6 +11,16 @@ type PaneProps = ComponentProps<typeof NativeAllotment.Pane>;
 
 type AllotmentProperties = ComponentProps<typeof NativeAllotment> & {
   readonly paneLabels: readonly string[];
+  /**
+   * Wrap each pane's content in its own Suspense boundary with a spinner fallback, so a
+   * pane that suspends on the client keeps the splitter mounted. Defaults to `true`.
+   *
+   * A layout whose panes never suspend passes `false`. Streaming server rendering
+   * outlines any large boundary and paints its fallback before the content, even when
+   * nothing suspended, so a boundary in the application shell put a spinner in the
+   * first paint (home page loading audit, Finding 8).
+   */
+  readonly hasPaneSuspense?: boolean;
 };
 
 /** Shared outer-pane resize owner. The native engine still owns dragging, reset and constraints. */
@@ -19,6 +29,7 @@ function AllotmentLayout({
   className,
   children,
   paneLabels,
+  hasPaneSuspense = true,
   onDragEnd,
   ...properties
 }: AllotmentProperties): React.JSX.Element {
@@ -72,7 +83,7 @@ function AllotmentLayout({
         onDragEnd={onDragEnd}
       >
         {Children.map(children, (child): React.ReactNode => {
-          if (!isValidElement<PaneProps>(child)) {
+          if (!hasPaneSuspense || !isValidElement<PaneProps>(child)) {
             return child;
           }
           // Keep the splitter mounted when pane content suspends. Allotment cannot

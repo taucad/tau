@@ -2,7 +2,7 @@ import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import --
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
-import { assertRefundKey, runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
+import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
@@ -161,11 +161,6 @@ async function main(): Promise<void> {
         }
         // Outside the fixture, the deployment's write key performs mutations only where it collects.
         const writeKey = process.env.STRIPE_SECRET_KEY;
-        // A refund goes out only under the operator-held Refunds-Write key; Stripe refuses the create key.
-        const refundKey = process.env.STRIPE_REFUND_SECRET_KEY;
-        if (refundKey) {
-          assertRefundKey({ refundKey, livemode: mode === 'true', createKey: writeKey, readKey: secretKey });
-        }
         const collection = protectedKey
           ? null
           : resolveBillingCollection({
@@ -189,7 +184,6 @@ async function main(): Promise<void> {
                 ...(writeKey && collection
                   ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }) }
                   : {}),
-                ...(refundKey ? { refundStripe: createBillingStripeClient({ secretKey: refundKey, fixtureUrl }) } : {}),
               }),
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
@@ -303,7 +297,7 @@ async function main(): Promise<void> {
         const database = { database: drizzle(client, { schema }) };
         const policy = new BillingPolicyService(database);
         const ledger = new CreditLedgerService(database, policy);
-        const cash = new BillingCashService(database, sourceStripe, sourceStripe, ledger, {
+        const cash = new BillingCashService(database, sourceStripe, ledger, {
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
           livemode: livemode === 'true',
@@ -494,7 +488,7 @@ async function main(): Promise<void> {
         const database = { database: drizzle(client, { schema }) };
         const policy = new BillingPolicyService(database);
         const ledger = new CreditLedgerService(database, policy);
-        const cash = new BillingCashService(database, sourceStripe, sourceStripe, ledger, {
+        const cash = new BillingCashService(database, sourceStripe, ledger, {
           environment: billingEnvironment,
           stripeAccountId,
           livemode: livemode === 'true',
@@ -656,6 +650,11 @@ async function main(): Promise<void> {
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
+            );
+            // Plan credit expires once every subscription on the account has ended (terms §3.3).
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.plan_expiry', async () =>
+              ledger.expireEndedPlanCredits({ environment: billingEnvironment, limit }),
             );
             // Drains the notice outbox: renewal dunning and automatic-reload notices. A send failure leaves
             // the row pending with its own backoff rather than failing the pass; its last failure alerts.

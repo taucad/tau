@@ -1,6 +1,6 @@
-import { archiveByteCeiling, archiveTooLargeCode } from '@taucad/filesystem/content-ops';
-import type { FileProvenance, FileProvenanceSource } from '@taucad/types';
+import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
 import { formatBytes } from '#lib/format-bytes.js';
+import type { FileProvenance, FileProvenanceSource } from '@taucad/types';
 
 export type FileTreeDownloadPolicy =
   | { readonly allowed: true }
@@ -81,17 +81,33 @@ export function createFileTreeDownloadError(options: {
  *
  * It crosses the bridge wire as a bare `Error` carrying `code`, and a file-tree
  * download wraps that as the `cause` of a `zip-generation-failed`; both spell
- * the ceiling as a raw byte count, which is not a message for a person.
+ * the ceiling as a raw byte count, which is not a message for a person. The
+ * archive streams and has no ceiling of its own: this answers the download's,
+ * which the caller passes as it asked for it.
  */
 const isArchiveTooLarge = (error: unknown): boolean =>
   error instanceof Error &&
   ((error as { code?: unknown }).code === archiveTooLargeCode || isArchiveTooLarge(error.cause));
 
-const archiveTooLargeMessage = `This folder is larger than the ${formatBytes(archiveByteCeiling)} a ZIP download can hold. Download a smaller folder instead.`;
+/**
+ * The refusal a person reads, naming the ceiling the archive was refused at.
+ *
+ * @param maxBytes - The ceiling the download asked for, when the caller knows it.
+ */
+export const archiveTooLargeMessage = (maxBytes?: number): string =>
+  maxBytes === undefined
+    ? 'This folder is larger than a ZIP download can hold in this browser. Download a smaller folder instead.'
+    : `This folder is larger than the ${formatBytes(maxBytes)} a ZIP download can hold in this browser. Download a smaller folder instead.`;
 
-export function getFileTreeDownloadErrorMessage(error: unknown): string {
+/**
+ * The message a download's toast shows for a failure.
+ *
+ * @param error   - The failure, at whatever depth the archive's refusal arrives.
+ * @param ceiling - The `{ maxBytes }` the download asked for (`zipDownloadCeiling()`).
+ */
+export function getFileTreeDownloadErrorMessage(error: unknown, ceiling?: Readonly<{ maxBytes?: number }>): string {
   if (isArchiveTooLarge(error)) {
-    return archiveTooLargeMessage;
+    return archiveTooLargeMessage(ceiling?.maxBytes);
   }
   if (error instanceof FileTreeDownloadError) {
     return error.message;

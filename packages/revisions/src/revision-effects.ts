@@ -56,7 +56,7 @@ import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
-import { createTreeIdMemo } from '#tree-id-memo.js';
+import { createTreeIdMemo, recordBlobOid } from '#tree-id-memo.js';
 import type { TreeIdMemo } from '#tree-id-memo.js';
 import {
   conflictLabels,
@@ -110,7 +110,8 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { publishMachine } from '#publish.machine.js';
@@ -218,6 +219,20 @@ import type {
 import type { TurnAttemptKey, TurnCutOf, TurnLease as TurnLeaseRecord } from '#turn.types.js';
 
 import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
+import { coveredByIgnoreListing } from '#git-ignore.js';
+
+/** The head a listing was read under: the paths it tracks are never ignored. */
+type TrackedHead = Readonly<{ revisionId: string; tree: ImmutableRevisionTree }>;
+
+/** One checkout's own Git ignore rules, as its port answers them. */
+type CaptureIgnores = Readonly<{
+  /** What the rules read besides `.gitignore` files; `undefined` where the port cannot say, so every capture lists them whole. */
+  context: string | undefined;
+  /** The ignored paths, all of them or only those covering `paths`. */
+  list: (paths?: readonly string[]) => Promise<readonly string[] | undefined>;
+  /** The checkout's head now, whose tracked paths the answers depend on. */
+  head: () => Promise<TrackedHead | undefined>;
+}>;
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- Preserve the published revision-effects contract names. */
 export type {
@@ -962,11 +977,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     /**
      * Where the checkout's index stood when `last` was observed (S10): its
      * epoch and generation, read before the capture began, the clock reading
-     * its racy guard keys on (EQ7) and the ignored paths it left out. A capture
-     * whose ignored paths and inherited modes agree starts from `last` and
-     * reads only what the D5 compare and the index changed and removed since.
+     * its racy guard keys on (EQ7). A capture whose ignore rules and
+     * inherited modes agree starts from `last` and reads only what the D5
+     * compare and the index changed and removed since.
      */
-    cursor: Readonly<{ epoch: string; generation: number; observedAt: number; ignored: string }> | undefined;
+    cursor: Readonly<{ epoch: string; generation: number; observedAt: number }> | undefined;
+    /**
+     * The ignored paths `last` left out, and what they were read under: the
+     * ignore context, or the listing itself where the port gives no context.
+     * While the context holds and no `.gitignore` changed, a capture asks only
+     * about the paths it reads and keeps the rest of this listing.
+     */
+    ignore: Readonly<{ key: string; listing: ReadonlySet<string>; head: TrackedHead | undefined }> | undefined;
   };
   const checkoutMemos = new Map<string, CheckoutMemos>();
   const memosOf = (checkoutId: string): CheckoutMemos => {
@@ -978,6 +1000,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       basis: undefined,
       comparing: undefined,
       cursor: undefined,
+      ignore: undefined,
     };
     checkoutMemos.set(checkoutId, memos);
     return memos;
@@ -1184,12 +1207,47 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * one captured from disk, and the I5 gate compares a cut against a recorded
    * head — so the cut runs the same host-neutral clean step the writer does.
    *
+   * The writer keeps the representation of every entry unchanged from the
+   * cut's first parent (rule 13), so the prediction reads the same parent's
+   * listing — blob ids only — and folds case exactly where the writer does.
+   *
    * @param tree - The captured tree.
+   * @param parent - The revision the cut would follow: the checkout's head.
    * @returns The tree as the store will hold it.
    */
-  const recordedTree = async (tree: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+  const recordedTree = async (
+    tree: ImmutableRevisionTree,
+    parent: string | undefined,
+  ): Promise<ImmutableRevisionTree> => {
     const descriptor = await describePort();
-    return descriptor.largeObjects ? cleanLargeObjects(tree).tree : tree;
+    if (!descriptor.largeObjects) {
+      return tree;
+    }
+    return cleanLargeObjects(tree, {
+      basis: parent === undefined ? undefined : await largeObjectBasisFor(parent),
+      ignoreCase: descriptor.ignoreCase === true,
+    }).tree;
+  };
+  /* ponytail: a handful of heads are live at once; one entry per head keeps the clean step's per-basis cache warm. */
+  const largeObjectBases = new Map<string, Promise<LargeObjectBasis | undefined>>();
+  const largeObjectBasisFor = async (head: string): Promise<LargeObjectBasis | undefined> => {
+    let held = largeObjectBases.get(head);
+    if (held === undefined) {
+      held = (async () => {
+        try {
+          const listing = await port.listTree?.(revisionId(head));
+          return listing === undefined ? undefined : largeObjectBasisOf(await formatOf(), listing);
+        } catch (error) {
+          largeObjectBases.delete(head);
+          throw error;
+        }
+      })();
+      largeObjectBases.set(head, held);
+      if (largeObjectBases.size > 8) {
+        largeObjectBases.delete(largeObjectBases.keys().next().value!);
+      }
+    }
+    return held;
   };
 
   /*
@@ -1385,6 +1443,37 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @param captureOptions - This checkout's memos, whether reuse is safe, and the paths written since `last`.
    * @returns The complete versioned tree.
    */
+  /*
+   * D12: the first revision after an import is built from the blob ids its
+   * record holds, measured once from the read-back of what it wrote (EQ6),
+   * so those files are not hashed a second time (I2). Only the record's own
+   * facts are taken (`recorded: 'import'`), asked for after the read, for
+   * bytes of the size the walk listed, and the index confirms each with a
+   * provider stat at exactly the recorded size and mtime: a change it has not
+   * observed yet is hashed. Every other file is hashed by the memo as before,
+   * never read again here.
+   */
+  const recordedBlobOids = async (
+    rooted: RevisionFileSystem,
+    read: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+    stats: readonly FileStatEntry[] | undefined,
+  ): Promise<void> => {
+    if (rooted.facts === undefined || stats === undefined || read.size === 0 || (await formatOf()) !== 'sha1') {
+      return;
+    }
+    const sizes = new Map(stats.map(({ path, size }) => [path, size] as const));
+    const paths = [...read.keys()].filter((path) => sizes.get(path) === read.get(path)?.byteLength);
+    const facts = await rooted
+      .facts(paths, { digests: ['blobOid'], measure: false, recorded: 'import' })
+      .catch(() => undefined);
+    for (const [path, { blobOid }] of facts ?? []) {
+      const content = read.get(path);
+      if (content !== undefined && blobOid !== undefined) {
+        recordBlobOid(content, 'sha1', blobOid);
+      }
+    }
+  };
+
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
     basisOf: () => Promise<ImmutableRevisionTree | undefined>,
@@ -1392,21 +1481,124 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       memos: CheckoutMemos;
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      /** Paths the person's own Git ignores, in an adopted repository. */
-      ignored?: ReadonlySet<string> | undefined;
+      /** The checkout's own Git ignore rules, as its port answers them. */
+      ignores?: CaptureIgnores | undefined;
       /** A comparison a newer write has made stale: the walk stops rather than finish for nobody. */
       signal?: AbortSignal | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> => {
-    const { memos, bypassMemo, changed, ignored, signal } = captureOptions;
+    const { memos, bypassMemo, changed, ignores, signal } = captureOptions;
     const started = ++captureSequence;
-    /* Git lists an ignored directory once, with its trailing `/`; capture never
-     * descends into an excluded directory, so the directory is enough. */
+    /* The ignored paths this capture leaves out, and what they were read under (`CheckoutMemos.ignore`). */
+    let ignored: ReadonlySet<string> = new Set();
+    let ignoreKey = ignores === undefined ? '' : undefined;
+    let listedWhole = ignores === undefined;
+    let headNow: TrackedHead | undefined;
+    /* Git lists an ignored directory with its trailing `/`. A walk never
+     * descends into one, but the index names a changed path by itself, so a
+     * path under a listed directory is left out too. */
     const exclude = (path: string): boolean =>
-      !policy.classify(path).versioned || ignored?.has(path) === true || ignored?.has(`${path}/`) === true;
-    const ignoredKey = ignored === undefined ? '' : [...ignored].toSorted().join('\n');
+      !policy.classify(path).versioned || coveredByIgnoreListing(ignored, path);
+    const contextKey = ignores?.context === undefined ? undefined : `context:${ignores.context}`;
+    /* The whole listing: what a walk leaves out, and where the captures after it start. */
+    const listWhole = async (): Promise<void> => {
+      if (listedWhole) {
+        return;
+      }
+      headNow = await ignores?.head();
+      const listing = new Set((await ignores?.list()) ?? []);
+      ignored = listing;
+      /* Without a context, the listing is its own key; only an entry that changes what is captured moves
+       * it, so a new generated output the registry never versions still lets the next capture start from `last`. */
+      ignoreKey =
+        contextKey ??
+        `listing:${[...listing]
+          .filter((path) => path.endsWith('/') || policy.classify(path).versioned)
+          .toSorted()
+          .join('\n')}`;
+      listedWhole = true;
+    };
+    /* The listing `last` was captured under, while it still speaks for the files. */
+    const held = contextKey !== undefined && memos.ignore?.key === contextKey ? memos.ignore.listing : undefined;
+    /*
+     * The paths whose tracking moved since that listing in a way `last` does
+     * not already account for: one the old head tracked that `last` holds and
+     * the new head does not (an outside `git rm --cached` and commit, its file
+     * untouched, may now be ignored), and one the new head tracks that `last`
+     * left out (never ignored now). A cut Tau made moves neither, so its next
+     * capture asks nothing more.
+     */
+    const trackingMoved = async (from: ImmutableRevisionTree): Promise<readonly string[]> => {
+      if (ignores === undefined || held === undefined) {
+        return [];
+      }
+      headNow = await ignores.head();
+      const before = memos.ignore?.head;
+      if (before?.revisionId === headNow?.revisionId) {
+        return [];
+      }
+      const moved: string[] = [];
+      for (const { path } of before?.tree.entries() ?? []) {
+        if (headNow?.tree.has(path) !== true && from.has(path)) {
+          moved.push(path);
+        }
+      }
+      for (const { path } of headNow?.tree.entries() ?? []) {
+        if (before?.tree.has(path) !== true && !from.has(path)) {
+          moved.push(path);
+        }
+      }
+      return moved;
+    };
+    /*
+     * Keep the held listing current for the paths this capture reads: each is
+     * asked again (a head move can track a file inside a directory Git listed
+     * whole, so a listed directory above it is asked again too), and a removed
+     * one is forgotten. A changed `.gitignore`, ignore context or bare listing
+     * changes what every path answers, so it walks instead: `false`.
+     */
+    const askAgain = async (paths: Iterable<string>, removed: ReadonlySet<string>): Promise<boolean> => {
+      if (ignores === undefined) {
+        return true;
+      }
+      if (held === undefined || contextKey === undefined) {
+        /* Another context (an `info/exclude` or `core.ignoreCase` change, which names no file), or a bare
+         * port's listing that moved, changes what paths no one named answer: only a walk takes them. */
+        await listWhole();
+        return memos.ignore?.key === ignoreKey;
+      }
+      const named = [...paths];
+      if (named.some((path) => /(?:^|\/)\.gitignore$/iu.test(path))) {
+        return false;
+      }
+      const listing = new Set(held);
+      const asked = named.filter((path) => !removed.has(path) && policy.classify(path).versioned);
+      for (const path of named) {
+        listing.delete(path);
+        listing.delete(`${path}/`);
+      }
+      for (const path of asked) {
+        for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+          listing.delete(path.slice(0, at + 1));
+        }
+      }
+      let answer: readonly string[] | undefined;
+      try {
+        answer = asked.length === 0 ? [] : await ignores.list(asked);
+      } catch {
+        /* A port that cannot answer for the paths says nothing about them: the capture walks instead. */
+        return false;
+      }
+      for (const entry of answer ?? []) {
+        listing.add(entry);
+      }
+      ignored = listing;
+      ignoreKey = contextKey;
+      return true;
+    };
     let cursor: CheckoutMemos['cursor'];
     const walk = async (): Promise<ImmutableRevisionTree> => {
+      await listWhole();
       /* Where the index stands, read before anything else, so a write this walk races is named next time.
        * A generation past any it issued answers `rescan` at once, with where it stands. */
       const at = await rooted.changedSince?.(Number.MAX_SAFE_INTEGER).catch(() => undefined);
@@ -1425,14 +1617,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       cursor =
         at === undefined || stats === undefined
           ? undefined
-          : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
-      return captureRevisionTree(rooted, {
+          : { epoch: at.epoch, generation: at.generation, observedAt };
+      const read = new Map<string, Uint8Array<ArrayBuffer>>();
+      const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
         reuse: bypassMemo ? undefined : memoOptions.reuse,
-        onRead: memoOptions.onRead,
+        onRead: (path, content) => {
+          read.set(path, content);
+          memoOptions.onRead?.(path, content);
+        },
         ...(signal === undefined ? {} : { signal }),
       });
+      await recordedBlobOids(rooted, read, stats);
+      return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
      * whenever it has them; the index answers every other capture that has a `last` to start from. */
@@ -1444,14 +1642,29 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         bypassMemo ||
         last === undefined ||
         previous === undefined ||
-        previous.ignored !== ignoredKey ||
         compareIndex === undefined ||
         changedSince === undefined ||
         statTree === undefined
       ) {
         return walk();
       }
+      if (ignores !== undefined) {
+        if (contextKey === undefined) {
+          /* A port with no context is listed whole each time, and a capture under another listing walks. */
+          await listWhole();
+          if (memos.ignore?.key !== ignoreKey) {
+            return walk();
+          }
+        } else if (held === undefined) {
+          return walk();
+        } else {
+          ignored = held;
+        }
+      }
       const admits = (path: string): boolean => !exclude(path);
+      /* Every change the registry versions is named, one under a directory Git listed whole too: a head
+       * move can track a file there, and only asking again tells. */
+      const versioned = (path: string): boolean => policy.classify(path).versioned;
       const observedAt = clock();
       let found: Readonly<{ changes: IndexChanges; racy: readonly string[]; stats: readonly FileStatEntry[] }>;
       try {
@@ -1461,7 +1674,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         signal?.throwIfAborted();
         const changes = await changedSince.call(rooted, previous.generation, {
           epoch: previous.epoch,
-          admits,
+          admits: versioned,
           ...(signal === undefined ? {} : { signal }),
         });
         signal?.throwIfAborted();
@@ -1491,6 +1704,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...stats
           .filter(({ mtimeMs }) => previous.observedAt - mtimeMs <= timestampGranularityMilliseconds)
           .map(({ path }) => path),
+        ...(await trackingMoved(last)),
       ]);
       const kept = last.entries().filter(({ path }) => !paths.has(path));
       if (getFileMode === undefined) {
@@ -1509,7 +1723,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         });
         signal?.throwIfAborted();
       }
-      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt, ignored: ignoredKey };
+      if (!(await askAgain(paths, new Set(changes.removed.map(({ path }) => path))))) {
+        return walk();
+      }
+      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt };
       return captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
@@ -1517,17 +1734,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(signal === undefined ? {} : { signal }),
       });
     };
-    const tree =
-      since === undefined || changed?.paths === undefined
-        ? await fromIndex()
-        : /* `last` carries the modes it inherited, and a moved head empties
+    /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
+    const fromFeed = async (from: ImmutableRevisionTree, named: readonly string[]): Promise<ImmutableRevisionTree> => {
+      const paths = [...new Set([...named, ...(await trackingMoved(from))])];
+      return (await askAgain(paths, new Set()))
+        ? /* `last` carries the modes it inherited, and a moved head empties
            * the paths, so it is still the head's (I6). */
-          await captureRevisionTree(rooted, {
+          captureRevisionTree(rooted, {
             exclude,
-            inheritedMode: (path) => since.mode(path),
-            changedSince: { tree: since, paths: changed.paths },
+            inheritedMode: (path) => from.mode(path),
+            changedSince: { tree: from, paths },
             ...(signal === undefined ? {} : { signal }),
-          });
+          })
+        : walk();
+    };
+    const tree =
+      since === undefined || changed?.paths === undefined ? await fromIndex() : await fromFeed(since, changed.paths);
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
       throw new RevisionPortError(
@@ -1540,6 +1762,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if ((options.completeChanges === true || cursor !== undefined) && started > memos.lastCapture) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
+      memos.ignore =
+        memos.last === undefined || ignoreKey === undefined
+          ? undefined
+          : { key: ignoreKey, listing: ignored, head: headNow };
       if (cursor !== undefined || since === undefined) {
         memos.cursor = memos.last === undefined ? undefined : cursor;
       }
@@ -1582,18 +1808,35 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const { modeBasis, bypassMemo, changed, signal } = captureOptions;
       const memos = memosOf(place.id);
-      const ignored = await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root);
+      const ignoreRoot = place.kind === 'live' ? undefined : place.root;
+      const ignores: CaptureIgnores | undefined =
+        port.ignoredPaths === undefined
+          ? undefined
+          : {
+              context: await port.ignoreContext?.(ignoreRoot),
+              list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
+              head: async () => {
+                const head = await headOf(place);
+                const tree = head === undefined ? undefined : await headBasis(place, memos);
+                return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
+              },
+            };
       return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
         memos,
         bypassMemo,
         signal,
         ...(changed === undefined ? {} : { changed }),
-        ...(ignored === undefined ? {} : { ignored: new Set(ignored) }),
+        ...(ignores === undefined ? {} : { ignores }),
       });
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
-    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree), await formatOf());
+    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());
+  /* The head a cut of this checkout would follow — asked only of a store that pointerises. */
+  const recordingParentOf = async (checkoutId: string): Promise<string | undefined> => {
+    const descriptor = await describePort();
+    return descriptor.largeObjects ? headOf(await placeOf(checkoutId)) : undefined;
+  };
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
@@ -1688,6 +1931,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     capture: async (place) => capture(place),
     withCheckoutFence,
     materializeTree,
+    /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
+    landsFromStore: async (place) =>
+      useFileSystem(place, async (rooted) => rooted.capabilities.largeObjectSources === true),
     report: options.onLargeObjects,
   });
   /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
@@ -1949,8 +2195,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const head = await headOf(await readPlaceOf(checkoutId));
     return head === undefined ? undefined : readEntryClosure(port, revisionId(head));
   };
-  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
-    adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
+  /* A host whose checkouts keep the file beside the store (D9, desktop) never swaps it for its pointer. */
+  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> => {
+    const descriptor = await describePort();
+    return adoption === undefined || descriptor.keepsLargeObjectFiles === true
+      ? { adopted: [], left: [] }
+      : adoption.adopt(await readPlaceOf(checkoutId));
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -2172,7 +2423,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const currentTreeId = await treeIdOf(current);
       if (
-        currentTreeId === revisionTreeId(await recordedTree(tree), await formatOf()) &&
+        currentTreeId === revisionTreeId(await recordedTree(tree, current ?? remoteHead), await formatOf()) &&
         (remoteHead === undefined || current === remoteHead)
       ) {
         return [{ name: evidenceRefName, status: 'upToDate', head: current }];

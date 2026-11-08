@@ -364,7 +364,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S12',
     title: 'Agent grep / glob over the project',
     model:
-      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread.",
+      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread. Fixture caveat (W12.1): every binary now starts with its format's real header (a text STEP replaced by a SolidWorks .sldprt), so the 512-byte NUL sniff judges each one binary; S12.binary-bytes turned green from that fixture change, not from a change to grep, and a real binary without a NUL in its head would still be read in full.",
     times: [
       { metric: 'grepDuration', limit: 2000, description: 'grep ≤ 2 s' },
       { metric: 'globDuration', limit: 200, description: 'glob ≤ 200 ms' },
@@ -406,12 +406,18 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S14',
     title: 'Export 500 MB project zip',
-    model: 'content-ops archive of the whole project.',
-    times: [
-      { metric: 'duration', limit: Number.POSITIVE_INFINITY, description: 'streams, ≤ 1.2× largest file resident' },
+    model:
+      "content-ops' streaming archive (archiveStream) of the whole imported project over the user-masked composed view the file manager archives, each file read by readFileStream and deflated as it streams, gathered into a Blob a batch at a time as archive() gathers it. residentPeak is the gathered batch plus the input pulled since the archive last gave bytes back, at its most; residentCeiling is 1.2× the largest file the archive read. archivedFiles, sourceBytes and archiveBytes are recorded for information.",
+    times: [{ metric: 'duration', limit: Number.POSITIVE_INFINITY, description: 'streams; no time target' }],
+    gates: [
+      {
+        id: 'S14.resident',
+        metric: 'residentPeak',
+        comparison: 'at-most',
+        limit: 'residentCeiling',
+        description: 'streams, ≤ 1.2× largest file resident',
+      },
     ],
-    gates: [],
-    pending: 'Owned by W12 (editor/export); not in the W0.1 runner set. The fixture and worker already support it.',
   },
   {
     id: 'S15',
@@ -474,23 +480,36 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S19',
     title: 'Grep while saving and reading',
     model:
-      'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax and readsDuringGrep (reads completed before grep and glob return) are recorded for information and never gated.',
+      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return) and authorityCalls (what the port served) are recorded for information and never gated; authorityReads (the port's reads of fixture files; the concurrent save's own file, which grep lists or not by when the save lands, is left out so the count does not move between runs) is gated by S19.compute-worker.",
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },
     ],
     gates: [
       {
+        id: 'S19.off-authority',
+        metric: 'authoritySearchCalls',
+        comparison: 'equals',
+        limit: 0,
+        description: 'grep and glob run off the authority (grep/glob calls the authority serves = 0)',
+      },
+      {
+        /* The charter's own wording: grep runs where the authority serves none of its
+         * reads. Off the authority, the reads still cross to it, so this stays red. */
         id: 'S19.compute-worker',
         metric: 'authorityReads',
         comparison: 'equals',
         limit: 0,
         description: 'grep runs on the compute worker (authority reads during grep = 0)',
-        qualifier: {
-          kind: 'model-bound',
-          reason:
-            "The runner calls the grep handler on the authority's own thread, so its reads are the authority's by construction; it becomes real when W9 moves grep to the compute worker and the runner drives that path.",
-        },
+      },
+      {
+        /* S7 unchanged while grep runs, as a gate: the save waits behind the grep's
+         * reads on the authority's event loop. */
+        id: 'S19.save',
+        metric: 'saveLatency',
+        comparison: 'at-most',
+        limit: 100,
+        description: 'the save lands within S7 while grep runs (save latency ≤ 100 ms)',
       },
     ],
   },
@@ -613,6 +632,21 @@ const noWorse = ({ comparison, limit }: GateBound, value: number, atHead: number
   comparison === 'equals'
     ? value >= Math.min(atHead, limit) - Number.EPSILON && value <= Math.max(atHead, limit) + Number.EPSILON
     : value <= atHead + Number.EPSILON;
+
+/**
+ * Whether an authority read counts toward S19's `authorityReads`.
+ *
+ * Only the fixture's own files count. S19's concurrent save writes a file the
+ * fixture does not hold, and grep lists it or not by when the save lands, so
+ * counting it would move the count by one from run to run and fail a known-red
+ * gate that held.
+ *
+ * @param fixturePaths - The fixture plan's paths.
+ * @param path - The path the authority was asked to read.
+ * @returns True when the read is of a fixture file.
+ */
+export const countsAsFixtureRead = (fixturePaths: ReadonlyMap<string, unknown>, path: string): boolean =>
+  fixturePaths.has(path);
 
 /**
  * Whether a known-red gate has held or improved on its value at HEAD.

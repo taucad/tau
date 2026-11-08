@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -373,12 +374,14 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       enableAutoFocus?: boolean;
       enableMobileCollapse?: boolean;
       isFocused?: boolean;
+      earlyInput?: EarlyChatInput;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
     const element = (session: AcpSessionData): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
+          earlyInput={options.earlyInput}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
           enableMobileCollapse={options.enableMobileCollapse}
@@ -451,6 +454,52 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       });
     },
   );
+
+  /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The box keeps
+   * that outline until the editor has focus, so the swap never paints an unfocused border. */
+  it('should keep the focus outline across the handover from a focused native input', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    renderComposer('', codexSession, {
+      enableAutoFocus: true,
+      earlyInput: {
+        text: '',
+        edited: false,
+        focused: true,
+        focusUnclaimed: false,
+        start: 0,
+        end: 0,
+        direction: 'none',
+      },
+    });
+    const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+    expect(box).toHaveClass('focus-outline');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveFocus();
+    });
+    expect(box).not.toHaveClass('focus-outline');
+  });
+
+  it('should not draw a focus outline when the native input was not focused', () => {
+    renderComposer('', codexSession, {
+      earlyInput: {
+        text: '',
+        edited: false,
+        focused: false,
+        focusUnclaimed: true,
+        start: 0,
+        end: 0,
+        direction: 'none',
+      },
+    });
+    const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+    expect(box).not.toHaveClass('focus-outline');
+  });
 
   describe('enableMobileCollapse', () => {
     const composerBox = (): HTMLElement =>

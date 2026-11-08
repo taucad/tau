@@ -1,4 +1,4 @@
-import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
+import { chatComposerEditorTextClassName } from '#components/chat/chat-input-styles.js';
 import { memo } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
@@ -75,11 +75,8 @@ export const ChatEditor = memo(function ChatEditor({
         editor={editor}
         className={cn(
           tiptapTailwindOverrides,
-          'w-full min-h-6',
-          'px-3 pb-3',
-          chatInputTextClassName,
-          // Touch: 16px, since iOS zooms into any field under 16px on focus.
-          'pointer-coarse:text-base pointer-coarse:leading-6',
+          // Shared with Home's native stand-in, so the swap between them moves no text (R2).
+          chatComposerEditorTextClassName,
           isLoading && tiptapShimmerOverrides,
           className,
         )}

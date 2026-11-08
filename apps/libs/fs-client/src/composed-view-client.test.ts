@@ -365,6 +365,33 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
    * provider. Since W11 the authority has no per-path call to fall through to,
    * so a path another route owns is refused here instead of being walked raw.
    */
+  it("should serve a digested read in the view's own namespace, and refuse it where the view has none (D17)", async () => {
+    const { client, view } = await harness();
+    await expect(client.readFileWithDigest!(`${root}/main.ts`)).rejects.toMatchObject({ code: 'ENOTSUP' });
+    const digested = { data: new Uint8Array([1]), sha256: 'c'.repeat(64) };
+    view.readFileWithDigest = vi.fn().mockResolvedValue(digested);
+
+    await expect(client.readFileWithDigest!(`${root}/main.ts`)).resolves.toBe(digested);
+    expect(view.readFileWithDigest).toHaveBeenCalledWith('main.ts');
+  });
+
+  it('should hand a digest precondition to the view in its own namespace (D17)', async () => {
+    const { client, view } = await harness();
+    const expectedSha256 = 'd'.repeat(64);
+
+    await client.writeFileChecked({
+      path: `${root}/main.ts`,
+      data: 'x',
+      preconditions: [{ path: `${root}/main.ts`, expectedSha256 }],
+    });
+
+    expect(view.writeFileChecked).toHaveBeenCalledWith({
+      path: 'main.ts',
+      data: 'x',
+      preconditions: [{ path: 'main.ts', expectedSha256 }],
+    });
+  });
+
   it('should refuse a path another route owns at a Home root', async () => {
     const { client, view } = await harness(undefined, '/');
     const viewReadFile = vi.spyOn(view, 'readFile');

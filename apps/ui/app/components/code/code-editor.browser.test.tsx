@@ -760,6 +760,7 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
     import('#lib/typescript-language/create-typescript-extensions.js'),
   ]);
   const content = mock<FileContentService>();
+  content.addEditorSaveFlusher.mockReturnValue(() => undefined);
   const source = Array.from(
     { length: 80 },
     (_, index) => `const value${String(index)}: number = ${String(index)};`,

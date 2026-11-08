@@ -7,6 +7,7 @@ import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
 
 function fixture() {
   const content = mock<FileContentService>();
+  content.addEditorSaveFlusher.mockReturnValue(() => undefined);
   content.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode('old') });
   content.saveEditor.mockResolvedValue(undefined);
   content.peekOutcome.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('new') });

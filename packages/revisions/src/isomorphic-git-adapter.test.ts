@@ -6,7 +6,12 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
-import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
 import type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
 
 const encoder = new TextEncoder();
@@ -135,7 +140,7 @@ node_modules/
 # END Tau generated
 `;
 
-  it('should replace a stale generated block once and keep the hand-written lines', async () => {
+  it('should leave an existing ignore file as written and keep its ignores in the store (D16)', async () => {
     const { filesystem, written } = counting();
     await filesystem.writeFile(generatedIgnorePath, stale);
     written.length = 0;
@@ -143,8 +148,49 @@ node_modules/
 
     await port.init({ author });
 
-    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent('# mine\n*.log\n'));
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
+    /* Brand new, so the attributes file Tau's rule lives in is created beside it. */
+    expect(written).toStrictEqual([generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedGitattributesPath, 'utf8')).toBe(
+      generatedGitattributesContent(undefined),
+    );
+    expect(await filesystem.readFile('.git/info/exclude', 'utf8')).toBe(generatedIgnoreContent(undefined));
+  });
+
+  it('should create both setup files for a brand-new project', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+
+    await port.init({ author });
+
     expect(written).toStrictEqual([generatedIgnorePath, generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent(undefined));
+  });
+
+  it('should give a project an older build created its attributes file, and nothing else (DEF-W22-1)', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author, createSetupFiles: false });
+    await filesystem.writeFile(generatedIgnorePath, stale);
+    written.length = 0;
+
+    await port.init({ author });
+
+    expect(written).toStrictEqual([generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
+  });
+
+  it('should write neither file into a store whose files carry no Tau block', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author, createSetupFiles: false });
+    await filesystem.writeFile(generatedIgnorePath, '# mine\n*.log\n');
+    written.length = 0;
+
+    await port.init({ author });
+
+    expect(written).toStrictEqual([]);
+    expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
   });
 
   it('should write nothing when the project is already current', async () => {
@@ -542,6 +588,8 @@ describe('reading a tree with large objects', () => {
   ]);
   const partTree = (): ImmutableRevisionTree =>
     new ImmutableRevisionTree([
+      /* Tau's block names the family, so the parts are pointers (D16). */
+      [generatedGitattributesPath, encoder.encode(generatedGitattributesContent(undefined))],
       ['main.scad', encoder.encode('cube(1);\n')],
       ...parts.map(([path, content]) => [path!, encoder.encode(content)] as const),
     ]);

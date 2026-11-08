@@ -97,6 +97,10 @@ let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
 /** Milliseconds Stripe takes to answer a Customer create, so concurrent first purchases overlap it. */
 let customerCreateLatency = 0;
+/** Stripe fails Checkout Session creates with a 500, as when a create never completes. */
+let checkoutCreateFails = false;
+/** The `return_url` of the last Billing Portal session create, as Stripe received it. */
+let latestPortalReturnUrl: string | undefined;
 /** Stripe refuses Customer searches with a 429, as it refuses part of a burst of them. */
 let customerSearchRateLimited = false;
 // Hosted Checkout saves a card without setting the customer's invoice default.
@@ -125,6 +129,31 @@ const server = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(body));
   };
+  if (request.method === 'POST' && url.pathname === '/v1/checkout/sessions' && checkoutCreateFails) {
+    request.resume();
+    response.writeHead(500, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'Checkout create failed', type: 'api_error' } }));
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v1/billing_portal/sessions') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      latestPortalReturnUrl = form.get('return_url') ?? undefined;
+      const id = `bps_foundation_${randomUUID().replaceAll('-', '')}`;
+      sessionReply({
+        id,
+        object: 'billing_portal.session',
+        customer: form.get('customer'),
+        livemode: false,
+        return_url: latestPortalReturnUrl,
+        url: `http://127.0.0.1:3000/portal/${id}`,
+      });
+    });
+    return;
+  }
   if (request.method === 'POST' && url.pathname === '/v1/checkout/sessions') {
     const chunks: string[] = [];
     request.setEncoding('utf8');
@@ -163,6 +192,16 @@ const server = createServer((request, response) => {
       paymentStatus = 'canceled';
     }
     sessionReply(session);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v1/checkout/sessions') {
+    const customer = url.searchParams.get('customer');
+    sessionReply({
+      object: 'list',
+      data: [...checkoutSessions.values()].filter((session) => customer === null || session['customer'] === customer),
+      has_more: false,
+      url: url.pathname,
+    });
     return;
   }
   const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)$/u.exec(url.pathname)?.groups?.['id'];
@@ -652,7 +691,7 @@ beforeAll(async () => {
     },
     policy,
     ledger,
-    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, fixtureStripe, ledger, {
+    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, ledger, {
       environment: 'development',
       stripeAccountId,
       livemode: false,
@@ -1609,6 +1648,117 @@ describe('billing payments PostgreSQL foundation', () => {
     expect(journals[0]?.accountDeltaAtoms).toBe(0n);
   });
 
+  it('expires unheld plan credit only once every subscription on the account has ended', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Plan Expiry', email: `${userId}@test.invalid`, emailVerified: true });
+    const accountId = await ledger.ensureAccountBinding({ environment: 'development', authUserId: userId });
+    await database.update(creditAccount).set({ purchasedAtoms: 5_000_000n }).where(eq(creditAccount.id, accountId));
+    const bindingId = randomUUID();
+    const subscriptionId = randomUUID();
+    const periodId = randomUUID();
+    const invoiceId = `in_${randomUUID()}`;
+    const offer: PaymentOfferSnapshot = {
+      version: 'payment-offer-v1',
+      policyId: 'policy-expiry',
+      offerId: 'pro-monthly',
+      environment: 'development',
+      accountId,
+      stripeAccountId,
+      livemode: false,
+      currency: 'usd',
+      principalMinor: '2000',
+      taxMinor: '0',
+      grossMinor: '2000',
+      maximumGrossMinor: '2000',
+      creditAtoms: '20000000',
+      ceilingCreditAtoms: '40000000',
+      stripePriceId: 'price_monthly',
+      stripeProductId: null,
+      quantity: 1,
+      term: 'month',
+      taxBasis: 'synthetic_local_zero_tax',
+      paymentMethod: null,
+    };
+    const paidAt = new Date('2026-09-06T00:00:00.000Z');
+    const evidence: PaidPaymentEvidence = {
+      version: 'stripe-paid-v1',
+      stripeAccountId,
+      livemode: false,
+      customerId: `cus_${bindingId}`,
+      currency: 'usd',
+      principalMinor: '2000',
+      taxMinor: '0',
+      grossMinor: '2000',
+      paymentIntentIds: [`pi_${periodId}`],
+      chargeIds: [`ch_${periodId}`],
+      invoiceId,
+      subscriptionId: `sub_${subscriptionId}`,
+      subscriptionItemId: `si_${subscriptionId}`,
+      sourceDigest: 'f'.repeat(64),
+      paidAt: paidAt.toISOString(),
+      paymentMethod: null,
+    };
+    await database.insert(billingStripeCustomer).values({
+      id: bindingId,
+      accountId,
+      environment: 'development',
+      stripeAccountId,
+      livemode: false,
+      stripeCustomerId: evidence.customerId,
+    });
+    await database.insert(subscription).values({
+      id: subscriptionId,
+      plan: 'pro',
+      stripeSubscriptionId: evidence.subscriptionId,
+      accountId,
+      environment: 'development',
+      customerBindingId: bindingId,
+      requestId: randomUUID(),
+      requestHash: 'e'.repeat(64),
+      offerSnapshot: offer,
+      slotState: 'current',
+      status: 'active',
+    });
+    await database.insert(billingPeriod).values({
+      id: periodId,
+      accountId,
+      sourceIdentity: `period:${periodId}`,
+      creditAtoms: 20_000_000n,
+      periodStart: new Date('2026-09-01T00:00:00.000Z'),
+      periodEnd: new Date('2026-10-01T00:00:00.000Z'),
+      subscriptionId,
+      invoiceId,
+      offerSnapshot: offer,
+      paidEvidence: evidence,
+      state: 'verified',
+      paidAt,
+    });
+    const granted = await fulfillPaidFixture({ database, ledger, source: 'plan', accountId, causeId: periodId });
+    expect(granted.grantedAtoms).toBe(20_000_000n);
+
+    // A live subscription keeps its plan credit.
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    const [live] = await database.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    expect(live?.planAtoms).toBe(20_000_000n);
+
+    await database
+      .update(subscription)
+      .set({ slotState: 'ended', status: 'canceled' })
+      .where(eq(subscription.id, subscriptionId));
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    const [ended] = await database.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    expect(ended).toMatchObject({ planAtoms: 0n, purchasedAtoms: 5_000_000n });
+    const expiries = await database
+      .select()
+      .from(creditTransaction)
+      .where(and(eq(creditTransaction.accountId, accountId), eq(creditTransaction.kind, 'plan_expiry')));
+    expect(expiries).toHaveLength(1);
+    expect(expiries[0]).toMatchObject({ periodId, planDeltaAtoms: -20_000_000n, accountDeltaAtoms: -20_000_000n });
+  });
+
   it('receipts a historical invoice without reducing paidThrough and anchors grace only to a current qualified failure', async () => {
     const userId = randomUUID();
     await database
@@ -2486,6 +2636,101 @@ describe('billing payments PostgreSQL foundation', () => {
       const again = await payments.prepareSubscription(pro.userId, request());
       expect(again).toMatchObject({ state: 'redirect_required' });
       expect(again.actionId).not.toBe(pro.action.actionId);
+    });
+
+    it('should never offer a paid Pro Checkout awaiting its first invoice as a Checkout to resume', async () => {
+      const pro = await openHostedPro('Hosted Pro Awaiting Invoice');
+      // Checkout completed and linked its subscription; the first invoice has not been reconciled yet.
+      await database
+        .update(subscription)
+        .set({ stripeSubscriptionId: `sub_awaiting_${randomUUID().replaceAll('-', '')}` })
+        .where(eq(subscription.id, pro.action.actionId));
+      await expect(payments.getAction(pro.userId, pro.action.actionId)).resolves.toMatchObject({
+        state: 'processing',
+        redirectUrl: null,
+      });
+      await expect(
+        payments.prepareSubscription(pro.userId, { requestId: randomUUID(), returnPath: '/settings/billing' }),
+      ).rejects.toMatchObject({
+        response: { code: 'action_already_pending', action: { state: 'processing', redirectUrl: null } },
+      });
+    });
+
+    it('should create a Pro Checkout whose first create failed from the provider-leg sweep', async () => {
+      const userId = randomUUID();
+      await database
+        .insert(user)
+        .values({ id: userId, name: 'Lost Pro Create', email: `${userId}@test.invalid`, emailVerified: true });
+      checkoutCreateFails = true;
+      try {
+        await expect(
+          payments.prepareSubscription(userId, { requestId: randomUUID(), returnPath: '/settings/billing' }),
+        ).rejects.toThrow();
+      } finally {
+        checkoutCreateFails = false;
+      }
+      const [owned] = await database
+        .select({ id: subscription.id })
+        .from(subscription)
+        .innerJoin(billingProviderLeg, eq(billingProviderLeg.subscriptionId, subscription.id))
+        .innerJoin(billingStripeCustomer, eq(billingStripeCustomer.id, billingProviderLeg.customerBindingId))
+        .where(and(eq(subscription.slotState, 'pending'), eq(billingProviderLeg.state, 'dispatched')))
+        .orderBy(sql`${subscription.updatedAt} desc`)
+        .limit(1);
+      const actionId = owned?.id ?? '';
+      await expect(payments.getAction(userId, actionId)).resolves.toMatchObject({ state: 'creating' });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.subscriptionId, actionId));
+      await onlyDue(leg?.id ?? '');
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(leg?.id ?? ''), requests: requests.slice(-10) });
+      expect(swept, diagnostic).toEqual({ processed: [leg?.id], pending: [], failed: [] });
+      await expect(payments.getAction(userId, actionId)).resolves.toMatchObject({
+        state: 'redirect_required',
+        redirectUrl: expect.stringContaining('/checkout/cs_foundation_') as unknown,
+      });
+    });
+
+    it('should return from the portal as a portal visit, never as a payment action to resume or recover', async () => {
+      const pro = await openHostedPro('Portal Visit');
+      await database
+        .update(subscription)
+        .set({
+          slotState: 'current',
+          status: 'active',
+          stripeSubscriptionId: `sub_portal_${randomUUID().replaceAll('-', '')}`,
+        })
+        .where(eq(subscription.id, pro.action.actionId));
+      const created = await payments.createPortal(pro.userId, {
+        requestId: randomUUID(),
+        returnPath: '/?settings=billing',
+      });
+      expect(created).toMatchObject({ purpose: 'billing_portal', state: 'redirect_required' });
+      const returnUrl = new URL(latestPortalReturnUrl ?? 'http://invalid');
+      expect(returnUrl.searchParams.get('billing_return')).toBe('portal');
+      expect(returnUrl.searchParams.get('settings')).toBe('billing');
+      expect(returnUrl.searchParams.has('payment_action')).toBe(false);
+      // Read back, the visit is over: its short-lived session link is never offered again.
+      await expect(payments.getAction(pro.userId, created.actionId)).resolves.toMatchObject({
+        state: 'completed',
+        redirectUrl: null,
+      });
+      const listed = await payments.listActions(pro.userId);
+      expect(listed.map((action) => action.actionId)).not.toContain(created.actionId);
+      await expect(payments.listActions(pro.userId, 'billing_portal')).resolves.toEqual([]);
+      await database
+        .update(billingProviderLeg)
+        .set({ state: 'attention' })
+        .where(eq(billingProviderLeg.id, created.actionId));
+      await onlyDue(created.actionId);
+      // Nothing about a portal session is recoverable, so the sweep never claims one.
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toEqual({
+        processed: [],
+        pending: [],
+        failed: [],
+      });
     });
   });
 });

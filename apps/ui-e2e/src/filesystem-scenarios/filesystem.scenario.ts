@@ -17,6 +17,7 @@ import { defaultFixtureSeed, fixtureProfiles, planFixture } from '#filesystem-sc
 import type { FixturePlan } from '#filesystem-scenarios/fixture.js';
 import type { AtomicityProgress, AtomicityRequest, AtomicityWriter } from '#filesystem-scenarios/atomicity.worker.js';
 import { scenarioCrashPoint, scenarioWorkerReady } from '#filesystem-scenarios/protocol.js';
+import { openOffAuthorityAgent } from '#filesystem-scenarios/off-authority-grep.js';
 import type {
   ProbeReport,
   RunnerName,
@@ -50,7 +51,14 @@ declare module 'vitest' {
 const profileName = inject('filesystemScenarioProfile');
 const runs = inject('filesystemScenarioRuns');
 type KnownRedGate = Readonly<{ id: string; limit: number; atHead: Readonly<Record<string, number>> }>;
-const knownRedGates: readonly KnownRedGate[] = knownRedList.gates;
+/* A gate recorded on one profile only leaves the other profile's key out. */
+const knownRedGates: readonly KnownRedGate[] = knownRedList.gates.map(({ id, limit, atHead }) => ({
+  id,
+  limit,
+  atHead: Object.fromEntries(
+    Object.entries(atHead).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+  ),
+}));
 const knownRed = new Set<string>(knownRedGates.map((gate) => gate.id));
 /** The known-red ratchet key: values at HEAD differ by engine and fixture profile. */
 const baselineKey = `${server.browser}-${profileName}`;
@@ -64,7 +72,7 @@ const directoryPrefix = 'fsx-';
 /* ------------------------------------------------------------------ workers */
 
 type ScenarioWorker = Readonly<{
-  call: <Value>(command: WorkerCommand) => Promise<Value>;
+  call: <Value>(command: WorkerCommand, transfer?: Transferable[]) => Promise<Value>;
   /** Settles when the worker posts its crash point (the I1 replacement probe). */
   crashPoint: Promise<void>;
   terminate: () => void;
@@ -139,11 +147,11 @@ const spawn = async (name: string): Promise<ScenarioWorker> => {
   });
   return {
     crashPoint: crashPoint.promise,
-    call: async <Value>(command: WorkerCommand): Promise<Value> =>
+    call: async <Value>(command: WorkerCommand, transfer: Transferable[] = []): Promise<Value> =>
       new Promise<Value>((resolve, reject) => {
         sequence += 1;
         pending.set(sequence, { resolve: resolve as (value: unknown) => void, reject });
-        worker.postMessage({ id: sequence, command });
+        worker.postMessage({ id: sequence, command }, transfer);
       }),
     terminate: () => {
       worker.terminate();
@@ -600,17 +608,46 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     expect(row.metrics['probes']).toBeGreaterThanOrEqual(1000);
   });
 
-  test('S19: grep while saving and reading', async () => {
+  test('S14: export the project as a streaming zip', async () => {
     const samples: Array<Record<string, number>> = [];
     let spans: unknown;
     for (let run = 0; run < runs; run += 1) {
       // oxlint-disable-next-line no-await-in-loop -- sequential samples.
-      const measured = await runOn(authority, { runner: 'grep-with-save-and-reads', project: imported });
+      const measured = await runOn(authority, { runner: 'archive', project: imported });
       samples.push(flatten(measured));
       spans = measured.spans;
     }
+    const row = record('S14', samples, spans);
+    expect(row.metrics['archivedFiles']).toBeGreaterThan(0);
+    expect(row.metrics['sourceBytes']).toBeGreaterThan(row.metrics['largestFile'] ?? 0);
+  });
+
+  test('S19: grep while saving and reading', async () => {
+    /* The agent host's topology: grep and glob run here, off the authority, over a
+     * 'working-copy' bridge port, while the authority saves and serves the viewer. */
+    const channel = new MessageChannel();
+    await authority.call({ type: 'connect', projectId: imported.projectId, port: channel.port1 }, [channel.port1]);
+    const agent = await openOffAuthorityAgent(channel.port2, plan);
+    const samples: Array<Record<string, number>> = [];
+    let spans: unknown;
+    try {
+      for (let run = 0; run < runs; run += 1) {
+        const saving = runOn(authority, { runner: 'save-with-reads', project: imported });
+        // oxlint-disable-next-line no-await-in-loop -- sequential samples.
+        const grep = await agent.grepAndGlob();
+        // oxlint-disable-next-line no-await-in-loop -- sequential samples.
+        await authority.call({ type: 'grep-done' });
+        // oxlint-disable-next-line no-await-in-loop -- sequential samples.
+        const measured = await saving;
+        samples.push({ ...flatten(measured), ...grep });
+        spans = measured.spans;
+      }
+    } finally {
+      agent.dispose();
+    }
     const row = record('S19', samples, spans);
     expect(row.metrics['reads']).toBeGreaterThan(0);
+    expect(row.metrics['authorityCalls']).toBeGreaterThan(0);
   });
 
   test('S16: a second tab while S3 materialises', async () => {

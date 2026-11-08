@@ -92,6 +92,7 @@ import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
@@ -1405,11 +1406,12 @@ export const ChatEditorFileTree = memo(function ({
       const name = path.split('/').pop() ?? path;
 
       if (isFolder) {
+        const ceiling = zipDownloadCeiling();
         toast.promise(
           async () => {
             let zipBlob: Blob;
             try {
-              zipBlob = await getZippedDirectory(path);
+              zipBlob = await getZippedDirectory(path, ceiling);
             } catch (error) {
               throw createFileTreeDownloadError({
                 code: 'zip-generation-failed',
@@ -1430,7 +1432,7 @@ export const ChatEditorFileTree = memo(function ({
           {
             loading: `Downloading ${name}...`,
             success: `Downloaded ${name}.zip`,
-            error: getFileTreeDownloadErrorMessage,
+            error: (error: unknown) => getFileTreeDownloadErrorMessage(error, ceiling),
           },
         );
       } else {

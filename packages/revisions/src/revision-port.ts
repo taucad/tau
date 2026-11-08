@@ -58,11 +58,22 @@ export type RevisionEngineDescriptor = Readonly<{
    * A caller that computes a tree id without writing it has to hash what the
    * store will record, pointers included (I5) — so the cut asks rather than
    * assumes. True on both legs since W11b: the decision is host-neutral
-   * (`lfs.ts`) and only the transport behind it differs. False for a
-   * repository a disk host adopted, whose entries keep the representation the
-   * person's own Git gave them (rule 13).
+   * (`lfs.ts`) and only the transport behind it differs.
    */
   largeObjects: boolean;
+  /**
+   * Whether the repository matches its attributes case-insensitively
+   * (`core.ignoreCase`, a native host on a case-insensitive disk). The cut's
+   * clean folds case exactly when this says so, so its prediction is the
+   * host's own tree (I5). Absent means case-sensitive, as the browser is.
+   */
+  ignoreCase?: boolean;
+  /**
+   * Whether a checkout keeps each large object's bytes as a file once the
+   * store holds it (D9: a disk host keeps a physical copy). Large-object
+   * adoption, which replaces such a file by its pointer, then adopts nothing.
+   */
+  keepsLargeObjectFiles?: boolean;
 }>;
 
 /** Durable storage evidence for one revision. `objectFormat` travels with it. @public */
@@ -540,9 +551,14 @@ export type ReadTreeOptions = Readonly<{
    * `local` answers from this store alone: an object that is not here yet
    * stays its pointer, and nothing is fetched. A caller that asks for it
    * either reads only small files or tracks every pointer it got back.
+   * `stored` fetches what the store lacks, as the default does, then answers
+   * each large object as its pointer once the store holds it whole: for a
+   * writer that lands it from the store rather than from bytes in hand
+   * (W11.3). A host whose store a checkout cannot read answers the bytes, as
+   * the default does, so a pointer in the answer always names a stored object.
    * Absent, every pointer is resolved, from the remote if need be.
    */
-  largeObjects?: 'local';
+  largeObjects?: 'local' | 'stored';
   /**
    * Only these project-relative paths are wanted, so a host may read just
    * them instead of every blob in the tree. A host may still answer the whole
@@ -708,19 +724,41 @@ export type RevisionPort = Readonly<{
   /** Every place this project's files are, live checkout first. */
   listCheckouts?(): Promise<readonly Checkout[]>;
   /**
-   * The untracked paths Git itself ignores in one checkout of an adopted repository.
+   * The untracked paths one checkout's own Git ignore rules exclude.
    *
-   * Capture versions what the path registry admits. In a repository the person
-   * made, their own ignore rules decide too, or a revision records their build
-   * output and secrets and commits them to their branch. A store Tau created
-   * answers `undefined`: its ignore file is derived from the registry, so the
-   * registry alone decides on every host.
+   * Capture versions what the path registry admits, and the tree's own ignore
+   * rules decide too, or a revision records a person's build output and
+   * secrets and commits them to their branch. The sources are the checkout's
+   * `.gitignore` files, nested, and the store's `info/exclude` (Tau's derived
+   * ignores); never `core.excludesFile`, which is per device. Both legs answer
+   * for every repository with Git's semantics, so a cut excludes the same
+   * paths on each (I5). A path the checkout tracks is never listed.
+   *
+   * The repository's own `core.ignoreCase` decides whether letters fold, on
+   * both legs.
+   *
+   * Given `paths`, the answer covers those alone, so a capture that names
+   * what changed costs what changed rather than a walk of the checkout: each
+   * named path Git would leave out, or the ignored directory above it that
+   * Git would list instead. One that does not exist is left out.
    *
    * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @param paths - Only these paths, each relative to that root.
    * @returns Paths relative to that root, a directory with a trailing `/`, or
-   *   `undefined` when the registry alone decides.
+   *   `undefined` when the registry alone decides (a port that does not read ignore rules).
    */
-  ignoredPaths?(root?: string): Promise<readonly string[] | undefined>;
+  ignoredPaths?(root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined>;
+  /**
+   * What the ignore rules read besides the checkout's own `.gitignore` files
+   * (the store's `info/exclude` and `core.ignoreCase`), as one comparable
+   * value. While it holds, and no `.gitignore` changed, an answer for the
+   * paths that changed keeps an earlier listing current; a port without it is
+   * asked for a whole listing at every capture.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns A value that differs whenever those sources do.
+   */
+  ignoreContext?(root?: string): Promise<string>;
   /** Add one linked checkout on its own branch. */
   addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
   /** Remove one linked checkout. Removing the live checkout is refused. */

@@ -6,6 +6,7 @@ import { mock } from 'vitest-mock-extended';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -171,10 +172,12 @@ describe('NativeImageViewer', () => {
   it('should keep the live image after a no-op file refresh and reload changed tail bytes', async () => {
     let bytes = new Uint8Array(600);
     bytes.set(png);
-    const proxy = mock<ComposedViewClient>({
-      stat: vi.fn().mockImplementation(async () => ({ size: bytes.byteLength })),
-      readFile: vi.fn().mockImplementation(async () => new Uint8Array(bytes)),
-    });
+    const proxy = withAuthorityDigest(
+      mock<ComposedViewClient>({
+        stat: vi.fn().mockImplementation(async () => ({ size: bytes.byteLength })),
+        readFile: vi.fn().mockImplementation(async () => new Uint8Array(bytes)),
+      }),
+    );
     let emitFileChanged: (event: unknown) => void = () => undefined;
     const watches = new Set<(event: { type: 'change'; path: string }) => void>();
     /* As the worker reports a write: the exact authority watch, then the coalesced tree notification. */
@@ -232,10 +235,10 @@ describe('NativeImageViewer', () => {
       act(writeFile);
       await waitFor(() => {
         expect(proxy.readFile).toHaveBeenCalledTimes(2);
-        expect(digest).toHaveBeenCalledTimes(2);
+        expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(2);
       });
       await act(async () => {
-        await digest.mock.results[1]!.value;
+        await vi.mocked(proxy.readFileWithDigest!).mock.results[1]!.value;
         await new Promise((resolve) => {
           setTimeout(resolve, 0);
         });
@@ -253,7 +256,9 @@ describe('NativeImageViewer', () => {
         expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute('src', 'blob:second');
       });
       expect(proxy.readFile).toHaveBeenCalledTimes(3);
-      expect(digest).toHaveBeenCalledTimes(3);
+      expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(3);
+      /* Each refresh compares the authority's digest (D17): this thread hashes nothing. */
+      expect(digest).not.toHaveBeenCalled();
       expect(service.peekOutcome('preview.png')).not.toBe(firstOutcome);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
     } finally {

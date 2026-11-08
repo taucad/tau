@@ -25,7 +25,7 @@
  */
 
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileContentMetadata,
@@ -47,6 +47,7 @@ import type {
   WatchEvent,
   WatchRequest,
 } from '#types.js';
+import { isDigestPrecondition } from '#checked-write-precondition.js';
 import { bufferToStream } from '#backend/stream-utils.js';
 import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
 import { mapConcurrent } from '#concurrency.js';
@@ -177,13 +178,19 @@ export type ComposedViewOptions = Readonly<{
 export type RecursiveRmdir = { rmdir(path: string, options?: { recursive?: boolean }): Promise<void> };
 
 /** A rooted filesystem with provenance. @public */
-export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
+export type ComposedView = Omit<FileSystemProvider, 'rmdir' | 'writeFileChecked'> &
   RecursiveRmdir &
   Partial<WatchableFileSystem> &
   Partial<IndexedFileSystem> &
   Partial<RootedPorcelain> & {
     /** A fenced record-log append (D23), mask-checked like `appendFile`. */
     appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    /**
+     * Check and replace one file. A precondition may name a digest (D17), which
+     * the base answers through its `writeFileCheckedDigest`; a base without one
+     * refuses a digest with `ENOTSUP`.
+     */
+    writeFileChecked?(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with head metadata and provenance (I3). */
@@ -1076,16 +1083,28 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           /* The target is a write, the preconditions are reads: a hidden path is
            * refused on whichever side names it, before the fence is taken. */
-          writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
+          writeFileChecked: async (
+            input: Omit<AuthorityCheckedFileWrite, 'signal'>,
+          ): Promise<CheckedFileWriteResult> => {
             const [target] = await writableTargets([input.path]);
-            return base.writeFileChecked!({
-              ...input,
-              path: target!,
-              preconditions: input.preconditions.map(({ path, expected }) => ({
-                path: readablePath(canonical(path)),
-                expected,
-              })),
-            });
+            const preconditions = input.preconditions.map((precondition) => ({
+              ...precondition,
+              path: readablePath(canonical(precondition.path)),
+            }));
+            if (!preconditions.some((precondition) => isDigestPrecondition(precondition))) {
+              return base.writeFileChecked!({
+                ...input,
+                path: target!,
+                preconditions: preconditions as FileWritePrecondition[],
+              });
+            }
+            if (base.writeFileCheckedDigest === undefined) {
+              return fileSystemError(
+                'ENOTSUP',
+                `ENOTSUP: digest preconditions are not supported here, writeFileChecked '${input.path}'`,
+              );
+            }
+            return base.writeFileCheckedDigest({ ...input, path: target!, preconditions });
           },
         }),
     ...(base.deleteFileChecked === undefined

@@ -25,7 +25,15 @@
  * @module
  */
 
-import type { CheckedFileWriteResult, FileStat, FileSystemBackend } from '@taucad/types';
+import type {
+  CheckedFileWriteResult,
+  CheckedWritePrecondition,
+  FileDigestPrecondition,
+  FileStat,
+  FileSystemBackend,
+} from '@taucad/types';
+import { sha256Bytes } from '@taucad/utils/hash';
+import { isDigestPrecondition } from '#checked-write-precondition.js';
 import {
   assertRootedPath,
   joinPath,
@@ -67,6 +75,7 @@ import type {
 import {
   changesetReceipt,
   inHandBytes,
+  isLargeObjectSource,
   isBoundedChangeset,
   maximumChangesetBytes,
   maximumChangesetEntries,
@@ -164,6 +173,37 @@ const occupancyOf = (prepared: Pick<PreparedEntry, 'batch' | 'resolution' | 'tar
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
+
+/** One checked-write precondition as the pipeline holds it: owned bytes or absence, or a digest. */
+type OwnedPrecondition = Readonly<{
+  path: string;
+  resolution: MountResolution;
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+  expected?: Uint8Array<ArrayBuffer> | null;
+  sha256?: string;
+}>;
+
+/** One path a checked write found changed, as its result reports it. */
+type CheckedWriteConflict = Extract<CheckedFileWriteResult, { status: 'conflict' }>['conflicts'][number];
+
+const sha256Pattern = /^[\da-f]{64}$/u;
+
+const ownedDigest = (precondition: FileDigestPrecondition): string => {
+  if (!sha256Pattern.test(precondition.expectedSha256)) {
+    throw new TypeError(`Checked write digest for '${precondition.path}' is not a lowercase SHA-256.`);
+  }
+  return precondition.expectedSha256;
+};
+
+/** Whether two preconditions on one physical path expect the same thing; a digest and bytes never agree. */
+const sameExpectation = (left: OwnedPrecondition, right: OwnedPrecondition): boolean => {
+  if (left.sha256 !== undefined || right.sha256 !== undefined) {
+    return left.sha256 === right.sha256;
+  }
+  return left.expected === null || left.expected === undefined
+    ? right.expected === null || right.expected === undefined
+    : right.expected !== null && right.expected !== undefined && bytesEqual(left.expected, right.expected);
+};
 
 const readFileOrAbsent = async (
   provider: FileSystemProvider,
@@ -890,12 +930,7 @@ export class MutationPipeline {
     path: string;
     resolution: MountResolution;
     data: Uint8Array<ArrayBuffer> | string;
-    preconditions: ReadonlyArray<{
-      path: string;
-      // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-      expected: Uint8Array<ArrayBuffer> | string | null;
-      resolution: MountResolution;
-    }>;
+    preconditions: ReadonlyArray<CheckedWritePrecondition & { resolution: MountResolution }>;
     signal?: AbortSignal;
     context?: WorkspaceMutationContext;
   }): Promise<CheckedFileWriteResult> {
@@ -903,15 +938,26 @@ export class MutationPipeline {
       throw new TypeError(`Checked writes require 1-${String(maximumCheckedWritePreconditions)} preconditions.`);
     }
     const ownedData = asBytes(data);
-    const ownedPreconditions = preconditions.map((precondition) => ({
-      ...precondition,
-      expected: precondition.expected === null ? null : asBytes(precondition.expected),
-    }));
+    const ownedPreconditions = preconditions.map(
+      (precondition): OwnedPrecondition =>
+        isDigestPrecondition(precondition)
+          ? { path: precondition.path, resolution: precondition.resolution, sha256: ownedDigest(precondition) }
+          : {
+              path: precondition.path,
+              resolution: precondition.resolution,
+              expected: precondition.expected === null ? null : asBytes(precondition.expected),
+            },
+    );
+    const digested = ownedPreconditions.some((precondition) => precondition.sha256 !== undefined);
     const expectedBytes = ownedPreconditions.reduce(
       (total, precondition) => total + (precondition.expected?.byteLength ?? 0),
-      ownedData.byteLength,
+      0,
     );
-    if (expectedBytes > maximumCheckedWriteBytes) {
+    /* A byte precondition carries the file it expects, so a request that compares bytes is
+     * bounded with its data; a digest carries 64 characters, and the authority reads the bytes
+     * it names under the locks, and an absence carries none (D17), so neither bounds the data. */
+    const comparesBytes = ownedPreconditions.some((precondition) => (precondition.expected ?? null) !== null);
+    if (expectedBytes + (comparesBytes && !digested ? ownedData.byteLength : 0) > maximumCheckedWriteBytes) {
       throw new TypeError(`Checked write request exceeds ${String(maximumCheckedWriteBytes)} bytes.`);
     }
     const targetAuthority = resolution.entry;
@@ -925,57 +971,84 @@ export class MutationPipeline {
     ) {
       throw new TypeError('Checked write paths must share one admitted physical authority.');
     }
-    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-    const physical = new Map<string, Uint8Array<ArrayBuffer> | null>();
-    const logicalByPhysical = new Map<string, string>();
+    const physical = new Map<string, OwnedPrecondition>();
     for (const precondition of ownedPreconditions) {
       const previous = physical.get(precondition.resolution.path);
-      if (previous !== undefined || physical.has(precondition.resolution.path)) {
-        const same =
-          previous === null
-            ? precondition.expected === null
-            : precondition.expected !== null && bytesEqual(previous!, precondition.expected);
-        if (!same) {
-          throw new TypeError(`Checked write aliases disagree for '${precondition.path}'.`);
-        }
-      } else {
-        physical.set(precondition.resolution.path, precondition.expected);
-        logicalByPhysical.set(precondition.resolution.path, precondition.path);
+      if (previous === undefined) {
+        physical.set(precondition.resolution.path, precondition);
+      } else if (!sameExpectation(previous, precondition)) {
+        throw new TypeError(`Checked write aliases disagree for '${precondition.path}'.`);
       }
     }
     if (!physical.has(resolution.path)) {
       throw new TypeError('Checked writes require a destination precondition.');
     }
-    if (signal?.aborted) {
-      throw checkedWriteFailure(
-        'known-not-applied',
-        signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
-      );
-    }
+    const throwIfAborted = (): void => {
+      if (signal?.aborted) {
+        throw checkedWriteFailure(
+          'known-not-applied',
+          signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+        );
+      }
+    };
+    throwIfAborted();
 
     const operations = [
       { path, resolution },
       ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
     ];
     const locks = this.lockClaims(operations);
+    const digestOf = async (bytes: Uint8Array<ArrayBuffer>): Promise<string | undefined> =>
+      digested ? sha256Bytes(bytes) : undefined;
+    const withDigest = async (
+      status: 'applied' | 'unchanged',
+      content: Uint8Array<ArrayBuffer>,
+    ): Promise<CheckedFileWriteResult> => {
+      const sha256 = await digestOf(content);
+      return sha256 === undefined ? { status, content } : { status, content, sha256 };
+    };
     const run = async (): Promise<CheckedFileWriteResult> =>
       this._resourceQueue.queueForClaims(toQueueClaims(locks), async () => {
         await this._refreshScoped(operations.map(({ resolution }) => resolution));
-        if (signal?.aborted) {
-          throw checkedWriteFailure(
-            'known-not-applied',
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException('The operation was aborted.', 'AbortError'),
-          );
+        throwIfAborted();
+        /* Each digest is checked here, under the locks, from one read of the file it names:
+         * the bytes it resolves to are what a provider's own check then compares (D17). */
+        // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+        const resolved = new Map<string, Uint8Array<ArrayBuffer> | null>();
+        const digestConflicts: CheckedWriteConflict[] = [];
+        for (const [physicalPath, precondition] of physical) {
+          if (precondition.sha256 === undefined) {
+            resolved.set(physicalPath, precondition.expected ?? null);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- at most 32 preconditions, each one read under the locks.
+          const actual = await readFileOrAbsent(precondition.resolution.provider, physicalPath);
+          // oxlint-disable-next-line no-await-in-loop -- the digest of the read just taken.
+          const actualSha256 = actual === null ? undefined : await sha256Bytes(actual);
+          if (actualSha256 === precondition.sha256) {
+            resolved.set(physicalPath, actual);
+          } else {
+            digestConflicts.push({
+              path: precondition.path,
+              actual,
+              ...(actualSha256 === undefined ? {} : { sha256: actualSha256 }),
+            });
+          }
         }
-        if (resolution.provider.writeFileChecked !== undefined) {
+        if (digestConflicts.length > 0) {
+          return { status: 'conflict', conflicts: digestConflicts };
+        }
+        const resolvedBytes = [...resolved.values()].reduce((total, bytes) => total + (bytes?.byteLength ?? 0), 0);
+        if (
+          resolution.provider.writeFileChecked !== undefined &&
+          resolvedBytes + ownedData.byteLength <= maximumCheckedWriteBytes
+        ) {
           let result: CheckedFileWriteResult;
           try {
             result = await resolution.provider.writeFileChecked({
               path: resolution.path,
               data: ownedData,
-              preconditions: [...physical].map(([preconditionPath, expected]) => ({
+              preconditions: [...resolved].map(([preconditionPath, expected]) => ({
                 path: preconditionPath,
                 expected,
               })),
@@ -989,26 +1062,29 @@ export class MutationPipeline {
           if (result.status === 'applied') {
             this._recordCompletedWrite({ path, resolution, bytes: result.content, context });
           }
-          return result.status === 'conflict'
-            ? {
-                status: 'conflict',
-                conflicts: result.conflicts.map((conflict) => ({
-                  ...conflict,
-                  path: logicalByPhysical.get(conflict.path) ?? conflict.path,
-                })),
-              }
-            : result;
+          if (result.status === 'conflict') {
+            return {
+              status: 'conflict',
+              conflicts: result.conflicts.map((conflict) => ({
+                ...conflict,
+                path: physical.get(conflict.path)?.path ?? conflict.path,
+              })),
+            };
+          }
+          return withDigest(result.status, result.content);
         }
-        const checkedPaths = [
-          ...new Map(ownedPreconditions.map((precondition) => [precondition.path, precondition])).values(),
-        ];
+        /* No provider check, or one past the provider's own byte bound: compare here, under
+         * the same locks. A digest was compared above from a read taken under them. */
         const compared = await Promise.all(
-          checkedPaths.map(async (precondition) => {
-            const actual = await readFileOrAbsent(precondition.resolution.provider, precondition.resolution.path);
+          [...physical].map(async ([physicalPath, precondition]) => {
+            if (precondition.sha256 !== undefined) {
+              return undefined;
+            }
+            const actual = await readFileOrAbsent(precondition.resolution.provider, physicalPath);
             const matches =
               actual === null
                 ? precondition.expected === null
-                : precondition.expected !== null && bytesEqual(actual, precondition.expected);
+                : precondition.expected !== null && bytesEqual(actual, precondition.expected!);
             return matches ? undefined : { path: precondition.path, actual };
           }),
         );
@@ -1017,25 +1093,18 @@ export class MutationPipeline {
           return { status: 'conflict', conflicts };
         }
         // The destination is always a precondition and every precondition matched, so it holds the expected bytes.
-        const current = physical.get(resolution.path) ?? null;
+        const current = resolved.get(resolution.path) ?? null;
         if (current !== null && bytesEqual(current, ownedData)) {
-          return { status: 'unchanged', content: current };
+          return withDigest('unchanged', current);
         }
-        if (signal?.aborted) {
-          throw checkedWriteFailure(
-            'known-not-applied',
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException('The operation was aborted.', 'AbortError'),
-          );
-        }
+        throwIfAborted();
         try {
           await resolution.provider.writeFile(resolution.path, ownedData);
           this._recordCompletedWrite({ path, resolution, bytes: ownedData, context });
         } catch (error) {
           throw checkedWriteFailure('potentially-applied', error);
         }
-        return { status: 'applied', content: ownedData };
+        return withDigest('applied', ownedData);
       });
     const result = await (resolution.provider.writeFileChecked === undefined
       ? this._crossTabCoordinator.withRequiredLocks(locks, run)
@@ -1313,10 +1382,18 @@ export class MutationPipeline {
   /**
    * The locks a mutation over `operations` holds (D3): for each path its
    * physical hierarchy up to its provider base path — the path exclusive,
-   * every ancestor shared — and its logical hierarchy up to its mount prefix,
-   * all shared (exclusive at the path only for a mount with no physical
-   * identity), plus the owning project's token: shared, or exclusive for a
-   * lifecycle changeset.
+   * every ancestor shared — plus the owning project's token: shared, or
+   * exclusive for a lifecycle changeset. A mount with no physical identity
+   * holds its logical hierarchy up to its mount prefix instead, exclusive at
+   * the path.
+   *
+   * A physical mount holds no logical token. Every logical token under a
+   * physical mount's prefix was only ever held shared — the physical token is
+   * what excludes every alias of the bytes, and a lifecycle fence is the
+   * project token — and a path under a nested mount with no physical identity
+   * routes to that mount, whose hierarchy stops at its own prefix. So those
+   * tokens fenced nothing and cost one Web Lock grant each, a task that waits
+   * behind whatever else the authority's event loop is serving (S19).
    *
    * @param operations - Every resolved path the mutation touches.
    * @param options - `lifecycle` takes the project token exclusively.
@@ -1330,13 +1407,13 @@ export class MutationPipeline {
     const claim = (token: string, shared: boolean): void => {
       claims.push(shared ? { token, shared } : { token });
     };
-    const addAuthorityHierarchy = (path: string, boundary: string, exactShared: boolean): void => {
+    const addAuthorityHierarchy = (path: string, boundary: string): void => {
       let current = resolveAuthorityPath(path);
       const root = resolveAuthorityPath(boundary);
       if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
-      let shared = exactShared;
+      let shared = false;
       while (current !== '/') {
         claim(current, shared);
         shared = true;
@@ -1366,15 +1443,9 @@ export class MutationPipeline {
 
     for (const { path, resolution } of operations) {
       const normalized = resolveAuthorityPath(path);
-      /* The physical token excludes every alias of the bytes, so the logical
-       * path itself needs no exclusive token of its own when there is one; its
-       * logical ancestors are still held shared, so a holder of a route lock
-       * (a project route held exclusively) still fences the write. */
-      addAuthorityHierarchy(
-        normalized,
-        resolution.entry?.prefix ?? normalized,
-        resolution.entry?.storageRootKey !== undefined,
-      );
+      if (resolution.entry?.storageRootKey === undefined) {
+        addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized);
+      }
       const projectId = this._projectLockOwner(normalized, resolution);
       if (projectId !== undefined) {
         claim(`project:${projectId}`, options?.lifecycle !== true);
@@ -1594,6 +1665,14 @@ export class MutationPipeline {
       }
       admission.admit(occupancy);
       this._assertEntryAdmissible(prepared);
+      if (
+        prepared.batch.op === 'write' &&
+        isLargeObjectSource(prepared.batch.data) &&
+        prepared.resolution.provider.capabilities.largeObjectSources !== true
+      ) {
+        /* Only a provider whose authority holds the root's store resolves one (EQ13). */
+        throw errnoError('EINVAL', `'${prepared.path}' cannot be written from a large-object store here`);
+      }
       return prepared;
     });
   }
@@ -1712,6 +1791,7 @@ export class MutationPipeline {
         ...(result.error === undefined ? {} : { error: result.error }),
         ...(result.kind === undefined ? {} : { kind: result.kind }),
         ...(durability === undefined ? {} : { durability }),
+        ...(result.largeObject === undefined ? {} : { largeObject: result.largeObject }),
       };
     };
     const fenceRefusals = await this._checkAppendFences(prepared, indexes);
@@ -1981,12 +2061,16 @@ export class MutationPipeline {
         case 'write':
         case 'append': {
           if (current) {
+            const landed = batches[index]?.largeObject;
             if (batch.op === 'write' && entry.bytes !== undefined) {
               /* The write path is where content facts are recorded: the bytes are in hand (D4). */
               this._projectIndexes.addFile(path, {
                 size: entry.bytes.byteLength,
                 facts: getFileContentMetadata(entry.bytes),
               });
+            } else if (batch.op === 'write' && landed !== undefined) {
+              /* A store-cloned large object: its size from the receipt's verified read-back, its kind measured lazily (I3). */
+              this._projectIndexes.addFile(path, { size: landed.size });
             } else {
               this._projectIndexes.invalidate(path);
             }

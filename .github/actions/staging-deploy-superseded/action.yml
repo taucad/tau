@@ -14,7 +14,7 @@ description: >-
 # When this deploy comes from a `staging.yml` push run, a newer run that is still going
 # supersedes it as well, once that run's plan has passed, every check its `Wait for CI
 # checks` job gates deploys on has passed in its commit's `ci.yml` push run (and that
-# job did not record them before they settled), and its deploy job for this app has not
+# job did not give up waiting for them), and its deploy job for this app has not
 # ended without deploying. Its plan diffs the app against the last commit staging recorded
 # (`staging-deploy-history`), which this unpublished commit is not, so it deploys this
 # change too, or the app is unchanged since that record and there is nothing to
@@ -58,20 +58,23 @@ runs:
         # in step with its CHECKS.
         gates='["Validate workspace","Run affected tasks","API tests (Postgres + MinIO)","Billing contracts (no Stripe credentials)"]'
         gates_passed() {
-          local ci settled waited
+          local ci waited
           ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$2&event=push&branch=main&per_page=1" \
             --jq '.workflow_runs[0].id // empty')
           [ -n "$ci" ] || return 1
-          # The last gate's completion time, or empty unless every gate passed.
-          settled=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
-            --jq '.jobs[] | {name, conclusion, completed_at}' | jq -rs --argjson gates "$gates" '
-            [$gates[] as $g | first(.[] | select(.name == $g)) // null] as $found
-            | if all($found[]; . != null and .conclusion == "success")
-              then ($found | map(.completed_at) | max) else empty end')
-          [ -n "$settled" ] || return 1
+          # Every gate passed. The wait job records a gate's conclusion only once all of
+          # them have completed, unless it gives up at its 340-minute deadline, when an
+          # unsettled gate reads `missing`. So a wait job still running or done well
+          # inside that deadline records what CI concluded; one that ran to the deadline
+          # may not have.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
+            --jq '.jobs[] | {name, conclusion}' | jq -se --argjson gates "$gates" '
+            [$gates[] as $g | first(.[] | select(.name == $g)) // null]
+            | all(.[]; . != null and .conclusion == "success")' > /dev/null || return 1
           waited=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name == "Wait for CI checks") | .completed_at // ""' | head -n1)
-          [ -z "$waited" ] || [[ "$waited" > "$settled" ]] || [ "$waited" = "$settled" ]
+            --jq '.jobs[] | select(.name == "Wait for CI checks" and .completed_at != null)
+              | (.completed_at | fromdate) - (.started_at | fromdate)')
+          [ -z "$waited" ] || [ "$waited" -lt $(( 330 * 60 )) ]
         }
         # In a called workflow the run is the caller's, so this is the staging.yml push run;
         # a manual dispatch looks at the runs started since it began.
@@ -101,7 +104,7 @@ runs:
             else "none" end')
           # A newer run only takes this deploy over once its deploy gates will pass: every
           # check its `Wait for CI checks` job reads has passed in that commit's `ci.yml`
-          # push run, and that job did not finish (or give up) before the last of them.
+          # push run, and that job did not give up before recording them.
           if [ "$verdict" = coming ] && ! gates_passed "$run_id" "$sha"; then
             continue
           fi

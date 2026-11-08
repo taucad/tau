@@ -64,16 +64,16 @@ runs:
           [ -n "$ci" ] || return 1
           # Every gate passed. The wait job records a gate's conclusion only once all of
           # them have completed, unless it gives up at its 340-minute deadline, when an
-          # unsettled gate reads `missing`. So a wait job still running or done well
-          # inside that deadline records what CI concluded; one that ran to the deadline
-          # may not have.
+          # unsettled gate reads `missing`. Its elapsed time (to now while it runs) under
+          # 330 minutes means its next poll, inside the deadline, sees every gate settled,
+          # or it already recorded them settled; a job past that may give up first.
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs?per_page=100" \
             --jq '.jobs[] | {name, conclusion}' | jq -se --argjson gates "$gates" '
             [$gates[] as $g | first(.[] | select(.name == $g)) // null]
             | all(.[]; . != null and .conclusion == "success")' > /dev/null || return 1
           waited=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name == "Wait for CI checks" and .completed_at != null)
-              | (.completed_at | fromdate) - (.started_at | fromdate)')
+            --jq '.jobs[] | select(.name == "Wait for CI checks" and .started_at != null)
+              | ((.completed_at // (now | todate)) | fromdate) - (.started_at | fromdate) | floor')
           [ -z "$waited" ] || [ "$waited" -lt $(( 330 * 60 )) ]
         }
         # In a called workflow the run is the caller's, so this is the staging.yml push run;

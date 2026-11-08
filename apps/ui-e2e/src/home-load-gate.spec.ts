@@ -18,8 +18,9 @@ import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#suppo
  *
  * A recorder installed before any page script samples every animation frame, so a state that is painted once
  * is caught; the server HTML is fetched and inspected on its own, before any script could have corrected it.
- * No API runs here: the page's model catalog is the API's real rows, served by the fixture a second late, while
- * the UI server's own catalog prefetch finds no API, which is the path a cold or failed prefetch takes.
+ * As in production, the UI server has the model catalog: a stand-in API on the API origin serves it the API's real
+ * rows, and nothing else (no other API runs in this tier). The page's own catalog request is answered with the same
+ * rows a second late, as a slow API would, so a label the page draws before the catalog arrives is seen.
  */
 
 /** The returning visitor's library, as the audit seeded it. */
@@ -116,6 +117,8 @@ test.each([
   async ({ profile, rate }) => {
     await target.setViewport({ width: 1440, height: 900 });
     await target.installModelCatalogFixture(catalogLatency);
+    const { serverHasCatalog } = await target.startModelCatalogApi();
+    expect.soft(serverHasCatalog, 'the UI server never rendered Home with the model catalog').toBe(true);
     await installHomeLoadRecorder();
     const projects = profile === 'returning' ? seededProjects : [];
     const label = `${profile}-cpu${rate}x`;

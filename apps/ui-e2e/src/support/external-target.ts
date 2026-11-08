@@ -320,6 +320,7 @@ export type UiBrowserCommands = {
     options?: AgentHostGatewayFixtureOptions,
   ): Promise<void>;
   uiInstallModelCatalogFixture(latency?: number): Promise<void>;
+  uiStartModelCatalogApi(): Promise<{ readonly serverHasCatalog: boolean }>;
   uiInstallPostHogFixture(apiKey: string): Promise<void>;
   uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
   uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
@@ -760,6 +761,12 @@ export const installAgentHostGatewayFixture = (
  */
 export const installModelCatalogFixture = (latency?: number): Promise<void> =>
   server.commands.uiInstallModelCatalogFixture(latency);
+/**
+ * Serves the API's real catalog on the API origin, so the UI server's own prefetch finds it as in production, and
+ * waits until that server renders with it; closes with the target (see `uiStartModelCatalogApi`).
+ */
+export const startModelCatalogApi = (): Promise<{ readonly serverHasCatalog: boolean }> =>
+  server.commands.uiStartModelCatalogApi();
 export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
 /** Releases a response parked mid-stream; omit `turn` for the newest gate. */
 export const releaseAgentHostGatewayFixture = (turn?: string): Promise<void> =>

@@ -141,6 +141,8 @@ type Session = {
   agentHostGatewayWalk?: GatewayScriptWalk;
   /** The GitHub-linked project's far side, while a spec has one (R15). */
   linkedGithub?: LinkedGithubFixture;
+  /** The stand-in API serving the model catalog on the API origin, while a spec has one. */
+  modelCatalogApi?: Server;
   /** What `uiSetTargetOffline` last said, so a routed fixture answers offline too. */
   offline?: boolean;
   secondary?: TargetPage;
@@ -284,6 +286,19 @@ const observePage = (session: Session, page: TargetPage): void => {
   });
 };
 
+/** Close an HTTP server and every connection it still holds. */
+const closeServer = async (server: Server): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+    server.closeAllConnections();
+  });
+
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
   for (const gate of session.agentHostGatewayGates.splice(0)) {
@@ -293,16 +308,16 @@ const disposeSession = async (session: Session): Promise<void> => {
     const server = session.agentHostGatewayServer;
     session.agentHostGatewayServer = undefined;
     try {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
-        server.closeAllConnections();
-      });
+      await closeServer(server);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (session.modelCatalogApi) {
+    const api = session.modelCatalogApi;
+    session.modelCatalogApi = undefined;
+    try {
+      await closeServer(api);
     } catch (error) {
       errors.push(error);
     }
@@ -764,6 +779,91 @@ const routeModelCatalog = async (session: Session, catalog: readonly unknown[], 
  */
 export const uiInstallModelCatalogFixture: BrowserCommand<[latency?: number]> = async (commandContext, latency) => {
   await routeModelCatalog(sessionFor(commandContext), await realModelCatalog(), latency);
+};
+
+/** How long the UI server is given to render with the catalog; covers its 30 s failure backoff. Milliseconds. */
+const serverCatalogDeadline = 40_000;
+
+/**
+ * Whether the UI server renders Home with the model catalog, polling for up to {@link serverCatalogDeadline}. Each
+ * document request is what makes the server prefetch, and a prefetch that failed earlier holds it back for its backoff.
+ *
+ * @param catalogId - A catalog row's id, which the server's HTML carries once it has the catalog.
+ * @returns Whether it did before the deadline.
+ */
+const waitForServerCatalog = async (catalogId: string): Promise<boolean> => {
+  const deadline = Date.now() + serverCatalogDeadline;
+  for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1000);
+      });
+    }
+    const html = await fetch(testBaseURL)
+      .then(async (response) => response.text())
+      .catch(() => '');
+    if (html.includes(catalogId)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Serve the API's real model catalog on the API origin itself (`TAU_E2E_API_URL`, else `http://localhost:4000`), so
+ * the UI server's own catalog prefetch finds it as it would in production, then wait until that server renders with
+ * it. Every other path is dropped unanswered, as an absent API would be, so nothing else about the tier changes. When
+ * the origin already has an API that answers `/v1/models`, that API is used instead. The stand-in closes with the
+ * target.
+ *
+ * @returns Whether the UI server renders with the catalog: false when its build has no server-side prefetch.
+ */
+export const uiStartModelCatalogApi: BrowserCommand<[], { readonly serverHasCatalog: boolean }> = async (
+  commandContext,
+) => {
+  const session = sessionFor(commandContext);
+  if (session.modelCatalogApi) {
+    throw new Error('The model catalog API stand-in is already running for this session.');
+  }
+  const origin = new URL(tauApiUrl);
+  const catalog = (await realModelCatalog()) as ReadonlyArray<{ readonly id: string }>;
+  const body = JSON.stringify(catalog);
+  const api = createServer((request, response) => {
+    if (!request.url?.startsWith('/v1/models')) {
+      request.socket.destroy();
+      return;
+    }
+    response.writeHead(200, {
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-origin': request.headers.origin ?? new URL(testBaseURL).origin,
+      'content-type': 'application/json',
+    });
+    response.end(body);
+  });
+  try {
+    /* No host: both `127.0.0.1` and `::1`, whichever `localhost` resolves to first. */
+    await new Promise<void>((resolve, reject) => {
+      api.once('error', reject);
+      api.listen(Number(origin.port || 80), () => {
+        api.off('error', reject);
+        resolve();
+      });
+    });
+    session.modelCatalogApi = api;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+      throw error;
+    }
+    const existing = await fetch(new URL('/v1/models', origin)).catch(() => undefined);
+    if (!existing?.ok) {
+      throw new Error(`${origin.origin} is taken by something that does not serve /v1/models.`, { cause: error });
+    }
+  }
+  const [first] = catalog;
+  if (!first) {
+    throw new Error('The API model catalog has no enabled rows.');
+  }
+  return { serverHasCatalog: await waitForServerCatalog(first.id) };
 };
 
 /** CDP sessions holding a page's CPU throttle; the rate lasts only while its session stays attached. */
@@ -3293,6 +3393,7 @@ export const uiBrowserCommands = {
   uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
   uiInstallModelCatalogFixture,
+  uiStartModelCatalogApi,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,

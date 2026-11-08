@@ -20,7 +20,7 @@ export const navRoutes: {
 } = {
   navMain: [
     {
-      title: 'All projects',
+      title: 'Projects',
       url: '/projects',
       icon: Hammer,
       // Items: [

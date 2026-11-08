@@ -43,7 +43,7 @@ const readTopBar = async (): Promise<TopBarGeometry> =>
         const link = header?.querySelector<HTMLElement>('[data-slot=page-header-action] a');
         return link ? { text: link.textContent.trim(), height: link.getBoundingClientRect().height } : undefined;
       })(),
-      // The title row's own New project link only: the empty library's "Build from code" shares its href.
+      // The title row's own New project link only.
       titleRowActionPainted:
         document.querySelector<HTMLElement>('main > section [data-slot=new-project-link]')?.checkVisibility() ?? false,
     };

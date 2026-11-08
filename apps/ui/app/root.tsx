@@ -13,6 +13,7 @@ import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { CrashReportPrompt } from '#components/crash-report-prompt.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
+import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
 import { readShellRequestHints } from '#lib/shell-request-hints.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
@@ -63,6 +64,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     globalPrivacyControl,
     env: await getClientEnvironment(),
     pathname: new URL(request.url).pathname,
+    // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
+    projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
     // R4/R7: sidebar state and request platform, so the shell's first paint is final.
     shellHints: readShellRequestHints(request),
     theme: await readThemeCookie(request),

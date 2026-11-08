@@ -55,7 +55,10 @@ export type ScopedStorageClient = {
   readShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
   readFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
-  getZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /**
@@ -85,7 +88,10 @@ export type WorkspaceAuthorityClient = Pick<
   readScopedFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readScopedFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
   readScopedShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
-  getScopedZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getScopedZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /**

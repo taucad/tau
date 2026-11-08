@@ -524,6 +524,36 @@ describe('catalog route vocabulary', () => {
     ]);
   });
 
+  /* The transport may mark any Anthropic breakpoint with a one-hour lifetime, which
+   * Anthropic bills at 2× base input against 1.25× for five minutes. Every Anthropic
+   * contract prices both tiers so a split usage report always settles. */
+  it('should price both cache-write lifetimes on every Anthropic meter contract', () => {
+    const anthropicMeters = billableModelRouteMeters.filter((meter) => meter.routeId.startsWith('anthropic-'));
+    expect(anthropicMeters.length).toBeGreaterThan(0);
+    for (const meter of anthropicMeters) {
+      const rate = (key: string): bigint | undefined =>
+        meter.rates.find((entry) => `${entry.dimension}:${entry.tier ?? ''}` === key)?.numeratorPicoUsd;
+      const input = rate('uncached_input:');
+      expect(input, meter.routeId).toBeDefined();
+      expect(rate('cache_write:5m'), meter.routeId).toBe(((input ?? 0n) * 5n) / 4n);
+      expect(rate('cache_write:1h'), meter.routeId).toBe((input ?? 0n) * 2n);
+    }
+  });
+
+  it('should stamp the one-hour tariff reading on the Anthropic valuation', () => {
+    const result = qualifyRoute('anthropic-claude-opus-5.5');
+
+    expect(result.invocation.supplierValuation?.sourceRevision).toBe(
+      'official-pricing:2026-11-08:anthropic-claude-opus-5.5',
+    );
+    expect(result.invocation.supplierRates).toContainEqual({
+      dimension: 'cache_write',
+      tier: '1h',
+      numeratorPicoUsd: '8000000000000',
+      denominatorUnits: '1000000',
+    });
+  });
+
   it('should resolve every funded route id and forward the supplier model id', () => {
     for (const routeId of billableModelRouteIds) {
       const resolved = qualifyRoute(routeId);

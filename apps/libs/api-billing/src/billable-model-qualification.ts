@@ -70,6 +70,15 @@ const rates = (
       ]),
   { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
 ];
+/* Anthropic bills a one-hour cache write at 2× base input and a five-minute write at 1.25×
+ * (published pricing, read 2026-11-08). The transport marks a breakpoint with either lifetime,
+ * so every Anthropic route prices both tiers and settles the split the supplier reports. */
+const anthropicOneHourRevision = '2026-11-08';
+// oxlint-disable-next-line max-params -- mirrors the supplier tariff dimensions in the static table.
+const anthropicRates = (input: string, read: string, write: string, output: string): readonly Rate[] => [
+  ...rates(input, read, write, output, '5m'),
+  { dimension: 'cache_write', tier: '1h', numeratorPicoUsd: picoUsd(input) * 2n },
+];
 const inputOutputRates = (input: string, output: string): readonly Rate[] => [
   { dimension: 'uncached_input', tier: null, numeratorPicoUsd: picoUsd(input) },
   { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
@@ -140,28 +149,65 @@ const routes = [
     'anthropic',
     1_000_000,
     128_000,
-    rates('10', '.25', '12.5', '50', '5m'),
+    anthropicRates('10', '.25', '12.5', '50'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
-  route('anthropic-claude-fable-5', 'Fable 5', 'anthropic', 1_000_000, 128_000, rates('10', '1', '12.5', '50', '5m')),
-  route('anthropic-claude-opus-5.5', 'Opus 5.5', 'anthropic', 1_000_000, 128_000, rates('4', '.2', '5', '20', '5m')),
-  route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
-  route('anthropic-claude-opus-4.8', 'Opus 4.8', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route(
+    'anthropic-claude-fable-5',
+    'Fable 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('10', '1', '12.5', '50'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
+  route(
+    'anthropic-claude-opus-5.5',
+    'Opus 5.5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('4', '.2', '5', '20'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
+  route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, anthropicRates('5', '.5', '6.25', '25'), {
+    pricingRevision: anthropicOneHourRevision,
+  }),
+  route(
+    'anthropic-claude-opus-4.8',
+    'Opus 4.8',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('5', '.5', '6.25', '25'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
   route(
     'anthropic-claude-sonnet-5.5',
     'Sonnet 5.5',
     'anthropic',
     1_000_000,
     128_000,
-    rates('2', '.2', '2.5', '10', '5m'),
+    anthropicRates('2', '.2', '2.5', '10'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
-  route('anthropic-claude-sonnet-5', 'Sonnet 5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
+  route(
+    'anthropic-claude-sonnet-5',
+    'Sonnet 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('2', '.2', '2.5', '10'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
   route(
     'anthropic-claude-sonnet-4.6',
     'Sonnet 4.6',
     'anthropic',
     1_000_000,
     64_000,
-    rates('3', '.3', '3.75', '15', '5m'),
+    anthropicRates('3', '.3', '3.75', '15'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
   route(
     'anthropic-claude-haiku-5.5',
@@ -169,10 +215,8 @@ const routes = [
     'anthropic',
     1_000_000,
     128_000,
-    rates('.5', '.05', '.625', '2.5', '5m'),
-    {
-      pricingRevision: '2026-10-10',
-    },
+    anthropicRates('.5', '.05', '.625', '2.5'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
   route(
     'openai-gpt-6.1-terra',
@@ -297,7 +341,7 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
-  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: rates('.1', '.01', '.125', '.5', '5m') }],
+  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: anthropicRates('.1', '.01', '.125', '.5') }],
   ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
   ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],

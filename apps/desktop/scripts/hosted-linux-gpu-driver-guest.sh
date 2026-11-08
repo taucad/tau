@@ -19,8 +19,9 @@ if [[ "$ID" == ubuntu ]]; then
   ubuntu-drivers devices || true
   sudo env DEBIAN_FRONTEND=noninteractive ubuntu-drivers install
 else
+  # nvidia-smi is its own package in Debian (only recommended by the driver), and both scripts read the GPU with it.
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    "linux-headers-$(uname -r)" nvidia-driver firmware-misc-nonfree
+    "linux-headers-$(uname -r)" nvidia-driver nvidia-smi firmware-misc-nonfree
 fi
 dpkg-query -W -f='${Package} ${Version}\n' | grep -E '^(nvidia-driver|linux-modules-nvidia|nvidia-kernel-dkms|xserver-xorg-video-nvidia|libnvidia-gl)' || true
 # Which display driver the first boot bound, for the record; the reboot that follows hands the GPU to NVIDIA.

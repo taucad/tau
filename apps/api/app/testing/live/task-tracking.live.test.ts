@@ -40,7 +40,8 @@ import { expectCompleted, runUsage, textOf, toolCalls } from '#testing/live/live
  * would change the project ends the turn, so the check stops before modelling.
  */
 
-const modelId = 'anthropic-claude-haiku-5.5';
+/** The catalog row under test; `TAU_LIVE_MODEL` picks another, such as `anthropic-claude-opus-5.5`. */
+const modelId = process.env['TAU_LIVE_MODEL'] ?? 'anthropic-claude-haiku-5.5';
 
 const stopHere: HostToolResult = {
   content: {

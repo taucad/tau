@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { ImmutableRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
-import { cleanLargeObjects, lfsPointerFor, readLfsPointer } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsPointerFor, readLfsPointer } from '#lfs.js';
+import { blobOid } from '#tree-id-memo.js';
 import { generatedGitattributesContent, generatedIgnoreContent } from '#workspace-config.js';
 
 const decoder = new TextDecoder();
@@ -81,6 +82,68 @@ describe("cleanLargeObjects under Tau's generated block", () => {
   });
 });
 
+describe("when a cut rewrites Tau's block (W11.2 review)", () => {
+  const stale =
+    '# BEGIN Tau generated — large objects are git LFS objects\n*.stl filter=lfs diff=lfs merge=lfs -text\n# END Tau generated\n';
+  const big = new Uint8Array(2 * 1024 * 1024).fill(3);
+
+  it('leaves a stale block alone in a cut that changed nothing', () => {
+    const parent = new ImmutableRevisionTree([
+      ['.gitattributes', stale],
+      ['part.step', 'solid part\n'],
+      ['big.bin', big],
+    ]);
+    const basis = largeObjectBasisOf(
+      'sha1',
+      [...revisionTreeFiles(parent)].map(([path, { content }]) => ({ path, oid: blobOid(content, 'sha1') })),
+    );
+
+    const { tree: recorded, objects } = cleanLargeObjects(parent, { basis });
+
+    expect(recorded).toBe(parent);
+    expect(objects.size).toBe(0);
+  });
+
+  it('rewrites it in the cut that adds a file it owes a line for, and keeps the unchanged entries as they were', () => {
+    const parent = new ImmutableRevisionTree([
+      ['.gitattributes', stale],
+      ['part.step', 'solid part\n'],
+    ]);
+    const basis = largeObjectBasisOf(
+      'sha1',
+      [...revisionTreeFiles(parent)].map(([path, { content }]) => ({ path, oid: blobOid(content, 'sha1') })),
+    );
+    const next = new ImmutableRevisionTree([
+      ...parent.entries().map(({ path, content }) => [path, content] as const),
+      ['big.bin', big],
+    ]);
+
+    const { tree: recorded } = cleanLargeObjects(next, { basis });
+
+    expect(decoder.decode(recorded.get('.gitattributes'))).toBe(generatedGitattributesContent(undefined, ['big.bin']));
+    expect(readLfsPointer(recorded.get('big.bin')!)).toBeDefined();
+    /* Its family is named now, but it is unchanged from the parent, so it stays the blob the parent holds. */
+    expect(sameRecord(recorded, next, 'part.step')).toBe(true);
+  });
+
+  it('never adds a line to a block that lost its end marker', () => {
+    const malformed =
+      '# BEGIN Tau generated — large objects are git LFS objects\n*.stl filter=lfs diff=lfs merge=lfs -text\n';
+    const tree = new ImmutableRevisionTree([
+      ['.gitattributes', malformed],
+      ['big.bin', big],
+      ['scan.stl', 'solid scan\n'],
+    ]);
+
+    const { tree: recorded } = cleanLargeObjects(tree);
+
+    expect(sameRecord(recorded, tree, '.gitattributes')).toBe(true);
+    expect(sameRecord(recorded, tree, 'big.bin')).toBe(true);
+    /* What its lines say still stands, as Git reads them. */
+    expect(readLfsPointer(recorded.get('scan.stl')!)).toBeDefined();
+  });
+});
+
 describe("cleanLargeObjects under a repository's own attributes (D16)", () => {
   it('should pointerise exactly the paths their attributes name and never touch the attributes', () => {
     const scan = new Uint8Array(4096).fill(3);
@@ -118,5 +181,26 @@ describe("cleanLargeObjects under a repository's own attributes (D16)", () => {
 
     expect(cleanLargeObjects(plain).tree).toBe(plain);
     expect(cleanLargeObjects(pointered).tree).toBe(pointered);
+  });
+});
+
+describe('cleanLargeObjects with case folding (core.ignoreCase)', () => {
+  it("writes the same block either way, and folds only the person's own patterns", () => {
+    const shouted = new Uint8Array(64).fill(6);
+    const tree = new ImmutableRevisionTree([
+      ['.gitattributes', `*.raw filter=lfs diff=lfs merge=lfs -text\n${tauBlock}`],
+      ['PART.STEP', shouted],
+      ['SCAN.RAW', 'raw\n'],
+    ]);
+
+    const folded = cleanLargeObjects(tree, { ignoreCase: true }).tree;
+    const exact = cleanLargeObjects(tree).tree;
+
+    expect(decoder.decode(folded.get('.gitattributes'))).toBe(decoder.decode(exact.get('.gitattributes')));
+    expect(readLfsPointer(folded.get('PART.STEP')!)).toBeDefined();
+    expect(readLfsPointer(exact.get('PART.STEP')!)).toBeDefined();
+    /* The residual: a person's pattern matched only by case is a pointer only where the host folds case. */
+    expect(readLfsPointer(folded.get('SCAN.RAW')!)).toBeDefined();
+    expect(readLfsPointer(exact.get('SCAN.RAW')!)).toBeUndefined();
   });
 });

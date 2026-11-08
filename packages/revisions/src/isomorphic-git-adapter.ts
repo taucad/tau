@@ -73,8 +73,8 @@ import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
-import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
-import type { LfsPointer } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LargeObjectBasis, LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
@@ -605,6 +605,21 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const paths = new Map<string, Readonly<{ oid: string; mode: string }>>();
     await walkTree(oid, '', paths);
     return paths;
+  };
+
+  /*
+   * The first parent's entries, which unchanged content keeps the
+   * representation of (rule 13) — blob ids only, no blob is read. A browser
+   * host is case-sensitive, so its cut never folds case.
+   */
+  const largeObjectBasisFor = async (parent: RevisionId | undefined): Promise<LargeObjectBasis | undefined> => {
+    const commit = parent === undefined ? undefined : await commitOf(parent);
+    return commit === undefined
+      ? undefined
+      : largeObjectBasisOf(
+          objectFormat,
+          [...(await flatTree(commit.tree))].map(([path, { oid }]) => ({ path, oid })),
+        );
   };
 
   /**
@@ -1925,7 +1940,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const recorded =
         input.largeObjects === false
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
-          : cleanLargeObjects(input.tree);
+          : cleanLargeObjects(input.tree, { basis: await largeObjectBasisFor(input.parents[0]) });
       await Promise.all(
         [...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content.byteLength, content)),
       );

@@ -449,3 +449,127 @@ describe("a repository's own large-file attributes (D16)", () => {
     expect(isAttributesPath('models/x.gitattributes')).toBe(false);
   });
 });
+
+describe('attributes as git reads them (W11.2 review)', () => {
+  /** Every path's `filter` as `git check-attr` reports it, in a scratch repository holding `files`. */
+  const checkAttribute = async (
+    files: Readonly<Record<string, string>>,
+    paths: readonly string[],
+    ignoreCase: boolean,
+  ): Promise<boolean[]> => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-attributes-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: root });
+      for (const [path, content] of Object.entries(files)) {
+        // oxlint-disable-next-line no-await-in-loop -- parents first.
+        await mkdir(join(root, path, '..'), { recursive: true });
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await writeFile(join(root, path), content);
+      }
+      const input = `${paths.join('\0')}\0`;
+      return execFileSync(
+        'git',
+        ['-c', `core.ignoreCase=${String(ignoreCase)}`, 'check-attr', '-z', '--stdin', 'filter'],
+        { cwd: root, encoding: 'utf8', input },
+      )
+        .split('\0')
+        .filter((_, index) => index % 3 === 2)
+        .map((value) => value === 'lfs');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  };
+  const verdicts = (files: Readonly<Record<string, string>>, paths: readonly string[], ignoreCase: boolean) => {
+    const isLarge = repositoryLargeObjectMatcher(new Map(Object.entries(files)), { ignoreCase });
+    return paths.map((path) => isLarge(path));
+  };
+
+  it.runIf(gitToolchainOnPath)('agrees on macros, a bare or unset filter, and case folding', async () => {
+    const files = {
+      '.gitattributes': [
+        '[attr]big filter=lfs diff=lfs merge=lfs -text',
+        '[attr]plain -big',
+        '*.bin filter=lfs',
+        'raw.bin binary',
+        '*.big big',
+        'off.big -big',
+        'neg.big !big',
+        'flat.big plain',
+        '*.stl filter=lfs',
+        'bare.stl filter',
+        'unset.stl -filter',
+        'unspecified.stl !filter',
+        'other.stl filter=other',
+        '*.STEP filter=lfs',
+      ].join('\n'),
+      'sub/.gitattributes': '[attr]small -filter\n*.bin small\n',
+    };
+    const paths = [
+      'a.bin',
+      'raw.bin',
+      'sub/a.bin',
+      'a.big',
+      'off.big',
+      'neg.big',
+      'flat.big',
+      'a.stl',
+      'bare.stl',
+      'unset.stl',
+      'unspecified.stl',
+      'other.stl',
+      'part.STEP',
+      'part.step',
+      'A.STL',
+      'Sub/a.bin',
+    ];
+    const [exact, folded] = await Promise.all(
+      [false, true].map(async (ignoreCase) => checkAttribute(files, paths, ignoreCase)),
+    );
+    expect(verdicts(files, paths, false), 'core.ignoreCase=false').toStrictEqual(exact);
+    expect(verdicts(files, paths, true), 'core.ignoreCase=true').toStrictEqual(folded);
+  });
+
+  it.runIf(gitToolchainOnPath)(
+    "escapes glob characters in Tau's per-path lines, so each names its own path",
+    async () => {
+      const named = [
+        'models/a[1].note',
+        'models/star*.note',
+        'models/what?.note',
+        String.raw`models/back\slash.note`,
+        'my scan.dat',
+      ];
+      const others = ['models/a1.note', 'models/starry.note', 'models/whatx.note', 'models/backslash.note'];
+      const files = { '.gitattributes': generatedGitattributesContent(undefined, named) };
+      const paths = [...named, ...others];
+
+      expect(verdicts(files, paths, false)).toStrictEqual(await checkAttribute(files, paths, false));
+      expect(verdicts(files, named, false)).toStrictEqual(named.map(() => true));
+      expect(verdicts(files, others, false)).toStrictEqual(others.map(() => false));
+    },
+  );
+
+  it("still names the path an older build's unescaped line in Tau's block named", () => {
+    const block = generatedGitattributesContent(undefined);
+    const older = block.replace(
+      '# END Tau generated',
+      '/models/a[1].stl filter=lfs diff=lfs merge=lfs -text\n# END Tau generated',
+    );
+    const isLarge = repositoryLargeObjectMatcher(new Map([['.gitattributes', older]]));
+
+    expect(isLarge('models/a[1].stl')).toBe(true);
+    /* The line's glob reading, which Git itself gives it, still stands too. */
+    expect(isLarge('models/a1.stl')).toBe(true);
+    /* Regenerated, the line is written escaped and keeps naming the same path. */
+    const regenerated = generatedGitattributesContent(older);
+    expect(regenerated).toContain(String.raw`/models/a\[1].stl filter=lfs`);
+    expect(repositoryLargeObjectMatcher(new Map([['.gitattributes', regenerated]]))('models/a[1].stl')).toBe(true);
+  });
+
+  it('leaves a file whose Tau block lost its end marker exactly as it is', () => {
+    const malformed = `*.psd filter=lfs\n# BEGIN Tau generated — large objects are git LFS objects\n*.stl filter=lfs\nmine.txt -filter\n`;
+    expect(generatedGitattributesContent(malformed, ['big.bin'])).toBe(malformed);
+    const ignore = `dist/\n# BEGIN Tau generated — derived content is never versioned\n/.tau/cache/\nkeep.me\n`;
+    expect(generatedIgnoreContent(ignore)).toBe(ignore);
+  });
+});

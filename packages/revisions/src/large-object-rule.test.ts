@@ -186,3 +186,89 @@ describe('one rule on both legs (I5)', () => {
     }
   }, 120_000);
 });
+
+describe('an entry unchanged from its parent keeps its representation on both legs (rule 13, I5)', () => {
+  const art = encoder.encode('layered art\n'.repeat(300));
+  const fresh = encoder.encode('new art\n'.repeat(300));
+  const scan = encoder.encode('scanned mesh\n'.repeat(300));
+  const cases = [
+    {
+      name: 'a blob stays a blob after the attributes start naming it',
+      parent: new ImmutableRevisionTree([
+        ['main.scad', 'cube(1);\n'],
+        ['art.psd', art],
+      ]),
+      next: new ImmutableRevisionTree([
+        [generatedGitattributesPath, '*.psd filter=lfs diff=lfs merge=lfs -text\n'],
+        ['main.scad', 'cube(1);\n'],
+        ['art.psd', art],
+        ['new.psd', fresh],
+      ]),
+      expected: new ImmutableRevisionTree([
+        [generatedGitattributesPath, '*.psd filter=lfs diff=lfs merge=lfs -text\n'],
+        ['main.scad', 'cube(1);\n'],
+        ['art.psd', art],
+        ['new.psd', lfsPointerFor(fresh).bytes],
+      ]),
+    },
+    {
+      name: 'a pointer stays a pointer after the attributes stop naming it',
+      parent: new ImmutableRevisionTree([
+        [generatedGitattributesPath, '*.stl filter=lfs diff=lfs merge=lfs -text\n'],
+        ['scan.stl', lfsPointerFor(scan).bytes],
+      ]),
+      next: new ImmutableRevisionTree([
+        ['scan.stl', scan],
+        ['other.stl', fresh],
+      ]),
+      expected: new ImmutableRevisionTree([
+        ['scan.stl', lfsPointerFor(scan).bytes],
+        ['other.stl', fresh],
+      ]),
+    },
+  ];
+  const legs = [
+    () => createIsomorphicGitRevisionPort({ filesystem: new MemoryProvider() }),
+    ...(gitToolchainOnPath
+      ? [
+          async () => {
+            const root = await mkdtemp(join(tmpdir(), 'tau-rule-13-'));
+            roots.push(root);
+            return createNativeGitRevisionPort({ repositoryPath: root });
+          },
+        ]
+      : []),
+  ];
+
+  for (const { name, parent, next, expected } of cases) {
+    it(
+      name,
+      async () => {
+        const recorded = await Promise.all(
+          legs.map(async (leg) => {
+            const port = await leg();
+            await port.init({ author, createSetupFiles: false });
+            const first = await port.writeRevision({
+              parents: [],
+              tree: parent,
+              largeObjects: false,
+              provenance,
+              summary: { generated: 'Parent' },
+            });
+            const receipt = await port.writeRevision({
+              parents: [revisionId(first.commitId)],
+              tree: next,
+              provenance,
+              summary: { generated: 'Next' },
+            });
+            const record = await port.readRevision(revisionId(receipt.commitId));
+            return record?.treeId;
+          }),
+        );
+        expect(new Set(recorded).size).toBe(1);
+        expect(recorded[0]).toBe(revisionTreeId(expected, 'sha1'));
+      },
+      120_000,
+    );
+  }
+});

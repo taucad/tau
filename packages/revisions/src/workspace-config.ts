@@ -145,7 +145,8 @@ export const hasGeneratedBlock = (content: string | undefined): boolean =>
  *
  * Existing content is preserved: every line outside the block stays where it
  * was, so a person's line after the block still overrides it, and re-running
- * this is a no-op once the block is current.
+ * this is a no-op once the block is current. A block with no end marker is
+ * malformed, and the file comes back unchanged.
  *
  * @param existing - Current file content, or `undefined` when absent.
  * @param markerStart - The block's opening comment.
@@ -157,10 +158,14 @@ const withGeneratedBlock = (existing: string | undefined, markerStart: string, l
   const block = `${markerStart}\n${lines.join('\n')}\n${markerEnd}\n`;
   const start = previous.indexOf(markerStart);
   if (start !== -1) {
-    /* A block that lost its end marker runs to the end of the file. */
     const end = previous.indexOf(markerEnd, start);
-    const rest = end === -1 ? '' : previous.slice(end + markerEnd.length).replace(/^\n/u, '');
-    return previous.slice(0, start) + block + rest;
+    /* A block that lost its end marker is malformed: nothing after it is
+     * known to be Tau's, so the file is left exactly as it is until a person
+     * mends it (W11.2 review). */
+    if (end === -1) {
+      return previous;
+    }
+    return previous.slice(0, start) + block + previous.slice(end + markerEnd.length).replace(/^\n/u, '');
   }
   const head = previous === '' ? '' : previous.endsWith('\n') ? previous : `${previous}\n`;
   return `${head}${block}`;
@@ -298,15 +303,37 @@ const lfsAttributes = 'filter=lfs diff=lfs merge=lfs -text';
  * Anchored with a leading `/` so it names this file and not every file of that
  * name in every directory.
  *
- * ponytail: whitespace becomes `?` (gitattributes has no quoting — the pattern
- * ends at the first space — and `?` is gitignore's single-character wildcard,
- * so the pattern still matches the file). `#`, `!` and `[` in a path would need
- * the same treatment; no CAD workspace has produced one yet.
+ * The glob characters wildmatch reads — `\`, `[`, `*` and `?` — are escaped
+ * with `\`, so `renders/shot[final].exr` names that file and not
+ * `renders/shotf.exr`. Whitespace becomes `?` (gitattributes has no quoting —
+ * the pattern ends at the first space — and `?` matches the one character).
+ * The leading `/` means a `#` or `!` in the name is never the line's first
+ * character.
  *
  * @param path - Project-relative path.
  * @returns The pattern naming exactly that path.
  */
-const attributePattern = (path: string): string => `/${path.replaceAll(/\s/gu, '?')}`;
+const attributePattern = (path: string): string =>
+  `/${path.replaceAll(/[*?[\\]/gu, String.raw`\$&`).replaceAll(/\s/gu, '?')}`;
+
+/**
+ * One per-path line of Tau's block as an older build wrote it, before glob
+ * characters were escaped: everything literal except `?`, which stood for
+ * whitespace. Read beside the pattern's own glob meaning, so a block written
+ * then still tracks the path it named (W11.2 review).
+ *
+ * @param pattern - An anchored per-path pattern from Tau's block.
+ * @param ignoreCase - Whether case is folded.
+ * @returns A matcher over a root-relative path.
+ */
+const legacyPathMatcher = (pattern: string, ignoreCase = false): ((relative: string) => boolean) => {
+  const body = pattern.slice(1);
+  const expression = new RegExp(
+    `^${[...body].map((character) => (character === '?' ? '[^/]' : character.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`))).join('')}$`,
+    ignoreCase ? 'iu' : 'u',
+  );
+  return (relative) => expression.test(relative);
+};
 
 /**
  * The patterns Tau's generated block already tracks by name.
@@ -323,22 +350,49 @@ const generatedTrackedPatterns = (existing: string | undefined): ReadonlySet<str
   if (held !== undefined && held.source === existing) {
     return held.patterns;
   }
-  const start = existing?.indexOf(attributesMarker) ?? -1;
+  const block = generatedAttributesBlock(existing);
   const patterns =
-    existing === undefined || start === -1
+    block === undefined
       ? new Set<string>()
       : new Set(
-          existing
-            .slice(start, existing.indexOf(markerEnd, start))
+          block
             .split('\n')
             .filter((line) => line.startsWith('/'))
-            .map((line) => line.slice(0, line.indexOf(' '))),
+            .map((line) => escapedLegacyPattern(line.slice(0, line.indexOf(' ')))),
         );
   parsedTrackedPatterns = { source: existing, patterns };
   return patterns;
 };
 
 let parsedTrackedPatterns: Readonly<{ source: string | undefined; patterns: ReadonlySet<string> }> | undefined;
+
+/**
+ * The body of Tau's large-object block, when the file holds a well-formed one:
+ * its start marker, then its end marker.
+ *
+ * @param content - Attributes file content, or `undefined` when absent.
+ * @returns The lines between the markers, or `undefined`.
+ */
+const generatedAttributesBlock = (content: string | undefined): string | undefined => {
+  const start = content?.indexOf(attributesMarker) ?? -1;
+  const end = start === -1 ? -1 : content!.indexOf(markerEnd, start);
+  return end === -1 ? undefined : content!.slice(start + attributesMarker.length, end);
+};
+
+/**
+ * A per-path pattern an older build wrote, rewritten with its glob characters
+ * escaped, so a regenerated block names the path for a stock Git too. A
+ * pattern already escaped is returned as it is: an older build never wrote a
+ * `\`, and this build never writes `[` or `*` bare.
+ *
+ * ponytail: a `?` stays a wildcard either way; an older build wrote it for
+ * whitespace, and it still matches the one character it stood for.
+ *
+ * @param pattern - An anchored per-path pattern from Tau's block.
+ * @returns The pattern as this build writes it.
+ */
+const escapedLegacyPattern = (pattern: string): string =>
+  pattern.includes('\\') ? pattern : pattern.replaceAll(/[*[]/gu, String.raw`\$&`);
 
 /**
  * Merge Tau's LFS tracking rules into any existing attributes file.
@@ -368,17 +422,17 @@ export const generatedGitattributesContent = (
 /**
  * Whether an attributes file carries Tau's generated large-object block.
  *
- * The block is what makes Tau a writer of the file at all: a cut regenerates
- * it (the families, the per-path lines it already holds, and a line per new
- * path the families or the size threshold name), and a file without it is the
- * person's alone, never written.
+ * The block is what makes Tau a writer of the file at all: a cut that must
+ * add a per-path line regenerates it (the families, the per-path lines it
+ * already holds, and the new lines), and a file without a well-formed one is
+ * the person's alone, never written.
  *
  * @param content - Attributes file content, or `undefined` when absent.
  * @returns Whether Tau's large-object block is present.
  * @internal
  */
 export const hasGeneratedAttributesBlock = (content: string | undefined): boolean =>
-  content?.includes(attributesMarker) === true;
+  generatedAttributesBlock(content) !== undefined;
 
 /**
  * Whether one path's attributes put it on git LFS, by the root attributes file.
@@ -423,9 +477,10 @@ let rootMatcher: Readonly<{ source: string | undefined; matches: (path: string) 
  * own name.
  *
  * @param pattern - The pattern, unquoted, with no trailing `/`.
+ * @param ignoreCase - Whether case is folded (`core.ignoreCase`).
  * @returns A matcher over the path relative to the attributes file's directory.
  */
-const attributeMatcher = (pattern: string): ((relative: string) => boolean) => {
+const attributeMatcher = (pattern: string, ignoreCase = false): ((relative: string) => boolean) => {
   const anchored = pattern.includes('/');
   const body = pattern.startsWith('/') ? pattern.slice(1) : pattern;
   let source = '';
@@ -459,7 +514,7 @@ const attributeMatcher = (pattern: string): ((relative: string) => boolean) => {
       source += character.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
     }
   }
-  const expression = new RegExp(`^${source}$`, 'u');
+  const expression = new RegExp(`^${source}$`, ignoreCase ? 'iu' : 'u');
   return anchored
     ? (relative) => expression.test(relative)
     : (relative) => expression.test(relative.slice(relative.lastIndexOf('/') + 1));
@@ -468,22 +523,100 @@ const attributeMatcher = (pattern: string): ((relative: string) => boolean) => {
 /** Whether one attributes line sets, unsets or leaves `filter`, and what to. */
 type FilterRule = Readonly<{ matches: (relative: string) => boolean; lfs: boolean }>;
 
+/** How a tree's attributes are read: git's case folding, when the host's repository asks for it. @internal */
+export type AttributesReading = Readonly<{
+  /** `core.ignoreCase`: patterns match whatever the case (a native host on a case-insensitive disk). */
+  ignoreCase?: boolean;
+}>;
+
+/** Git's one built-in macro; it never names `filter`. */
+const builtInMacros: ReadonlyMap<string, readonly string[]> = new Map([['binary', ['-diff', '-merge', '-text']]]);
+
+/**
+ * The macros a root attributes file defines (`[attr]name attributes…`).
+ *
+ * Git honours a macro only in the top-level file, and refuses one elsewhere.
+ *
+ * ponytail: every definition in the file counts, wherever it stands; git
+ * reads them in order, and a macro used above its own definition is rare.
+ *
+ * @param content - The root attributes file, or `undefined`.
+ * @returns Each macro's attribute tokens by its name, the built-in ones included.
+ */
+const macrosOf = (content: string | undefined): ReadonlyMap<string, readonly string[]> => {
+  const macros = new Map(builtInMacros);
+  for (const raw of content?.split(/\r?\n/u) ?? []) {
+    const line = raw.trim();
+    if (line.startsWith('[attr]')) {
+      const [name, ...tokens] = line.slice('[attr]'.length).split(/\s+/u);
+      if (name !== undefined && name !== '') {
+        macros.set(name, tokens);
+      }
+    }
+  }
+  return macros;
+};
+
+/**
+ * What one line's attribute tokens do to `filter`, as `git check-attr` reads
+ * them: `filter=lfs` puts the path on LFS; another value, a bare `filter`,
+ * `-filter` and `!filter` take it off; a macro expands to its own tokens, and
+ * an unset or unspecified macro (`-name`, `!name`) leaves `filter`
+ * unspecified, which is off LFS too.
+ *
+ * @param tokens - The line's attribute tokens, in order.
+ * @param macros - The macros the root file defines.
+ * @param depth - How deep in macro expansion this is; a cycle stops.
+ * @returns `true` or `false` for the last token that speaks to `filter`, else `undefined`.
+ */
+const filterVerdictOf = (
+  tokens: readonly string[],
+  macros: ReadonlyMap<string, readonly string[]>,
+  depth = 0,
+): boolean | undefined => {
+  let lfs: boolean | undefined;
+  for (const token of tokens) {
+    if (token === 'filter=lfs') {
+      lfs = true;
+    } else if (token === 'filter' || token.startsWith('filter=') || token === '-filter' || token === '!filter') {
+      lfs = false;
+    } else if (depth < 8) {
+      const negated = token.startsWith('-') || token.startsWith('!');
+      const expanded = macros.get(negated ? token.slice(1) : token);
+      const verdict = expanded === undefined ? undefined : filterVerdictOf(expanded, macros, depth + 1);
+      if (verdict !== undefined) {
+        lfs = negated ? false : verdict;
+      }
+    }
+  }
+  return lfs;
+};
+
 /**
  * The `filter` rules of one attributes file, in file order.
  *
- * Only lines that mention `filter` count: `filter=lfs` sets it, `filter=<other>`,
- * `-filter` and `!filter` leave the path off LFS. A negative pattern is
- * refused by git and ignored here too, as are macro definitions (`[attr]`)
- * and a directory pattern (`dir/`), which matches no file.
+ * Only lines that speak to `filter` count, directly or through a macro (see
+ * {@link filterVerdictOf}). A negative pattern is refused by git and ignored
+ * here too, as are macro definitions and a directory pattern (`dir/`), which
+ * matches no file. A per-path line inside Tau's well-formed block also matches
+ * the path an older build meant by it, before glob characters were escaped.
  *
  * ponytail: a C-quoted pattern (`"a b" filter=lfs`) is read with its quotes
  * dropped and `\"` unescaped; octal escapes are left as written.
  *
  * @param content - The attributes file.
+ * @param macros - The macros the root file defines.
+ * @param reading - Case folding.
  * @returns Its filter rules.
  */
-const filterRules = (content: string): readonly FilterRule[] =>
-  content.split(/\r?\n/u).flatMap((raw): FilterRule[] => {
+const filterRules = (
+  content: string,
+  macros: ReadonlyMap<string, readonly string[]>,
+  reading: AttributesReading,
+): readonly FilterRule[] => {
+  const block = generatedAttributesBlock(content);
+  const tauLines = new Set(block?.split(/\r?\n/u).filter((line) => line.startsWith('/')) ?? []);
+  return content.split(/\r?\n/u).flatMap((raw): FilterRule[] => {
     const line = raw.trim();
     if (line === '' || line.startsWith('#') || line.startsWith('[attr]') || line.startsWith('!')) {
       return [];
@@ -491,19 +624,21 @@ const filterRules = (content: string): readonly FilterRule[] =>
     const quoted = line.startsWith('"') ? /^"((?:[^"\\]|\\.)*)"/u.exec(line) : undefined;
     const pattern = quoted?.[1]?.replaceAll(/\\(.)/gu, '$1') ?? line.split(/\s/u, 1)[0]!;
     const rest = line.slice(quoted ? quoted[0].length : pattern.length);
-    let lfs: boolean | undefined;
-    for (const token of rest.split(/\s+/u)) {
-      if (token === 'filter=lfs') {
-        lfs = true;
-      } else if (token.startsWith('filter=') || token === '-filter' || token === '!filter') {
-        lfs = false;
-      }
-    }
+    const lfs = filterVerdictOf(
+      rest.split(/\s+/u).filter((token) => token !== ''),
+      macros,
+    );
     if (lfs === undefined || pattern === '' || pattern.endsWith('/')) {
       return [];
     }
-    return [{ matches: attributeMatcher(pattern), lfs }];
+    const matches = attributeMatcher(pattern, reading.ignoreCase === true);
+    if (!tauLines.has(raw)) {
+      return [{ matches, lfs }];
+    }
+    const legacy = legacyPathMatcher(pattern, reading.ignoreCase === true);
+    return [{ matches: (relative) => matches(relative) || legacy(relative), lfs }];
   });
+};
 
 /** Attributes files by their own project-relative path, as a tree holds them. @internal */
 export type RepositoryAttributes = ReadonlyMap<string, string>;
@@ -519,14 +654,18 @@ export type RepositoryAttributes = ReadonlyMap<string, string>;
  *
  * ponytail: `$GIT_DIR/info/attributes` and `core.attributesFile` are not read:
  * a cut has to predict the tree from the tree alone (I4), so only the
- * versioned files decide. Case folding (`core.ignoreCase`) is not applied.
+ * versioned files decide.
  *
  * @param attributes - Every attributes file the tree holds, by its path.
+ * @param reading - Case folding, as the host's repository asks.
  * @returns Whether one project-relative path is a large object.
  * @internal
  */
-export const repositoryLargeObjectMatcher = (attributes: RepositoryAttributes): ((path: string) => boolean) => {
-  const verdict = largeObjectVerdict(attributes);
+export const repositoryLargeObjectMatcher = (
+  attributes: RepositoryAttributes,
+  reading: AttributesReading = {},
+): ((path: string) => boolean) => {
+  const verdict = largeObjectVerdict(attributes, reading);
   return (path) => verdict(path) === true;
 };
 
@@ -535,15 +674,21 @@ export const repositoryLargeObjectMatcher = (attributes: RepositoryAttributes): 
  * sets or unsets `filter` for it — the paths Tau's block may still name.
  *
  * @param attributes - Every attributes file the tree holds, by its path.
+ * @param reading - Case folding, as the host's repository asks.
  * @returns `true` for `filter=lfs`, `false` for another filter or an unset one,
  *   `undefined` when the attributes say nothing about the path.
  * @internal
  */
-export const largeObjectVerdict = (attributes: RepositoryAttributes): ((path: string) => boolean | undefined) => {
+export const largeObjectVerdict = (
+  attributes: RepositoryAttributes,
+  reading: AttributesReading = {},
+): ((path: string) => boolean | undefined) => {
+  const macros = macrosOf(attributes.get(generatedGitattributesPath));
+  const fold = (text: string): string => (reading.ignoreCase === true ? text.toLowerCase() : text);
   const files = [...attributes]
     .map(([file, content]) => ({
-      directory: file.slice(0, file.length - generatedGitattributesPath.length),
-      rules: filterRules(content),
+      directory: fold(file.slice(0, file.length - generatedGitattributesPath.length)),
+      rules: filterRules(content, macros, reading),
     }))
     .filter(({ rules }) => rules.length > 0)
     /* Shallowest first, so a deeper file's verdict is the one that stands. */
@@ -554,7 +699,7 @@ export const largeObjectVerdict = (attributes: RepositoryAttributes): ((path: st
   return (path) => {
     let lfs: boolean | undefined;
     for (const { directory, rules } of files) {
-      if (!path.startsWith(directory)) {
+      if (!fold(path).startsWith(directory)) {
         continue;
       }
       const relative = path.slice(directory.length);

@@ -62,6 +62,13 @@ export type RevisionEngineDescriptor = Readonly<{
    */
   largeObjects: boolean;
   /**
+   * Whether the repository matches its attributes case-insensitively
+   * (`core.ignoreCase`, a native host on a case-insensitive disk). The cut's
+   * clean folds case exactly when this says so, so its prediction is the
+   * host's own tree (I5). Absent means case-sensitive, as the browser is.
+   */
+  ignoreCase?: boolean;
+  /**
    * Whether a checkout keeps each large object's bytes as a file once the
    * store holds it (D9: a disk host keeps a physical copy). Large-object
    * adoption, which replaces such a file by its pointer, then adopts nothing.

@@ -21,7 +21,7 @@ import type { FastifyReply } from 'fastify';
 import { ZodSerializerDto } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { OptionalAuth, OptionalUser, UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import {
   InvitePublicationAccessDto,
   PublicationAccessGrantDto,

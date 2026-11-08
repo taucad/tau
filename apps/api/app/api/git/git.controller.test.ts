@@ -13,7 +13,7 @@ import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 /**
  * D22 / charter I11 / L6-F3: every Hosted Remote route spends a per-`(user,

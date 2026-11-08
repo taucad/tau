@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
+import { DevWebSocketService } from '#websocket/dev-websocket.service.js';
 
 /**
  * WebSocket module providing shared WebSocket infrastructure.

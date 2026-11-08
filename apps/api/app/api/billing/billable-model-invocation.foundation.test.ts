@@ -56,7 +56,7 @@ import { AuthGuard } from '#auth/auth.guard.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { DatabaseService } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];

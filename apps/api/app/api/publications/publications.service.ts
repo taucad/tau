@@ -57,7 +57,7 @@ import type { StorageTier } from '#storage/object-storage.service.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 
 /** The shared placeholder card image every publication starts with. */

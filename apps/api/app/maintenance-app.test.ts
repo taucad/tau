@@ -92,7 +92,7 @@ const listeningPackages = [
   '@opentelemetry/exporter-prometheus',
   '@opentelemetry/sdk-node',
 ];
-const listeningModules = ['app/main.ts', 'app/app.module.ts', 'app/telemetry/otel.ts'];
+const listeningModules = ['app/main.ts', 'app/app.module.ts', '../libs/api-observability/src/otel.ts'];
 
 describe('tau-maintenance image (DC4)', () => {
   it('should build a maintenance target that runs the maintenance command and exposes nothing', () => {

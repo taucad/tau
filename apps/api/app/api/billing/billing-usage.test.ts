@@ -11,7 +11,7 @@ import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { environmentSchemaBase } from '@taucad/api-core';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 type Tx = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 

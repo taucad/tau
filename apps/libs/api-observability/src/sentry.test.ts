@@ -9,7 +9,7 @@ import {
   reportReadinessFailure,
   reportServerError,
   scrubSentryEvent,
-} from '#telemetry/sentry.js';
+} from '#sentry.js';
 
 /** Events a real Sentry client produced, captured in `beforeSend` and never sent. */
 const sentEvents: ErrorEvent[] = [];

@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import type { Provider } from '@nestjs/common';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
 import { RouteCache } from '#api/git/routing/route-cache.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';

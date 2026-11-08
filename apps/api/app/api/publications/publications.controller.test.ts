@@ -19,7 +19,7 @@ import { ViewerIdentityInterceptor } from '#api/publications/viewer-identity.int
 import { ViewerIdentityService } from '#api/publications/viewer-identity.service.js';
 import type { PublicationWireRow } from '#api/publications/publications.dto.js';
 import { PublishRequestDto } from '#api/publications/publications.dto.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 const validationPipe = new ZodValidationPipe();
 

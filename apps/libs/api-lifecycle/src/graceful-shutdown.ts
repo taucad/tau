@@ -1,8 +1,8 @@
 import process from 'node:process';
 import { Logger } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
+import { ShutdownService } from '#shutdown.service.js';
+import { UpgradeRouter } from '#upgrade-router.js';
 
 /** Milliseconds after the stop signal at which each phase gives up. */
 export type ShutdownPhases = {

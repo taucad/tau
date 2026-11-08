@@ -49,12 +49,12 @@ import { PublicationRateLimiterService } from '#api/publications/publication-rat
 import { gitExecutionKey } from '#api/git/forwarding/git-execution.js';
 import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import { AttributeKey, TauMetrics } from '@taucad/telemetry';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import type {
   SyncOperationAttributes,
   SyncOperationDurationAttributes,
   SyncRefusalAttributes,
-} from '#telemetry/metrics.js';
+} from '@taucad/api-observability/metrics';
 
 type SyncOperation = SyncOperationAttributes['tau.sync.operation'];
 type SyncOutcome = SyncOperationAttributes['outcome'];

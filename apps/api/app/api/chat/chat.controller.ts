@@ -9,7 +9,7 @@ import { AuthGuard } from '#auth/auth.guard.js';
 import { User } from '#auth/decorators/auth.decorator.js';
 import { ChatMessagesValidationPipe } from '#api/chat/chat.dto.js';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
 import { assertNoQuery, invocationSignal, readHint } from '#api/llm/llm-gateway.headers.js';
 

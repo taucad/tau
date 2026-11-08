@@ -10,14 +10,14 @@ import type { RawData } from 'ws';
 import { hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsGateway } from '#api/hosts/hosts.gateway.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
-import type { DevWebSocketService, WebSocketConnectionHandler } from '#api/websocket/dev-websocket.service.js';
+import type { DevWebSocketService, WebSocketConnectionHandler } from '@taucad/api-lifecycle';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { UpgradeRouter } from '@taucad/api-lifecycle';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** A `ws` socket as the gateway uses one: it closes, listens, and holds its frames while paused. */
 const routeSocket = (): WebSocket =>

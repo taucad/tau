@@ -4,7 +4,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
 import { billingOwnerBinding } from '#database/schema.js';
 import type { Environment } from '@taucad/api-core';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';

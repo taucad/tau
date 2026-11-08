@@ -4,7 +4,7 @@ import type { BillingCashReconciliationService } from '#api/billing/billing-cash
 import type { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
 import type { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 /** Unpriced terminal operations of one provider, SKU and reason. */
 type UnpricedOperations = {

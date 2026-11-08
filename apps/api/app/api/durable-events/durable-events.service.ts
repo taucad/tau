@@ -10,7 +10,7 @@ import { DatabaseService } from '#database/database.service.js';
 import { durableStream, durableStreamEvent } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type {
   DurableAppendOutcome,
   DurableStreamEvent,

@@ -9,7 +9,7 @@ import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { BillingRecoveryScheduler, recoveryPassLimit } from '#api/billing/billing-recovery.scheduler.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';

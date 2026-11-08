@@ -5,7 +5,7 @@ import process from 'node:process';
 import { setTimeout } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const apiRoot = path.resolve(import.meta.dirname, '../..');
+const libraryRoot = path.resolve(import.meta.dirname, '..');
 const fixture = path.join(import.meta.dirname, 'graceful-shutdown.signal-fixture.ts');
 
 type Exit = { readonly code: number | undefined; readonly signal: NodeJS.Signals | undefined };
@@ -19,12 +19,12 @@ type Child = {
 const start = async (): Promise<{ child: Child; url: string }> => {
   const childEnvironment: Record<string, string | undefined> = {
     ...(process.env as Record<string, string | undefined>),
-    // The tsx loader does not find the decorator settings on its own; the app config carries them.
+    // The tsx loader does not find the decorator settings on its own; the library config carries them.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
-    TSX_TSCONFIG_PATH: path.join(apiRoot, 'tsconfig.app.json'),
+    TSX_TSCONFIG_PATH: path.join(libraryRoot, 'tsconfig.lib.json'),
   };
   const spawned: ChildProcess = spawn(process.execPath, ['--import', 'tsx', fixture], {
-    cwd: apiRoot,
+    cwd: libraryRoot,
     env: childEnvironment as NodeJS.ProcessEnv,
     stdio: ['ignore', 'pipe', 'inherit'],
   });

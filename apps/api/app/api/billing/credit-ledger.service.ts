@@ -23,7 +23,7 @@ import {
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {

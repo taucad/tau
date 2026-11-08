@@ -17,7 +17,7 @@ import { ProviderModule } from '#api/providers/provider.module.js';
 import { TestApiModule } from '#api/test-api/test-api.module.js';
 import { ObservabilityDebugModule } from '#api/observability-debug/observability-debug.module.js';
 import { TelemetryIngestModule } from '#api/telemetry/telemetry.module.js';
-import { WebSocketModule } from '#api/websocket/websocket.module.js';
+import { WebSocketModule } from '@taucad/api-lifecycle';
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { JobsModule } from '#api/jobs/jobs.module.js';

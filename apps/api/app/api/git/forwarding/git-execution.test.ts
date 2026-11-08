@@ -5,8 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { verifyReceipt } from '#api/git/forwarding/contract/receipt.js';
 import {
   gitExecutionProvider,

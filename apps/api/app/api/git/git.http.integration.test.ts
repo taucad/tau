@@ -55,7 +55,7 @@ import { livePackBound } from '#api/git/store/limits.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { createGitTestListener } from '#api/git/git-test-listener.js';
 
 /**

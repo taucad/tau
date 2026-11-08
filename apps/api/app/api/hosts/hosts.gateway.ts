@@ -12,13 +12,10 @@ import type { RawData } from 'ws';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { asBuffer, hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
-import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
-import { absorbSocketErrors } from '#api/websocket/socket-error.js';
-import { trackSocket } from '#api/websocket/socket-metrics.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { WsUpgradeRejection } from '#telemetry/metrics.js';
+import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { WsUpgradeRejection } from '@taucad/api-observability/metrics';
 
 const controlPath = '/v1/agents/control';
 const sessionPathPrefix = '/v1/agents/sessions/';

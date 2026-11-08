@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import type { Environment } from '@taucad/api-core';
 import { AttributeKey } from '@taucad/telemetry';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 /**
  * Milliseconds. Finite socket-connect deadline: a dial that is accepted but

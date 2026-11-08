@@ -48,8 +48,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
     "geospec": "catalog:",
-    "geospec-engine": "catalog:",
-    "pino-pretty": "catalog:"
+    "geospec-engine": "catalog:"
   },
   "imports": {
     "#*.js": "./app/*.ts",

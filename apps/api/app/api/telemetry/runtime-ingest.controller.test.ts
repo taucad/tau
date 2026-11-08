@@ -31,7 +31,7 @@ import { authInstanceKey } from '#constants/auth.constant.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RedisService } from '#redis/redis.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { RuntimeIngestService, networkOf, runtimeIngestLimits } from '#api/telemetry/runtime-ingest.service.js';
 import { RuntimeMetricsService } from '#api/telemetry/runtime-metrics.service.js';

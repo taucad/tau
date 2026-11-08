@@ -3,10 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InternalServerErrorException, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
-import { reportServerError } from '#telemetry/sentry.js';
-import type * as SentryModule from '#telemetry/sentry.js';
+import { reportServerError } from '@taucad/api-observability/sentry';
+import type * as SentryModule from '@taucad/api-observability/sentry';
 
-vi.mock('#telemetry/sentry.js', async (importOriginal) => ({
+vi.mock('@taucad/api-observability/sentry', async (importOriginal) => ({
   ...(await importOriginal<typeof SentryModule>()),
   reportServerError: vi.fn(),
 }));

@@ -5,7 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
-import { isRetryableGitRefusal } from '#telemetry/sentry.js';
+import { isRetryableGitRefusal } from '@taucad/api-observability/sentry';
 
 /**
  * The one refusal shape stock git reads (N6).

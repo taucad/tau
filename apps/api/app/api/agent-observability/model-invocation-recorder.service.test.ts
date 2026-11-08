@@ -5,7 +5,7 @@ import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import { verifyEvidenceDigest } from '@taucad/agent-observability/identity';
 import type { DatabaseService } from '#database/database.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';

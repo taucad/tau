@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { pinoHttp } from 'pino-http';
 import type { Environment } from '@taucad/api-core';
 import { logServiceProvider } from '@taucad/api-core/constants/app';
-import { useLoggerFactory } from '#logger/logger-factory.js';
+import { useLoggerFactory } from '@taucad/api-observability/logger-factory';
 
 describe('bearer authentication logging', () => {
   it('redacts authorization bearer values without mutating the request', async () => {

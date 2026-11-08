@@ -4,7 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type { DatabaseService } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import type { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurpose, TelemetryPurposeState } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';

@@ -6,7 +6,7 @@ import type { DurableStreamReadOutcome } from '#api/durable-events/durable-event
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 

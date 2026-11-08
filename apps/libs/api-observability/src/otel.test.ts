@@ -51,7 +51,7 @@ type HttpInstrumentationConfig = NonNullable<
 >;
 
 const incomingSpanHook = async (): Promise<NonNullable<HttpInstrumentationConfig['startIncomingSpanHook']>> => {
-  await import('#telemetry/otel.js');
+  await import('#otel.js');
   const config = instrumentationConfigs[0]?.['@opentelemetry/instrumentation-http'] as
     | HttpInstrumentationConfig
     | undefined;
@@ -65,7 +65,7 @@ const request = (url: string): IncomingMessage => mock<IncomingMessage>({ url, h
 
 describe('OTEL LangChain instrumentation', () => {
   it('should trace helper calls without their prompts or completions', async () => {
-    await import('#telemetry/otel.js');
+    await import('#otel.js');
 
     expect(LangChainInstrumentation).toHaveBeenCalledWith({ traceContent: false });
   });
@@ -101,7 +101,7 @@ describe('OTEL Prometheus exporter', () => {
   });
 
   it('should label every series with service_name but leave other resource attributes off (OBS-13)', async () => {
-    await import('#telemetry/otel.js');
+    await import('#otel.js');
     const labels = exporterConfigs[0]?.withResourceConstantLabels;
 
     expect(labels?.test('service.name')).toBe(true);
@@ -115,7 +115,7 @@ describe('OTEL Prometheus exporter', () => {
   ])('should name the Fly process group %s as tau.process', async (group, expected) => {
     vi.resetModules();
     vi.stubEnv('FLY_PROCESS_GROUP', group);
-    await import('#telemetry/otel.js');
+    await import('#otel.js');
 
     expect(sdkConfigs.at(-1)?.resource?.attributes['tau.process']).toBe(expected);
   });
@@ -124,8 +124,8 @@ describe('OTEL Prometheus exporter', () => {
 describe('OTEL metric views', () => {
   it('should pass the named cardinality views to the SDK', async () => {
     vi.resetModules();
-    await import('#telemetry/otel.js');
-    const { cardinalityViews } = await import('#telemetry/cardinality-views.js');
+    await import('#otel.js');
+    const { cardinalityViews } = await import('#cardinality-views.js');
 
     expect(sdkConfigs.at(-1)?.views).toStrictEqual(cardinalityViews);
   });
@@ -136,7 +136,7 @@ describe('OTEL log export configuration', () => {
     vi.resetModules();
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://otel.invalid:4318');
     try {
-      await import('#telemetry/otel.js');
+      await import('#otel.js');
 
       const processors = sdkConfigs.at(-1)?.logRecordProcessors;
       expect(processors).toHaveLength(1);
@@ -153,7 +153,7 @@ describe('OTEL log export configuration', () => {
     vi.resetModules();
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
     try {
-      await import('#telemetry/otel.js');
+      await import('#otel.js');
 
       expect(sdkConfigs.at(-1)?.logRecordProcessors).toBeUndefined();
     } finally {
@@ -172,7 +172,7 @@ describe('OTEL context manager and Sentry scopes', () => {
    */
   const startWithApiContextManager = async (): Promise<{ Sentry: typeof SentryNode; events: ErrorEvent[] }> => {
     vi.resetModules();
-    await import('#telemetry/otel.js');
+    await import('#otel.js');
     const Sentry = await import('@sentry/node');
     const contextManager = sdkConfigs.at(-1)?.contextManager;
     if (contextManager === undefined) {

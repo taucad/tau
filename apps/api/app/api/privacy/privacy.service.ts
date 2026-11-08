@@ -6,7 +6,7 @@ import type { PrivacyPreferences, UpdatePrivacyPreferencesInput } from '#api/pri
 import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 
 type StoredPreferences = Pick<
   typeof user.$inferSelect,

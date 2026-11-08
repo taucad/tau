@@ -5,7 +5,7 @@ import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { DatabaseService } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { billingFinancialCase, billingJournalCheckpoint, creditAccount, creditTransaction } from '#database/schema.js';
 
 type Checkpoint = typeof billingJournalCheckpoint.$inferSelect;

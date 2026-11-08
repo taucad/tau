@@ -1,4 +1,4 @@
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { frozenRouteRecheckMilliseconds, isFrozen, routeCacheTtlMilliseconds } from '#api/git/routing/route.js';
 import type { RepositoryRoute } from '#api/git/routing/route.js';
 

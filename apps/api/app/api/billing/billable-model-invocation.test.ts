@@ -24,8 +24,8 @@ import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
 const qualification = (): QualifiedBillableInvocation => ({
   surface: 'gateway',

@@ -165,7 +165,6 @@ const config: KnipConfig = {
         'app/storage-worker.ts',
         'app/api/**/*.module.ts',
         'app/database/**/*.ts',
-        'app/telemetry/**/*.ts',
         'app/types/**/*.d.ts',
         'scripts/*.mts',
         // Started by path: `test:billing-load` runs `run.ts`, which forks `driver.ts` and boots
@@ -176,12 +175,19 @@ const config: KnipConfig = {
         'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
         // The deletion recovery integration test spawns this process by path.
         'app/testing/project-deletion-process.ts',
-        'app/lifecycle/graceful-shutdown.signal-fixture.ts',
       ],
+    },
+    'apps/libs/api-observability': {
+      // `otel.ts` and `sentry.ts` are side-effect entries; the rest are its exported modules.
+      entry: ['src/**/*.ts'],
       ignoreDependencies: [
         // `logger/logger-factory.ts` names it as a pino transport target, which knip cannot see.
         'pino-pretty',
       ],
+    },
+    'apps/libs/api-lifecycle': {
+      // The graceful-shutdown signal test spawns this fixture by path.
+      entry: ['src/graceful-shutdown.signal-fixture.ts'],
     },
     'apps/desktop': {
       // Electron's main/preload and utility-process bundles are separate entry points.

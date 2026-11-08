@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { parseMemoryUtilization, RedisService } from '#redis/redis.service.js';
 
 const createService = (): RedisService => {

@@ -16,7 +16,7 @@ import {
   modelList,
   modelListEntryToModel,
 } from '#api/models/model.constants.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 import {
   isFundedGatewayProviderId,
   isGatewayProviderConfigured,

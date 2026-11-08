@@ -3,7 +3,10 @@
   "version": "0.1.0-beta.0",
   "description": "API telemetry, metrics, tracing, Sentry and logging",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/otel.ts",
+    "./src/sentry.ts"
+  ],
   "private": true,
   "repository": {
     "type": "git",
@@ -25,10 +28,44 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./cardinality-views": "./src/cardinality-views.ts",
+    "./logger-factory": "./src/logger/logger-factory.ts",
+    "./logger-module": "./src/logger/logger.module.ts",
+    "./metrics": "./src/metrics.ts",
+    "./otel": "./src/otel.ts",
+    "./sentry": "./src/sentry.ts",
     "./package.json": "./package.json"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/auto-instrumentations-node": "catalog:",
+    "@opentelemetry/exporter-logs-otlp-http": "catalog:",
+    "@opentelemetry/exporter-prometheus": "catalog:",
+    "@opentelemetry/exporter-trace-otlp-http": "catalog:",
+    "@opentelemetry/resources": "catalog:",
+    "@opentelemetry/sdk-logs": "catalog:",
+    "@opentelemetry/sdk-node": "catalog:",
+    "@pyroscope/nodejs": "catalog:",
+    "@sentry/node": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "@traceloop/instrumentation-langchain": "catalog:",
+    "fastify": "catalog:",
+    "nestjs-pino": "^4.6.1",
+    "pino-http": "^10.5.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "dotenv": "catalog:",
+    "pino-pretty": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:"
   }
 }

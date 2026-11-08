@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { BillingEnvironment, FundedLlmCapacityPool } from '#api/billing/credit-ledger.types.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 /** One pass claims at most this many due operations per pool; the ledger caps a claim at 100. */
 export const recoveryPassLimit = 100;

@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { trackSocket, wsCloseReason } from '#api/websocket/socket-metrics.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import { trackSocket, wsCloseReason } from '#websocket/socket-metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 const fakeMetrics = () => {
   const active = vi.fn();

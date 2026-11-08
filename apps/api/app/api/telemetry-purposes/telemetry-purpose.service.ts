@@ -5,7 +5,7 @@ import type { FeedbackGrant, FeedbackGrants } from '@taucad/agent-observability/
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
 import type { Environment } from '@taucad/api-core';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import type { ProjectAuthority, RecordedPurposeDecision } from '#api/telemetry-purposes/purpose-authority.js';

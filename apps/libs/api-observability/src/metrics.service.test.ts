@@ -6,7 +6,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { metrics } from '@opentelemetry/api';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { metrics as sdkMetrics } from '@opentelemetry/sdk-node';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '#metrics.js';
 
 describe('MetricsService', () => {
   let service: MetricsService;

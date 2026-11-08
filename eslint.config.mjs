@@ -296,9 +296,16 @@ const moduleBoundaryOptions = {
    * probe and the integration tests import the same packages directly.
    * Entries are matched as regular expressions against the import
    * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
-   * `@taucad/runtime-testing`.
+   * `@taucad/runtime-testing`. The API's command entries load
+   * `@taucad/api-observability/otel` late, after the process has decided it
+   * needs tracing, while the server imports it first.
    */
-  checkDynamicDependenciesExceptions: ['@taucad/runtime(/|$)', '@taucad/agent-host(/|$)', '@taucad/fs-bridge(/|$)'],
+  checkDynamicDependenciesExceptions: [
+    '@taucad/runtime(/|$)',
+    '@taucad/agent-host(/|$)',
+    '@taucad/fs-bridge(/|$)',
+    '@taucad/api-observability(/|$)',
+  ],
   depConstraints: [
     {
       sourceTag: 'scope:api',

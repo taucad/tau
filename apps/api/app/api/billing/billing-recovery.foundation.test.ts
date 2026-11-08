@@ -23,7 +23,7 @@ import { createOperationsGaugeSource, recordOpenCases } from '#billing-command.o
 import type { OperationsGaugeMetrics } from '#billing-command.operations.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {

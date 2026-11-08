@@ -24,7 +24,7 @@ import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storag
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
 import type { StorageMetricTier } from '#storage/storage-metrics.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
 

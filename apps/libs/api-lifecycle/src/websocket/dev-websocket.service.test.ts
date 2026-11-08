@@ -129,7 +129,7 @@ describe('DevWebSocketService', () => {
 
   async function createService() {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- class import from dynamic module
-    const { DevWebSocketService } = await import('#api/websocket/dev-websocket.service.js');
+    const { DevWebSocketService } = await import('#websocket/dev-websocket.service.js');
     return new DevWebSocketService(createMockConfigService() as any);
   }
 

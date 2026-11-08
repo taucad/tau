@@ -22,7 +22,7 @@ import {
 import type { WireBalanceExplanation, WireOpenHolds, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
 import { CreditLedgerService, recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { DatabaseService } from '#database/database.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 

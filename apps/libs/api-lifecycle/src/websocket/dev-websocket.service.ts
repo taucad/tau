@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Environment } from '@taucad/api-core';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
-import { absorbSocketErrors } from '#api/websocket/socket-error.js';
+import { absorbSocketErrors } from '#websocket/socket-error.js';
 
 export type WebSocketConnectionHandler = (socket: WebSocket, request: IncomingMessage) => void | Promise<void>;
 

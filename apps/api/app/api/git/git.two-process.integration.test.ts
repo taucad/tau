@@ -35,7 +35,7 @@ import { DurableEventsService } from '#api/durable-events/durable-events.service
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { getStorageEnvironment } from '#config/storage-environment.config.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';

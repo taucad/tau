@@ -12,7 +12,7 @@ import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
-import { isRetryableGitRefusal, reportServerError } from '#telemetry/sentry.js';
+import { isRetryableGitRefusal, reportServerError } from '@taucad/api-observability/sentry';
 
 /**
  * Bounded retry estimates for the funded-admission refusals (B9 `:292`).

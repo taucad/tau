@@ -5,7 +5,7 @@ import type { Environment } from '@taucad/api-core';
 import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { accountingTasks, r2SourceOf } from '#api/storage-accounting/accounting-tasks.js';
 import {
   StorageAccountingScheduler,

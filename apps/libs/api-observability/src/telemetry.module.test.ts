@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
-import { TracerService } from '#telemetry/tracer.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { TelemetryModule } from '#telemetry.module.js';
+import { TracerService } from '#tracer.service.js';
+import { MetricsService } from '#metrics.js';
 
 const mockShutdown = vi.fn();
 
-vi.mock('#telemetry/otel.js', () => ({
+vi.mock('#otel.js', () => ({
   sdk: { shutdown: mockShutdown },
 }));
 

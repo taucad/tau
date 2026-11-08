@@ -8,7 +8,7 @@ import type { WebSocket } from 'ws';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { hashHostGitCredential, resolveHostGitCredential } from '#api/hosts/host-git-credential.js';

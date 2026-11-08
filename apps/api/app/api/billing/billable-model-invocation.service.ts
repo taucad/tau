@@ -41,8 +41,8 @@ import type {
 } from '#api/billing/billable-model-invocation.types.js';
 import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;

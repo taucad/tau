@@ -12,8 +12,8 @@ import type { LoggerService, OnModuleDestroy } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { closeGracefullyOnSignal, drainingServerOptions } from '#lifecycle/graceful-shutdown.js';
-import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
+import { closeGracefullyOnSignal, drainingServerOptions } from '#graceful-shutdown.js';
+import { LifecycleModule } from '#lifecycle.module.js';
 
 const record = (line: string): void => {
   process.stdout.write(`${line}\n`);

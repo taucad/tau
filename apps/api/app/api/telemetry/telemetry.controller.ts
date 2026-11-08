@@ -11,7 +11,7 @@ import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolic
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { OptionalAuth, OptionalUser } from '#auth/decorators/auth.decorator.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 

@@ -5,9 +5,9 @@ import { ConfigService } from '@nestjs/config';
 import { TauMetrics } from '@taucad/telemetry';
 import { DatabaseService } from '#database/database.service.js';
 import type { Environment } from '@taucad/api-core';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '@taucad/api-observability/metrics';
 import {
   completeErasures,
   leaseErasureTraces,

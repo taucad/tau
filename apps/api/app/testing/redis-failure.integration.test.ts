@@ -19,7 +19,7 @@ import type { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Environment } from '@taucad/api-core';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { RedisService } from '#redis/redis.service.js';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';

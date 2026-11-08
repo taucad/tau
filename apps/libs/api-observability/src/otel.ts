@@ -28,7 +28,7 @@ import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 import { redactUrlQuery } from '#logger/logger-factory.js';
-import { cardinalityViews } from '#telemetry/cardinality-views.js';
+import { cardinalityViews } from '#cardinality-views.js';
 
 const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
 const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);

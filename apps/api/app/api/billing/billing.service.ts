@@ -14,7 +14,7 @@ import {
 } from '#database/schema.js';
 import type { Environment } from '@taucad/api-core';
 import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 import { stripeReadClientKey } from '#api/billing/billing.constants.js';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
 import { subscriptionTierOf, subscriptionTierAssuranceOf } from '#api/billing/subscription-tier.js';

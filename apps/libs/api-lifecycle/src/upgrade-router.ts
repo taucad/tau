@@ -2,9 +2,9 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { Injectable, Optional } from '@nestjs/common';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { WsGateway, WsUpgradeRejection } from '#telemetry/metrics.js';
+import { ShutdownService } from '#shutdown.service.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { WsGateway, WsUpgradeRejection } from '@taucad/api-observability/metrics';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
 export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;

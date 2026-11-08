@@ -22,7 +22,7 @@ import { agentRun, hostDevice, project, user } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
 import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import {
   cloudHostProvisionerToken,
   cloudHostRefusalReason,

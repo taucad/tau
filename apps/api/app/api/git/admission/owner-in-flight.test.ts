@@ -3,7 +3,7 @@ import process from 'node:process';
 import { HttpException } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import {
   MemoryOwnerInFlightCap,
   OwnerInFlightGate,

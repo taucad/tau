@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
 
-import type { MetricsService, WsCloseReason, WsGateway } from '#telemetry/metrics.js';
+import type { MetricsService, WsCloseReason, WsGateway } from '@taucad/api-observability/metrics';
 
 /**
  * Bounded `ws.close.reason` for a close code, so the label never carries the

@@ -1,7 +1,7 @@
 import type { Attributes } from '@opentelemetry/api';
 import { metrics } from '@opentelemetry/sdk-node';
 import { describe, expect, it } from 'vitest';
-import { cardinalityViews, defaultCardinalityLimit } from '#telemetry/cardinality-views.js';
+import { cardinalityViews, defaultCardinalityLimit } from '#cardinality-views.js';
 
 /** A pull reader: `collect()` returns everything recorded since the provider started. */
 class CollectingReader extends metrics.MetricReader {

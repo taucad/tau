@@ -6,7 +6,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { getEnvironment } from '@taucad/api-core';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
+import { TelemetryModule } from '@taucad/api-observability';
 import { RedisModule } from '#redis/redis.module.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
@@ -18,7 +18,7 @@ import { BillingService } from '#api/billing/billing.service.js';
 // consumer above — nestjs-pino materialises the per-context logger providers
 // from decorator side effects that have run by the time logger.module.ts
 // evaluates (production gets this ordering transitively via ApiModule).
-import { LoggerModule } from '#logger/logger.module.js';
+import { LoggerModule } from '@taucad/api-observability/logger-module';
 
 /**
  * Focused NestJS module for billing integration tests: REAL database, Redis,

@@ -36,7 +36,7 @@ afterEach(async () => {
 
 it('should deliver identical failures from independent API requests while capturing the same error only once', async () => {
   vi.stubEnv('SENTRY_DSN', 'https://public@sentry.invalid/1');
-  const { reportServerError } = await import('#telemetry/sentry.js');
+  const { reportServerError } = await import('#sentry.js');
   const sentry = await import('@sentry/node');
   for (const requestId of ['first-request', 'second-request']) {
     const failure = new Error('Identical API failure');

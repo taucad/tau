@@ -54,8 +54,8 @@ import {
   deriveScanIntervalMilliseconds,
 } from '#api/git/forwarding/derive-scheduler.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitAccess, ReceiptVerification } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';

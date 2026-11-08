@@ -1,8 +1,8 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Global, Module, Logger } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
-import { TracerService } from '#telemetry/tracer.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { TracerService } from '#tracer.service.js';
+import { MetricsService } from '#metrics.js';
 
 /** Milliseconds. */
 const shutdownTimeout = 5000;
@@ -19,7 +19,7 @@ export class TelemetryModule implements OnApplicationShutdown {
     this.logger.log('Shutting down OTEL SDK...');
 
     try {
-      const { sdk } = await import('#telemetry/otel.js');
+      const { sdk } = await import('#otel.js');
       const shutdownTimeoutPromise = new Promise<never>((_resolve, reject) => {
         const timer = setTimeout(() => {
           reject(new Error('OTEL shutdown timeout'));

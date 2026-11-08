@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { TracerService, Span } from '#telemetry/tracer.service.js';
+import { TracerService, Span } from '#tracer.service.js';
 
 describe('TracerService', () => {
   let service: TracerService;

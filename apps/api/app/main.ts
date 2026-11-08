@@ -1,5 +1,5 @@
-import '#telemetry/otel.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module
-import '#telemetry/sentry.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- error reporting must initialize before the app can throw
+import '@taucad/api-observability/otel'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module
+import '@taucad/api-observability/sentry'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- error reporting must initialize before the app can throw
 
 import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -15,14 +15,14 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { AppModule } from '#app.module.js';
 import { getEnvironment } from '@taucad/api-core';
 import type { Environment } from '@taucad/api-core';
-import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
-import { redactUrlQuery } from '#logger/logger-factory.js';
+import { getFastifyLoggingConfig } from '@taucad/api-observability';
+import { redactUrlQuery } from '@taucad/api-observability/logger-factory';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
 import { getTrustProxyOption } from '@taucad/api-core/utils/trust-proxy';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { installApiUnhandledRejectionHandler } from '#api-unhandled-rejection-handler.js';
-import { closeGracefullyOnSignal, drainingServerOptions } from '#lifecycle/graceful-shutdown.js';
+import { closeGracefullyOnSignal, drainingServerOptions } from '@taucad/api-lifecycle';
 
 async function createApiApp() {
   const fastifyAdapter = new FastifyAdapter({

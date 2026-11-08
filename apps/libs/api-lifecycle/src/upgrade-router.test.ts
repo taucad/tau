@@ -3,9 +3,9 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '#shutdown.service.js';
+import { UpgradeRouter } from '#upgrade-router.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 
 const setup = () => {
   const shutdown = new ShutdownService();

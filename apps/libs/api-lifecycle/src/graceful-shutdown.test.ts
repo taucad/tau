@@ -1,5 +1,4 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
-import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { Controller, Get, Inject, Injectable, Module } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
@@ -8,10 +7,10 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { closeGracefully, drainingServerOptions, shutdownPhases } from '#lifecycle/graceful-shutdown.js';
-import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
+import { closeGracefully, drainingServerOptions } from '#graceful-shutdown.js';
+import { LifecycleModule } from '#lifecycle.module.js';
+import { ShutdownService } from '#shutdown.service.js';
+import { UpgradeRouter } from '#upgrade-router.js';
 
 /** What requests, work and the database record, in the order it happens. */
 const events: string[] = [];
@@ -244,17 +243,5 @@ describe('closeGracefully', () => {
     expect(responses).toHaveLength(2);
     expect(responses[1]).toMatch(/^HTTP\/1\.1 200 /);
     expect(responses[1]).toMatch(/\r\nconnection: close\r\n/i);
-  });
-});
-
-describe('shutdownPhases', () => {
-  it.each(['fly.prod.toml', 'fly.staging.toml'])('should fit inside the kill_timeout in %s', (file) => {
-    const config = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-    const killTimeout = Number(/^kill_timeout = '(\d+)s'$/mu.exec(config)?.[1]) * 1000;
-    // Teardown after the abandon deadline: the OTEL flush (at most 5 s) and a margin for the closes.
-    const teardown = 5000 + 2000;
-
-    expect(shutdownPhases.cut).toBeLessThan(shutdownPhases.abandon);
-    expect(shutdownPhases.abandon + teardown).toBeLessThanOrEqual(killTimeout);
   });
 });

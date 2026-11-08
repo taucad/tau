@@ -14,14 +14,11 @@ import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { zooCloseCodes } from '#api/billing/billing.constants.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
-import { absorbSocketErrors } from '#api/websocket/socket-error.js';
-import { trackSocket } from '#api/websocket/socket-metrics.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { WsUpgradeRejection } from '#telemetry/metrics.js';
-import { Span } from '#telemetry/tracer.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
+import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { WsUpgradeRejection } from '@taucad/api-observability/metrics';
+import { Span } from '@taucad/api-observability';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
 const zooWebSocketPath = '/v1/kernels/zoo';
 

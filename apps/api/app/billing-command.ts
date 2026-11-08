@@ -31,7 +31,7 @@ import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#api/billi
 import { installBillingProtections } from '#database/billing-protections.js';
 import { runMigrationJob } from '#database/database-migration.js';
 import * as schema from '#database/schema.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
 import {
@@ -370,7 +370,7 @@ async function main(): Promise<void> {
           throw new Error('Financial case scope requires the Stripe account and an explicit mode');
         }
         // No provider client: the sweep reads and writes only the local financial authority.
-        const { sdk } = await import('#telemetry/otel.js');
+        const { sdk } = await import('@taucad/api-observability/otel');
         const reconciliation = new BillingJournalReconciliationService(
           { database: drizzle(client, { schema }) },
           new MetricsService(),
@@ -412,7 +412,7 @@ async function main(): Promise<void> {
         const billingEnvironment = financialEnvironmentSchema.parse(environment);
         const database = { database: drizzle(client, { schema }) };
         const ledger = new CreditLedgerService(database, new BillingPolicyService(database));
-        const { sdk } = await import('#telemetry/otel.js');
+        const { sdk } = await import('@taucad/api-observability/otel');
         const metrics = new MetricsService();
         const shutdown = new AbortController();
         const stop = (): void => {
@@ -535,7 +535,7 @@ async function main(): Promise<void> {
           },
           billingEnvironment,
         );
-        const { sdk } = await import('#telemetry/otel.js');
+        const { sdk } = await import('@taucad/api-observability/otel');
         const sourceConfig = {
           environment: billingEnvironment,
           stripeAccountId,

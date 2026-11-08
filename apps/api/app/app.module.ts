@@ -8,10 +8,10 @@ import { StorageModule } from '#storage/storage.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import type { Environment } from '@taucad/api-core';
 import { ApiModule } from '#api/api.module.js';
-import { LoggerModule } from '#logger/logger.module.js';
+import { LoggerModule } from '@taucad/api-observability/logger-module';
 import { RedisModule } from '#redis/redis.module.js';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
-import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
+import { TelemetryModule } from '@taucad/api-observability';
+import { LifecycleModule } from '@taucad/api-lifecycle';
 import { RequestIdMiddleware } from '#middlewares/request-id.middleware.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 

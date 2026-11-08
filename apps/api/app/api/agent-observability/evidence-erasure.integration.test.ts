@@ -20,8 +20,8 @@ import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { createScratchDatabase } from '#testing/scratch-database.js';
 import type { ScratchDatabase } from '#testing/scratch-database.js';
 import { databaseReachable } from '#testing/database-reachable.js';

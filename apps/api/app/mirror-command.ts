@@ -7,7 +7,7 @@ import type { Environment } from '@taucad/api-core';
 import { assertSchemaCompatibility } from '#database/database-migration.js';
 import * as schema from '#database/schema.js';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { readMirrorEnvironment } from '#api/git/mirror/config.js';
 import type { MirrorEnvironment } from '#api/git/mirror/config.js';
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
 
   const environment = readMirrorEnvironment(process.env);
   // Started before any instrument is created, as in billing-command; the worker's metrics port opens here.
-  const { sdk } = await import('#telemetry/otel.js');
+  const { sdk } = await import('@taucad/api-observability/otel');
   /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL connection options */
   const client = postgres(environment.DATABASE_URL, {
     max: 4,

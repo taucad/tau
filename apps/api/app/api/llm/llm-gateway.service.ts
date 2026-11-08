@@ -5,7 +5,7 @@ import type { FastifyReply } from 'fastify';
 import type { FinancialActivityKind } from '@taucad/billing';
 import type { ModelInvocationService, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
 export type LlmGatewayRelayInput = {
   readonly provider: ModelProviderWire;

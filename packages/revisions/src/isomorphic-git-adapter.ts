@@ -1626,6 +1626,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     maximumTransferBytes?: number,
   ): RevisionHttpClient & Readonly<{ refused: (error: unknown, remote: string) => RevisionPortError }> => {
     let retryAfter: string | undefined;
+    let authenticate: string | undefined;
     let remaining = maximumTransferBytes;
     let limitExceeded = false;
     const exceeded = (): RevisionPortError => {
@@ -1637,6 +1638,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const response = await client.request(signal === undefined ? request : { ...request, signal });
         if (response.statusCode === 429) {
           retryAfter = response.headers['retry-after'];
+        }
+        if (response.statusCode === 401 || response.statusCode === 403) {
+          authenticate = response.headers['www-authenticate'];
         }
         const { 'content-length': declared } = response.headers;
         if (
@@ -1675,7 +1679,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       refused: (error, remote) =>
         limitExceeded
           ? exceeded()
-          : remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
+          : remoteTransportError(error, {
+              remote,
+              ...(retryAfter === undefined ? {} : { retryAfter }),
+              ...(authenticate === undefined ? {} : { authenticate }),
+            }),
     };
   };
 

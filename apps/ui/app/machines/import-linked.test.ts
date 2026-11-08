@@ -284,13 +284,19 @@ describe('a linked import over the import channel', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
-    { status: 401, code: 'REMOTE_REAUTHORIZATION_REQUIRED' },
-    { status: 403, code: 'REMOTE_REAUTHORIZATION_REQUIRED' },
-    { status: 404, code: 'REMOTE_NOT_FOUND' },
-  ])('should carry a remote that answered $status to the page as $code', async ({ status, code }) => {
+  it.each<{ status: number; headers: Record<string, string>; code: string }>([
+    { status: 401, headers: {}, code: 'REMOTE_REAUTHORIZATION_REQUIRED' },
+    /* A live token refused: the repository's access was withdrawn, which no reconnect restores. */
+    { status: 403, headers: {}, code: 'REMOTE_FORBIDDEN' },
+    {
+      status: 403,
+      headers: { 'www-authenticate': 'Bearer error="invalid_token"' },
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+    },
+    { status: 404, headers: {}, code: 'REMOTE_NOT_FOUND' },
+  ])('should carry a remote that answered $status $headers to the page as $code', async ({ status, headers, code }) => {
     const provider = movingRoot();
-    const fetch = vi.fn(async () => new Response('refused', { status }));
+    const fetch = vi.fn(async () => new Response('refused', { status, headers }));
     const session = connect(provider, fetchingWith(fetch));
 
     const failure = await session

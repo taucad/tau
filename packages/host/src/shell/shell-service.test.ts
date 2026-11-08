@@ -335,6 +335,72 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     });
   });
 
+  it('runs a command once more, from a fresh launch, after a sandbox setup failure that ran nothing', async () => {
+    let attempts = 0;
+    const { service, provider } = harness(() => {
+      attempts += 1;
+      return attempts === 1
+        ? { status: 'sandbox-unavailable', message: "bwrap: Can't find source path", retryable: true }
+        : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } };
+    });
+
+    await expect(service.run(call({ command: 'ls' }))).resolves.toMatchObject({
+      status: 'completed',
+      exitCode: 0,
+      stdout: { text: 'ok\n' },
+    });
+    const [first, second] = provider.launches;
+    expect(provider.launches).toHaveLength(2);
+    expect(second!.executionId).not.toBe(first!.executionId);
+    // The refused attempt was recovered and released before the retry was prepared.
+    expect(provider.released).toEqual([first!.executionId, second!.executionId]);
+  });
+
+  it('retries a sandbox setup failure at most once, and never one that was not proven harmless', async () => {
+    const twice = harness(() => ({
+      status: 'sandbox-unavailable',
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp",
+      retryable: true,
+    }));
+    const refused = await twice.service.run(call({ command: 'ls' }));
+    expect(refused).toMatchObject({
+      status: 'not-started',
+      code: 'shell-unavailable',
+      message: expect.stringContaining('could not be set up') as unknown as string,
+    });
+    /* The sandbox's own output names paths: it reaches the host log, never the person or the model. */
+    expect(JSON.stringify(refused)).not.toContain('thumbnail.webp');
+    expect(twice.provider.launches).toHaveLength(2);
+
+    const plain = harness(() => ({ status: 'sandbox-unavailable', message: 'socat is missing' }));
+    await expect(plain.service.run(call({ command: 'ls' }))).resolves.toMatchObject({ status: 'not-started' });
+    expect(plain.provider.launches).toHaveLength(1);
+
+    const exited = harness(() => ({
+      status: 'started',
+      stderr: "bwrap: Can't find source path\n",
+      exit: { exitCode: 1 },
+    }));
+    await expect(exited.service.run(call({ command: 'ls' }))).resolves.toMatchObject({
+      status: 'completed',
+      exitCode: 1,
+    });
+    expect(exited.provider.launches).toHaveLength(1);
+  });
+
+  it('never retries a sandbox setup failure once the call is cancelled', async () => {
+    const controller = new AbortController();
+    const { service, provider } = harness(() => {
+      controller.abort();
+      return { status: 'sandbox-unavailable', message: 'bwrap: setup failed', retryable: true };
+    });
+    await expect(service.run(call({ command: 'ls' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(provider.launches).toHaveLength(1);
+  });
+
   it('keeps output bounded and saves the full log in the records row only once it is written (A08)', async () => {
     const big = `${'a'.repeat(100_000)}END`;
     const { service } = harness(() => ({ status: 'started', stdout: big, stderr: 'warn\n', exit: { exitCode: 0 } }));
@@ -640,6 +706,30 @@ describe('human Terminal sessions (D6, D21)', () => {
     expect(provider.launches[1]).not.toHaveProperty('startupFiles');
     expect(provider.launches[1]!.arguments.slice(0, 2)).toStrictEqual(['--noprofile', '--norc']);
     await opened.session[Symbol.asyncDispose]();
+  });
+
+  it('opens the Terminal once more after a sandbox setup failure that ran nothing, and only once', async () => {
+    let attempts = 0;
+    const { service, provider } = harness(() => {
+      attempts += 1;
+      return attempts === 1
+        ? { status: 'sandbox-unavailable', message: "bwrap: Can't find source path", retryable: true }
+        : { status: 'started', stdout: '$ ' };
+    });
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    expect(provider.launches).toHaveLength(2);
+    expect(provider.released).toEqual([provider.launches[0]!.executionId]);
+    await opened.session[Symbol.asyncDispose]();
+
+    const twice = harness(() => ({ status: 'sandbox-unavailable', message: 'bwrap: setup failed', retryable: true }));
+    await expect(
+      twice.service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal }),
+    ).resolves.toMatchObject({ status: 'refused', code: 'sandbox-unavailable' });
+    expect(twice.provider.launches).toHaveLength(2);
+    expect(twice.provider.released).toHaveLength(2);
   });
 
   it('maps a provider that cannot give a terminal to pty-unavailable', async () => {

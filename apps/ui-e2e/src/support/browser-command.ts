@@ -710,6 +710,84 @@ const writeScriptedTurn = async (options: {
 };
 /* eslint-enable @typescript-eslint/naming-convention -- The Anthropic wire fixture ends here. */
 
+/**
+ * The API's own enabled catalog rows, as `/v1/models` answers them.
+ *
+ * @param contextWindow - Replaces the context window every row advertises, when given.
+ * @returns The catalog rows.
+ */
+const realModelCatalog = async (contextWindow?: number): Promise<unknown[]> => {
+  const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
+    await import('../../../api/app/api/models/model.constants.js');
+  return (
+    Object.values(modelList)
+      .flatMap((entries) => Object.values(entries))
+      .filter((entry) => isModelListEntryEnabled(entry))
+      // The window a row advertises is the compaction budget `agentHostConfig`
+      // hands the host, so overriding it is how a vertical crosses the compaction
+      // threshold on scripted usage instead of on real megabytes.
+      .map((entry) => {
+        const model = modelListEntryToModel(entry);
+        return contextWindow === undefined ? model : { ...model, details: { ...model.details, contextWindow } };
+      })
+  );
+};
+
+/**
+ * Answer the page's `/v1/models` with `catalog`, as the API would to this origin's credentialed fetch, after
+ * `latency` milliseconds.
+ */
+const routeModelCatalog = async (session: Session, catalog: readonly unknown[], latency = 0): Promise<void> => {
+  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
+    if (latency > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, latency);
+      });
+    }
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(catalog),
+    });
+  });
+};
+
+/**
+ * Serve the browser the API's real model catalog without an API, so a model label can resolve to its display name.
+ * Only the page's requests are answered: the UI server's own catalog prefetch still goes to `TAU_API_URL`.
+ * `latency` (milliseconds) holds each answer, as a slow API would, so a label drawn before the catalog is seen.
+ */
+export const uiInstallModelCatalogFixture: BrowserCommand<[latency?: number]> = async (commandContext, latency) => {
+  await routeModelCatalog(sessionFor(commandContext), await realModelCatalog(), latency);
+};
+
+/** CDP sessions holding a page's CPU throttle; the rate lasts only while its session stays attached. */
+const cpuThrottlingSessions = new WeakMap<TargetPage, CdpSession>();
+
+/**
+ * Slow the page's CPU by `rate` (1 is no throttle) through Chromium's `Emulation.setCPUThrottlingRate`. The rate holds
+ * across reloads of the same page, so a spec sets it before the navigation it measures.
+ */
+export const uiEmulateCpuThrottling: BrowserCommand<[rate: number, surface?: TargetSurface]> = async (
+  commandContext,
+  rate,
+  surface,
+) => {
+  const session = sessionFor(commandContext);
+  const page = pageFor(session, surface);
+  let cdp = cpuThrottlingSessions.get(page);
+  if (!cdp) {
+    cdp = await session.context.newCDPSession(page);
+    cpuThrottlingSessions.set(page, cdp);
+  }
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+};
+
 export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   [script?: readonly GatewayScriptTurn[], options?: AgentHostGatewayFixtureOptions]
 > = async (commandContext, script = browserHostScript, options = {}) => {
@@ -920,31 +998,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   // The browser-host vertical proves the API absent from the DATA path; the
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
-  const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
-    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
-    await import('../../../api/app/api/models/model.constants.js');
-  const catalog = Object.values(modelList)
-    .flatMap((entries) => Object.values(entries))
-    .filter((entry) => isModelListEntryEnabled(entry))
-    // The window a row advertises is the compaction budget `agentHostConfig`
-    // hands the host, so overriding it is how a vertical crosses the compaction
-    // threshold on scripted usage instead of on real megabytes.
-    .map((entry) => {
-      const model = modelListEntryToModel(entry);
-      const { contextWindow } = options;
-      return contextWindow === undefined ? model : { ...model, details: { ...model.details, contextWindow } };
-    });
-  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'access-control-allow-credentials': 'true',
-        'access-control-allow-origin': new URL(testBaseURL).origin,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(catalog),
-    });
-  });
+  await routeModelCatalog(session, await realModelCatalog(options.contextWindow));
   session.agentHostGatewayServer = server;
   const address = server.address();
   if (!address || typeof address === 'string') {
@@ -3226,6 +3280,7 @@ export const uiBrowserCommands = {
   uiReadObservedRequests,
   uiEmulateColorScheme,
   uiEmulateContrast,
+  uiEmulateCpuThrottling,
   uiEmulateForcedColors,
   uiEmulateReducedMotion,
   uiEmulateSafeAreaInsets,
@@ -3237,6 +3292,7 @@ export const uiBrowserCommands = {
   uiHoverTarget,
   uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
+  uiInstallModelCatalogFixture,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,

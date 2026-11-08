@@ -17,9 +17,12 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
+    /*
+     * The foundation suites need the test-owned PostgreSQL the `test:billing-foundation` launcher
+     * starts, and `src/testing/**` holds the operator-only Stripe acceptance suite (`test:billing-stripe`).
+     */
+    exclude: ['src/*.foundation.test.ts', 'src/testing/**', 'node_modules/**', 'out-tsc/**'],
     testTimeout: 120_000,
-    // ponytail: the library is empty until its move commit; removed there.
-    passWithNoTests: true,
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

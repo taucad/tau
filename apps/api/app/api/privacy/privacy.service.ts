@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { DatabaseService } from '@taucad/api-database';
 import { user } from '@taucad/api-database/schema';
 import type { PrivacyPreferences, UpdatePrivacyPreferencesInput } from '#api/privacy/privacy.schema.js';
-import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
+import { effectiveTrainingConsent } from '@taucad/billing/training-consent';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import { Span } from '@taucad/api-observability';

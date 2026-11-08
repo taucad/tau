@@ -880,3 +880,7 @@ jobs:
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
+
+      # The two foundation suites that compose billing with the app's chat and agent-observability code.
+      - name: Run the API's billing composition contracts
+        run: pnpm nx run-many -t test:billing-composition

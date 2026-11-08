@@ -1,9 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Configuration fixtures retain their environment key names. */
 import { ConfigService } from '@nestjs/config';
 import { mockDeep } from 'vitest-mock-extended';
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
-import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
+import {
+  BillingAccountClosureService,
+  BillingPaymentsService,
+  createBillingStripeClient,
+  stripeApiVersion,
+} from '@taucad/api-billing';
 import { DatabaseService } from '@taucad/api-database';
 import { getEnvironment } from '@taucad/api-core';
 import { Test } from '@nestjs/testing';

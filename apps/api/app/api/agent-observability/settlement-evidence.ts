@@ -1,6 +1,6 @@
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
-import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';

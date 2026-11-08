@@ -5,8 +5,8 @@ import { convertToModelMessages, DefaultChatTransport, readUIMessageStream } fro
 import { ChatService } from '#api/chat/chat.service.js';
 import { LlmGatewayError } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelInvocationService } from '@taucad/api-llm-gateway';
-import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
-import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
+import { CodeOwnedBillableModelQualificationResolver } from '@taucad/api-billing';
+import type { BillableModelProviderAdapter } from '@taucad/api-billing';
 
 /* eslint-disable @typescript-eslint/naming-convention -- synthetic supplier fixture uses exact Responses fields */
 const nativeStream = (terminal: 'completed' | 'incomplete' = 'completed') =>

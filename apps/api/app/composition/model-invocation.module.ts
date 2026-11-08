@@ -1,8 +1,7 @@
 import { Global, Injectable, Module, ServiceUnavailableException } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
+import { BillableModelInvocationService, BillingModule } from '@taucad/api-billing';
 import {
   DirectModelInvocationService,
   invocationEvidenceRecorderToken,

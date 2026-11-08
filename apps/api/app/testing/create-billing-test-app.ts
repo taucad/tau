@@ -11,9 +11,7 @@ import { RedisModule } from '@taucad/api-redis';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { AuthModule } from '@taucad/api-auth/module';
 import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import { BillingModule, BillingService, CreditLedgerService } from '@taucad/api-billing';
 // IMPORTANT: LoggerModule must be imported AFTER every `@InjectPinoLogger`
 // consumer above — nestjs-pino materialises the per-context logger providers
 // from decorator side effects that have run by the time logger.module.ts

@@ -25,6 +25,8 @@ Run from the workspace root. These are available project targets; generation doe
 pnpm nx lint api-billing
 pnpm nx test api-billing --watch=false
 pnpm nx typecheck api-billing
+pnpm nx run api-billing:test:billing-foundation
+pnpm nx run api-billing:formal
 ```
 
 ## Local maintenance
@@ -47,3 +49,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
+
+- The foundation suites (`src/*.foundation.test.ts`, `src/testing/billing-foundation.test.ts`, the two Stripe adapter suites) run only through `test:billing-foundation`, whose launcher owns a disposable PostgreSQL 17; the default `test` target excludes them and `src/testing/**`. Six suites spawn `apps/api/dist/billing-command.js`, so the target depends on `api:build:billing-command`; `src/cli/billing-command.ts` is that command's body.
+- Children the suites fork through tsx read `tsconfig.spec.json`, which therefore lists every source-consumed `api-*` library billing loads.
+- `specs/GatewayInvocation*` are this library's formal models; `specs/GatewayInvocation/drift.json` hashes slices of `src/billable-model-invocation.service.ts`.

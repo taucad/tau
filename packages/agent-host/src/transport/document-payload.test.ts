@@ -13,7 +13,7 @@ import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gatewa
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 
 /*
- * W11c's admission schemas (apps/api/app/api/billing/billable-model-request.ts),
+ * W11c's admission schemas (apps/libs/api-llm-gateway/src/billable-model-request.ts),
  * restated: a published package cannot depend on the private API app. Keep these
  * in step with `anthropicDocumentSchema`, `inputFileSchema` and
  * `completionsFileSchema` there — a drift means the gateway refuses every PDF turn.

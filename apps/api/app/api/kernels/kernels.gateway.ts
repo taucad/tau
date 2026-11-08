@@ -11,7 +11,7 @@ import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
-import { zooCloseCodes } from '#api/billing/billing.constants.js';
+import { zooCloseCodes } from '@taucad/api-billing';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';

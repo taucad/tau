@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { eraseAccountEvidence } from '#api/agent-observability/evidence-erasure.js';
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { stripeWebhookRoute } from '#api/billing/billing-stripe-webhook.route.js';
+import {
+  BillingAccountClosureService,
+  BillingModule,
+  BillingPaymentsService,
+  stripeWebhookRoute,
+} from '@taucad/api-billing';
 import { HostsModule, HostsService } from '@taucad/api-hosts';
 import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '@taucad/api-auth';
 import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';

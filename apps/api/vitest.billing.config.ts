@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-/** Only the test-owned launcher supplies this suite's database; dotenv loading is disabled. */
+/*
+ * The billing foundation suites that compose billing with the app's own chat and agent-observability
+ * code. `api-billing:test:billing-foundation` owns the rest; both run on the launcher's test-owned
+ * PostgreSQL, and only that launcher supplies the database, so dotenv loading is disabled.
+ */
 export default defineConfig({
   root: import.meta.dirname,
   envDir: false,
@@ -8,13 +12,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
-    globalSetup: ['./app/testing/billing-foundation.setup.ts'],
-    include: [
-      'app/api/billing/*.foundation.test.ts',
-      'app/testing/billing-foundation.test.ts',
-      'app/api/billing/billing-stripe.test.ts',
-      'app/api/billing/billing-cash-stripe.test.ts',
-    ],
+    globalSetup: ['../libs/api-billing/src/testing/billing-foundation.setup.ts'],
+    include: ['app/api/billing/*.foundation.test.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,

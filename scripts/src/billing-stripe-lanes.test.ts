@@ -69,7 +69,7 @@ describe('credential-free billing CI', () => {
   });
 
   it('should retain explicit local sandbox probes without silently accepting absent credentials', () => {
-    const project = JSON.parse(read('apps/api/project.json')) as {
+    const project = JSON.parse(read('apps/libs/api-billing/project.json')) as {
       readonly targets: Record<string, { readonly options?: { readonly command?: string } }>;
     };
     const command = project.targets['test:billing-stripe']?.options?.command ?? '';

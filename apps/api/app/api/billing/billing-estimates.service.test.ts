@@ -10,20 +10,20 @@ import type { Auth } from 'better-auth';
 import { describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { wireModelEstimatesSchema } from '@taucad/billing';
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
-import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
-import { BillingUsageService } from '#api/billing/billing-usage.service.js';
-import { BillingController } from '#api/billing/billing.controller.js';
-import { composeTariff, parseCommercialOverlay } from '#api/billing/billing-policy.sync.js';
-import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 import {
   billableModelRouteIds,
+  BillingAccountClosureService,
+  BillingController,
+  BillingEstimatesService,
+  BillingPaymentsService,
+  BillingService,
+  BillingUsageService,
   CodeOwnedBillableModelQualificationResolver,
+  composeTariff,
+  parseCommercialOverlay,
   registerBillableModelMeterContracts,
-} from '#api/billing/billable-model-qualification.js';
+} from '@taucad/api-billing';
+import type { BillableModelProviderAdapter, BillingPolicyService } from '@taucad/api-billing';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import type { Environment } from '@taucad/api-core';

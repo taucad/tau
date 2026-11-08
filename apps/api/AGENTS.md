@@ -6,12 +6,12 @@ The API owns HTTP authentication, billing, persistence, publication, model catal
 
 - Keep `POST /v1/chat` limited to `project_name` and `commit_name`. Reject `cad` placement there; CAD requests use the browser/daemon host transport described by [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md).
 - Preserve provider payload bytes at the LLM gateway. Provider-specific prompt projection and stream normalization belong to the portable host codecs; follow [Cross-Provider Content Contract Policy](../../docs/policy/cross-provider-content-contract.md).
-- Preserve the byte-exact Stripe webhook body on the scoped `/v1/auth/stripe/webhook` parser, owned by billing (`billing-stripe-webhook.route.ts`) and registered through the auth route extension port bound in `app/composition/auth-extensions.module.ts`. Do not route it through the catch-all JSON reserialization path.
+- Preserve the byte-exact Stripe webhook body on the scoped `/v1/auth/stripe/webhook` parser, owned by billing and registered through auth's route-extension port in `app/composition/`. Do not route it through the catch-all JSON reserialization path.
 - Keep `/health/live` process-local. `/health/ready` probes Redis, PostgreSQL, memory, the git toolchain, the public object-store probe, and the private publication bucket, but refuses only for Machine faults (git, heap); a down shared dependency is reported and counted without draining every Machine.
 - Define Drizzle schema changes in `apps/libs/api-database/src/schema/` and generate migrations with `pnpm db:generate`; do not hand-author migration SQL.
 - Changes to `fly.*.toml`, the env schema, health, process groups, storage namespaces or operator CLIs update the private handbook and its go-live checklist through `create-handbook`.
 - Register each injectable in its owning Nest module. Keep the AppModule compile guard when changing module wiring.
-- This app is the composition root and the process entries. Server capabilities that a library needs live in `apps/libs/api-*` (`@taucad/api-<name>`), which never import the app; the app binds their ports in `app/composition/`. Follow the dependency direction in [Workspace Project Policy](../../docs/policy/workspace-project-policy.md).
+- This app is the composition root and process entries. Server libraries live in `apps/libs/api-*` and never import the app; the app binds their ports in `app/composition/`. Follow the dependency direction in [Workspace Project Policy](../../docs/policy/workspace-project-policy.md).
 - Use shared schemas and error shapes at transport boundaries; do not duplicate `@taucad/chat` request types in API DTOs.
 
 Detailed interruption semantics live in [Interrupted Tool-Call Contract Policy](../../docs/policy/interrupted-tool-call-contract.md). Publication, billing, auth, and storage incident history remains in its owning research and tests rather than this always-loaded file.
@@ -22,7 +22,7 @@ Use `pnpm nx lint api`, `pnpm nx test api --watch=false`, `pnpm nx typecheck api
 
 ## Integration-test prerequisites
 
-`vitest.integration.config.ts` owns `app/testing/**`; the default test target excludes it. Use the existing `test:models` target for that configuration and select the relevant suite. Pin import-time environment in `vi.hoisted` before ConfigModule loads; app-factory options are too late for webhook configuration snapshots.
+`vitest.integration.config.ts` owns `app/testing/**`; the default test target excludes it. Use the existing `test:models` target for that configuration and select the relevant suite. `app/api/billing/*.foundation.test.ts` run through `test:billing-composition`. Pin import-time environment in `vi.hoisted` before ConfigModule loads; app-factory options are too late for webhook configuration snapshots.
 
 When using `ioredis-mock`, flush its shared keyspace when creating the test harness. `mockDeep` covers the declared `query.*.find*` members; stub Drizzle `update().set().where()` chains explicitly. If asymmetric values inside `objectContaining` trigger unsafe-assignment diagnostics, inspect typed mock calls or assert a literal call instead of casting away the type check.
 

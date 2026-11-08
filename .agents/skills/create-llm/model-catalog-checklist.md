@@ -10,7 +10,7 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 | Model schema                       | `apps/libs/api-llm-gateway/src/models/model.schema.ts`             |
 | Catalog cap/shape tests            | `apps/libs/api-llm-gateway/src/models/model.service.test.ts`       |
 | Gateway routes, wires, credentials | `apps/libs/api-llm-gateway/src/providers/provider-gateway.ts`      |
-| Strict gateway request boundary    | `apps/api/app/api/billing/billable-model-request.ts`               |
+| Strict gateway request boundary    | `apps/libs/api-llm-gateway/src/billable-model-request.ts`          |
 | Provider/family enums (chat wire)  | `libs/chat/src/schemas/provider.schema.ts`                         |
 | Tool-schema contract test          | `libs/chat/src/schemas/provider-tool-schema-compat.test.ts`        |
 | Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`     |

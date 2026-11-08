@@ -166,14 +166,18 @@ const config: KnipConfig = {
         'app/api/**/*.module.ts',
         'app/types/**/*.d.ts',
         'scripts/*.mts',
-        // Started by path: `test:billing-load` runs `run.ts`, which forks `driver.ts` and boots
-        // `cluster.ts`; the e2e Tau-cloud fixtures spawn the development billing account; the
-        // foundation and lifecycle tests fork the remaining children.
-        'app/testing/billing-load/{run,driver,cluster}.ts',
+        // The e2e Tau-cloud fixtures spawn the development billing account by this path.
         'app/testing/development-billing-account.ts',
-        'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
         // The deletion recovery integration test spawns this process by path.
         'app/testing/project-deletion-process.ts',
+      ],
+      ignoreDependencies: [
+        // Imported by the source-consumed `api-observability` and `api-email` libraries the server bundle
+        // inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        '@pyroscope/nodejs',
+        '@sentry/node',
+        'react-email',
+        'resend',
       ],
     },
     'apps/libs/api-observability': {
@@ -190,6 +194,15 @@ const config: KnipConfig = {
     'apps/libs/api-database': {
       // Schema, migration job and test helpers are reached by subpath, and `drizzle.config.ts` by drizzle-kit.
       entry: ['src/**/*.ts', 'drizzle.config.ts'],
+    },
+    'apps/libs/api-billing': {
+      entry: [
+        'scripts/*.mts',
+        // Started by path: `test:billing-load` runs `run.ts`, which forks `driver.ts` and boots
+        // `cluster.ts`; the foundation tests fork the remaining children.
+        'src/testing/billing-load/{run,driver,cluster}.ts',
+        'src/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
+      ],
     },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.

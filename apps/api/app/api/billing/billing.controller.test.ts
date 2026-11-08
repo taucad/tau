@@ -1,5 +1,11 @@
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import {
+  BillingAccountClosureService,
+  BillingController,
+  BillingEstimatesService,
+  BillingPaymentsService,
+  BillingService,
+  BillingUsageService,
+} from '@taucad/api-billing';
 import { ConflictException, ForbiddenException, VersioningType } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
@@ -9,10 +15,6 @@ import type { Auth } from 'better-auth';
 import { describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { wireOpenHoldsSchema, wireUsageSnapshotSchema } from '@taucad/billing';
-import { BillingController } from '#api/billing/billing.controller.js';
-import { BillingService } from '#api/billing/billing.service.js';
-import { BillingUsageService } from '#api/billing/billing-usage.service.js';
-import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 

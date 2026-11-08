@@ -10,7 +10,7 @@ import type { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-
 import type { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
-import type { ObservedSettlement } from '#api/billing/observed-settlement.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
 
 const settlement = (change: Partial<ObservedSettlement['operation']> = {}): ObservedSettlement => ({
   operation: {

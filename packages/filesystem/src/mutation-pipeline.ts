@@ -952,9 +952,11 @@ export class MutationPipeline {
       (total, precondition) => total + (precondition.expected?.byteLength ?? 0),
       0,
     );
-    /* A byte precondition carries the file it expects, so the request is bounded; a digest
-     * carries 64 characters, and the authority reads the bytes it names under the locks (D17). */
-    if (expectedBytes + (digested ? 0 : ownedData.byteLength) > maximumCheckedWriteBytes) {
+    /* A byte precondition carries the file it expects, so a request that compares bytes is
+     * bounded with its data; a digest carries 64 characters, and the authority reads the bytes
+     * it names under the locks, and an absence carries none (D17), so neither bounds the data. */
+    const comparesBytes = ownedPreconditions.some((precondition) => (precondition.expected ?? null) !== null);
+    if (expectedBytes + (comparesBytes && !digested ? ownedData.byteLength : 0) > maximumCheckedWriteBytes) {
       throw new TypeError(`Checked write request exceeds ${String(maximumCheckedWriteBytes)} bytes.`);
     }
     const targetAuthority = resolution.entry;

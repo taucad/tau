@@ -151,6 +151,26 @@ describe('checked writes with a digest precondition (D17)', () => {
     expect(await digest(await service.readFile('/large.txt'))).toBe(await digest(edited));
   });
 
+  it('should create a file past the byte ceiling against absence, and refuse it where the file exists', async () => {
+    const { service } = await createWorkspaceFileService();
+    const large = new Uint8Array(9 * mebibyte).fill(0x63);
+
+    const created = await service.writeFileChecked({
+      path: '/new.bin',
+      data: large,
+      preconditions: [{ path: '/new.bin', expected: null }],
+    });
+    const again = await service.writeFileChecked({
+      path: '/new.bin',
+      data: new Uint8Array(9 * mebibyte).fill(0x64),
+      preconditions: [{ path: '/new.bin', expected: null }],
+    });
+
+    expect(created.status).toBe('applied');
+    expect(again.status).toBe('conflict');
+    expect(await digest(await service.readFile('/new.bin'))).toBe(await digest(large));
+  });
+
   it('should refuse a malformed digest before any read', async () => {
     const { service } = await createWorkspaceFileService();
     await service.writeFile('/doc.ts', 'loaded');

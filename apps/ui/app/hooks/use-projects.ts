@@ -8,6 +8,7 @@ import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { selectCaughtUp } from '#machines/chat-projection.logic.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
@@ -44,6 +45,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     async queryFn({ signal }) {
       const listing = await getProjectListing({ includeDeleted: true });
       signal.throwIfAborted();
+      /* R5: remember the list's shape, so the next load reserves its rows and cards. */
+      projectListShapeStore.remember(projectListShapeOf(listing.projects.map(projectLibraryEntryToListItem)));
       return listing;
     },
     enabled: !isWorkerLoading,

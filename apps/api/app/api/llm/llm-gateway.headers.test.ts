@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { assertNoQuery, invocationSignal, readHint } from '#api/llm/llm-gateway.headers.js';
+import { assertNoQuery, invocationSignal, readHint, readTurnTelemetry } from '#api/llm/llm-gateway.headers.js';
 
 describe('funded invocation HTTP boundary', () => {
   it('rejects any query component before invocation', () => {
@@ -51,5 +51,34 @@ describe('readHint', () => {
     ['newline-injected', 'proj_1\nx-tau-chat-id: other'],
   ])('should drop a %s hint rather than refuse the turn', (_name, value) => {
     expect(readHint(value)).toBeUndefined();
+  });
+});
+
+describe('readTurnTelemetry', () => {
+  const requestWith = (headers: Record<string, string>): FastifyRequest =>
+    ({
+      headers,
+      raw: { rawHeaders: Object.entries(headers).flatMap(([name, value]) => [name, value]) },
+    }) as unknown as FastifyRequest;
+
+  it('should carry no turn labels when the caller asserted none', () => {
+    expect(readTurnTelemetry(requestWith({}))).toEqual({});
+  });
+
+  it('should keep asserted step and gap labels', () => {
+    expect(readTurnTelemetry(requestWith({ 'x-tau-turn-step': 'first', 'x-tau-turn-gap': '5m_60m' }))).toEqual({
+      turn: { step: 'first', gap: '5m_60m' },
+    });
+  });
+
+  it.each([
+    [{ 'x-tau-turn-step': 'second' }, { step: 'unknown', gap: 'unknown' }],
+    [
+      { 'x-tau-turn-step': 'unknown', 'x-tau-turn-gap': 'lt_5m' },
+      { step: 'unknown', gap: 'lt_5m' },
+    ],
+    [{ 'x-tau-turn-gap': '90m' }, { step: 'unknown', gap: 'unknown' }],
+  ])('should turn a malformed label into unknown rather than refuse the turn (%o)', (headers, turn) => {
+    expect(readTurnTelemetry(requestWith(headers))).toEqual({ turn });
   });
 });

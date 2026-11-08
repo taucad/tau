@@ -46,5 +46,5 @@ test.skip('renders loader data', async () => {
     </TestWrapper>,
   );
 
-  await waitFor(async () => screen.findByText('What can I help you build?'));
+  await waitFor(async () => screen.findByText('Design parts and assemblies in code'));
 });

@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjects } from '#hooks/use-projects.js';
+import { useProjectListShape } from '#hooks/use-project-list-shape.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
 import { projectChatUrl, projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
@@ -58,6 +59,9 @@ import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-n
 
 const projectsPerPage = 5;
 
+/** Rows reserved while a browser that has never listed its projects waits for its first listing. */
+const unknownShapeRowCount = 3;
+
 export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): ProjectListItem[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
@@ -87,6 +91,13 @@ export function ProjectNavigation({ className }: { readonly className?: string }
       ? visibleProjects.find((entry) => !live.has(entry.id))?.id
       : undefined;
   }, [liveProjectIds, visibleProjects]);
+  /* R5: until the worker lists, reserve the rows the last listing had (with its
+   * names once the client has them), and say "No projects yet" up front when it
+   * had none, so the listing only fills slots that are already there. */
+  const rememberedShape = useProjectListShape();
+  const isAwaitingListing = isLoading && projects.length === 0;
+  const placeholderCount = rememberedShape ? Math.min(rememberedShape.count, projectsPerPage) : unknownShapeRowCount;
+  const isKnownEmpty = isAwaitingListing ? rememberedShape?.count === 0 : !isLoading && !error && projects.length === 0;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   /* `isActive` gates the merge: the open project's parameters belong to its own
@@ -124,10 +135,10 @@ export function ProjectNavigation({ className }: { readonly className?: string }
           chats between themselves all sit `gap-0.5` apart, so expanding or
           collapsing a project shifts nothing. */}
         <SidebarMenu className='gap-0.5'>
-          {isLoading && projects.length === 0
-            ? Array.from({ length: 3 }, (_, index) => (
+          {isAwaitingListing
+            ? Array.from({ length: placeholderCount }, (_, index) => (
                 <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
-                  <SidebarRowSkeleton />
+                  <SidebarRowSkeleton name={rememberedShape?.projects[index]?.name} />
                 </SidebarMenuItem>
               ))
             : null}
@@ -138,7 +149,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               <SidebarFailureRow what='projects' />
             </SidebarMenuItem>
           ) : null}
-          {!isLoading && !error && projects.length === 0 && liveProjectIds.length === 0 ? (
+          {isKnownEmpty && liveProjectIds.length === 0 ? (
             <SidebarMenuItem>
               <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
             </SidebarMenuItem>
@@ -204,6 +215,13 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               </Fragment>
             );
           })}
+          {isAwaitingListing && rememberedShape !== undefined && rememberedShape.count > projectsPerPage ? (
+            <SidebarMenuItem aria-hidden data-testid='project-navigation-skeleton'>
+              <SidebarMenuButton type='button' disabled tabIndex={-1} className={sidebarDisclosureButtonClass}>
+                Show more projects
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ) : null}
           {visibleCount < sortedProjects.length ? (
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -453,33 +471,40 @@ function ProjectNavigationItem({
                 }}
               >
                 <ProjectSyncStatus sync={row.sync} isCloudPending={isCloudPending} onOpenDetails={openSyncDetails} />
-                <SidebarRowMenuButton isResponsive name={project.name} items={menuItems} className='w-48' />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='icon'
-                      className={sidebarRowButtonClass}
-                      aria-label={`New chat in ${project.name}`}
-                      aria-disabled={!canCreateChat}
-                      onClick={() => {
-                        if (canCreateChat) {
-                          void onCreateChat();
-                        }
-                      }}
-                    >
-                      <SquarePen aria-hidden className='size-3.5' />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side='bottom'>
-                    {isCloudPending
-                      ? 'New chat — Wait for project files to be ready.'
-                      : project.slugs
-                        ? 'New chat'
-                        : 'New chat — Project address is not ready.'}
-                  </TooltipContent>
-                </Tooltip>
+                {/* R13: the row's actions are for the row being reached: fine pointers see them on
+                    hover or focus, coarse pointers always, and an open menu keeps its anchor (I3). */}
+                <span
+                  data-slot='project-row-actions'
+                  className='hidden items-center group-focus-within/row:flex group-hover/row:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'
+                >
+                  <SidebarRowMenuButton isResponsive name={project.name} items={menuItems} className='w-48' />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        className={sidebarRowButtonClass}
+                        aria-label={`New chat in ${project.name}`}
+                        aria-disabled={!canCreateChat}
+                        onClick={() => {
+                          if (canCreateChat) {
+                            void onCreateChat();
+                          }
+                        }}
+                      >
+                        <SquarePen aria-hidden className='size-3.5' />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side='bottom'>
+                      {isCloudPending
+                        ? 'New chat — Wait for project files to be ready.'
+                        : project.slugs
+                          ? 'New chat'
+                          : 'New chat — Project address is not ready.'}
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
               </span>
             </>
           )}

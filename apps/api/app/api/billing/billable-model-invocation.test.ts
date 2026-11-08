@@ -66,6 +66,11 @@ const genAiMetrics = () => ({
   genAiOperationDuration: { record: vi.fn() },
   genAiTimeToFirstToken: { record: vi.fn() },
   genAiCost: { add: vi.fn() },
+  llmGatewayAdmissionDuration: { record: vi.fn() },
+  llmGatewayInlineImageBytes: { record: vi.fn() },
+  llmTurnStepCacheTokens: { add: vi.fn() },
+  llmTurnStepCacheOutcomes: { add: vi.fn() },
+  llmTurnStepTimeToFirstToken: { record: vi.fn() },
 });
 
 const intent = (signal = new AbortController().signal): BillableInvocationIntent => ({
@@ -1712,8 +1717,14 @@ describe('BillableModelInvocationService', () => {
     const settle = async (
       meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems'],
       stream?: boolean,
-      // oxlint-disable-next-line typescript/no-restricted-types -- null is an unpriced receipt
-      supplierCostPicoUsd: bigint | null = 0n,
+      {
+        supplierCostPicoUsd = 0n,
+        turn,
+      }: {
+        // oxlint-disable-next-line typescript/no-restricted-types -- null is an unpriced receipt
+        readonly supplierCostPicoUsd?: bigint | null;
+        readonly turn?: BillableInvocationIntent['turn'];
+      } = {},
     ) => {
       const qualified = qualification();
       qualified.normalizedRequest = {
@@ -1740,7 +1751,7 @@ describe('BillableModelInvocationService', () => {
       });
       const harness = exhaustionHarness(qualified);
       harness.ledger.terminalizeOperation.mockResolvedValue({ chargedAtoms: 2500n, supplierCostPicoUsd });
-      const result = await harness.service.invoke(intent());
+      const result = await harness.service.invoke({ ...intent(), ...(turn === undefined ? {} : { turn }) });
       if (result.state !== 'streaming') {
         throw new Error('Invocation did not stream');
       }
@@ -1756,7 +1767,7 @@ describe('BillableModelInvocationService', () => {
           { dimension: 'output', tier: null, quantity: 5n },
         ],
         undefined,
-        1_750_000n,
+        { supplierCostPicoUsd: 1_750_000n },
       );
 
       expect(metrics.billingSupplierCostPicoUsd.add).toHaveBeenCalledExactlyOnceWith(1_750_000, {
@@ -1770,11 +1781,9 @@ describe('BillableModelInvocationService', () => {
       ['a known zero', 0n],
       ['an unpriced receipt', null],
     ])('should not count supplier cost for %s', async (_label, supplierCostPicoUsd) => {
-      const metrics = await settle(
-        [{ dimension: 'uncached_input', tier: null, quantity: 7n }],
-        undefined,
+      const metrics = await settle([{ dimension: 'uncached_input', tier: null, quantity: 7n }], undefined, {
         supplierCostPicoUsd,
-      );
+      });
 
       expect(metrics.genAiCost.add).toHaveBeenCalledOnce();
       expect(metrics.billingSupplierCostPicoUsd.add).not.toHaveBeenCalled();
@@ -1810,6 +1819,48 @@ describe('BillableModelInvocationService', () => {
 
       expect(streamed.genAiTimeToFirstToken.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), labels);
       expect(buffered.genAiTimeToFirstToken.record).not.toHaveBeenCalled();
+    });
+
+    it('records one dispatched admission duration per invocation', async () => {
+      const metrics = await settle([{ dimension: 'uncached_input', tier: null, quantity: 1n }], true);
+
+      expect(metrics.llmGatewayAdmissionDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        'gen_ai.provider.name': 'openai',
+        'tau.surface': 'gateway',
+        outcome: 'dispatched',
+      });
+      expect(metrics.llmGatewayInlineImageBytes.record).toHaveBeenCalledExactlyOnceWith(0, {
+        'gen_ai.provider.name': 'openai',
+      });
+    });
+
+    it('records the turn-step cache series only when the caller asserted turn labels', async () => {
+      const usage = [
+        { dimension: 'uncached_input', tier: null, quantity: 3n },
+        { dimension: 'cache_read', tier: null, quantity: 900n },
+        { dimension: 'cache_write', tier: '1h', quantity: 40n },
+      ];
+      const labelled = await settle(usage, true, { turn: { step: 'first', gap: 'lt_5m' } });
+      const unlabelled = await settle(usage, true);
+      const turnLabels = { 'gen_ai.provider.name': 'openai', 'tau.turn.step': 'first', 'tau.turn.gap': 'lt_5m' };
+
+      expect(labelled.llmTurnStepCacheOutcomes.add).toHaveBeenCalledExactlyOnceWith(1, {
+        ...turnLabels,
+        'tau.prompt_cache.outcome': 'hit',
+      });
+      expect(labelled.llmTurnStepCacheTokens.add).toHaveBeenCalledWith(40, {
+        ...turnLabels,
+        'gen_ai.token.type': 'cache_write_1h',
+      });
+      expect(labelled.llmTurnStepTimeToFirstToken.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...turnLabels,
+        'tau.prompt_cache.outcome': 'hit',
+      });
+      expect(labelled.genAiTokenUsage.record).toHaveBeenCalledWith(
+        40,
+        expect.objectContaining({ 'gen_ai.token.type': 'cache_write_1h' }),
+      );
+      expect(unlabelled.llmTurnStepCacheOutcomes.add).not.toHaveBeenCalled();
     });
 
     it('records neither tokens nor cost for an operation left pending for recovery', async () => {
@@ -1865,6 +1916,11 @@ describe('BillableModelInvocationService', () => {
       expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
         ...labels,
         'error.type': 'policy_unavailable',
+      });
+      expect(metrics.llmGatewayAdmissionDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        'gen_ai.provider.name': 'openai',
+        'tau.surface': 'gateway',
+        outcome: 'refused',
       });
       expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
       expect(metrics.genAiCost.add).not.toHaveBeenCalled();

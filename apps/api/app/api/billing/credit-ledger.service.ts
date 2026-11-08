@@ -2046,6 +2046,41 @@ export class CreditLedgerService {
     return true;
   }
 
+  /**
+   * Expires the unheld plan credit of an account whose Pro subscription ended. Holds for in-flight
+   * operations and pending refunds stay, debt is untouched, and a replay converges with no write
+   * because nothing unheld is left.
+   */
+  public async expirePlanCredits(
+    input: { accountId: string; subscriptionId: string; occurredAt: Date },
+    tx: Tx,
+  ): Promise<boolean> {
+    const account = await this.lockAccount(tx, input.accountId);
+    const expired = account.planAtoms - account.planHeldAtoms;
+    if (expired <= 0n) {
+      return false;
+    }
+    const revision = account.revision + 1n;
+    await tx
+      .update(creditAccount)
+      .set({ planAtoms: account.planHeldAtoms, revision })
+      .where(eq(creditAccount.id, account.id));
+    await tx.insert(creditTransaction).values({
+      id: `plan_expiry:${input.subscriptionId}:${revision}`,
+      accountId: account.id,
+      revision,
+      kind: 'plan_expiry',
+      promoDeltaAtoms: 0n,
+      planDeltaAtoms: -expired,
+      purchasedDeltaAtoms: 0n,
+      debtDeltaAtoms: 0n,
+      accountDeltaAtoms: -expired,
+      balanceAfterAtoms: account.promoAtoms + account.planHeldAtoms + account.purchasedAtoms - account.debtAtoms,
+      occurredAt: input.occurredAt,
+    });
+    return true;
+  }
+
   /** Issues the current-period promotion once; disabled periods never backfill. */
   public async applyPromotionIssuance(input: PromotionIssuanceInput): Promise<boolean> {
     if (input.entitlementAtoms < 0n || input.accountCeilingAtoms < 0n) {

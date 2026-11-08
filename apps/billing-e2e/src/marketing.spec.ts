@@ -149,13 +149,13 @@ describe('marketing copy in the app', () => {
       const appExpected = [
         `$${dollars(commercial.pro.principalMinor)}/month USD, plus applicable tax`,
         `${credits(commercial.pro.grantCreditAtoms)} credits every month`,
-        `Unused plan credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
+        `Unused plan credits carry over while subscribed, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
         `Buy credits any time — ${creditsPerDollar} credits per US$1`,
       ];
       const wwwExpected = [
         `US$${dollars(commercial.pro.principalMinor)}`,
         `${credits(commercial.pro.grantCreditAtoms)} credits every month`,
-        `Unused plan credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
+        `Unused plan credits carry over while subscribed, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
         `Credits cost US$1 per ${creditsPerDollar}, with top-ups from US$${dollars(
           commercial.topUp.minimumPrincipalMinor,
         )} to US$${dollars(commercial.topUp.maximumPrincipalMinor)}`,

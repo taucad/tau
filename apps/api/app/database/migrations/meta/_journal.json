@@ -449,6 +449,13 @@
       "when": 1793315147465,
       "tag": "0064_ai_training_decided_at",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794098596282,
+      "tag": "0065_plan_credit_expiry",
+      "breakpoints": true
     }
   ]
 }

@@ -275,7 +275,7 @@ export const plans: Array<{
     features: [
       ['Everything in Free'],
       ['2,000 credits every month'],
-      ['Unused plan credits roll over, up to 4,000'],
+      ['Unused plan credits carry over while subscribed, up to 4,000'],
       ['Tau Cloud backup & sync, 10 GB'],
       ['Zoo KCL cloud kernel, metered'],
       ['Private and unlisted share links'],
@@ -321,6 +321,6 @@ export const pricingFaq: Array<[string, string]> = [
   ],
   [
     'What happens to unused Pro credits?',
-    'Unused plan credits roll over, up to 4,000. Purchased credits are separate and never expire. Subscription and cancellation terms are shown in the app before you buy.',
+    'Unused plan credits carry over while you stay subscribed, up to 4,000, and expire when Pro ends. Purchased credits are separate and never expire. Subscription and cancellation terms are shown in the app before you buy.',
   ],
 ];

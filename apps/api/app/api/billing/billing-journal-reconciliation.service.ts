@@ -520,7 +520,8 @@ async function readDifferences(
         or (t.kind = 'promotion_grant' and t.promotion_issuance_id is not null)
         or (t.kind = 'reversal' and t.reversal_case_id is not null)
         or (t.kind = 'deferred_grant' and t.reversal_case_id is not null and t.correction_of is not null)
-        or (t.kind = 'compensation' and t.correction_of is not null))) cause on true
+        or (t.kind = 'compensation' and t.correction_of is not null)
+        or t.kind = 'plan_expiry')) cause on true
     join lateral (select count(*) - count(distinct t.revision) as duplicates,
         coalesce(max(t.revision), 0) as maximum
       from billing.credit_transaction t where t.account_id = a.id) rev on true

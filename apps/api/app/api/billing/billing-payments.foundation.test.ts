@@ -1754,6 +1754,14 @@ describe('billing payments PostgreSQL foundation', () => {
     expect(afterHistorical?.paidThrough).toEqual(newerPaidThrough);
     expect(afterHistorical?.graceEndsAt).toBeNull();
     expect(afterHistorical).toMatchObject({ slotState: 'ended', status: 'canceled' });
+    // The subscription had already ended, so the late period's plan credit expires with it.
+    const [endedAccount] = await database.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    expect(endedAccount).toMatchObject({ planAtoms: 0n, planHeldAtoms: 0n });
+    const expiries = await database
+      .select()
+      .from(creditTransaction)
+      .where(and(eq(creditTransaction.accountId, accountId), eq(creditTransaction.kind, 'plan_expiry')));
+    expect(expiries).toMatchObject([{ planDeltaAtoms: -20_000_000n, accountDeltaAtoms: -20_000_000n }]);
     expect(requests.slice(getsBefore).every((request) => request.startsWith('GET '))).toBe(true);
 
     const overlapInvoiceId = `in_${randomUUID()}`;

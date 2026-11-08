@@ -3490,6 +3490,7 @@ export class BillingPaymentsService {
             updatedAt: new Date(),
           })
           .where(and(eq(subscription.id, ownedSubscription.id), eq(subscription.accountId, accountId)));
+        if (ended) await this.expireEndedPlanCredits(tx, accountId, ownedSubscription.id);
       });
       return true;
     }
@@ -3790,8 +3791,29 @@ export class BillingPaymentsService {
           updatedAt: new Date(),
         })
         .where(and(eq(subscription.id, owned.id), eq(subscription.accountId, accountId)));
+      if (remoteEnded) await this.expireEndedPlanCredits(tx, accountId, owned.id);
     });
     return true;
+  }
+
+  /**
+   * Plan Credits carry over only while subscribed: when a Pro subscription ends, its unheld plan credit
+   * expires. A late event for an old subscription must not expire a newer live subscription's credit.
+   */
+  private async expireEndedPlanCredits(tx: Transaction, accountId: string, subscriptionId: string): Promise<void> {
+    const live = await tx
+      .select({ id: subscription.id })
+      .from(subscription)
+      .where(
+        and(
+          eq(subscription.accountId, accountId),
+          ne(subscription.id, subscriptionId),
+          inArray(subscription.slotState, ['current', 'attention']),
+        ),
+      )
+      .limit(1);
+    if (live[0] !== undefined) return;
+    await this.ledger.expirePlanCredits({ accountId, subscriptionId, occurredAt: new Date() }, tx);
   }
 
   /**

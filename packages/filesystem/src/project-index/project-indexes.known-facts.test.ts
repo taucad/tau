@@ -68,6 +68,40 @@ describe('facts the index already holds (D12: a first revision from recorded oid
     expect(reads() - before).toBe(1);
   });
 
+  it('should answer an import record only while a stat finds the file at its size and mtime', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    await provider.writeFile('project/changed.txt', 'abcd');
+    await provider.writeFile('project/measured.txt', 'self');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [
+        { path: 'kept.txt', size: 4, oid: 'a'.repeat(40) },
+        { path: 'changed.txt', size: 4, oid: 'b'.repeat(40) },
+      ]),
+    );
+    vi.setSystemTime(1_020_000);
+    const indexes = indexesOver(provider);
+    await indexes.ready('/project');
+    /* The index measures this one itself: not a fact the import recorded. */
+    await indexes.facts('/project', ['measured.txt'], { digests: ['blobOid'] });
+    /* The same size, rewritten after the record and not yet observed by the index. */
+    vi.setSystemTime(1_030_000);
+    await provider.writeFile('project/changed.txt', 'wxyz');
+
+    const facts = await indexes.facts('/project', ['kept.txt', 'changed.txt', 'measured.txt'], {
+      digests: ['blobOid'],
+      measure: false,
+      recorded: 'import',
+    });
+
+    expect(facts.get('kept.txt')?.blobOid).toBe('a'.repeat(40));
+    expect(facts.has('changed.txt')).toBe(false);
+    expect(facts.has('measured.txt')).toBe(false);
+  });
+
   it('should measure what it does not hold when measuring is allowed', async () => {
     const { provider } = await durableRoot();
     vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });

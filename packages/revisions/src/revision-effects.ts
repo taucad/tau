@@ -1386,13 +1386,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns The complete versioned tree.
    */
   /*
-   * D12: a walk's reads are hashed only where the index has no trusted blob id
-   * for them. A committed import's facts, measured once from the read-back of
-   * what it wrote (EQ6), are asked for after the read and taken for bytes of
-   * the size the walk listed, so the first revision of an import is built from
-   * those recorded ids and no file is hashed a second time (I2). The index
-   * answers only what it holds (`measure: false`): a file it has no id for is
-   * hashed by the memo as before, never read again here.
+   * D12: the first revision after an import is built from the blob ids its
+   * record holds, measured once from the read-back of what it wrote (EQ6),
+   * so those files are not hashed a second time (I2). Only the record's own
+   * facts are taken (`recorded: 'import'`), asked for after the read, for
+   * bytes of the size the walk listed, and the index confirms each with a
+   * provider stat at exactly the recorded size and mtime: a change it has not
+   * observed yet is hashed. Every other file is hashed by the memo as before,
+   * never read again here.
    */
   const recordedBlobOids = async (
     rooted: RevisionFileSystem,
@@ -1404,7 +1405,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const sizes = new Map(stats.map(({ path, size }) => [path, size] as const));
     const paths = [...read.keys()].filter((path) => sizes.get(path) === read.get(path)?.byteLength);
-    const facts = await rooted.facts(paths, { digests: ['blobOid'], measure: false }).catch(() => undefined);
+    const facts = await rooted
+      .facts(paths, { digests: ['blobOid'], measure: false, recorded: 'import' })
+      .catch(() => undefined);
     for (const [path, { blobOid }] of facts ?? []) {
       const content = read.get(path);
       if (content !== undefined && blobOid !== undefined) {

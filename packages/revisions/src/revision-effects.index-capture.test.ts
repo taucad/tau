@@ -488,12 +488,9 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
   });
 
-  it("should take a committed import's recorded facts through the real Project Index", async () => {
-    const initial = files(10);
-    const at = await fixture(initial);
-    const placed = await stat(outside(at, 'dir1/f1.txt'));
-    const recorded = 'e'.repeat(40);
-    const now = Date.now();
+  /* A committed import's record, as the commit writes it: one file's recorded facts, at its placed size and mtime. */
+  const writeImportRecord = async (at: Fixture, path: string, oid: string): Promise<void> => {
+    const placed = await stat(outside(at, path));
     await mkdir(outside(at, '.tau'), { recursive: true });
     await writeFile(
       outside(at, '.tau/import.json'),
@@ -501,17 +498,24 @@ describe('a first revision built from recorded blob ids (D12)', () => {
         version: 1,
         operationId: 'req_import',
         pin: { kind: 'zip', name: 'x', size: 1, entries: 1 },
-        at: now,
+        at: Date.now(),
         entries: [
           {
-            path: 'dir1/f1.txt',
+            path,
             size: placed.size,
             mtimeMs: placed.mtimeMs,
-            facts: { contentKind: 'text', blobOid: recorded, sha256: 'a'.repeat(64) },
+            facts: { contentKind: 'text', blobOid: oid, sha256: 'a'.repeat(64) },
           },
         ],
       }),
     );
+  };
+
+  it("should take a committed import's recorded facts through the real Project Index", async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    const recorded = 'e'.repeat(40);
+    await writeImportRecord(at, 'dir1/f1.txt', recorded);
     at.reload();
 
     const written = await mint(at);
@@ -519,6 +523,40 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     const tree = await at.port.listTree?.(revisionId(written));
     expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
     expect(tree?.find(({ path }) => path === 'dir1/f6.txt')?.oid).toBe(blobOidOf(initial['dir1/f6.txt']!));
+  });
+
+  it('should hash a same-size change the index has not observed yet, never pinning the recorded id to it', async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    await writeImportRecord(at, 'dir1/f1.txt', 'e'.repeat(40));
+    at.reload();
+    /* The record is taken, then another program rewrites the file at its size before any compare sees it. */
+    const taken = await at.rooted.facts?.(['dir1/f1.txt'], { digests: ['blobOid'], measure: false });
+    expect(taken?.get('dir1/f1.txt')?.blobOid).toBe('e'.repeat(40));
+    const changed = 'FILE 1\n';
+    expect(Buffer.byteLength(changed)).toBe(Buffer.byteLength(initial['dir1/f1.txt']!));
+    await writeFile(outside(at, 'dir1/f1.txt'), changed);
+
+    const written = await mint(at);
+
+    const tree = await at.port.listTree?.(revisionId(written));
+    expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(blobOidOf(changed));
+  });
+
+  it('should take no fact the index measured itself, only those an import recorded', async () => {
+    const initial = files(10);
+    const at = await fixture(initial);
+    /* The index measures and trusts the file's id, but no import recorded it. */
+    const measured = await at.rooted.facts?.(['dir1/f1.txt'], { digests: ['blobOid'] });
+    expect(measured?.get('dir1/f1.txt')?.blobOid).toBe(blobOidOf(initial['dir1/f1.txt']!));
+
+    const answered = await at.rooted.facts?.(['dir1/f1.txt'], {
+      digests: ['blobOid'],
+      measure: false,
+      recorded: 'import',
+    });
+
+    expect(answered?.has('dir1/f1.txt')).toBe(false);
   });
 
   it("should hash to what a walk hashes when the recorded ids are the files' own", async () => {

@@ -83,6 +83,15 @@ export type IndexFactsOptions = ContentFactsOptions &
      * again (D12: the first revision is built from recorded oids).
      */
     measure?: boolean;
+    /**
+     * With `measure: false`, `'import'` answers only the facts a committed
+     * import's record seeded (D12), each confirmed as it is answered by a
+     * provider stat at exactly the size and mtime the record holds, so a
+     * change the index has not observed yet is never answered with the
+     * record's ids. A file placed within the racy window of the record (EQ7)
+     * is not trusted, so it is measured again by its caller.
+     */
+    recorded?: 'import';
   }>;
 
 const textEncoder = new TextEncoder();
@@ -166,6 +175,9 @@ export class ProjectIndexes {
 
   /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
   private readonly _importFactsTaken = new Set<string>();
+
+  /** What each root's import record seeded, at the size and mtime it holds: what `recorded: 'import'` may answer. */
+  private readonly _importSeeded = new Map<string, Map<string, Readonly<{ size: number; mtimeMs: number }>>>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -305,9 +317,21 @@ export class ProjectIndexes {
         (index.entry(path)?.size ?? 0) > byteCap
       );
     };
+    /* An import record's facts, answered only while the file the provider holds now is the one it recorded. */
+    const importRecorded = async (path: string, known: ContentFacts | undefined): Promise<ContentFacts | undefined> => {
+      const at = this._importSeeded.get(key)?.get(path);
+      if (at === undefined || !answers(path, known)) {
+        return undefined;
+      }
+      const stat = await resolution.provider.stat(joinRelativePath(resolution.path, path)).catch(() => undefined);
+      return stat?.type === 'file' && stat.size === at.size && stat.mtimeMs === at.mtimeMs ? known : undefined;
+    };
     const answered = await mapConcurrent(paths, factsConcurrency, async (path) => {
       options?.signal?.throwIfAborted();
       const known = index.factsFor(path);
+      if (options?.recorded === 'import') {
+        return { facts: await importRecorded(path, known), recorded: false };
+      }
       if (answers(path, known)) {
         return { facts: known, recorded: false };
       }
@@ -705,6 +729,7 @@ export class ProjectIndexes {
   public clear(): void {
     this._readFacts.clear();
     this._importFactsPending.clear();
+    this._importSeeded.clear();
     for (const state of this._states.values()) {
       clearTimeout(state.persistTimer);
     }
@@ -876,9 +901,12 @@ export class ProjectIndexes {
         ? undefined
         : { kind: 'file', size: entry.size, mtimeMs: entry.mtimeMs };
     });
+    const held = this._importSeeded.get(root) ?? new Map<string, Readonly<{ size: number; mtimeMs: number }>>();
     for (const [entryPath, { facts, size, mtimeMs }] of seeded) {
       index.recordFacts(entryPath, facts, { size, mtimeMs, observedAt: recordMtime });
+      held.set(entryPath, { size, mtimeMs });
     }
+    this._importSeeded.set(root, held);
     workerTimings.count('index.importFacts', seeded.size);
   }
 

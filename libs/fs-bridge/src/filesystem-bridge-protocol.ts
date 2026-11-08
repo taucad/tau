@@ -280,6 +280,8 @@ export type FactsOptions = Readonly<{
   digests?: ReadonlyArray<'sha256' | 'blobOid'>;
   /** `false`: only what the authority's index already holds and trusts, with no file read. */
   measure?: boolean;
+  /** With `measure: false`: only a committed import's recorded facts, confirmed by a stat at their size and mtime. */
+  recorded?: 'import';
 }>;
 
 /**
@@ -1277,6 +1279,7 @@ const factsOptionsSchema = z.looseObject({
   byteCap: countSchema.max(maxFactsByteCap).optional(),
   digests: z.array(z.enum(['sha256', 'blobOid'])).optional(),
   measure: z.boolean().optional(),
+  recorded: z.literal('import').optional(),
 });
 const indexEpochSchema = z.string().min(1).max(64);
 const indexChangedSinceSchema: z.ZodType<IndexChangedSince> = z.looseObject({

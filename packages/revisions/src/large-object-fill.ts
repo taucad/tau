@@ -616,11 +616,21 @@ export const createLargeObjectFill = (
       if (!isCurrent(fill)) {
         return;
       }
-      /* Objects a write found missing from the store after all: their bytes, fetched by oid, are written instead. */
-      const unstored = [...fill.unstored].flatMap((oid) =>
-        fill.arrived.has(oid) ? [] : [{ oid, size: fill.wanted.get(oid)! }],
-      );
-      if (unstored.length > 0 && port.fetchLargeObjects !== undefined) {
+      /* Objects a write found missing from the store after all: their bytes, fetched by oid, are written instead.
+       * A flush of those bytes can find another object gone, so this runs again for what is new — each object
+       * fetched once, so it ends. */
+      const refetched = new Set<string>();
+      for (;;) {
+        const unstored = [...fill.unstored].flatMap((oid) =>
+          fill.arrived.has(oid) || refetched.has(oid) ? [] : [{ oid, size: fill.wanted.get(oid)! }],
+        );
+        if (unstored.length === 0 || port.fetchLargeObjects === undefined) {
+          break;
+        }
+        for (const { oid } of unstored) {
+          refetched.add(oid);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- each pass fetches what the last one's flush found missing.
         const fetched = await port.fetchLargeObjects(unstored, transfer);
         if (!isCurrent(fill)) {
           return;
@@ -630,6 +640,7 @@ export const createLargeObjectFill = (
             arrive(fill, oid, content);
           }
         }
+        // oxlint-disable-next-line no-await-in-loop -- see above.
         await flushAll(fill);
         if (!isCurrent(fill)) {
           return;

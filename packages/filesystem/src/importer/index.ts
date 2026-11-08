@@ -72,6 +72,7 @@ export type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '
 export {
   discardStagedImport,
   importControlDirectory,
+  stagedControlDirectory,
   importOwnerPath,
   importResidentBytes,
   importStagingDirectory,

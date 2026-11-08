@@ -412,6 +412,11 @@ const removeOwnedEntries = async (port: ImportStagingPort, target: string, opera
           .map((path): BatchEntry => ({ op: 'delete', path: `${target}/${path}`, kind: 'file' })),
       );
     }
+    /* A linked import's `.git` was fetched straight into the folder (`stagedControlDirectory`): it is the import's whole. */
+    const control = await provider.stat(`${target}/.git`).catch(() => undefined);
+    if (control?.type === 'dir') {
+      await applied(port, [{ op: 'delete', path: `${target}/.git`, kind: 'dir', recursive: true }]);
+    }
     await applied(port, [{ op: 'delete', path: `${target}/${importOwnerPath}`, kind: 'file' }]);
     /* Then every folder those files leave empty, deepest first, the project folder last: never a recursive delete. */
     const folders = new Set<string>();
@@ -446,6 +451,22 @@ const removeOwnedEntries = async (port: ImportStagingPort, target: string, opera
 export const importControlDirectory = (operationId: string): string =>
   `${importStagingDirectory(operationId)}/control/.git`;
 
+/**
+ * Where one staged linked import's control plane is written. Staged to move
+ * (OPFS, Node: a rename is a metadata operation) it is the staging's own
+ * {@link importControlDirectory}, renamed into the project at the commit.
+ * Written in place (a picked folder, IndexedDB: a rename copies) it is the
+ * project folder's `.git` from the start, as the import's files are, so no
+ * pack is ever copied and the folder's owner marker covers it: a discard or a
+ * sweep of the staging removes it with the import's other entries.
+ *
+ * @param staged - The staged import, as its first stage answered it.
+ * @returns The `.git` directory the revisions authority fetches into.
+ * @public
+ */
+export const stagedControlDirectory = (staged: Pick<StagedImport, 'operationId' | 'inPlace'>): string =>
+  staged.inPlace === undefined ? importControlDirectory(staged.operationId) : `${staged.inPlace}/.git`;
+
 /* Every file under a directory, relative to it, by listing alone. */
 const filesUnder = async (provider: FileSystemProvider, root: string, prefix = ''): Promise<string[]> => {
   const files: string[] = [];
@@ -464,9 +485,11 @@ const filesUnder = async (provider: FileSystemProvider, root: string, prefix = '
  * `.git`: one rename of the directory, so its bytes are never written again
  * where a rename is a metadata operation, and never pass through the
  * mutation pipeline (I6). A commit that stopped partway through the move is
- * finished file by file: whatever `.git` already holds stays (every object is
- * content-addressed and every ref was written once, by the same fetch), and
- * what is left in the staging goes with it.
+ * finished file by file: whatever `.git` already holds at its staged size
+ * stays (every object is content-addressed and every ref was written once, by
+ * the same fetch), a file of any other size is a torn copy and is moved again,
+ * and what is left in the staging goes with it. An in-place import's `.git` is
+ * already in the project ({@link stagedControlDirectory}): nothing moves.
  *
  * @param provider - The storage root's provider.
  * @param operationId - The import operation.
@@ -490,10 +513,21 @@ export const placeStagedControl = async (
     return true;
   }
   const left = await filesUnder(provider, source);
-  const present = await Promise.all(
-    left.map(async (relative) => [relative, await provider.exists(`${destination}/${relative}`)] as const),
+  /* A file the stopped move left at the destination is kept only at its source's size: a torn copy is moved again. */
+  const kept = await Promise.all(
+    left.map(async (relative) => {
+      const [from, to] = await Promise.all([
+        provider.stat(`${source}/${relative}`),
+        provider.stat(`${destination}/${relative}`).catch(() => undefined),
+      ]);
+      if (to?.type === 'file' && to.size !== from.size) {
+        await provider.unlink(`${destination}/${relative}`);
+        return false;
+      }
+      return to !== undefined;
+    }),
   );
-  const missing = present.flatMap(([relative, there]) => (there ? [] : [relative]));
+  const missing = left.filter((_, index) => !kept[index]);
   const folders = new Set(
     missing.flatMap((relative) => {
       const slash = relative.lastIndexOf('/');

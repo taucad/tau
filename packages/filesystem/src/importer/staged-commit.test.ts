@@ -12,11 +12,13 @@ import type { WorkspaceFileService } from '#workspace-file-service.js';
 import { createInlineImportDecoder, createInlineImportMeasurer, subtleImportHash } from '#importer/decode.js';
 import { planImport, zipImportSource } from '#importer/sources.js';
 import {
+  discardStagedImport,
   importControlDirectory,
   importOwnerPath,
   importStagingDirectory,
   readStagedImport,
   stageImport,
+  stagedControlDirectory,
 } from '#importer/staging.js';
 import type { ImportStagingPort } from '#importer/staging.js';
 import { importFactsPath } from '#importer/facts.js';
@@ -373,6 +375,67 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
     expect(decoder.decode(await provider.readFile(`${directory}/.git/refs/heads/main`))).toBe(`${'a'.repeat(40)}\n`);
     expect(await provider.exists(`${directory}/.git/objects/ab/${'c'.repeat(38)}`)).toBe(true);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should move again a control file a copying rename tore, keeping none at another size than staged', async () => {
+    movingInPlace();
+    await stage();
+    await stageControl();
+    const object = `objects/ab/${'c'.repeat(38)}`;
+    /* A rename that copies file by file, then deletes (as one over handles does): HEAD whole, the object torn at 0 bytes. */
+    const rename = provider.rename.bind(provider);
+    const spy = vi.spyOn(provider, 'rename').mockImplementation(async (from, to) => {
+      if (to === `${directory}/.git`) {
+        await provider.mkdir(`${to}/objects/ab`, { recursive: true });
+        await provider.writeFile(`${to}/HEAD`, await provider.readFile(`${from}/HEAD`));
+        await provider.writeFile(`${to}/${object}`, new Uint8Array());
+        throw new Error('tab closed');
+      }
+      await rename(from, to);
+    });
+    await expect(commit()).rejects.toThrow('tab closed');
+    spy.mockRestore();
+    const torn = await provider.stat(`${directory}/.git/${object}`);
+    expect(torn.size).toBe(0);
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/${object}`))).toBe('object');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/refs/heads/main`))).toBe(`${'a'.repeat(40)}\n`);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should leave a .git fetched straight into an in-place folder where it is: no copy of a pack, and the manifest last', async () => {
+    await stage(directory);
+    const staged = await readStagedImport(provider, operationId);
+    expect(stagedControlDirectory(staged!)).toBe(`${directory}/.git`);
+    await provider.mkdir(`${directory}/.git/objects/ab`, { recursive: true });
+    await provider.writeFile(`${directory}/.git/HEAD`, 'ref: refs/heads/main\n');
+    await provider.writeFile(`${directory}/.git/objects/ab/${'c'.repeat(38)}`, 'object');
+    const counted = countBytes(provider);
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(counted.content(`${directory}/.git/`)).toBe(0);
+    expect(counted.renames.some((to) => to.includes('.git'))).toBe(false);
+    expect(counted.last()).toBe(`${directory}/tau.json`);
+  });
+
+  it("should take an in-place folder's .git with the import's other entries when its staging is discarded", async () => {
+    await stage(directory);
+    await provider.mkdir(`${directory}/.git/refs/heads`, { recursive: true });
+    await provider.writeFile(`${directory}/.git/HEAD`, 'ref: refs/heads/main\n');
+    await provider.writeFile(`${directory}/.git/refs/heads/main`, `${'a'.repeat(40)}\n`);
+
+    await discardStagedImport(
+      { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
+      operationId,
+    );
+
+    expect(await provider.exists(directory)).toBe(false);
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
   });
 

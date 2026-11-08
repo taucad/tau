@@ -436,6 +436,9 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
   // One `getMesh()` copy and one `numProp()` read per source, however many nodes share it.
   const runIdsBySource = new Map<Manifold, readonly number[]>();
   const propertyCountBySource = new Map<Manifold, number>();
+  // Each run material's labels as the model authored them: this pass relabels run materials with `NORMAL`, and a
+  // later node sharing the run must not read that relabelling as authored normals.
+  const authoredRunLabels = new Map<number, readonly GLTFAttribute[]>();
   const labelledMaterials = new Map<GLTFMaterial, Map<string, GLTFMaterial>>();
   for (const node of scene) {
     if (!(node instanceof gltfNodeModule.GLTFNode) || node.manifold === undefined) {
@@ -450,12 +453,17 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
     }
     const runMaterials = runIds.flatMap((id) => {
       const runMaterial = getMaterialById(id);
-      return runMaterial ? [{ id, runMaterial }] : [];
+      if (!runMaterial) {
+        return [];
+      }
+      let authoredLabels = authoredRunLabels.get(id);
+      if (!authoredLabels) {
+        authoredLabels = runMaterial.attributes ?? [];
+        authoredRunLabels.set(id, authoredLabels);
+      }
+      return [{ id, runMaterial, authoredLabels }];
     });
-    const labelLists = [
-      material.attributes ?? [],
-      ...runMaterials.map(({ runMaterial }) => runMaterial.attributes ?? []),
-    ];
+    const labelLists = [material.attributes ?? [], ...runMaterials.map(({ authoredLabels }) => authoredLabels)];
     let authored: readonly GLTFAttribute[] = [];
     for (const list of labelLists) {
       if (list.length > authored.length) {

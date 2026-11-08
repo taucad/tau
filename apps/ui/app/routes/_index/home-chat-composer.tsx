@@ -4,6 +4,9 @@ import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
 import { useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
 import { useKernel } from '#hooks/use-kernel.js';
 
+/** The marker after Home's composer that first paint waits for (`rel=expect`). */
+export const homeComposerEndId = 'home-composer-end';
+
 /**
  * Home's composer, with the native input in the route's own bundle and the rich composer in none.
  *
@@ -34,19 +37,28 @@ export function HomeChatComposer({
   const { kernel, setKernel } = useKernel();
 
   return (
-    <div className='space-y-4'>
-      <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
-      <ChatEarlyInput
-        isHostReady={Composer !== undefined}
-        enableAutoFocus={enableAutoFocus}
-        bar={({ isEmpty }) => <ChatComposerStaticBar isEmpty={isEmpty} />}
-      >
-        {(input) =>
-          Composer === undefined ? null : (
-            <Composer adoptedEarlyInput={input} enableAutoFocus={enableAutoFocus} enableKernelChips={false} />
-          )
-        }
-      </ChatEarlyInput>
-    </div>
+    <>
+      {/* Hoisted to the head by React. Until the parser reaches the marker after the composer, Chromium holds
+       * rendering, so on a slow CPU the first paint can never be a half-parsed composer: a kernel row cut
+       * mid-chip, a box without its bar, a model trigger without its label (gate findings 1, #1562). The held
+       * region ends at the composer, not the page, so the project list still streams in after first paint. A
+       * browser without `rel=expect` ignores it. */}
+      <link rel='expect' href={`#${homeComposerEndId}`} blocking='render' />
+      <div className='space-y-4'>
+        <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
+        <ChatEarlyInput
+          isHostReady={Composer !== undefined}
+          enableAutoFocus={enableAutoFocus}
+          bar={({ isEmpty }) => <ChatComposerStaticBar isEmpty={isEmpty} />}
+        >
+          {(input) =>
+            Composer === undefined ? null : (
+              <Composer adoptedEarlyInput={input} enableAutoFocus={enableAutoFocus} enableKernelChips={false} />
+            )
+          }
+        </ChatEarlyInput>
+      </div>
+      <span id={homeComposerEndId} hidden />
+    </>
   );
 }

@@ -22,13 +22,20 @@ const fileManager = vi.hoisted(() => ({
 }));
 
 /* The project's conflict records, which the close producer waits out. */
-const records = vi.hoisted(() => ({ inFlight: false, settled: undefined as PromiseWithResolvers<void> | undefined }));
+const records = vi.hoisted(() => ({
+  inFlight: false,
+  waiting: false,
+  settled: undefined as PromiseWithResolvers<void> | undefined,
+}));
 vi.mock('#lib/editor-document-session.js', async (importOriginal) => {
   const original = await importOriginal<typeof EditorDocumentSessionModule>();
   return {
     ...original,
     isRecordingEditorConflict: () => records.inFlight,
-    editorConflictRecordsSettled: async () => records.settled?.promise,
+    editorConflictRecordsSettled: async () => {
+      records.waiting = true;
+      return records.settled?.promise;
+    },
   };
 });
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', editorRef }) }));
@@ -134,6 +141,21 @@ describe('EditorDocumentSessionProvider close cut (D17)', () => {
     }
   });
 
+  it("settles on the session's answer to a refusal, so a conflict being recorded does not fail the close", async () => {
+    const content = mock<FileContentService>();
+    const answers: unknown[] = [];
+    content.settleEditorSaves.mockImplementation(async (options) => {
+      /* What a refusal the session does not own gets back: the close reports it. */
+      answers.push(options?.resolution?.(new Error('disk full')));
+    });
+    const flushProducers = await mountWithProducers(content);
+
+    await flushProducers();
+
+    expect(typeof content.settleEditorSaves.mock.calls[0]?.[0]?.resolution).toBe('function');
+    expect(answers).toEqual([undefined]);
+  });
+
   it('waits out a conflict record in flight, then settles the saves it made', async () => {
     const content = mock<FileContentService>();
     content.settleEditorSaves.mockResolvedValue(undefined);
@@ -147,8 +169,9 @@ describe('EditorDocumentSessionProvider close cut (D17)', () => {
         done = true;
       })();
       await vi.waitFor(() => {
-        expect(content.settleEditorSaves).toHaveBeenCalledOnce();
+        expect(records.waiting).toBe(true);
       });
+      expect(content.settleEditorSaves).toHaveBeenCalledOnce();
       expect(done).toBe(false);
 
       records.inFlight = false;
@@ -158,6 +181,7 @@ describe('EditorDocumentSessionProvider close cut (D17)', () => {
       expect(content.settleEditorSaves).toHaveBeenCalledTimes(2);
     } finally {
       records.inFlight = false;
+      records.waiting = false;
       records.settled = undefined;
     }
   });

@@ -89,19 +89,25 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       if (phase !== 'hidden' || !contentService) {
         return;
       }
+      /* A refusal the session is answering (a conflict recorded beside the
+       * file) settles on that answer, not as an unsaved edit. */
+      const settle = async (): Promise<void> =>
+        contentService.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined => session?.conflictResolution(failure),
+        });
       await confirmFlush(async () => {
-        await contentService.settleEditorSaves();
+        await settle();
         /* A record that ends may save its rebased text, so the saves are settled again after it. */
         while (isRecordingEditorConflict(projectId)) {
           // oxlint-disable-next-line no-await-in-loop -- one round per record that started meanwhile.
           await editorConflictRecordsSettled(projectId);
           // oxlint-disable-next-line no-await-in-loop -- the record's own save, if it made one.
-          await contentService.settleEditorSaves();
+          await settle();
         }
         return true;
       }, 'Editor changes are not confirmed saved.');
     },
-    [contentService, projectId],
+    [contentService, projectId, session],
   );
   useFlushOnClose(flushEditorAtClose, { stage: 'producer' });
 

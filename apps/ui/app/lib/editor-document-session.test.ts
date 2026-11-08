@@ -142,6 +142,43 @@ describe('EditorDocumentSession', () => {
     session.dispose();
   });
 
+  it('answers the refusal it is recording with the record, so a close cut waits instead of failing', async () => {
+    const { content } = service('one\n');
+    const refusal = new EditorSaveConflictError('main.ts', bytes('one\n'));
+    vi.mocked(content.saveEditor).mockRejectedValueOnce(refusal);
+    vi.mocked(content.peekOutcome).mockReturnValue(outcome('theirs\n'));
+    const recorded = Promise.withResolvers<EditorConflictOutcome>();
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-answer',
+      recordEditorConflict: async () => recorded.promise,
+    });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+    const saved = session.save('main.ts');
+    await vi.waitFor(() => {
+      expect(isRecordingEditorConflict('p-answer')).toBe(true);
+    });
+
+    const answer = session.conflictResolution(refusal);
+    expect(answer).toBeInstanceOf(Promise);
+    expect(session.conflictResolution(new Error('disk full'))).toBeUndefined();
+    expect(session.conflictResolution(new EditorSaveConflictError('main.ts', null))).toBeUndefined();
+    let answered = false;
+    const watching = (async (): Promise<void> => {
+      await answer;
+      answered = true;
+    })();
+    await Promise.resolve();
+    expect(answered).toBe(false);
+    recorded.resolve({ status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' });
+    await expect(answer).resolves.toBeUndefined();
+    await watching;
+    expect(answered).toBe(true);
+    await saved;
+    session.dispose();
+  });
+
   it('records refused text before a deleted file releases its document', async () => {
     const { content, contentChange } = service('original');
     const base = bytes('original');
@@ -372,6 +409,43 @@ describe('EditorDocumentSession library declarations', () => {
 
         expect(record).toHaveBeenLastCalledWith({ path: 'main.ts', base: 'one', mine: 'one A!' });
         expect(content.saveEditor).not.toHaveBeenCalled();
+        session.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('never records a file recreated at the same path as the text of the one deleted mid-record', async () => {
+      vi.useFakeTimers();
+      try {
+        const { content, contentChange } = service('one');
+        const first = Promise.withResolvers<EditorConflictOutcome>();
+        const record = vi
+          .fn<() => Promise<EditorConflictOutcome>>()
+          .mockReturnValueOnce(first.promise)
+          .mockResolvedValue({ status: 'recorded', revisionId: 'r2', line: 'main', into: 'main' });
+        const session = new EditorDocumentSession({
+          contentService: content,
+          projectId: 'p',
+          recordEditorConflict: record,
+        });
+        await session.acquire('main.ts');
+        edit(session, 'main.ts', { at: 3, insert: ' A' });
+        contentChange({ type: 'written', path: 'main.ts', data: bytes('one B'), source: 'user' });
+        expect(record).toHaveBeenCalledOnce();
+        contentChange({ type: 'deleted', path: 'main.ts', source: 'user' });
+        /* A new file at the same path, opened while the old one's record is in flight. */
+        vi.mocked(content.resolve).mockResolvedValue(outcome('fresh'));
+        vi.mocked(content.peekOutcome).mockReturnValue(outcome('fresh'));
+        await session.acquire('main.ts');
+        first.resolve({ status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' });
+        await vi.waitFor(() => {
+          expect(isRecordingEditorConflict('p')).toBe(false);
+        });
+
+        expect(record).toHaveBeenCalledOnce();
+        expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one', mine: 'one A' });
+        expect(session.get('main.ts')?.text).toBe('fresh');
         session.dispose();
       } finally {
         vi.useRealTimers();

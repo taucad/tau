@@ -40,6 +40,8 @@ type PendingRebase = {
   recording?: boolean;
   /** The text of a document removed while its record was in flight: the record carries it still. */
   latest?: string;
+  /** Its file was deleted mid-record: a document opened at the path since is another file's. */
+  gone?: boolean;
 };
 
 const recordingProjects = new Map<string, number>();
@@ -136,6 +138,8 @@ export class EditorDocumentSession {
   readonly #bases = new Map<string, Uint8Array<ArrayBuffer>>();
   readonly #saves = new Map<string, SaveState>();
   readonly #rebases = new Map<string, PendingRebase>();
+  /** Each refusal this session answered, with the rebase that answers it. */
+  readonly #answeredConflicts = new WeakMap<EditorSaveConflictError, PendingRebase>();
   readonly #scheduled = new Map<string, ScheduledSave>();
   /** Read-only library declaration text by path, most recently opened last. */
   readonly #declarations = new Map<string, string>();
@@ -318,6 +322,20 @@ export class EditorDocumentSession {
         this.#flushScheduled(scheduled);
       }
     }
+  }
+
+  /**
+   * What settles a save refusal this session answers: the rebased save, or the
+   * conflict recorded beside the file. `undefined` for any other failure.
+   *
+   * A close cut passes this to `settleEditorSaves`, so a conflict being recorded
+   * is waited out rather than reported as an unsaved edit.
+   */
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- hands back the rebase's own promise.
+  public conflictResolution(failure: unknown): Promise<void> | undefined {
+    return failure instanceof EditorSaveConflictError
+      ? this.#answeredConflicts.get(failure)?.settled.promise
+      : undefined;
   }
 
   /** Whether a save is waiting out its debounce window. */
@@ -538,7 +556,7 @@ export class EditorDocumentSession {
       const { path } = state;
       if (failure instanceof EditorSaveConflictError) {
         this.#saves.delete(path);
-        return this.#awaitRebase(path, failure.base);
+        return this.#awaitRebase(path, failure.base, failure);
       }
       if (failure === undefined) {
         this.#saves.delete(path);
@@ -557,13 +575,18 @@ export class EditorDocumentSession {
     }
   }
 
-  // oxlint-disable-next-line typescript/no-restricted-types -- checked-write absence sentinel.
-  async #awaitRebase(path: string, base: Uint8Array<ArrayBuffer> | null): Promise<void> {
+  async #awaitRebase(
+    path: string,
+    // oxlint-disable-next-line typescript/no-restricted-types -- checked-write absence sentinel.
+    base: Uint8Array<ArrayBuffer> | null,
+    refusal: EditorSaveConflictError,
+  ): Promise<void> {
     let pending = this.#rebases.get(path);
     if (!pending) {
       pending = { base, settled: Promise.withResolvers<void>() };
       this.#rebases.set(path, pending);
     }
+    this.#answeredConflicts.set(refusal, pending);
     this.#rebaseOnto(path, this.#contentService.peekOutcome(path), false);
     return pending.settled.promise;
   }
@@ -616,7 +639,9 @@ export class EditorDocumentSession {
         let carried = mine;
         /* Typing during the record is carried by another, even once the file is gone. */
         const typedNow = (): string | undefined =>
-          this.#documents.get(this.#pathOf(pending) ?? path)?.text ?? pending.latest;
+          pending.gone === true
+            ? pending.latest
+            : (this.#documents.get(this.#pathOf(pending) ?? path)?.text ?? pending.latest);
         let typed = typedNow();
         while (epoch === this.#epoch && outcome.status === 'recorded' && typed !== undefined && typed !== carried) {
           carried = typed;
@@ -624,7 +649,8 @@ export class EditorDocumentSession {
           outcome = await record({ ...input, mine: carried });
           typed = typedNow();
         }
-        if (epoch !== this.#epoch) {
+        /* A deleted file's record is done; a document at the path now is a new file's. */
+        if (epoch !== this.#epoch || pending.gone === true) {
           pending.settled.resolve();
           return;
         }
@@ -718,8 +744,13 @@ export class EditorDocumentSession {
     this.#cancelScheduled(path);
     const recording = this.#rebases.get(path);
     const removed = this.#documents.get(path);
-    if (recording?.recording === true && removed !== undefined) {
-      recording.latest = removed.text;
+    if (recording?.recording === true) {
+      if (removed !== undefined) {
+        recording.latest = removed.text;
+      }
+      /* The record carries the deleted file's text on its own; a file recreated here starts clean. */
+      recording.gone = true;
+      this.#rebases.delete(path);
     }
     this.#documents.delete(path);
     this.#holds.delete(path);

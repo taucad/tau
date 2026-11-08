@@ -25,6 +25,7 @@ vi.mock('#lib/billing-lifecycle-client.js', () => ({
 }));
 vi.mock('#lib/billing-payment-client.js', () => ({ createPaymentRequestId: () => 'request-a' }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: { deleteUser } }));
+vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits: () => undefined }));
 const binding = { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' } as const;
 const renderClosure = (activeBinding = binding, onReviewPayment: () => void = vi.fn()) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

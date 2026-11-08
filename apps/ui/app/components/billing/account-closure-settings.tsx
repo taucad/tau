@@ -24,6 +24,8 @@ import {
   prepareAccountClosure,
 } from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
+import { useCredits } from '@taucad/billing/hooks/use-credits';
+import { formatCredits } from '#utils/credits.utils.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
@@ -105,6 +107,8 @@ export function AccountClosureSettings({
   readonly onReviewPayment: () => void;
 }): React.JSX.Element {
   const financial = useFinancialSession();
+  const balance = useCredits()?.balance;
+  const purchased = balance ? BigInt(balance.purchasedCreditAtoms) : 0n;
   const confirmationId = useId();
   const requestId = useRef(createPaymentRequestId());
   const [closure, setClosure] = useState<WireAccountClosure>();
@@ -263,7 +267,10 @@ export function AccountClosureSettings({
             <AlertDialogTitle>Close your account?</AlertDialogTitle>
             <AlertDialogDescription>
               Paid usage stops and your plan is cancelled right away. To keep your plan until the end of your billing
-              period, cancel it in Billing instead.
+              period, cancel it in Billing instead.{' '}
+              {purchased > 0n
+                ? `Your ${formatCredits(purchased)} purchased credits are forfeited and not refunded.`
+                : 'Remaining credits are forfeited and not refunded.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className='flex items-start gap-2 text-sm'>

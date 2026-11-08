@@ -90,9 +90,12 @@ jobs:
   # check a deploy is gated on. `Run affected tasks` covers every affected lane, and
   # the browser lane when this commit needed it. The API's own suites left the
   # `affected` lane when the git storage substrate landed, so the API and the apps
-  # built from its code also need `API tests` and `Billing contracts`, which run on
-  # every push to `main`. A check that never ran reports `missing`, which no deploy
-  # accepts. This job passes whatever it reports: a red check belongs to `ci.yml`.
+  # built from its code also need `API tests` and `Billing contracts`. Those two run
+  # only when that CI run's plan finds them affected: a `skipped` one reports
+  # `not-affected` only when the run's `ci-plan` artifact says the plan did not select
+  # it, and stays `skipped` otherwise. A check that never ran reports `missing`. Deploys
+  # accept `success`, and `not-affected` for those two lanes; anything else refuses.
+  # This job passes whatever it reports: a red check belongs to `ci.yml`.
   # The wait runs up to 340 minutes, inside GitHub's 360-minute job limit: on
   # 2026-11-06 `ci.yml` push runs on `main` took up to 4 h 33 min under a backlog, so
   # the earlier 170-minute wait gave up on every commit and staging served no API
@@ -120,6 +123,8 @@ jobs:
              "affected": "Run affected tasks",
              "api": "API tests (Postgres + MinIO)",
              "billing-e2e": "Billing contracts (no Stripe credentials)"}
+          # The lanes `ci.yml` selects by its plan; their keys match `lanes.json` in its `ci-plan` artifact.
+          PLANNED_LANES: '["api", "billing-e2e"]'
         run: |
           set -euo pipefail
           deadline=$(( $(date +%s) + 340 * 60 ))
@@ -148,10 +153,27 @@ jobs:
             fi
             sleep 60
           done
+          # The plan job's lane selection, as that run uploaded it. Absent or unreadable, every
+          # planned lane counts as selected, so a skipped one stays `skipped` and refuses.
+          plan='{}'
+          if [ -n "${run_id:-}" ]; then
+            plan_dir=$(mktemp -d)
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name ci-plan --dir "$plan_dir" &&
+              jq -e 'type == "object"' "$plan_dir/lanes.json" > /dev/null; then
+              plan=$(cat "$plan_dir/lanes.json")
+            else
+              echo "::warning::CI run $run_id has no readable ci-plan artifact; a skipped planned lane refuses."
+            fi
+          fi
           for key in $(jq -r 'keys[]' <<< "$CHECKS"); do
             name=$(jq -r --arg key "$key" '.[$key]' <<< "$CHECKS")
             conclusion=$(jq -r --arg name "$name" \
               'first(.[] | select(.name == $name and .status == "completed") | .conclusion) // "missing"' <<< "$jobs")
+            if [ "$conclusion" = skipped ] &&
+              jq -e --arg key "$key" 'index($key) != null' <<< "$PLANNED_LANES" > /dev/null &&
+              [ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ]; then
+              conclusion=not-affected
+            fi
             echo "$name: $conclusion"
             echo "$key=$conclusion" >> "$GITHUB_OUTPUT"
           done
@@ -174,7 +196,8 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' && needs.ci.outputs.billing-e2e == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
+      (needs.ci.outputs.billing-e2e == 'success' || needs.ci.outputs.billing-e2e == 'not-affected') &&
       (needs.deploy-storage-staging.result == 'success' || needs.deploy-storage-staging.result == 'skipped')
     # `actions: read` lets the deploy see whether a newer run already deployed.
     permissions:
@@ -198,7 +221,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
     permissions:
       contents: read
@@ -221,7 +244,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success'
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected')
     permissions:
       contents: read
       actions: read
@@ -246,7 +269,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
     permissions:
       contents: read

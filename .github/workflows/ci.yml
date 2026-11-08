@@ -53,6 +53,7 @@ jobs:
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
+      billing: ${{ steps.plan.outputs.billing }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
@@ -76,12 +77,15 @@ jobs:
           set -o pipefail
           apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
+          # Billing contracts: the project that owns them (`api-billing`) or one it depends on changed.
+          billing=$(pnpm nx show projects --affected --with-target test:billing-foundation --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
           browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
+          echo "Affected with a test:billing-foundation target: $billing"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
@@ -91,13 +95,28 @@ jobs:
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples"; do
+          for lane in "api=$api" "billing=$billing" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
               echo "${lane%%=*}=true" >> "$GITHUB_OUTPUT"
             fi
           done
+          # `staging.yml` reads which service lanes this run selected: a lane it skipped is
+          # acceptable to a deploy only when this plan found nothing of it affected.
+          mkdir -p out/ci-plan
+          jq -n --arg api "$([ "$api" = '[]' ] && echo false || echo true)" \
+            --arg billing "$([ "$billing" = '[]' ] && echo false || echo true)" \
+            '{api: $api, "billing-e2e": $billing}' > out/ci-plan/lanes.json
+          cat out/ci-plan/lanes.json
+
+      - name: Upload the lane plan
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-plan
+          path: out/ci-plan/lanes.json
+          if-no-files-found: error
+          retention-days: 7
 
   # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
   # is the wildcard umbrella over all of them (frontmatter, workspace root,
@@ -766,15 +785,14 @@ jobs:
   # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
   # the `affected` lane above excludes the tag rather than trying to guess which
   # files reach a service — plus the service-backed targets (`test:models`,
-  # `test:server-modes`, `test:git`). Billing contracts have their own job. Always runs on `main`
-  # pushes so the deploy gate in `staging.yml` is never green off a stale service check.
+  # `test:server-modes`, `test:git`) and the API's billing composition suites. Billing contracts
+  # have their own job. Like every lane here it runs only when the plan finds it affected, on
+  # `main` pushes too; `staging.yml` accepts a skipped lane only when this run's plan says so.
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
     needs: [plan]
-    if: >-
-      !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -826,6 +844,14 @@ jobs:
 
       # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
       # deterministic edit qualification is the Tier-D edit bench.
+      # The two billing foundation suites that compose billing with the app's chat and
+      # agent-observability code, on the launcher's own disposable PostgreSQL 17.
+      - name: Pull the billing foundation PostgreSQL image
+        run: docker pull postgres:17-alpine
+
+      - name: Run the API's billing composition contracts
+        run: pnpm nx run-many -t test:billing-composition
+
       - name: Run deterministic file-edit qualification (edit bench)
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
@@ -858,16 +884,16 @@ jobs:
         if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
-  # Credential-free database and Stripe adapter contracts, including fork PRs.
+  # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
+  # `api-billing` or a project it depends on is affected, on pull requests, in the merge
+  # queue and on `main` pushes alike; a change under `apps/api/app/**` alone skips it.
   # Keep the job name stable: `staging.yml` gates the API deploy on its result.
   billing-e2e:
     name: Billing contracts (no Stripe credentials)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [plan]
-    if: >-
-      !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -880,7 +906,3 @@ jobs:
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
-
-      # The two foundation suites that compose billing with the app's chat and agent-observability code.
-      - name: Run the API's billing composition contracts
-        run: pnpm nx run-many -t test:billing-composition

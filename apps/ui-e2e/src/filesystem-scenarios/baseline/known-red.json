@@ -8,6 +8,13 @@
         "chromium-full": 0,
         "chromium-small": 0
       }
+    },
+    {
+      "id": "S19.compute-worker",
+      "limit": 0,
+      "atHead": {
+        "chromium-small": 77
+      }
     }
   ]
 }

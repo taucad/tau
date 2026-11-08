@@ -364,7 +364,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S12',
     title: 'Agent grep / glob over the project',
     model:
-      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread.",
+      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread. Fixture caveat (W12.1): every binary now starts with its format's real header (a text STEP replaced by a SolidWorks .sldprt), so the 512-byte NUL sniff judges each one binary; S12.binary-bytes turned green from that fixture change, not from a change to grep, and a real binary without a NUL in its head would still be read in full.",
     times: [
       { metric: 'grepDuration', limit: 2000, description: 'grep ≤ 2 s' },
       { metric: 'globDuration', limit: 200, description: 'glob ≤ 200 ms' },
@@ -486,6 +486,24 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         comparison: 'equals',
         limit: 0,
         description: 'grep and glob run off the authority (grep/glob calls the authority serves = 0)',
+      },
+      {
+        /* The charter's own wording: grep runs where the authority serves none of its
+         * reads. Off the authority, the reads still cross to it, so this stays red. */
+        id: 'S19.compute-worker',
+        metric: 'authorityReads',
+        comparison: 'equals',
+        limit: 0,
+        description: 'grep runs on the compute worker (authority reads during grep = 0)',
+      },
+      {
+        /* S7 unchanged while grep runs, as a gate: the save waits behind the grep's
+         * reads on the authority's event loop. */
+        id: 'S19.save',
+        metric: 'saveLatency',
+        comparison: 'at-most',
+        limit: 100,
+        description: 'the save lands within S7 while grep runs (save latency ≤ 100 ms)',
       },
     ],
   },

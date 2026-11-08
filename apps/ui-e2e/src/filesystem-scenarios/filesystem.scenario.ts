@@ -51,7 +51,14 @@ declare module 'vitest' {
 const profileName = inject('filesystemScenarioProfile');
 const runs = inject('filesystemScenarioRuns');
 type KnownRedGate = Readonly<{ id: string; limit: number; atHead: Readonly<Record<string, number>> }>;
-const knownRedGates: readonly KnownRedGate[] = knownRedList.gates;
+/* A gate recorded on one profile only leaves the other profile's key out. */
+const knownRedGates: readonly KnownRedGate[] = knownRedList.gates.map(({ id, limit, atHead }) => ({
+  id,
+  limit,
+  atHead: Object.fromEntries(
+    Object.entries(atHead).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+  ),
+}));
 const knownRed = new Set<string>(knownRedGates.map((gate) => gate.id));
 /** The known-red ratchet key: values at HEAD differ by engine and fixture profile. */
 const baselineKey = `${server.browser}-${profileName}`;

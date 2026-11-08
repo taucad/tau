@@ -1,17 +1,7 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
-import {
-  Grid,
-  ArrowRight,
-  Table as TableIcon,
-  Cog,
-  Trash,
-  AlertCircle,
-  PackageX,
-  FolderOpen,
-  House,
-} from 'lucide-react';
+import { Grid, ArrowRight, Table as TableIcon, Trash, AlertCircle, PackageX, FolderOpen, House } from 'lucide-react';
 import { NavLink, useNavigate, useNavigation } from 'react-router';
 import {
   getCoreRowModel,
@@ -40,7 +30,6 @@ import {
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
@@ -48,6 +37,7 @@ import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
+import { useProjectListShape } from '#hooks/use-project-list-shape.js';
 import { toast } from '#components/ui/sonner.js';
 import {
   AlertDialog,
@@ -74,8 +64,6 @@ import { flagParameter, stringParameter, enumParameter } from '#utils/search-par
 import type { InlineTextEditorHandle } from '#components/inline-text-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { OnDemandNewProjectComposer } from '#components/chat/on-demand-new-project-composer.js';
-import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
@@ -207,13 +195,19 @@ export function NewProjectLink({
   );
 }
 
-export function ProjectLibrary({
-  headingLevel = 1,
-  emptyComposer,
-}: {
-  readonly headingLevel?: 1 | 2;
-  /** Optional host-owned composer for an embedded library. */ readonly emptyComposer?: ReactNode;
-}): React.JSX.Element {
+/**
+ * The last listing's count (R5), which the server also read from its cookie. The Trash
+ * is a different list, so it keeps the unknown shape.
+ *
+ * @param isShowingDeleted - Whether the library shows the Trash.
+ * @returns The count to reserve, or `undefined` when unknown.
+ */
+function useRememberedLibraryCount(isShowingDeleted: boolean): number | undefined {
+  const rememberedShape = useProjectListShape();
+  return isShowingDeleted ? undefined : rememberedShape?.count;
+}
+
+export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -245,6 +239,7 @@ export function ProjectLibrary({
     updateName,
     isLoading,
   } = useProjects({ includeDeleted: showDeleted });
+  const rememberedCount = useRememberedLibraryCount(showDeleted);
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );
@@ -493,47 +488,31 @@ export function ProjectLibrary({
   );
 
   const viewControls = (
-    <div className='flex items-center gap-2'>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant='outline' size='icon' aria-label='View mode'>
-            {viewMode === 'grid' ? <Grid /> : <TableIcon />}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
-          <DropdownMenuCheckboxItem
-            checked={viewMode === 'grid'}
-            onCheckedChange={() => {
-              setViewMode('grid');
-            }}
-          >
-            Grid
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem
-            checked={viewMode === 'table'}
-            onCheckedChange={() => {
-              setViewMode('table');
-            }}
-          >
-            Table
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant='outline' size='icon' aria-label='Settings'>
-            <Cog className='size-4' />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
-          <DropdownMenuLabel>Settings</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuCheckboxItem checked={showDeleted} onCheckedChange={handleToggleDeleted}>
-            Show trashed projects
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant='outline' size='icon' aria-label='View mode'>
+          {viewMode === 'grid' ? <Grid /> : <TableIcon />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end'>
+        <DropdownMenuCheckboxItem
+          checked={viewMode === 'grid'}
+          onCheckedChange={() => {
+            setViewMode('grid');
+          }}
+        >
+          Grid
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={viewMode === 'table'}
+          onCheckedChange={() => {
+            setViewMode('table');
+          }}
+        >
+          Table
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   return (
@@ -732,11 +711,13 @@ export function ProjectLibrary({
         </div>
       ) : (
         <UnifiedProjectList
-          emptyComposer={emptyComposer}
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
           controls={viewControls}
+          isShowingDeleted={showDeleted}
+          onShowDeletedChange={handleToggleDeleted}
           isLoading={isLoading && projects.length === 0}
+          rememberedCount={rememberedCount}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -801,9 +782,13 @@ export function ProjectLibrary({
 
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
-  readonly emptyComposer?: ReactNode;
   readonly controls: ReactNode;
+  /** Whether the list is the Trash; its toggle lives in the sort menu (R15). */
+  readonly isShowingDeleted: boolean;
+  readonly onShowDeletedChange: (isShowing: boolean) => void;
   readonly isLoading: boolean;
+  /** The last listing's count (R5): how many cards to reserve while loading, `0` for the empty state. */
+  readonly rememberedCount?: number;
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
@@ -828,17 +813,52 @@ const sortParameter = enumParameter(
 );
 
 const defaultPageSize = 20;
-const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
+const minimumPageSize = defaultPageSize;
+const pageSizeOptions = [minimumPageSize, 50, 100, 150, 200];
+
+/**
+ * What the list draws before and after its rows arrive (R5, R12, R14).
+ *
+ * @param input - The list's row counts, loading state, remembered count and page size.
+ * @returns Whether the list is empty, still awaiting rows, how many cards to reserve, and whether it pages.
+ */
+function projectListLayout({
+  rowCount,
+  filteredRowCount,
+  isLoading,
+  rememberedCount,
+  pageSize,
+}: {
+  readonly rowCount: number;
+  readonly filteredRowCount: number;
+  readonly isLoading: boolean;
+  readonly rememberedCount: number | undefined;
+  readonly pageSize: number;
+}): { isEmpty: boolean; isAwaitingRows: boolean; placeholderCount: number; isPaged: boolean } {
+  const isEmpty = rowCount === 0 && (!isLoading || rememberedCount === 0);
+  const isAwaitingRows = isLoading && !isEmpty;
+  /* R14: paging is offered only when the list is longer than the smallest page, and is
+     reserved with the grid from the remembered count rather than appearing after it. */
+  const pagedCount = isAwaitingRows ? (rememberedCount ?? 0) : filteredRowCount;
+  return {
+    isEmpty,
+    isAwaitingRows,
+    placeholderCount: Math.min(rememberedCount ?? defaultPageSize, pageSize),
+    isPaged: pagedCount > minimumPageSize,
+  };
+}
 
 function UnifiedProjectList({
-  emptyComposer,
   rows,
   viewMode,
   actions,
   onOpenCloudProject,
   isCatalogUnavailable,
   controls,
+  isShowingDeleted,
+  onShowDeletedChange,
   isLoading,
+  rememberedCount,
   emptyTitleLevel,
 }: UnifiedProjectListProps) {
   'use no memo';
@@ -890,65 +910,53 @@ function UnifiedProjectList({
     },
   });
 
-  // Show empty state if no projects at all
-  if (rows.length === 0 && !isLoading && isCatalogUnavailable) {
-    return <div className='flex justify-end'>{controls}</div>;
-  }
-  if (rows.length === 0 && !isLoading) {
-    return (
-      <div className='space-y-4'>
-        <div className='flex justify-end'>{controls}</div>
-        <div className='flex min-h-[60vh] items-center justify-center p-4'>
-          {/* Empty-library CTA — composer-only, no chat session to attach to. */}
-          <ChatComposerProvider surface='library'>
-            <div className='mx-auto w-full max-w-2xl space-y-6'>
-              <div className='flex flex-col items-center space-y-4 text-center'>
-                <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
-                <div className='space-y-2'>
-                  <h2 className='text-xl font-semibold'>No projects yet</h2>
-                  <p className='text-sm'>Start by describing what you want to build, or create from code</p>
-                </div>
-              </div>
-              {emptyComposer ?? <OnDemandNewProjectComposer enableAutoFocus={false} className='shadow-none' />}
-              <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
-                <div className='h-px flex-1 bg-border' />
-                <span>or</span>
-                <div className='h-px flex-1 bg-border' />
-              </div>
-              <div className='flex justify-center'>
-                <NavLink to='/projects/new' className={buttonVariants({ variant: 'outline' })}>
-                  {({ isPending }) => <>Build from code {isPending ? <Loader /> : <ArrowRight />}</>}
-                </NavLink>
-              </div>
-            </div>
-          </ChatComposerProvider>
-        </div>
-      </div>
-    );
-  }
+  /* R12: an empty library keeps its controls row where the list's controls sit, and says
+     so in one line; the hero above is the way to start. R5: a remembered empty list is
+     known before the worker lists, so the server renders this state up front. */
+  const { isEmpty, isAwaitingRows, placeholderCount, isPaged } = projectListLayout({
+    rowCount: rows.length,
+    filteredRowCount: table.getFilteredRowModel().rows.length,
+    isLoading,
+    rememberedCount,
+    pageSize,
+  });
+  const selectedCount = table.getFilteredSelectedRowModel().rows.length;
 
   return (
     <div className='space-y-4'>
       <div role='group' aria-label='Project controls' className='flex flex-wrap items-center justify-between gap-2'>
-        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='min-w-40 grow basis-40' />
+        <DataTableSearch
+          table={table}
+          placeholder='Search projects…'
+          containerClassName='min-w-40 grow basis-40'
+          isDisabled={isEmpty}
+        />
         <div className='flex flex-wrap items-center gap-2'>
-          {/* Add bulk actions when rows are selected */}
-          {table.getFilteredSelectedRowModel().rows.length > 0 && (
-            <BulkActions table={table} deleteProject={actions.handleDelete} />
-          )}
-          <DataTableSortingDropdown table={table} />
+          {selectedCount > 0 && <BulkActions table={table} deleteProject={actions.handleDelete} />}
+          <DataTableSortingDropdown table={table}>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem checked={isShowingDeleted} onCheckedChange={onShowDeletedChange}>
+              Show trashed projects
+            </DropdownMenuCheckboxItem>
+          </DataTableSortingDropdown>
           {controls}
           {viewMode === 'table' ? <DataTableColumnVisibilityDropdown table={table} /> : null}
         </div>
       </div>
 
-      {isLoading && viewMode === 'table' ? (
+      {isEmpty ? (
+        isCatalogUnavailable ? null : (
+          <p className='text-sm text-muted-foreground'>
+            {isShowingDeleted ? 'Trash is empty.' : 'No projects yet. Your first project appears here.'}
+          </p>
+        )
+      ) : isAwaitingRows && viewMode === 'table' ? (
         <div role='status' aria-label='Loading projects' aria-busy='true'>
           <DataTable table={table} columns={columns} isLoading />
         </div>
-      ) : isLoading ? (
+      ) : isAwaitingRows ? (
         <div role='status' aria-label='Loading projects' aria-busy='true' className={projectGridClassName}>
-          {Array.from({ length: 20 }, (_, index) => (
+          {Array.from({ length: placeholderCount }, (_, index) => (
             <Card key={index} className='overflow-hidden pt-0'>
               <Skeleton className='aspect-4/3 w-full rounded-none' />
               <CardHeader>
@@ -997,6 +1005,7 @@ function UnifiedProjectList({
                     project={original}
                     actions={actions}
                     isSelected={row.getIsSelected()}
+                    isSelecting={selectedCount > 0}
                     onSelect={() => {
                       row.toggleSelected();
                     }}
@@ -1008,7 +1017,13 @@ function UnifiedProjectList({
         </ul>
       )}
 
-      {isLoading ? null : <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />}
+      {isPaged ? (
+        isAwaitingRows ? (
+          <div aria-hidden data-testid='project-pagination-placeholder' className='h-8' />
+        ) : (
+          <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />
+        )
+      ) : null}
     </div>
   );
 }
@@ -1017,6 +1032,8 @@ type ProjectLibraryCardProps = {
   readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
+  /** Whether any card is selected, so every card shows its checkbox (R13). */
+  readonly isSelecting?: boolean;
   readonly onSelect?: () => void;
 };
 
@@ -1024,6 +1041,7 @@ export function ProjectLibraryCard({
   project,
   actions,
   isSelected,
+  isSelecting = false,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
   const navigation = useNavigation();
@@ -1054,7 +1072,16 @@ export function ProjectLibraryCard({
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
       className={cn('flex flex-col', isSelected && 'ring-3 ring-primary')}
     >
-      <div className='absolute top-2 left-2 z-20'>
+      {/* R13: selection is a mode, not resting chrome: the checkbox shows when the card is
+          reached (hover or focus), on coarse pointers, and on every card once one is selected. */}
+      <div
+        className={cn(
+          'absolute top-2 left-2 z-20',
+          !isSelecting &&
+            !isSelected &&
+            'opacity-0 group-focus-within/card:opacity-100 group-hover/card:opacity-100 pointer-coarse:opacity-100',
+        )}
+      >
         <Checkbox
           size='large'
           aria-label={`Select ${project.name}`}

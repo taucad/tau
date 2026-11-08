@@ -561,7 +561,7 @@ test(
     const toggle = `${card} button[aria-label="Preview model"]`;
     const activeMedia = `${card} div:has(> button[aria-label="Preview model"][aria-pressed="true"])`;
     const projectsPage = async (): Promise<void> => {
-      await followSidebarLink('Projects');
+      await followSidebarLink('All projects');
       await target.expectUrl(/\/projects$/u, 60_000);
       await target.expectVisible(toggle, 60_000);
     };

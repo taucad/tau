@@ -11,6 +11,7 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { Writable } from 'node:stream';
 import { metrics as otelMetrics } from '@opentelemetry/api';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { metrics as sdkMetrics } from '@opentelemetry/sdk-node';
@@ -22,12 +23,15 @@ import {
   transcoderIds,
 } from '@taucad/telemetry';
 import type { Auth } from 'better-auth';
-import { getLoggerToken } from 'nestjs-pino';
+import { LoggerModule, PinoLogger } from 'nestjs-pino';
+import type { Params } from 'nestjs-pino';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { logServiceProvider } from '@taucad/api-core/constants/app';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
+import { useLoggerFactory } from '@taucad/api-observability/logger-factory';
 import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
@@ -177,7 +181,43 @@ const legacyMetrics = () => ({
 type Harness = Awaited<ReturnType<typeof createApp>>;
 const apps: NestFastifyApplication[] = [];
 
-const createApp = async (environment: Record<string, unknown> = {}, target?: RuntimeMetricsTarget) => {
+/**
+ * The production (Fly) logger parameters, writing every line to `lines` instead of stdout.
+ *
+ * @param lines - Receives each JSON line the logger writes.
+ * @returns The `LoggerModule` parameters.
+ */
+const capturingLoggerParameters = async (lines: string[]): Promise<Params> => {
+  const parameters = await useLoggerFactory(
+    new ConfigService<Record<string, unknown>, true>({
+      NODE_ENV: 'production',
+      LOG_LEVEL: 'info',
+      LOG_SERVICE: logServiceProvider.fly,
+    }) as Parameters<typeof useLoggerFactory>[0],
+  );
+  // Fly pairs the options with its stdout destination; this test supplies its own.
+  const options = Array.isArray(parameters.pinoHttp) ? parameters.pinoHttp[0] : parameters.pinoHttp;
+  if (!options || 'write' in options) {
+    throw new Error('Logger factory did not return pino-http options.');
+  }
+  const destination = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(
+        ...String(chunk)
+          .split('\n')
+          .filter((line) => line !== ''),
+      );
+      callback();
+    },
+  });
+  return { pinoHttp: [options, destination] };
+};
+
+const createApp = async (
+  environment: Record<string, unknown> = {},
+  target?: RuntimeMetricsTarget,
+  logLines?: string[],
+) => {
   const redis = new FakeRedis();
   const runtimeMetrics = createMetricsSpy(target);
   const metrics = legacyMetrics();
@@ -194,7 +234,12 @@ const createApp = async (environment: Record<string, unknown> = {}, target?: Run
     TAU_RUNTIME_RELEASES: '1.4.0,1.3.0',
     ...environment,
   };
+  if (logLines === undefined) {
+    // The service logs its events through a child of the root pino logger, which `LoggerModule` sets when configured.
+    Object.assign(PinoLogger, { root: { child: () => logger } });
+  }
   const module = await Test.createTestingModule({
+    imports: logLines === undefined ? [] : [LoggerModule.forRoot(await capturingLoggerParameters(logLines))],
     controllers: [TelemetryController],
     providers: [
       Reflector,
@@ -206,7 +251,6 @@ const createApp = async (environment: Record<string, unknown> = {}, target?: Run
       { provide: RuntimeMetricsService, useValue: runtimeMetrics },
       { provide: RedisService, useValue: { client: redis } },
       { provide: ConfigService, useValue: { get: (key: string) => values[key] } },
-      { provide: getLoggerToken(RuntimeIngestService.name), useValue: logger },
     ],
   }).compile();
   const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -795,6 +839,56 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
     } finally {
       await provider.shutdown();
       otelMetrics.disable();
+    }
+  });
+
+  it('should write the runtime.operation event with its enumerated fields only, never the request (§1.6, §4.1)', async () => {
+    const lines: string[] = [];
+    const harness = await createApp({}, undefined, lines);
+    const headers = {
+      'fly-client-ip': '203.0.113.41',
+      'x-forwarded-for': '203.0.113.41, 192.0.2.9',
+      'user-agent': 'ingest-log-probe-agent/1.0',
+      'accept-language': 'xx-ingest-probe',
+    };
+    const response = await post(
+      harness,
+      { batch: batchId(), entries: [operation({ outcome: 'failed', code: 'UNKNOWN' })] },
+      { ip: '198.51.100.23', headers },
+    );
+    expect(response.json()).toMatchObject({ recorded: 1 });
+    const events = lines.filter((line) => (JSON.parse(line) as { event?: unknown }).event === 'runtime.operation');
+    expect(events).toHaveLength(1);
+    const [line = ''] = events;
+    const event = JSON.parse(line) as Record<string, unknown>;
+    /* Pino's own keys (level, time, pid, hostname, the Fly `message` key) and the logger's `context` binding. */
+    const base = ['level', 'time', 'pid', 'hostname', 'message', 'context'];
+    const enumerated = [
+      'event',
+      'operation',
+      'outcome',
+      'cause',
+      'code',
+      'kernel',
+      'route',
+      'caller',
+      'population',
+      'release',
+      'request_id',
+    ];
+    expect(Object.keys(event).toSorted()).toEqual([...base, ...enumerated].toSorted());
+    expect(event).toMatchObject({
+      level: 40,
+      message: 'runtime.operation',
+      context: 'RuntimeIngestService',
+      event: 'runtime.operation',
+      outcome: 'failed',
+      code: 'UNKNOWN',
+      population: 'signed-out',
+    });
+    expect(typeof event['request_id']).toBe('string');
+    for (const value of [...Object.values(headers), '203.0.113.41', '192.0.2.9', '198.51.100.23']) {
+      expect(line).not.toContain(value);
     }
   });
 

@@ -13,9 +13,7 @@ import {
   billingCashScanFact,
   billingFinancialCase,
   billingPeriod,
-  billingProviderLeg,
   billingPurchase,
-  billingRefundIntent,
   billingReversalCase,
   billingStripeCustomer,
   creditAccount,
@@ -600,23 +598,7 @@ export class BillingCashReconciliationService {
         ),
       )
       .limit(1);
-    if (projected !== undefined) return true;
-    const { refundIntentId: intentId, reversalCaseId } = fact.evidence;
-    if (typeof intentId !== 'string' || typeof reversalCaseId !== 'string') return false;
-    const [owned] = await this.databaseService.database
-      .select({ id: billingRefundIntent.id })
-      .from(billingRefundIntent)
-      .innerJoin(billingProviderLeg, eq(billingProviderLeg.refundIntentId, billingRefundIntent.id))
-      .where(
-        and(
-          eq(billingRefundIntent.id, intentId),
-          eq(billingRefundIntent.reversalCaseId, reversalCaseId),
-          eq(billingRefundIntent.state, 'succeeded'),
-          eq(billingProviderLeg.providerObjectId, fact.sourceId),
-        ),
-      )
-      .limit(1);
-    return owned !== undefined;
+    return projected !== undefined;
   }
 
   /**

@@ -32,9 +32,6 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuTrigger: ({ children }: { readonly children?: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('@taucad/ui/components/client-only', () => ({
-  ClientOnly: ({ children }: { readonly children?: ReactNode }) => <div>{children}</div>,
-}));
 vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children?: ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children?: ReactNode }) => <span>{children}</span>,

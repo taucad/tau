@@ -215,6 +215,8 @@ const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
 /** The store this port owns, relative to the project directory. */
 const gitDirectoryName = '.git';
+/* Paths per `ls-files` when only named paths are asked: well inside any platform's command-line limit. */
+const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
  * Configuration this port pins on every command, ahead of the subcommand.
@@ -965,6 +967,32 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param content - Bytes as the object store holds them.
    * @returns The real bytes, or the pointer.
    */
+  /**
+   * A pointer whose object this store holds whole, answered as the pointer
+   * (`largeObjects: 'stored'`, W11.3): the size is checked, so a writer that
+   * clones the stored object lands the bytes the pointer names.
+   *
+   * @param content - A blob's bytes.
+   * @returns The same bytes.
+   */
+  const storedPointer = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    const pointer = readLfsPointer(content);
+    if (pointer === undefined) {
+      return content;
+    }
+    const held = await stat(lfsObjectFile(pointer.oid)).catch((error: unknown) => {
+      throw new RevisionPortError(
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MISSING_LARGE_OBJECT' : 'ENGINE_FAILED',
+        'A large object this revision references could not be read on this machine.',
+        { cause: error },
+      );
+    });
+    if (held.size !== pointer.size) {
+      throw new RevisionPortError('ENGINE_FAILED', 'A stored large object does not have the size its pointer names.');
+    }
+    return content;
+  };
+
   const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
     try {
       return await smudged(content);
@@ -1521,6 +1549,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return ignoreCase;
   };
 
+  /* The store's own `core.ignoreCase`, never a device's (`--local`): what the browser leg reads too, so the
+   * ignore rules fold case alike on both legs. Read again by every `ignoreContext`, so a `git config` while
+   * the store is open moves the context, and the listing after it folds as that reading said. */
+  const readStoreIgnoreCase = async (): Promise<boolean> => {
+    try {
+      const result = await run(['config', '--local', '--bool', 'core.ignoreCase']);
+      return result.exitCode === 0 && textDecoder.decode(result.stdout).trim() === 'true';
+    } catch {
+      return false;
+    }
+  };
+  let contextIgnoreCase: Promise<boolean> | undefined;
+  const storeIgnoresCase = async (): Promise<boolean> => contextIgnoreCase ?? readStoreIgnoreCase();
+
   /**
    * Every named blob, in one `cat-file --batch` (rule 20's `readTree` cost).
    *
@@ -1892,10 +1934,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * `adopted` is a repository the person made: Tau creates its setup files
    * before `git init`, so a store it created carries one of its blocks. An
-   * adopted repository's files and config are left alone, and only its ignore
-   * rules (`ignoredPaths`) and the adoption refusals depend on it: which paths
-   * are pointers is the tree's own attributes on every repository (D16,
-   * revisions policy rules 5 and 13).
+   * adopted repository's files and config are left alone, and only the
+   * adoption refusals and the LFS filter install depend on it: which paths are
+   * pointers is the tree's own attributes, and which untracked paths a cut
+   * leaves out its own ignore rules, on every repository (D16, revisions
+   * policy rules 5 and 13).
    *
    * Every session reaches the same answer for the same folder: before the
    * store exists the answer is what `init` will leave behind (a folder whose
@@ -2081,22 +2124,64 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     init: async (input: InitRevisionStoreInput): Promise<void> =>
       refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
 
-    ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
-      if (!(await isAdopted())) {
-        return undefined;
+    ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
+      /* Git's own answer, on every repository: the checkout's nested ignore
+       * files and the store's `info/exclude`. Never `core.excludesFile`,
+       * which is per device and which the browser leg cannot read, and the
+       * store's own `core.ignoreCase` rather than a device's, so both legs
+       * leave the same untracked paths out of a cut (I5). Named paths are
+       * literal pathspecs, so Git reads only their own directories. */
+      if (paths?.length === 0) {
+        return [];
       }
-      /* Git's own answer, so every ignore source the person's Git reads — nested
-       * ignore files, `info/exclude`, their global excludes — decides here too. */
-      const args = ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'];
-      const listed =
-        root === undefined
-          ? await output(args)
-          : // A linked worktree finds its own admin directory from its `.git` file.
-            await output(['-C', root, ...args], { env: clearedGitEnvironment() });
-      return textDecoder
-        .decode(listed)
-        .split('\0')
-        .filter((path) => path !== '');
+      const args = [
+        '--literal-pathspecs',
+        '-c',
+        'core.excludesFile=',
+        '-c',
+        `core.ignoreCase=${String(await storeIgnoresCase())}`,
+        'ls-files',
+        '-z',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ];
+      const list = async (pathspecs: readonly string[]): Promise<readonly string[]> => {
+        const command = pathspecs.length === 0 ? args : [...args, '--', ...pathspecs];
+        const listed =
+          root === undefined
+            ? await output(command)
+            : // A linked worktree finds its own admin directory from its `.git` file.
+              await output(['-C', root, ...command], { env: clearedGitEnvironment() });
+        return textDecoder
+          .decode(listed)
+          .split('\0')
+          .filter((path) => path !== '');
+      };
+      if (paths === undefined) {
+        return list([]);
+      }
+      /* A command line holds so much: the paths go in batches. Each batch also names `.git`, which Git
+       * never lists, so its common prefix is always the root: a batch whose paths all sit two levels
+       * inside an ignored folder (`build/deep/o.js` under `build/`) otherwise stops Git with "directory
+       * entry not superset of prefix", where the root answers `build/`. */
+      const listed = new Set<string>();
+      for (let index = 0; index < paths.length; index += ignorePathspecBatch) {
+        // oxlint-disable-next-line no-await-in-loop -- one Git at a time over one checkout.
+        for (const entry of await list(['.git', ...paths.slice(index, index + ignorePathspecBatch)])) {
+          listed.add(entry);
+        }
+      }
+      return [...listed].toSorted();
+    },
+
+    ignoreContext: async (): Promise<string> => {
+      const exclude = await readFile(join(repositoryPath, gitDirectoryName, 'info', 'exclude'), 'utf8').catch(
+        () => undefined,
+      );
+      contextIgnoreCase = readStoreIgnoreCase();
+      return JSON.stringify([exclude ?? null, await contextIgnoreCase]);
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -2186,13 +2271,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         return pointer === undefined ? [] : [pointer];
       });
       const local = readOptions?.largeObjects === 'local';
+      const stored = readOptions?.largeObjects === 'stored';
       if (!local && pointers.length > 0) {
         await fillLargeObjects(id, pointers, readOptions?.signal);
       }
       const entries = await Promise.all(
         paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
           const content = blobs.get(oid)!;
-          return [path, local ? await smudgedIfHere(content) : await smudged(content), mode];
+          const answer = local
+            ? await smudgedIfHere(content)
+            : stored
+              ? await storedPointer(content)
+              : await smudged(content);
+          return [path, answer, mode];
         }),
       );
       return new ImmutableRevisionTree(entries);

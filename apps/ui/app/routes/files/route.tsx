@@ -41,6 +41,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 
@@ -801,13 +802,14 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           return;
         }
         const folderName = path.split('/').pop() ?? 'folder';
-        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope }), {
+        const ceiling = zipDownloadCeiling();
+        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope, ...ceiling }), {
           loading: `Downloading ${folderName}...`,
           success(blob) {
             downloadBlob(blob, `${folderName}.zip`);
             return `Downloaded ${folderName}.zip`;
           },
-          error: getFileTreeDownloadErrorMessage,
+          error: (error: unknown) => getFileTreeDownloadErrorMessage(error, ceiling),
         });
       },
     }),

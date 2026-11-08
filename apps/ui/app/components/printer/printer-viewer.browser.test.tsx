@@ -29,6 +29,7 @@ import { parseGcode } from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -534,10 +535,12 @@ describe('Printer viewer framing', () => {
     document.documentElement.classList.remove('dark');
     globalThis.history.replaceState(undefined, '', `?graphicsBackend=${mocks.backend}`);
     await page.viewport(1320, 780);
-    const proxy = mock<ComposedViewClient>({
-      stat: vi.fn().mockResolvedValue({ size: container.byteLength }),
-      readFile: vi.fn().mockImplementation(async () => new Uint8Array(container)),
-    });
+    const proxy = withAuthorityDigest(
+      mock<ComposedViewClient>({
+        stat: vi.fn().mockResolvedValue({ size: container.byteLength }),
+        readFile: vi.fn().mockImplementation(async () => new Uint8Array(container)),
+      }),
+    );
     let emitFileChanged: (event: unknown) => void = () => undefined;
     const channel = new WorkerChangeChannel({
       transport: {
@@ -554,7 +557,6 @@ describe('Printer viewer framing', () => {
       refreshGuard: new RefreshGenerationGuard(),
     });
     fileManager.contentService = service;
-    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
     try {
       const { container: root } = render(<PrinterFromFileContentService />);
       const frame = await within(root).findByTestId('frame');
@@ -576,10 +578,11 @@ describe('Printer viewer framing', () => {
       });
       await waitFor(() => {
         expect(proxy.readFile).toHaveBeenCalledTimes(2);
-        expect(digest).toHaveBeenCalledTimes(3);
+        /* The refresh compares the authority's digest of the new read (D17). */
+        expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(2);
       });
       await act(async () => {
-        await digest.mock.results[2]!.value;
+        await vi.mocked(proxy.readFileWithDigest!).mock.results[1]!.value;
         await new Promise((resolve) => {
           setTimeout(resolve, 0);
         });

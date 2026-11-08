@@ -284,49 +284,13 @@ describe('journal reconciliation foundation', () => {
     expect(recordedAccounts.at(-1)).toBe(1);
   });
 
-  it('should accept a pending operation and a held refund intent as hold causes and case a hold that has none', async () => {
-    // GI-A7: the account's plan hold is a pending admission (100) plus a held refund intent (400); neither is drift.
+  it('should accept a pending operation as a hold cause and case a hold that has none', async () => {
+    // GI-A7: the account's plan hold is a pending admission (100), which is not drift.
     const explained = await seedAccount({
-      counters: { planAtoms: 500n, planHeldAtoms: 500n },
+      counters: { planAtoms: 500n, planHeldAtoms: 100n },
       journal: { plan: 500n },
     });
     await seedOperation(explained, 100n);
-    const purchaseId = `purchase-${randomUUID()}`;
-    const reversalCaseId = `reversal-${randomUUID()}`;
-    await database.insert(schema.billingPurchase).values({
-      id: purchaseId,
-      accountId: explained,
-      sourceIdentity: `purchase:${purchaseId}`,
-      offerSnapshot: { version: 'payment-offer-v1', offerId: 'journal-fixture-topup' },
-      creditAtoms: 400n,
-      state: 'prepared',
-    });
-    await database.insert(schema.billingReversalCase).values({
-      id: reversalCaseId,
-      accountId: explained,
-      purchaseId,
-      originalAtoms: 400n,
-      source: 'plan',
-      environment,
-    });
-    await database.insert(schema.billingRefundIntent).values({
-      id: `refund-${randomUUID()}`,
-      accountId: explained,
-      environment,
-      reversalCaseId,
-      requestId: `request-${randomUUID()}`,
-      requestHash: '0'.repeat(64),
-      requestedPrincipalMinor: 400n,
-      requestedTaxMinor: 0n,
-      requestedGrossMinor: 400n,
-      approvedMaximumGrossMinor: 400n,
-      targetReversedAtoms: 400n,
-      holdAtoms: 400n,
-      reviewActorId: 'journal-fixture-reviewer',
-      reviewedAt: new Date(),
-      reason: 'journal fixture',
-      sourceDigest: '0'.repeat(64),
-    });
     const unexplained = await seedAccount({
       counters: { planAtoms: 400n, planHeldAtoms: 400n },
       journal: { plan: 400n },

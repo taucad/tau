@@ -342,6 +342,26 @@ process.exit(result.status ?? 1);
 });
 
 describe.runIf(gitToolchainOnPath)('native large-object store', () => {
+  it('answers a stored read with the pointer of each object it holds whole, and refuses a short one (W11.3)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-lfs-stored-'));
+    cleanups.push(async () => rm(root, { recursive: true, force: true }));
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+    await port.init({ author });
+    const bytes = new Uint8Array(largeObjectThresholdBytes + 9).fill(4);
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(bytes);
+    const head = await mint(
+      port,
+      new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes], ['small.txt', 'small\n']]),
+    );
+
+    const stored = await port.readTree(head, { largeObjects: 'stored' });
+    expect(stored?.get('large.bin')).toStrictEqual(pointerBytes);
+    expect(new TextDecoder().decode(stored?.get('small.txt'))).toBe('small\n');
+
+    await writeFile(join(root, '.git', lfsObjectPath(pointer.oid)), bytes.subarray(1));
+    await expect(port.readTree(head, { largeObjects: 'stored' })).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+  });
+
   it('stores a pruned object again and sweeps an abandoned partial write', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-lfs-store-'));
     cleanups.push(async () => rm(root, { recursive: true, force: true }));

@@ -62,7 +62,7 @@ const payments = new BillingPaymentsService(
   },
   policy,
   ledger,
-  new BillingCashService({ database: workerDatabase }, stripe, stripe, ledger, {
+  new BillingCashService({ database: workerDatabase }, stripe, ledger, {
     environment: 'development',
     stripeAccountId: 'acct_notice_native',
     livemode: false,

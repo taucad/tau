@@ -55,13 +55,13 @@ describe('credential-free billing CI', () => {
     );
   });
 
-  it('should wait in staging only for checks that ci.yml defines', () => {
+  it('should gate staging only on checks that ci.yml defines', () => {
     const ci = load(read('.github/workflows/ci.yml')) as { readonly jobs: Record<string, { readonly name?: string }> };
     const names = new Set(Object.values(ci.jobs).map((definition) => definition.name));
-    const wait = job('.github/workflows/staging.yml', 'ci').steps?.find((step) => step.id === 'wait') as
+    const gate = job('.github/workflows/staging.yml', 'ci').steps?.find((step) => step.id === 'check') as
       | { readonly env?: Record<string, string> }
       | undefined;
-    const checks = Object.values(JSON.parse(wait?.env?.['CHECKS'] ?? '{}') as Record<string, string>);
+    const checks = Object.values(JSON.parse(gate?.env?.['CHECKS'] ?? '{}') as Record<string, string>);
     expect(checks).toContain('Billing contracts (no Stripe credentials)');
     for (const check of checks) {
       expect(names, check).toContain(check);

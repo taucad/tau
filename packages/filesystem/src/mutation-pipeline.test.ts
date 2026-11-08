@@ -1091,13 +1091,20 @@ describe('lockClaims', () => {
     providerBasePath,
   });
 
-  it('should hold every virtual ancestor of a nested path shared, exclusive of the root', async () => {
+  it('should hold no logical token for a mount with physical identity, whose physical tokens exclude every alias', async () => {
     const locks = await locksForWrite('/a/b/c.txt');
 
-    expect(locks.filter(({ key }) => key.startsWith('/'))).toEqual([
-      { key: '/a', shared: true },
-      { key: '/a/b', shared: true },
-      { key: '/a/b/c.txt', shared: true },
+    expect(locks.filter(({ key }) => key.startsWith('/'))).toEqual([]);
+  });
+
+  it('should hold one lock set of four tokens for a nested write in a project (S19)', async () => {
+    const locks = await locksForWrite(`/projects/${alpha}/src/main.ts`, [flatProject(alpha, 'cube-design')]);
+
+    expect(locks).toEqual([
+      { key: 'memory:0:cube-design', shared: true },
+      { key: 'memory:0:cube-design/src', shared: true },
+      { key: 'memory:0:cube-design/src/main.ts' },
+      { key: `project:${alpha}`, shared: true },
     ]);
   });
 

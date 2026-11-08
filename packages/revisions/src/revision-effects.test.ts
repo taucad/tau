@@ -11,7 +11,8 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -5095,6 +5096,10 @@ describe('the path policy a project is given', () => {
       policy: testPolicy,
     });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    /* The ignore rules init derived from Tau's own registry, which a store under this policy
+     * would not carry: a cut honours a checkout's ignore rules, so only the policy is left to decide. */
+    await filesystem.writeFile('.gitignore', '');
+    await filesystem.writeFile('.git/info/exclude', '');
     await filesystem.writeFile('drawings/plan.dxf', 'DXF\n');
     await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
@@ -5412,6 +5417,147 @@ describe('opening before large objects arrive', () => {
     });
     expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
   }, 30_000);
+  /* W11.3: a checkout over the host's store clones each object in place of writing bytes it read. */
+  it.runIf(gitToolchainOnPath)(
+    'lands each object from the store when the checkout declares large-object sources',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
+      const gate = Promise.withResolvers<void>();
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-store-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const reads: Array<string | undefined> = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects === 'local') {
+            return real.readTree(id, options);
+          }
+          reads.push(options?.largeObjects);
+          await gate.promise;
+          await writeFile(objectFile, held);
+          return real.readTree(id, options);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+      gate.resolve();
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(reads).toContain('stored');
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      const sourced = batches.mock.calls
+        .flatMap(([entries]) => entries)
+        .filter((entry) => entry.op === 'write' && 'largeObject' in entry.data);
+      expect(sourced).toHaveLength(1);
+      expect(sourced[0]).toMatchObject({ data: { largeObject: pointer.oid, size: part.byteLength } });
+    },
+    60_000,
+  );
+
+  /* W11.3 review: an object gone from the store between the read and the clone is brought as bytes, never a failed fill. */
+  it.runIf(gitToolchainOnPath)(
+    'writes the bytes of an object the store lost before its clone, fetched by its oid',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer } = lfsPointerFor(part);
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-unstored-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const fetched: string[][] = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects !== 'stored') {
+            return real.readTree(id, options);
+          }
+          /* The store holds it when the read answers, and loses it (a prune) before the clone. */
+          await writeFile(objectFile, held);
+          const tree = await real.readTree(id, options);
+          await rm(objectFile);
+          return tree;
+        },
+        fetchLargeObjects: async (pointers) => {
+          fetched.push(pointers.map(({ oid }) => oid));
+          return new Map([[pointer.oid, part]]);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      expect(fetched).toStrictEqual([[pointer.oid]]);
+      const writes = batches.mock.calls.flatMap(([entries]) => entries).filter((entry) => entry.op === 'write');
+      expect(writes.some((entry) => 'largeObject' in entry.data)).toBe(true);
+      expect(
+        writes.some((entry) => entry.data instanceof Uint8Array && entry.data.byteLength === part.byteLength),
+      ).toBe(true);
+      expect(reports.some((report) => report.facet?.error !== undefined)).toBe(false);
+    },
+    60_000,
+  );
+
   /* A project a reload left mid-download: its checkout holds the part's pointer, and the store lacks the bytes. */
   const leftMidDownload = async () => {
     const reports: LargeObjectsReport[] = [];
@@ -5637,3 +5783,88 @@ for (const actorSet of actorSets) {
     },
   );
 }
+
+/*
+ * The checkout's own Git ignore rules decide what a cut leaves out, on both
+ * legs alike (I5): its `.gitignore` files, nested, and the store's
+ * `info/exclude`, read as Git reads them; a tracked path is never left out.
+ */
+describe("a cut honours the checkout's own Git ignore rules on both legs", () => {
+  it.each([false, true])(
+    "records the same tree on each leg, leaving out ignored untracked files and keeping tracked ones (the store's core.ignoreCase %s)",
+    async (ignoreCase) => {
+      const cutTwice = async (actorSet: ActorSet['name']): Promise<readonly [string, readonly string[]]> => {
+        const { port, actors, filesystem, root } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, {
+          actorSet,
+        });
+        await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        /* The store's own setting, which both legs read: the native harness keeps its repository in `project/`. */
+        execFileSync('git', ['config', 'core.ignoreCase', String(ignoreCase)], {
+          cwd: actorSet === 'native-git' ? join(root, 'project') : root,
+        });
+        const cutOnce = async (parents: readonly string[]): Promise<string> => {
+          const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+            checkoutId: 'live',
+            trigger: 'save',
+          });
+          const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+            checkoutId: 'live',
+            cutId: cut.cutId,
+            treeId: cut.treeId,
+            parents,
+            trigger: 'save',
+            leaseIds: [],
+          });
+          await port.updateRef({
+            name: 'main',
+            expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
+            head: revisionId(written.revisionId),
+          });
+          return written.revisionId;
+        };
+        await filesystem.writeFile('notes.log', 'tracked before the rule\n');
+        const first = await cutOnce([]);
+        const ignore = await filesystem.readFile(generatedIgnorePath, 'utf8');
+        await filesystem.writeFile(generatedIgnorePath, `${ignore}*.log\nbuild/\n*.secret\n!keep.secret\n`);
+        await filesystem.writeFile('models/.gitignore', '/local.step\n');
+        for (const [path, content] of [
+          ['notes.log', 'tracked, and changed\n'],
+          ['new.log', 'untracked\n'],
+          ['build/out.stl', 'solid\n'],
+          ['docs/build/page.html', '<p>\n'],
+          ['a.secret', 'x\n'],
+          ['keep.secret', 'kept\n'],
+          ['models/local.step', 'solid local\n'],
+          ['models/deep/local.step', 'solid deep\n'],
+          ['Upper.LOG', 'ignored only where case folds\n'],
+          ['Build/case.stl', 'solid\n'],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
+          await filesystem.writeFile(path, content);
+        }
+        const second = await cutOnce([first]);
+        const record = await port.readRevision(revisionId(second));
+        const tree = await port.readTree(revisionId(second));
+        return [record!.treeId, (tree?.entries() ?? []).map(({ path }) => path).toSorted()];
+      };
+
+      const legs = await Promise.all(
+        actorSets.filter(({ enabled }) => enabled).map(async ({ name }) => cutTwice(name)),
+      );
+
+      expect(new Set(legs.map(([treeId]) => treeId)).size).toBe(1);
+      expect(legs[0]![1]).toStrictEqual([
+        '.gitattributes',
+        '.gitignore',
+        ...(ignoreCase ? [] : ['Build/case.stl']),
+        ...(ignoreCase ? [] : ['Upper.LOG']),
+        'keep.secret',
+        'main.scad',
+        'models/.gitignore',
+        'models/deep/local.step',
+        'notes.log',
+      ]);
+    },
+    60_000,
+  );
+});

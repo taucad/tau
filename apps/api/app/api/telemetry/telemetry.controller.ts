@@ -84,6 +84,7 @@ export class TelemetryController {
       entries: runtime,
       principal: userId,
       ip: request.ip,
+      requestId: request.id,
       bodyBytes: Number.isFinite(declared) ? declared : Buffer.byteLength(JSON.stringify(body)),
       now: new Date(),
     });

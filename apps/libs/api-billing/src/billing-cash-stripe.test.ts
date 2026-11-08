@@ -1,47 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe wire fixtures use provider field names. */
 import type { Stripe } from 'stripe';
-import { createStripeRefundOnce, listStripeBalancePage, listStripeRefundPage } from '#billing-cash-stripe.js';
+import { listStripeBalancePage, listStripeRefundPage } from '#billing-cash-stripe.js';
 
 describe('billing cash Stripe transport', () => {
-  it('creates one closed reviewed refund with the durable idempotency identity', async () => {
-    const create = vi.fn().mockResolvedValue({ id: 're_1', object: 'refund' });
-    const stripe: { refunds: Pick<Stripe['refunds'], 'create'> } = { refunds: { create } };
-    await expect(
-      createStripeRefundOnce(stripe, {
-        chargeId: 'ch_1',
-        amountMinor: 500n,
-        reason: 'requested_by_customer',
-        metadata: { tau_refund_intent_id: 'refund-1', tau_reversal_case_id: 'case-1' },
-        idempotencyKey: 'refund-leg-1',
-      }),
-    ).resolves.toMatchObject({ id: 're_1' });
-    expect(create).toHaveBeenCalledWith(
-      {
-        charge: 'ch_1',
-        amount: 500,
-        reason: 'requested_by_customer',
-        metadata: { tau_refund_intent_id: 'refund-1', tau_reversal_case_id: 'case-1' },
-      },
-      { idempotencyKey: 'refund-leg-1' },
-    );
-  });
-
-  it('rejects unsafe amounts and metadata before provider execution', async () => {
-    const create = vi.fn();
-    const stripe: { refunds: Pick<Stripe['refunds'], 'create'> } = { refunds: { create } };
-    await expect(
-      createStripeRefundOnce(stripe, {
-        chargeId: 'ch_1',
-        amountMinor: BigInt(Number.MAX_SAFE_INTEGER) + 1n,
-        reason: 'requested_by_customer',
-        metadata: { tau_refund_intent_id: 'refund-1', unexpected: 'case-1' },
-        idempotencyKey: 'refund-leg-1',
-      }),
-    ).rejects.toThrow('refund amount');
-    expect(create).not.toHaveBeenCalled();
-  });
-
   it('returns exact bounded cursors and rejects pagination without progress', async () => {
     const list = vi
       .fn()

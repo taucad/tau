@@ -126,7 +126,7 @@ const providerUpstreamFetch =
       ): BillingCashService {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         // Ordinary app composition has no protected refund credential.
-        return new BillingCashService(database, sourceStripe, sourceStripe, ledger, {
+        return new BillingCashService(database, sourceStripe, ledger, {
           environment: environment.success ? environment.data : 'development',
           stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
           livemode: config.get('STRIPE_LIVEMODE', { infer: true }),

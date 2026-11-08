@@ -475,7 +475,7 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     });
     const policy = new BillingPolicyService({ database: runtimeDatabase });
     ledger = new CreditLedgerService({ database: runtimeDatabase }, policy);
-    const cash = new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
+    const cash = new BillingCashService({ database: runtimeDatabase }, stripe, ledger, {
       environment: 'development',
       stripeAccountId,
       livemode: false,

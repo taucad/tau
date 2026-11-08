@@ -449,6 +449,20 @@
       "when": 1793315147465,
       "tag": "0064_ai_training_decided_at",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794097900025,
+      "tag": "0065_plan_credit_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794112808571,
+      "tag": "0066_drop_refund_intent",
+      "breakpoints": true
     }
   ]
 }

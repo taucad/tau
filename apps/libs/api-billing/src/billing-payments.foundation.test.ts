@@ -691,7 +691,7 @@ beforeAll(async () => {
     },
     policy,
     ledger,
-    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, fixtureStripe, ledger, {
+    new BillingCashService({ database: runtimeDatabase }, fixtureStripe, ledger, {
       environment: 'development',
       stripeAccountId,
       livemode: false,
@@ -1646,6 +1646,117 @@ describe('billing payments PostgreSQL foundation', () => {
     const journals = await database.select().from(creditTransaction).where(eq(creditTransaction.periodId, periodId));
     expect(journals).toHaveLength(1);
     expect(journals[0]?.accountDeltaAtoms).toBe(0n);
+  });
+
+  it('expires unheld plan credit only once every subscription on the account has ended', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Plan Expiry', email: `${userId}@test.invalid`, emailVerified: true });
+    const accountId = await ledger.ensureAccountBinding({ environment: 'development', authUserId: userId });
+    await database.update(creditAccount).set({ purchasedAtoms: 5_000_000n }).where(eq(creditAccount.id, accountId));
+    const bindingId = randomUUID();
+    const subscriptionId = randomUUID();
+    const periodId = randomUUID();
+    const invoiceId = `in_${randomUUID()}`;
+    const offer: PaymentOfferSnapshot = {
+      version: 'payment-offer-v1',
+      policyId: 'policy-expiry',
+      offerId: 'pro-monthly',
+      environment: 'development',
+      accountId,
+      stripeAccountId,
+      livemode: false,
+      currency: 'usd',
+      principalMinor: '2000',
+      taxMinor: '0',
+      grossMinor: '2000',
+      maximumGrossMinor: '2000',
+      creditAtoms: '20000000',
+      ceilingCreditAtoms: '40000000',
+      stripePriceId: 'price_monthly',
+      stripeProductId: null,
+      quantity: 1,
+      term: 'month',
+      taxBasis: 'synthetic_local_zero_tax',
+      paymentMethod: null,
+    };
+    const paidAt = new Date('2026-09-06T00:00:00.000Z');
+    const evidence: PaidPaymentEvidence = {
+      version: 'stripe-paid-v1',
+      stripeAccountId,
+      livemode: false,
+      customerId: `cus_${bindingId}`,
+      currency: 'usd',
+      principalMinor: '2000',
+      taxMinor: '0',
+      grossMinor: '2000',
+      paymentIntentIds: [`pi_${periodId}`],
+      chargeIds: [`ch_${periodId}`],
+      invoiceId,
+      subscriptionId: `sub_${subscriptionId}`,
+      subscriptionItemId: `si_${subscriptionId}`,
+      sourceDigest: 'f'.repeat(64),
+      paidAt: paidAt.toISOString(),
+      paymentMethod: null,
+    };
+    await database.insert(billingStripeCustomer).values({
+      id: bindingId,
+      accountId,
+      environment: 'development',
+      stripeAccountId,
+      livemode: false,
+      stripeCustomerId: evidence.customerId,
+    });
+    await database.insert(subscription).values({
+      id: subscriptionId,
+      plan: 'pro',
+      stripeSubscriptionId: evidence.subscriptionId,
+      accountId,
+      environment: 'development',
+      customerBindingId: bindingId,
+      requestId: randomUUID(),
+      requestHash: 'e'.repeat(64),
+      offerSnapshot: offer,
+      slotState: 'current',
+      status: 'active',
+    });
+    await database.insert(billingPeriod).values({
+      id: periodId,
+      accountId,
+      sourceIdentity: `period:${periodId}`,
+      creditAtoms: 20_000_000n,
+      periodStart: new Date('2026-09-01T00:00:00.000Z'),
+      periodEnd: new Date('2026-10-01T00:00:00.000Z'),
+      subscriptionId,
+      invoiceId,
+      offerSnapshot: offer,
+      paidEvidence: evidence,
+      state: 'verified',
+      paidAt,
+    });
+    const granted = await fulfillPaidFixture({ database, ledger, source: 'plan', accountId, causeId: periodId });
+    expect(granted.grantedAtoms).toBe(20_000_000n);
+
+    // A live subscription keeps its plan credit.
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    const [live] = await database.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    expect(live?.planAtoms).toBe(20_000_000n);
+
+    await database
+      .update(subscription)
+      .set({ slotState: 'ended', status: 'canceled' })
+      .where(eq(subscription.id, subscriptionId));
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    await ledger.expireEndedPlanCredits({ environment: 'development', limit: 1000 });
+    const [ended] = await database.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    expect(ended).toMatchObject({ planAtoms: 0n, purchasedAtoms: 5_000_000n });
+    const expiries = await database
+      .select()
+      .from(creditTransaction)
+      .where(and(eq(creditTransaction.accountId, accountId), eq(creditTransaction.kind, 'plan_expiry')));
+    expect(expiries).toHaveLength(1);
+    expect(expiries[0]).toMatchObject({ periodId, planDeltaAtoms: -20_000_000n, accountDeltaAtoms: -20_000_000n });
   });
 
   it('receipts a historical invoice without reducing paidThrough and anchors grace only to a current qualified failure', async () => {

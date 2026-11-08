@@ -2,7 +2,6 @@
 import type { Stripe } from 'stripe';
 
 const maximumPageSize = 100;
-const metadataKeys = new Set(['tau_refund_intent_id', 'tau_reversal_case_id']);
 
 export type StripeCashPage<T> = {
   readonly data: readonly T[];
@@ -14,26 +13,6 @@ export type StripeCashPageRequest = {
   readonly created: { readonly gte: number; readonly lt: number };
   readonly startingAfter?: string;
 };
-
-export async function createStripeRefundOnce(
-  stripe: { readonly refunds: Pick<Stripe['refunds'], 'create'> },
-  input: {
-    readonly chargeId: string;
-    readonly amountMinor: bigint;
-    readonly reason: 'requested_by_customer';
-    readonly metadata: Readonly<Record<string, string>>;
-    readonly idempotencyKey: string;
-  },
-): Promise<Stripe.Refund> {
-  assertId(input.chargeId, 'Charge');
-  assertId(input.idempotencyKey, 'idempotency key');
-  const amount = safePositiveInteger(input.amountMinor, 'refund amount');
-  assertMetadata(input.metadata);
-  return stripe.refunds.create(
-    { charge: input.chargeId, amount, reason: input.reason, metadata: input.metadata },
-    { idempotencyKey: input.idempotencyKey },
-  );
-}
 
 export async function retrieveStripeRefund(
   stripe: { readonly refunds: Pick<Stripe['refunds'], 'retrieve'> },
@@ -188,25 +167,8 @@ function assertPageRequest(request: StripeCashPageRequest): void {
   }
 }
 
-function assertMetadata(metadata: Readonly<Record<string, string>>): void {
-  const entries = Object.entries(metadata);
-  if (
-    entries.length !== metadataKeys.size ||
-    entries.some(([key, value]) => !metadataKeys.has(key) || value.length === 0 || value.length > 200)
-  ) {
-    throw new Error('Invalid refund metadata');
-  }
-}
-
 function assertId(value: string, label: string): void {
   if (value.length === 0 || value.length > 255) {
     throw new Error(`Invalid ${label}`);
   }
-}
-
-function safePositiveInteger(value: bigint, label: string): number {
-  if (value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error(`Invalid ${label}`);
-  }
-  return Number(value);
 }

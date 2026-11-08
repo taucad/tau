@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { CheckedFileWriteResult } from '@taucad/types';
 
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
@@ -1065,7 +1066,8 @@ describe('createRuntimeParameterAgentClient', () => {
     const commit = vi.fn(async ({ input }: { input: { proposed: typeof current } }) => {
       await gate;
       persisted = structuredClone(input.proposed);
-      return { status: 'applied', content: input.proposed.bytes! } as const;
+      const result: CheckedFileWriteResult = { status: 'applied', content: input.proposed.bytes! };
+      return result;
     });
     const loads = vi.fn();
     const actor = createActor(

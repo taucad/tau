@@ -13,6 +13,7 @@ import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { CrashReportPrompt } from '#components/crash-report-prompt.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
+import { readShellRequestHints } from '#lib/shell-request-hints.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
@@ -62,6 +63,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     globalPrivacyControl,
     env: await getClientEnvironment(),
     pathname: new URL(request.url).pathname,
+    // R4/R7: sidebar state and request platform, so the shell's first paint is final.
+    shellHints: readShellRequestHints(request),
     theme: await readThemeCookie(request),
   };
 }

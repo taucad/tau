@@ -22,10 +22,12 @@ describe('skewProtectionCookie', () => {
     expect(skewProtectionConfig.sources).toStrictEqual([{ type: 'cookie', name: skewProtectionCookieName }]);
   });
 
-  it('pins the chunks, the route data and the manifest, not documents', () => {
+  it('pins the chunks, the runtime bundles, the route data and the manifest, not documents', () => {
     const pinned = (path: string): boolean =>
       skewProtectionConfig.patterns.some((pattern) => new RegExp(pattern, 'u').test(path));
     expect(pinned('/assets/route-CIX3STd0.js')).toBe(true);
+    expect(pinned(`/picogk-browser/${'a'.repeat(64)}/_framework/dotnet.js`)).toBe(true);
+    expect(pinned(`/csharp-language/${'a'.repeat(64)}/manifest.json`)).toBe(true);
     expect(pinned('/projects.data')).toBe(true);
     expect(pinned('/__manifest')).toBe(true);
     expect(pinned('/projects')).toBe(false);

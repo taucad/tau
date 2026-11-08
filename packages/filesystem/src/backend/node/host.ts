@@ -317,6 +317,14 @@ export type NodeFsHostOptions = {
    * standing between a renderer-supplied string and the whole host filesystem.
    */
   allowRoot(root: string): boolean;
+  /**
+   * The repository LFS object directory an admitted root's large objects are
+   * cloned from (EQ13), asked per write, or `undefined` when it has none. A
+   * batch write that names a large object by its id is resolved here, by the
+   * authority, so no client ever names a `.git` path (I6). Omitted, no root
+   * accepts such a write.
+   */
+  largeObjectStore?(root: string): string | undefined;
 };
 
 declare const entryIdentityBrand: unique symbol;
@@ -950,12 +958,13 @@ const errorFrame = (id: number, error: unknown): NodeFsResponse => ({
 });
 
 /* A receipt as it crosses the port: its error keeps what tells a refusal apart (code, abort name). */
-const wireReceipt = ({ outcome, kind, created, error }: BatchReceipt): NodeFsBatchReceipt => {
+const wireReceipt = ({ outcome, kind, created, largeObject, error }: BatchReceipt): NodeFsBatchReceipt => {
   const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
   return {
     outcome,
     ...(kind === undefined ? {} : { kind }),
     ...(created === undefined ? {} : { created }),
+    ...(largeObject === undefined ? {} : { largeObject }),
     ...(error === undefined
       ? {}
       : {
@@ -1162,7 +1171,11 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     if (existing) {
       return existing;
     }
-    const provider = new NodeFsProvider(root, { policy: options.policy });
+    const { largeObjectStore } = options;
+    const provider = new NodeFsProvider(root, {
+      policy: options.policy,
+      ...(largeObjectStore === undefined ? {} : { largeObjectStore: () => largeObjectStore(root) }),
+    });
     providers.set(root, provider);
     return provider;
   };

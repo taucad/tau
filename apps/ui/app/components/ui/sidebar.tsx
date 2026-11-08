@@ -6,10 +6,10 @@ import { cn } from '@taucad/ui/utils/cn';
 import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
-import { usePlatform } from '@taucad/ui/hooks/use-platform';
+import { RequestPlatformProvider, usePlatform } from '@taucad/ui/hooks/use-platform';
 import { cookieName } from '#constants/cookie.constants.js';
-import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { useShellRequestHints, writeSidebarOpenCookie } from '#lib/shell-request-hints.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -72,6 +72,12 @@ const SidebarBehavior = () => {
   return <MobileSidebarRouteReset key={key} />;
 };
 
+/**
+ * The application shell's sidebar state. The open preference lives in local storage; the
+ * server renders and hydrates with the state the request's cookie mirror carried (see
+ * `#lib/shell-request-hints.js`), so the first paint has the person's sidebar, and the
+ * mirror follows every change. The request's platform labels the shell's shortcut hints.
+ */
 const SidebarProvider = ({
   onOpenChange: setOpenProperty,
   children,
@@ -79,7 +85,11 @@ const SidebarProvider = ({
 }: React.ComponentProps<'div'> & {
   readonly onOpenChange?: (open: boolean) => void;
 }): React.JSX.Element => {
-  const [open, setOpenCookie] = useCookie(cookieName.sidebarOp, sidebarDefaultOpen);
+  const { isSidebarOpen, platform } = useShellRequestHints();
+  const [open, setOpenCookie] = useCookie(cookieName.sidebarOp, isSidebarOpen);
+  React.useEffect(() => {
+    writeSidebarOpenCookie(open);
+  }, [open]);
   const setOpen = React.useCallback(
     (nextOpen: boolean) => {
       if (setOpenProperty) {
@@ -93,10 +103,12 @@ const SidebarProvider = ({
   );
 
   return (
-    <DesignSystemSidebarProvider {...properties} open={open} onOpenChange={setOpen} keyboardShortcutKey=''>
-      <SidebarBehavior />
-      {children}
-    </DesignSystemSidebarProvider>
+    <RequestPlatformProvider platform={platform}>
+      <DesignSystemSidebarProvider {...properties} open={open} onOpenChange={setOpen} keyboardShortcutKey=''>
+        <SidebarBehavior />
+        {children}
+      </DesignSystemSidebarProvider>
+    </RequestPlatformProvider>
   );
 };
 

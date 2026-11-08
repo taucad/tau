@@ -1,4 +1,4 @@
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import type { AccountingTask } from '#api/storage-accounting/accounting-figures.js';
 import { readDatabaseConnections } from '#api/storage-accounting/database-connections.js';
 import { readR2Analytics } from '#api/storage-accounting/r2-analytics.js';

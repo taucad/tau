@@ -31,8 +31,8 @@ import postgres from 'postgres';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import * as schema from '#database/schema.js';
-import { installBillingProtections } from '#database/billing-protections.js';
+import * as schema from '@taucad/api-database/schema';
+import { installBillingProtections } from '@taucad/api-database/billing-protections';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { startOwnedCluster } from '#testing/billing-load/cluster.js';
@@ -448,7 +448,7 @@ async function main(): Promise<void> {
   let report: Record<string, unknown> = {};
   let failed = false;
   try {
-    await migrate(database, { migrationsFolder: join(apiRoot, 'app/database/migrations') });
+    await migrate(database, { migrationsFolder: join(apiRoot, '../libs/api-database/src/migrations') });
     await installBillingProtections(client);
     const suffix = randomUUID();
     const ledger = new CreditLedgerService({ database }, new BillingPolicyService({ database }));

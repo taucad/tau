@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { mockDeep } from 'vitest-mock-extended';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import { getEnvironment } from '@taucad/api-core';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';

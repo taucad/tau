@@ -10,7 +10,7 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
+import type { Database, OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 import { getEnvironment } from '@taucad/api-core';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -47,7 +47,7 @@ import { restoreRepository } from '#api/git/maintenance/restore.js';
 // === harness =============================================================
 
 // The storage-only suite uses an active lifecycle; deletion refusal has its own database test.
-vi.mock('#database/project-lifecycle.js', () => ({ assertActiveProjectLocked: async () => undefined }));
+vi.mock('@taucad/api-database/project-lifecycle', () => ({ assertActiveProjectLocked: async () => undefined }));
 const database = mock<Database>();
 database.transaction.mockImplementation(async (run) => run(mock<OwnerLockTransaction>()));
 

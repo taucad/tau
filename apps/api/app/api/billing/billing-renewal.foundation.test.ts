@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingFinancialCase,
   billingProviderLeg,
@@ -16,13 +16,13 @@ import {
   creditAccount,
   subscription,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import type { BillingRecoveryNoticeTransport } from '#api/billing/billing-payments.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import type { PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 

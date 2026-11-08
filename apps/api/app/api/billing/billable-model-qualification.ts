@@ -18,7 +18,8 @@ import type {
   BillableProviderWire,
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
-import type { JointInputMaximum, MeterQuantity, SupplierValuation } from '#api/billing/credit-ledger.types.js';
+import type { MeterQuantity } from '#api/billing/credit-ledger.types.js';
+import type { JointInputMaximum, SupplierValuation } from '@taucad/api-database/schema/billing.types';
 
 type Rate = {
   dimension: MeterQuantity['dimension'];

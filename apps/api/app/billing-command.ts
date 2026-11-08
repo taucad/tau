@@ -28,9 +28,9 @@ import {
 } from '#api/billing/billing-supplier-legacy-export.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#api/billing/billing-policy.command.js';
-import { installBillingProtections } from '#database/billing-protections.js';
-import { runMigrationJob } from '#database/database-migration.js';
-import * as schema from '#database/schema.js';
+import { installBillingProtections } from '@taucad/api-database/billing-protections';
+import { runMigrationJob } from '@taucad/api-database/migration';
+import * as schema from '@taucad/api-database/schema';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
@@ -41,8 +41,8 @@ import {
   recoveryNoticeEmailOrigin,
   runHourlyOperationsJobs,
 } from '#billing-command.operations.js';
-import type { DatabaseService } from '#database/database.service.js';
-import { applicationNameOf } from '#database/application-name.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
  * Recovery notices become email only when this worker knows where the app lives (`TAU_FRONTEND_URL`) and

@@ -11,14 +11,14 @@ import postgres from 'postgres';
  * is bound to an id they generated. A job that selects by *state* rather than
  * by identity cannot be scoped that way — the zero-count blob collector takes
  * every `refcount = 0` row there is — so the only honest boundary is the
- * database itself. `app/testing/git-storage-migration.integration.test.ts`
+ * database itself. `apps/api/app/testing/git-storage-migration.integration.test.ts`
  * already owns one this way; this is that pattern, shared.
  *
  * The configured `DATABASE_URL` is the admin connection the scratch database is
  * created from and beside, never the one the suite runs against.
  */
 
-const migrationsFolder = path.resolve(import.meta.dirname, '../database/migrations');
+const migrationsFolder = path.resolve(import.meta.dirname, '../migrations');
 /** Postgres identifiers are interpolated into DDL, so they are checked rather than escaped. */
 const identifier = /^[a-z][a-z0-9_]*$/u;
 

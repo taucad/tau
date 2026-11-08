@@ -2,8 +2,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { project, projectDeletion, projectGit } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { project, projectDeletion, projectGit } from '@taucad/api-database/schema';
 import { RedisService } from '#redis/redis.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 

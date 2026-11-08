@@ -34,10 +34,10 @@ const serializers = {
  */
 export function getFastifyLoggingConfig(): PinoLoggerOptions | boolean {
   // We use process.env here as the config service is not available when this function is called during app bootstrap.
-  switch (process.env['NODE_ENV']) {
+  switch (process.env.NODE_ENV) {
     case 'production': {
-      // At bootstrap LOG_SERVICE has not been validated yet, so it may be unset.
-      const logService = process.env['LOG_SERVICE'] as LogServiceProvider | undefined;
+      // The ambient type claims LOG_SERVICE is always set; at bootstrap it has not been validated yet.
+      const logService = process.env.LOG_SERVICE as LogServiceProvider | undefined;
       return { ...logServiceConfig(logService ?? logServiceProvider.console), serializers };
     }
 

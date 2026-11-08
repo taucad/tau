@@ -19,7 +19,7 @@ import type { BillingCashQualification } from '#api/billing/billing-payments.ser
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl || !process.env['BILLING_TEST_OWNED']) {

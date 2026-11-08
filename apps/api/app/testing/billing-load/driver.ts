@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { TerminalEvidence } from '#api/billing/credit-ledger.types.js';

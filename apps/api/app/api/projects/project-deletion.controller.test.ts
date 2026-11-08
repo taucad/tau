@@ -19,7 +19,7 @@ import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import type { Environment } from '@taucad/api-core';
 import { authInstanceKey } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 // The HTTP adapter, guard and exception filter are real. The durable deletion

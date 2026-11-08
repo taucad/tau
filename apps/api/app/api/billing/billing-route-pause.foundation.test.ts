@@ -5,8 +5,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { and, asc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { billingRoutePause } from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
+import { billingRoutePause } from '@taucad/api-database/schema';
 import { BillingRoutePauseService } from '#api/billing/billing-route-pause.service.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];

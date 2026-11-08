@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 

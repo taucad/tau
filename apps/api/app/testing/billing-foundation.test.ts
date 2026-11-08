@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import postgres from 'postgres';
 import { setTimeout as wait } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
-import { installBillingProtections } from '#database/billing-protections.js';
+import { installBillingProtections } from '@taucad/api-database/billing-protections';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl || !process.env['BILLING_TEST_OWNED']) {
@@ -692,7 +692,7 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
         /* Expected fixture DDL notices are not diagnostics. */
       },
     });
-    const migrationsFolder = resolve(import.meta.dirname, '../database/migrations');
+    const migrationsFolder = resolve(import.meta.dirname, '../../../libs/api-database/src/migrations');
     migrationsBefore0049 = mkdtempSync(join(tmpdir(), 'tau-billing-0048-'));
     cpSync(migrationsFolder, migrationsBefore0049, { recursive: true });
     const journalPath = join(migrationsBefore0049, 'meta', '_journal.json');

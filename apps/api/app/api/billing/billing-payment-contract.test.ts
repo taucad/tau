@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noChargeEvidenceSchema, paymentOfferSnapshotSchema } from '#api/billing/billing-payment-contract.js';
+import { noChargeEvidenceSchema, paymentOfferSnapshotSchema } from '@taucad/api-database/schema/billing-payment.types';
 
 const offer = {
   version: 'payment-offer-v1',

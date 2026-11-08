@@ -12,7 +12,7 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingOwnerBinding,
   billingPeriod,
@@ -25,13 +25,13 @@ import {
   stripeEventInbox,
   subscription,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import type { Environment } from '@taucad/api-core';
-import type { DatabaseService } from '#database/database.service.js';
-import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import {

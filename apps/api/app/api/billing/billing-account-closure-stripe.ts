@@ -1,11 +1,11 @@
 import type {
   SubscriptionCancellationEvidence,
   SubscriptionCheckoutExpiryEvidence,
-} from '#api/billing/billing-payment-contract.js';
+} from '@taucad/api-database/schema/billing-payment.types';
 import { createHash } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type {
   ClosureCancellationAdapter,
@@ -22,7 +22,7 @@ import {
   billingStripeCustomer,
   creditAccount,
   subscription,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 
 type Input = Parameters<ClosureCancellationAdapter['recoverAndCancel']>[0];
 type Context = {

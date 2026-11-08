@@ -4,9 +4,9 @@ import { setTimeout } from 'node:timers/promises';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { installBillingProtections } from '#database/billing-protections.js';
-import { installMaintenanceRole, installMirrorRole } from '#database/service-roles.js';
-import { applicationNameOf } from '#database/application-name.js';
+import { installBillingProtections } from '#billing-protections.js';
+import { installMaintenanceRole, installMirrorRole } from '#service-roles.js';
+import { applicationNameOf } from '#application-name.js';
 
 /** Drizzle's generated journal; `when` is the millisecond stamp the migrator stores as `created_at`. */
 type MigrationJournal = { entries: Array<{ readonly tag: string; readonly when: number }> };

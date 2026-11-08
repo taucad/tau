@@ -4,8 +4,8 @@ import { and, count, eq, gte, lt, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
-import { billingFinancialCase, creditOperation } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { billingFinancialCase, creditOperation } from '@taucad/api-database/schema';
 
 type Transaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
 

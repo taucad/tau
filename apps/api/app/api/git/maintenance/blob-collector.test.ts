@@ -7,17 +7,17 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getEnvironment } from '@taucad/api-core';
-import { blobRef } from '#database/schema.js';
-import * as schema from '#database/schema.js';
+import { blobRef } from '@taucad/api-database/schema';
+import * as schema from '@taucad/api-database/schema';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { applyBlobReferences } from '#api/publications/publication-materializer.js';
-import { databaseReachable } from '#testing/database-reachable.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 
 /**
  * S6's publication half (charter D10): a content-addressed blob nothing

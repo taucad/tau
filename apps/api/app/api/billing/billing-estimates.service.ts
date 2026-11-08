@@ -13,7 +13,8 @@ import { billableModelRouteIds } from '#api/billing/billable-model-qualification
 import { resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import type { BillingEnvironment, JointInputMaximum, MeterQuantity } from '#api/billing/credit-ledger.types.js';
+import type { MeterQuantity } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment, JointInputMaximum } from '@taucad/api-database/schema/billing.types';
 import type { Environment } from '@taucad/api-core';
 
 /* Contract C2 publishes two holds per route, both at the 16,384 requested output

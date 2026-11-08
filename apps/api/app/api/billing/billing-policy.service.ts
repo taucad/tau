@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { financialIdentitySchema } from '@taucad/billing';
-import { DatabaseService } from '#database/database.service.js';
-import type { DatabaseType } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import type { DatabaseType } from '@taucad/api-database';
 import {
   assertPolicyFleetCompatibility,
   assertPolicySchemaCompatibility,

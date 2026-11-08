@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateDrizzleJson, generateMigration } from 'drizzle-kit/api';
 import { describe, expect, it } from 'vitest';
-import * as schema from '#database/schema.js';
+import * as schema from '#schema/index.js';
 
 /**
  * Schema/migration parity guard. `drizzle-kit generate` diffs the Drizzle

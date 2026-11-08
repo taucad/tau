@@ -2,10 +2,10 @@
 import 'reflect-metadata';
 import { beforeEach, afterEach, vi } from 'vitest';
 
-// Provide a deterministic 32+ char secret so getEnvironment() can boot without an API .env file
+// Provide a deterministic 32+ char secret so getEnvironment() can boot without apps/api/.env
 const rawViewCookieSecret = Reflect.get(process.env, 'TAU_VIEW_COOKIE_SECRET');
 if (typeof rawViewCookieSecret !== 'string' || rawViewCookieSecret.length < 32) {
-  process.env['TAU_VIEW_COOKIE_SECRET'] = 'test-view-cookie-secret-min-32-chars';
+  process.env.TAU_VIEW_COOKIE_SECRET = 'test-view-cookie-secret-min-32-chars';
 }
 
 if (!Reflect.has(globalThis, 'DOMMatrix')) {
@@ -41,7 +41,7 @@ if (!Reflect.has(globalThis, 'Path2D')) {
   Reflect.set(globalThis, 'Path2D', TestPath2D);
 }
 
-// Global test setup for the API server libraries (the same as apps/api/vitest.setup.ts)
+// Global test setup for NestJS API
 beforeEach(async () => {
   // Setup before each test
   // E.g., clear database, reset mocks

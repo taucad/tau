@@ -4,8 +4,8 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
 import type { BetterAuthService } from '#auth/better-auth.service.js';
 import type { Environment } from '@taucad/api-core';
-import type { DatabaseService } from '#database/database.service.js';
-import type { account, githubGistPreference } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { account, githubGistPreference } from '@taucad/api-database/schema';
 import { GithubGistService } from '#api/github/github-gist.service.js';
 
 const revision = 'a'.repeat(40);

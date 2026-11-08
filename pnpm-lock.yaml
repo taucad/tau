@@ -2322,7 +2322,54 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
 
-  apps/libs/api-database: {}
+  apps/libs/api-database:
+    dependencies:
+      '@nestjs/common':
+        specifier: 'catalog:'
+        version: 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/config':
+        specifier: ^4.0.4
+        version: 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@taucad/api-core':
+        specifier: workspace:*
+        version: link:../api-core
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../billing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)
+      nestjs-pino:
+        specifier: ^4.6.1
+        version: 4.6.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@10.5.0)(pino@10.4.0)(rxjs@7.8.2)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      '@nestjs/testing':
+        specifier: 'catalog:'
+        version: 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
+      dotenv:
+        specifier: 'catalog:'
+        version: 17.4.2
+      drizzle-kit:
+        specifier: ^0.31.10
+        version: 0.31.11
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
 
   apps/libs/api-email: {}
 

@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';

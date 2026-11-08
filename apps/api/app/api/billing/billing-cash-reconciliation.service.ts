@@ -6,7 +6,7 @@ import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from '
 import type { Stripe } from 'stripe';
 import { z } from 'zod';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import {
   billingCashFact,
   billingCashScan,
@@ -20,7 +20,7 @@ import {
   billingStripeCustomer,
   creditAccount,
   creditTransaction,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import {
   listStripeBalancePage,
   listStripeChargePage,
@@ -31,7 +31,7 @@ import {
   retrieveStripeCustomer,
   retrieveStripePaymentIntent,
 } from '#api/billing/billing-cash-stripe.js';
-import { paidPaymentEvidenceSchema } from '#api/billing/billing-payment-contract.js';
+import { paidPaymentEvidenceSchema } from '@taucad/api-database/schema/billing-payment.types';
 import { journalBlockingFinancialCaseKinds } from '#api/billing/billing-journal-reconciliation.service.js';
 import { purchaseBlockingFinancialCaseKinds } from '#api/billing/billing-purchase-reconciliation.service.js';
 

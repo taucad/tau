@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TauMetrics } from '@taucad/telemetry';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';

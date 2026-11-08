@@ -8,8 +8,14 @@ import { mockDeep } from 'vitest-mock-extended';
 import { eq, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { billingFinancialCase, creditAccount, creditOperation, supplierCostEvidence, user } from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
+import {
+  billingFinancialCase,
+  creditAccount,
+  creditOperation,
+  supplierCostEvidence,
+  user,
+} from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import {

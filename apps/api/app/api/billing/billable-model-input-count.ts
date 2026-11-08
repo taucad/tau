@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
-import type { BillingEnvironment, InputCountEvidence } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment, InputCountEvidence } from '@taucad/api-database/schema/billing.types';
 
 const countModels = new Set([
   'gpt-6.1-terra',

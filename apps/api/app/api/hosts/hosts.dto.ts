@@ -1,7 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-import { agentRunStates } from '#database/schema.js';
+import { agentRunStates } from '@taucad/api-database/schema';
 
 export const createHostPairingSchema = z.object({
   deviceLabel: z.string().trim().min(1).max(100),

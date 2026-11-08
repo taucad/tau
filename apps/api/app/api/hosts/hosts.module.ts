@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { HostsController } from '#api/hosts/hosts.controller.js';
 import { HostsGateway } from '#api/hosts/hosts.gateway.js';
 import { HostsService } from '#api/hosts/hosts.service.js';

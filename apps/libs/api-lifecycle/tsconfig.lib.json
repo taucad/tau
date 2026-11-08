@@ -9,6 +9,6 @@
     "target": "ESNext",
     "erasableSyntaxOnly": false
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../api-core/src/types/environment.d.ts"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts"]
 }

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import { billingPolicy, billingPolicyActivation, billingPolicyHead } from '#database/schema.js';
+import { billingPolicy, billingPolicyActivation, billingPolicyHead } from '@taucad/api-database/schema';
 import { validateCommercialPolicy } from '#api/billing/billing-policy.js';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 
 /** Seeds synthetic test tariffs atomically; it does not exercise publication notice eligibility. */
 export async function seedBillingFixturePolicy(input: {

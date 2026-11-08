@@ -13,7 +13,7 @@ import type {
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { ObservedModelInvocationService } from '#api/agent-observability/model-invocation-observer.js';
-import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 import type { Environment } from '@taucad/api-core';
 
 @Injectable()

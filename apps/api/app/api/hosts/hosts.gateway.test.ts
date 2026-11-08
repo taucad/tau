@@ -13,7 +13,7 @@ import { HostsService } from '#api/hosts/hosts.service.js';
 import type { DevWebSocketService, WebSocketConnectionHandler } from '@taucad/api-lifecycle';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { RedisService } from '#redis/redis.service.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { UpgradeRouter } from '@taucad/api-lifecycle';

@@ -3,7 +3,7 @@ import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { runMigrationJob } from '#database/database-migration.js';
+import { runMigrationJob } from '#database-migration.js';
 
 /**
  * The release command against a lock another session holds. Every deploy re-runs

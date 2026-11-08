@@ -1,7 +1,7 @@
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';

@@ -1,5 +1,5 @@
 import { ceilRationalCreditAtoms } from '@taucad/billing';
-import type { JointInputMaximum } from '#api/billing/credit-ledger.types.js';
+import type { JointInputMaximum } from '@taucad/api-database/schema/billing.types';
 
 /** Prices independent meter maxima, or the qualified single disjoint input partition. */
 export const maximumMeterCharge = (

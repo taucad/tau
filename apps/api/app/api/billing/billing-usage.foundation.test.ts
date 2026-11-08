@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingOwnerBinding,
   billingPolicyActivation,
@@ -13,7 +13,7 @@ import {
   creditOperation,
   creditTransaction,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';

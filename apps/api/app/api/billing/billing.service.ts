@@ -4,14 +4,14 @@ import type Stripe from 'stripe';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Entitlements, SubscriptionStatus } from '@taucad/billing';
 import { entitlementsFromTier, financialEnvironmentSchema } from '@taucad/billing';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import {
   billingOwnerBinding,
   billingStripeCustomer,
   subscription,
   subscriptionExtension,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import type { Environment } from '@taucad/api-core';
 import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
 import { Span } from '@taucad/api-observability';

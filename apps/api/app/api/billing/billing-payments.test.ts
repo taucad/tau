@@ -9,7 +9,7 @@ import {
   qualifySubscriptionInvoice,
 } from '#api/billing/billing-payments.recovery.js';
 import { cashOccurredAt } from '#api/billing/billing-payment-contract.js';
-import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import type { PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe source fixtures preserve provider response field names. */
 

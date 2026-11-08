@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
 import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';

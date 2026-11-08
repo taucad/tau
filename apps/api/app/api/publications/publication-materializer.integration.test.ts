@@ -43,7 +43,7 @@ import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/objec
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 
 // Real lifecycle lock interleavings live in publication-deletion.integration.test.ts.
-vi.mock('#database/project-lifecycle.js', () => ({ assertProjectActive: vi.fn() }));
+vi.mock('@taucad/api-database/project-lifecycle', () => ({ assertProjectActive: vi.fn() }));
 
 /**
  * The runner the API passes in, as a plain `spawnSync` so the suite exercises

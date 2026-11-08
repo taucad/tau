@@ -20,8 +20,8 @@ import { ConfigService } from '@nestjs/config';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Environment } from '@taucad/api-core';
-import { DatabaseService } from '#database/database.service.js';
-import { githubConnection, githubRepositoryWrite } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { githubConnection, githubRepositoryWrite } from '@taucad/api-database/schema';
 import { RedisService } from '#redis/redis.service.js';
 
 const apiVersion = '2026-03-10';

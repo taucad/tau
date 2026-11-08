@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import {
   billableModelRouteMeters,

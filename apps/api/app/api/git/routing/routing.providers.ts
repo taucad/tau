@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap -- NestJS's Logger is a class the module instantiates once */
 import { Logger } from '@nestjs/common';
 import type { Provider } from '@nestjs/common';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import { RedisService } from '#redis/redis.service.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';

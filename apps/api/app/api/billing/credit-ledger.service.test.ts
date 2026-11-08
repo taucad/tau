@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CreditLedgerService, recordSettledGenAiUsage } from '#api/billing/credit-ledger.service.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 
 const attributes = {

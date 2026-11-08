@@ -1,7 +1,7 @@
 import { withBillableEvidenceCollector } from '#api/billing/billable-model-qualification.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
-import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 import {
   executeGatewayProviderRequest,
   gatewayModelRoutes,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateSupplierCost } from '#api/billing/billable-model-cost.js';
-import type { NormalizedMeterItem, SupplierValuation } from '#api/billing/credit-ledger.types.js';
+import type { NormalizedMeterItem } from '#api/billing/credit-ledger.types.js';
+import type { SupplierValuation } from '@taucad/api-database/schema/billing.types';
 
 const untiered = (baseRates: SupplierValuation['baseRates']): SupplierValuation => ({
   version: 'supplier-valuation-v1',

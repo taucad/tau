@@ -21,10 +21,10 @@ import {
 } from '@taucad/billing';
 import type { WireBalanceExplanation, WireOpenHolds, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
 import { CreditLedgerService, recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
-import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { DatabaseService } from '#database/database.service.js';
-import type { DatabaseType } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import type { DatabaseType } from '@taucad/api-database';
 
 type Tx = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 type QueryDatabase = Pick<DatabaseType, 'transaction'>;

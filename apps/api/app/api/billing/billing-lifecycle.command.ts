@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Stripe } from 'stripe';
 import { financialEnvironmentSchema, financialIdentitySchema } from '@taucad/billing';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';

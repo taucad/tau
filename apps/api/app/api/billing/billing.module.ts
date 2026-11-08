@@ -4,7 +4,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Stripe } from 'stripe';
 import { financialEnvironmentSchema } from '@taucad/billing';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { BillingRecoveryScheduler, recoveryPassLimit } from '#api/billing/billing-recovery.scheduler.js';
@@ -14,7 +14,6 @@ import { BillingPaymentsService } from '#api/billing/billing-payments.service.js
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { resolveBillingCollection } from '#api/billing/billing-collection.js';
-import { DatabaseModule } from '#database/database.module.js';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
 import { ModelModule } from '#api/models/model.module.js';

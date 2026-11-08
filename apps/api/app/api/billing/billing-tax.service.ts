@@ -5,15 +5,12 @@ import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type Stripe from 'stripe';
 import type { WireFinancialCase } from '@taucad/billing';
-import {
-  cashProjectionDigest,
-  cashProjectionEvidenceSchema,
-  paidPaymentEvidenceSchema,
-} from '#api/billing/billing-payment-contract.js';
-import type { PaidPaymentEvidence } from '#api/billing/billing-payment-contract.js';
+import { cashProjectionDigest, cashProjectionEvidenceSchema } from '#api/billing/billing-payment-contract.js';
+import { paidPaymentEvidenceSchema } from '@taucad/api-database/schema/billing-payment.types';
+import type { PaidPaymentEvidence } from '@taucad/api-database/schema/billing-payment.types';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { StripeTaxTransactionEvidence } from '#api/billing/billing-stripe.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import {
   billingFinancialCase,
   billingOwnerBinding,
@@ -22,7 +19,7 @@ import {
   billingReversalCase,
   billingStripeSource,
   billingTaxFact,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 
 export type DatabaseTransaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
 

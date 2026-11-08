@@ -1,8 +1,8 @@
 import { storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { billingOwnerBinding, subscription, subscriptionExtension } from '#database/schema.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { billingOwnerBinding, subscription, subscriptionExtension } from '@taucad/api-database/schema';
 import { subscriptionTierOf } from '#api/billing/subscription-tier.js';
 import type { TierSubscription } from '#api/billing/subscription-tier.js';
 

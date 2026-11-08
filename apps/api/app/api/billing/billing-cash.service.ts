@@ -16,14 +16,14 @@ import {
 } from '#api/billing/billing-payment-contract.js';
 import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import {
   billingProviderLeg,
   billingRefundIntent,
   billingReversalCase,
   billingStripeSource,
   creditAccount,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import {
   createStripeRefundOnce,
   listStripeDisputePage,

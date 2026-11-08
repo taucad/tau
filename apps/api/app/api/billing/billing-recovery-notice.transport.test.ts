@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 
 type OwnerRows = ReadonlyArray<{ readonly email: string }>;
 

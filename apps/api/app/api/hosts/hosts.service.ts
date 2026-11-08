@@ -17,8 +17,8 @@ import type { WebSocket } from 'ws';
 import { z } from 'zod';
 
 import type { Environment } from '@taucad/api-core';
-import { DatabaseService } from '#database/database.service.js';
-import { agentRun, hostDevice, project, user } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { agentRun, hostDevice, project, user } from '@taucad/api-database/schema';
 import { RedisService } from '#redis/redis.service.js';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
 import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';

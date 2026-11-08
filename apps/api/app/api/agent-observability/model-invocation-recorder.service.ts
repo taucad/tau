@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { billingOwnerBinding } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { billingOwnerBinding } from '@taucad/api-database/schema';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';

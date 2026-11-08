@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { mock } from 'vitest-mock-extended';
 import { getLoggerToken } from 'nestjs-pino';
 import type { PinoLogger } from 'nestjs-pino';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '#database.service.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys and postgres.js option names */
 
@@ -19,7 +19,7 @@ const { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres } = vi.hoist
   return { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres };
 });
 
-vi.mock('#database/database-migration.js', () => ({
+vi.mock('#database-migration.js', () => ({
   assertSchemaCompatibility: mockAssertCompatibility,
 }));
 

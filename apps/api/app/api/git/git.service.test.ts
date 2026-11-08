@@ -35,7 +35,7 @@ import {
   hydratesPerCallerPerDay,
   incompleteRepositoryMarker,
 } from '#api/git/git.constants.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -78,12 +78,12 @@ import type {
   StoredObject,
 } from '#api/git/store/port.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
-import { project, projectDeletion, projectGit, user } from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
+import { project, projectDeletion, projectGit, user } from '@taucad/api-database/schema';
 
 /* Every lease is still a real one; the spy is how DB1 shows an advertisement builds none. */
 vi.mock('#api/git/store/lease.js', async (importOriginal) => {

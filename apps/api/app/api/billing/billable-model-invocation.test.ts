@@ -22,7 +22,7 @@ import type {
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';

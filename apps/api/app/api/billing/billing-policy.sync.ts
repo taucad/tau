@@ -13,7 +13,7 @@ import {
 } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy, FinancialEnvironment, ValidatedCommercialPolicy } from '#api/billing/billing-policy.js';
 import type { BillingPolicyService, PolicyReplica } from '#api/billing/billing-policy.service.js';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 
 /* The overlay reuses the document's own sub-schemas so a change to an offer or the promotion
  * cannot drift between the two files; only the four keys the overlay adds are written here. */

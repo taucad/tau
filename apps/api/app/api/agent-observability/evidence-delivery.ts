@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { agentEvidenceOutbox, agentEvidenceReceipt } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { agentEvidenceOutbox, agentEvidenceReceipt } from '@taucad/api-database/schema';
 import { stricterProtection } from '#api/agent-observability/evidence-admission.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 

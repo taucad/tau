@@ -3,10 +3,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import { seedPaidPurchase, fulfillPaidFixture } from '#testing/billing-payment.fixture.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];

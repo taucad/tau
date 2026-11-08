@@ -4,8 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { Environment } from '@taucad/api-core';
-import { assertSchemaCompatibility } from '#database/database-migration.js';
-import * as schema from '#database/schema.js';
+import { assertSchemaCompatibility } from '@taucad/api-database/migration';
+import * as schema from '@taucad/api-database/schema';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
@@ -23,7 +23,7 @@ import { runRetentionSweep } from '#api/git/mirror/retention.js';
 import { R2MirrorSource } from '#api/git/mirror/source.js';
 import { PostgresMirrorLedger } from '#api/git/mirror/watermark.js';
 import { exportBacklog, runMirrorWorker } from '#api/git/mirror/worker.js';
-import { applicationNameOf } from '#database/application-name.js';
+import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
  * `tau-mirror`: the B2 second copy's copier (W13 DM1, B3a). It runs in its own

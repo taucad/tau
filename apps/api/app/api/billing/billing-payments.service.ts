@@ -22,15 +22,17 @@ import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.servic
 import {
   activePurchaseStates,
   cashOccurredAt,
-  checkoutExpiryEvidenceSchema,
   exactPaymentOfferTotals,
+} from '#api/billing/billing-payment-contract.js';
+import {
+  checkoutExpiryEvidenceSchema,
   noChargeEvidenceSchema,
   paidPaymentEvidenceSchema,
   paymentCheckoutExpiryEvidenceSchema,
   paymentOfferSnapshotSchema,
   subscriptionCheckoutExpiryEvidenceSchema,
-} from '#api/billing/billing-payment-contract.js';
-import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+} from '@taucad/api-database/schema/billing-payment.types';
+import type { PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import {
   cancelStripePaymentIntent,
   createStripeReloadTaxCalculationOnce,
@@ -68,7 +70,7 @@ import {
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { collectionMatchesScope } from '#api/billing/billing-collection.js';
 import type { BillingCollection } from '#api/billing/billing-collection.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import { desktopAppOrigin } from '@taucad/api-core/utils/cors';
 import {
   billingOwnerBinding,
@@ -85,7 +87,7 @@ import {
   stripeEventInbox,
   subscription,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 
 type Database = DatabaseService['database'];
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];

@@ -16,7 +16,7 @@ import { AuthGuard } from '#auth/auth.guard.js';
 import type { Environment } from '@taucad/api-core';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import type { RedisService } from '#redis/redis.service.js';
 

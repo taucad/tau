@@ -1,9 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
-import { projectGitLfsObject } from '#database/schema.js';
+import type { Database, OwnerLockTransaction } from '@taucad/api-database/owner-lock';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { projectGitLfsObject } from '@taucad/api-database/schema';
 
 /*
  * The LFS reachability marks (D6), apart from the walk that finds them: tau-api

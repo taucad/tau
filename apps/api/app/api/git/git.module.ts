@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import type { MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';

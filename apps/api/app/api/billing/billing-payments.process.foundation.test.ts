@@ -8,14 +8,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type {
   NoChargeEvidence,
   PaidPaymentEvidence,
   PaymentOfferSnapshot,
-} from '#api/billing/billing-payment-contract.js';
+} from '@taucad/api-database/schema/billing-payment.types';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import { qualifyReloadCustomerLocation } from '#api/billing/billing-payments.recovery.js';
 

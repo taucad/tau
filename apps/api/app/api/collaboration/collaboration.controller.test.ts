@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { OwnerLockTransaction } from '#database/owner-lock.js';
+import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
-import type { DatabaseService } from '#database/database.service.js';
-import { projectCollaborator, projectInvitation, user } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { projectCollaborator, projectInvitation, user } from '@taucad/api-database/schema';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { CollaboratorsController, InvitationsController } from '#api/collaboration/collaboration.controller.js';

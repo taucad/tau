@@ -32,9 +32,9 @@ import {
   isPublishableTauPath,
 } from '@taucad/types/constants';
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
-import type { DatabaseService } from '#database/database.service.js';
-import * as schema from '#database/schema.js';
-import { assertProjectActive } from '#database/project-lifecycle.js';
+import type { DatabaseService } from '@taucad/api-database';
+import * as schema from '@taucad/api-database/schema';
+import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';

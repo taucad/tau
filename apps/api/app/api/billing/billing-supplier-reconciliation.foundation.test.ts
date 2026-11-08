@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { and, eq, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingFinancialCase,
   creditAccount,
@@ -11,14 +11,15 @@ import {
   creditTransaction,
   supplierCostEvidence,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import { seedPaidPurchase, fulfillPaidFixture } from '#testing/billing-payment.fixture.js';
-import type { QualifiedAdmissionInput, SupplierValuation, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import type { SupplierValuation } from '@taucad/api-database/schema/billing.types';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (databaseUrl === undefined || process.env['BILLING_TEST_OWNED'] === undefined) {

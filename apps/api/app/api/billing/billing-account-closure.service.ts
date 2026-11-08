@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { activePurchaseStates } from '#api/billing/billing-payment-contract.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import {
   billingAccountClosure,
   billingOwnerBinding,
@@ -14,7 +14,7 @@ import {
   billingReloadConsent,
   creditAccount,
   subscription,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 
 type Database = DatabaseService['database'];
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];

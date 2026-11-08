@@ -18,7 +18,7 @@ import { mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingBudget,
   billingBudgetFunding,
@@ -28,7 +28,7 @@ import {
   creditAccount,
   creditOperation,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
@@ -55,7 +55,7 @@ import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 

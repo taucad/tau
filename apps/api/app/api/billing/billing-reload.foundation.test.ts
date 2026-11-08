@@ -8,7 +8,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { Stripe } from 'stripe';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingProviderLeg,
   billingPurchase,
@@ -16,7 +16,7 @@ import {
   billingReloadWork,
   creditAccount,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';

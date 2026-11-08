@@ -10,8 +10,8 @@ import type {
 import { digestJobDefinition, matchJobCapabilities } from '@taucad/jobs';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { DatabaseType } from '#database/database.service.js';
-import { DatabaseService } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { DatabaseService } from '@taucad/api-database';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import {
   durableStream,
@@ -21,7 +21,7 @@ import {
   jobDispatchOutbox,
   jobRunner,
   jobRun,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import type { DurableStreamEvent } from '#api/durable-events/durable-events.types.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import { jobArtifactStorageKey, verifyJobArtifactStream } from '#api/jobs/job-artifacts.js';

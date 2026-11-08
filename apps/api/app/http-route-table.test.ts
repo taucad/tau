@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import { isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import { getEnvironment } from '@taucad/api-core';
 
 /**

@@ -11,7 +11,7 @@ import {
 import type { CashDisputeSource, ReviewedRefundRequest } from '#api/billing/billing-cash.service.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 
 const refund = (
   input: Partial<Stripe.Refund> & Pick<Stripe.Refund, 'id' | 'amount' | 'status'>,

@@ -1,22 +1,20 @@
 import type { PaidCauseReceipt } from '#api/billing/credit-ledger.types.js';
 import { and, eq, sql } from 'drizzle-orm';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { paidPaymentEvidenceSchema, cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
+import { cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
+import { paidPaymentEvidenceSchema } from '@taucad/api-database/schema/billing-payment.types';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import {
   billingPurchase,
   billingPeriod,
   billingStripeCustomer,
   billingStripeSource,
   creditAccount,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type {
-  PaymentOfferSnapshot,
-  PaidPaymentEvidence,
-  CashProjectionEvidence,
-} from '#api/billing/billing-payment-contract.js';
+import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
+import type { PaymentOfferSnapshot, PaidPaymentEvidence } from '@taucad/api-database/schema/billing-payment.types';
 
 /** Explicit controlled source facts for ledger tests; HTTP source qualification is tested separately. */
 export async function seedPaidPurchase(input: {

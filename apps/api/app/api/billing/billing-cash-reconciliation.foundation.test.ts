@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { cashProjectionDigest, cashProjectionEvidenceSchema } from '#api/billing/billing-payment-contract.js';
 import {
   BillingCashReconciliationService,

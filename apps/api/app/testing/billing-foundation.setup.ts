@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import postgres from 'postgres';
-import { installBillingProtections } from '#database/billing-protections.js';
+import { installBillingProtections } from '@taucad/api-database/billing-protections';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 
@@ -38,7 +38,9 @@ export default async function setup(): Promise<void> {
       throw new Error('Fixture target proof failed');
     }
     console.log('Verified test-owned PostgreSQL target billing_test; applying migrations');
-    await migrate(drizzle(client), { migrationsFolder: resolve(import.meta.dirname, '../database/migrations') });
+    await migrate(drizzle(client), {
+      migrationsFolder: resolve(import.meta.dirname, '../../../libs/api-database/src/migrations'),
+    });
     await installBillingProtections(client);
   } finally {
     await client.end();

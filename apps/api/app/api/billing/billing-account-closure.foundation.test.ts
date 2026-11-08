@@ -15,9 +15,9 @@ import type { BillingCashQualification } from '#api/billing/billing-payments.ser
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { billingAccountClosure, billingOwnerBinding } from '#database/schema.js';
-import * as schema from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { billingAccountClosure, billingOwnerBinding } from '@taucad/api-database/schema';
+import * as schema from '@taucad/api-database/schema';
 import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
 
 describe('account closure cancellation boundary', () => {

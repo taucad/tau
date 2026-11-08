@@ -1,6 +1,6 @@
 import { sql, eq, and, isNull } from 'drizzle-orm';
-import type { DatabaseService } from '#database/database.service.js';
-import { project, projectGit, projectDeletion } from '#database/schema.js';
+import type { DatabaseService } from '#database.service.js';
+import { project, projectGit, projectDeletion } from '#schema/index.js';
 
 /** The Drizzle handle every caller holds. */
 export type Database = DatabaseService['database'];

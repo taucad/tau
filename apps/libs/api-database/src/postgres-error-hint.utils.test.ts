@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapPostgresErrorToHint } from '#database/postgres-error-hint.utils.js';
+import { mapPostgresErrorToHint } from '#postgres-error-hint.utils.js';
 
 describe('mapPostgresErrorToHint', () => {
   describe('top-level error.code', () => {

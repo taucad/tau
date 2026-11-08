@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { EmailModule } from '#email/email.module.js';
 import { GitModule } from '#api/git/git.module.js';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';

@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 
 describe('DatabaseHealthIndicator', () => {
   let indicator: DatabaseHealthIndicator;

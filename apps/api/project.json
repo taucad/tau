@@ -62,37 +62,16 @@
         "command": "fly launch --config ./apps/api/fly.prod.toml"
       }
     },
-    "db-generate": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "drizzle-kit generate",
-        "cwd": "{projectRoot}"
-      }
-    },
     "db-migrate": {
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and — with TAU_CLOUD_ENABLED=true — derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
+        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and \u2014 with TAU_CLOUD_ENABLED=true \u2014 derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
       },
       "dependsOn": ["build:billing-command"],
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js migrate --environment development --commercial-file infra/billing/development.commercial.json"
-      }
-    },
-    "db-studio": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "drizzle-kit studio",
-        "cwd": "{projectRoot}"
-      }
-    },
-    "db-push": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "drizzle-kit push",
-        "cwd": "{projectRoot}"
       }
     },
     "test:models": {
@@ -273,7 +252,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=…` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
+        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=\u2026` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
       },
       "dependsOn": ["build:billing-command"],
       "options": {

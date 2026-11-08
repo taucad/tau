@@ -6,13 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { cashOccurredAt, cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
-import type {
-  CashProjectionEvidence,
-  PaidPaymentEvidence,
-  PaymentOfferSnapshot,
-} from '#api/billing/billing-payment-contract.js';
+import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
+import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import type { QualifiedCashSource } from '#api/billing/billing-cash.service.js';

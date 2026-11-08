@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Loopback fixtures preserve exact Stripe field names. */
-import { paymentOfferSnapshotSchema } from '#api/billing/billing-payment-contract.js';
-import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import { paymentOfferSnapshotSchema } from '@taucad/api-database/schema/billing-payment.types';
+import type { PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';

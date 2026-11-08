@@ -1,12 +1,14 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
 import { spendBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
-  paymentOfferSnapshotSchema,
-  paidPaymentEvidenceSchema,
   cashProjectionCoversRetained,
   cashProjectionEvidenceSchema,
   cashProjectionDigest,
 } from '#api/billing/billing-payment-contract.js';
+import {
+  paymentOfferSnapshotSchema,
+  paidPaymentEvidenceSchema,
+} from '@taucad/api-database/schema/billing-payment.types';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { calculateSupplierCost } from '#api/billing/billable-model-cost.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
@@ -22,7 +24,7 @@ import {
   billingExecutionStatusSchema,
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
-import { DatabaseService } from '#database/database.service.js';
+import { DatabaseService } from '@taucad/api-database';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
@@ -49,12 +51,11 @@ import {
   creditOperation,
   creditTransaction,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import type {
   AccountSnapshot,
   AdmissionResult,
   AdmissionDenial,
-  BillingEnvironment,
   CompensationInput,
   CashDispositionInput,
   FundedLlmCapacityPool,
@@ -72,6 +73,7 @@ import type {
   TerminalizeInput,
   TerminalReceipt,
 } from '#api/billing/credit-ledger.types.js';
+import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 
 type Tx = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
 type Account = typeof creditAccount.$inferSelect;

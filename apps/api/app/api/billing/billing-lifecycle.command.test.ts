@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Stripe } from 'stripe';
 import { mockDeep } from 'vitest-mock-extended';
 import { ZodError } from 'zod';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { assertRefundKey, runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { maximumRefundReasonLength } from '#api/billing/billing-cash.service.js';

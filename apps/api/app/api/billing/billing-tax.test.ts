@@ -7,7 +7,7 @@ import {
   taxFactEvidenceSchema,
 } from '#api/billing/billing-tax.service.js';
 import type Stripe from 'stripe';
-import type { PaidPaymentEvidence } from '#api/billing/billing-payment-contract.js';
+import type { PaidPaymentEvidence } from '@taucad/api-database/schema/billing-payment.types';
 
 const evidence = (overrides: Record<string, unknown> = {}) =>
   taxFactEvidenceSchema.parse({

@@ -5,7 +5,7 @@ import { ConflictException, Injectable, ServiceUnavailableException } from '@nes
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import {
   billingCashFact,
   billingCashScan,
@@ -19,7 +19,7 @@ import {
   creditAccount,
   creditTransaction,
   subscription,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { retrieveStripePaymentIntent } from '#api/billing/billing-cash-stripe.js';
 import { isStripeSubscriptionEnding } from '#api/billing/billing-stripe.js';
 

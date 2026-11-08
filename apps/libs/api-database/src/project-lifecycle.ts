@@ -1,7 +1,7 @@
 import { GoneException, NotFoundException } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
-import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
-import { projectDeletion } from '#database/schema.js';
+import type { Database, OwnerLockTransaction } from '#owner-lock.js';
+import { projectDeletion } from '#schema/index.js';
 
 type LifecycleDatabase = Pick<Database, 'select'>;
 

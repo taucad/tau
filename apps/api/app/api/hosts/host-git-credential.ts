@@ -2,8 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
-import type { DatabaseService } from '#database/database.service.js';
-import { hostDevice } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { hostDevice } from '@taucad/api-database/schema';
 
 /**
  * A cloud host's repository-scoped push credential (D21, I10): the third

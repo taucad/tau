@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { environmentSchemaBase } from '@taucad/api-core';
 import type { Environment } from '@taucad/api-core';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 
 type Tx = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];

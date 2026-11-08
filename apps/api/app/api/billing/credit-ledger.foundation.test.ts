@@ -6,7 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingBudget,
   billingBudgetFunding,
@@ -22,7 +22,7 @@ import {
   creditOperation,
   supplierCostEvidence,
   user,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { allocateSources, creditDebtFirst, CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';

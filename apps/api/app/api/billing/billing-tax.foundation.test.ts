@@ -10,13 +10,14 @@ import type {
   TaxSourceClaim,
 } from '#api/billing/billing-tax.service.js';
 import { cashProjectionDigest } from '#api/billing/billing-payment-contract.js';
-import type { CashProjectionEvidence, PaidPaymentEvidence } from '#api/billing/billing-payment-contract.js';
+import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
+import type { PaidPaymentEvidence } from '@taucad/api-database/schema/billing-payment.types';
 import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import type Stripe from 'stripe';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');

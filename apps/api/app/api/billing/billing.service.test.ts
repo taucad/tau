@@ -5,9 +5,9 @@ import type Stripe from 'stripe';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BillingService } from '#api/billing/billing.service.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { Environment } from '@taucad/api-core';
-import type { subscription, user, billingOwnerBinding, billingStripeCustomer } from '#database/schema.js';
+import type { subscription, user, billingOwnerBinding, billingStripeCustomer } from '@taucad/api-database/schema';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
 
 vi.mock('#api/billing/resolve-default-card.js', () => ({ resolveDefaultCard: vi.fn() }));

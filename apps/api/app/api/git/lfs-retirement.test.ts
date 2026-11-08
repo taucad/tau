@@ -17,10 +17,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { getEnvironment } from '@taucad/api-core';
 import type { Environment } from '@taucad/api-core';
-import { DatabaseService } from '#database/database.service.js';
-import type { Database } from '#database/owner-lock.js';
-import { project, projectGit, projectGitLfsObject, user } from '#database/schema.js';
-import * as schema from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { project, projectGit, projectGitLfsObject, user } from '@taucad/api-database/schema';
+import * as schema from '@taucad/api-database/schema';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
@@ -39,7 +39,7 @@ import {
   retireDueLfsObjects as streamDueLfsObjects,
   retireLfsObjects as streamLfsObjects,
 } from '#api/git/lfs-retirement.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 const retireLfsObjects = async (...args: Parameters<typeof streamLfsObjects>) => {
   const batches = await Array.fromAsync(streamLfsObjects(...args));

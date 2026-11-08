@@ -1,4 +1,4 @@
-import type { Environment } from '@taucad/api-core';
+import type { Environment } from '#environment.config.js';
 
 declare global {
   namespace NodeJS {

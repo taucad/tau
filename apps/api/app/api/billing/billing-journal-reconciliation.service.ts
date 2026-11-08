@@ -4,9 +4,14 @@ import { ConflictException, Injectable, ServiceUnavailableException } from '@nes
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
-import { billingFinancialCase, billingJournalCheckpoint, creditAccount, creditTransaction } from '#database/schema.js';
+import {
+  billingFinancialCase,
+  billingJournalCheckpoint,
+  creditAccount,
+  creditTransaction,
+} from '@taucad/api-database/schema';
 
 type Checkpoint = typeof billingJournalCheckpoint.$inferSelect;
 type Transaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];

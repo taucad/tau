@@ -1,6 +1,6 @@
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
-import type { creditOperation } from '#database/schema.js';
+import type { creditOperation } from '@taucad/api-database/schema';
 import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';

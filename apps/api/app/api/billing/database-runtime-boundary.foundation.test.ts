@@ -8,7 +8,7 @@ import {
   readAppliedMigrations,
   readMigrationHead,
   runMigrationJob,
-} from '#database/database-migration.js';
+} from '@taucad/api-database/migration';
 
 /**
  * Native evidence for the T3 runtime boundary on the disposable PostgreSQL 17 cluster.

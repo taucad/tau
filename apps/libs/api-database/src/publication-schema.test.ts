@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
-import * as schema from '#database/schema.js';
+import * as schema from '#schema/index.js';
 import { databaseReachable } from '#testing/database-reachable.js';
 
 const rawDatabaseEnv = process.env.DATABASE_URL;

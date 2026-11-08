@@ -76,12 +76,12 @@ export default defineConfig(({ command, mode }) => {
         environment: 'ssr',
         targets: [
           {
-            src: 'app/database/migrations/**/*',
+            src: '../libs/api-database/src/migrations/**/*',
             dest: 'migrations',
-            // Strip the `app/database/migrations/` prefix so files land at
+            // Strip the `../libs/api-database/src/migrations/` prefix so files land at
             // `dist/migrations/<file>` (drizzle expects `meta/_journal.json`
             // directly under the migrations folder).
-            rename: { stripBase: 3 },
+            rename: { stripBase: 4 },
           },
         ],
       }),

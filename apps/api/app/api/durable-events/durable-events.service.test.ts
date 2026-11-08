@@ -3,7 +3,7 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import type { Redis } from 'ioredis';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { DurableStreamReadOutcome } from '#api/durable-events/durable-events.types.js';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import type { RedisService } from '#redis/redis.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';

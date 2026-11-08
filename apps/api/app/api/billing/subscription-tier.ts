@@ -1,5 +1,5 @@
 import type { BillingTier } from '@taucad/billing';
-import type { subscription } from '#database/schema.js';
+import type { subscription } from '@taucad/api-database/schema';
 
 /** The subscription fields that decide an owner's tier. */
 export type TierSubscription = Pick<

@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { BillingRecoveryNoticeTransport } from '#api/billing/billing-payments.service.js';
-import { billingOwnerBinding, user } from '#database/schema.js';
-import type { DatabaseService } from '#database/database.service.js';
+import { billingOwnerBinding, user } from '@taucad/api-database/schema';
+import type { DatabaseService } from '@taucad/api-database';
 import type { EmailService } from '#email/email.service.js';
 
 /** The three senders this transport needs from `EmailService`; a test supplies exactly these. */

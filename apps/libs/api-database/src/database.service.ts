@@ -6,11 +6,11 @@ import postgres from 'postgres';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import type { Environment } from '@taucad/api-core';
-import * as schema from '#database/schema.js';
-import { SqlLogger } from '#database/database.logger.js';
-import { assertSchemaCompatibility } from '#database/database-migration.js';
-import { mapPostgresErrorToHint } from '#database/postgres-error-hint.utils.js';
-import { applicationNameOf } from '#database/application-name.js';
+import * as schema from '#schema/index.js';
+import { SqlLogger } from '#database.logger.js';
+import { assertSchemaCompatibility } from '#database-migration.js';
+import { mapPostgresErrorToHint } from '#postgres-error-hint.utils.js';
+import { applicationNameOf } from '#application-name.js';
 
 export type DatabaseType = ReturnType<typeof drizzle<typeof schema>>;
 

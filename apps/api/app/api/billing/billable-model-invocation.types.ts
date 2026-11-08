@@ -1,12 +1,11 @@
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
+import type { MeterQuantity, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import type {
   BillingEnvironment,
-  MeterQuantity,
-  TerminalEvidence,
   SupplierValuation,
   JointInputMaximum,
   InputCountEvidence,
-} from '#api/billing/credit-ledger.types.js';
+} from '@taucad/api-database/schema/billing.types';
 import type {
   ModelInvocationIntent,
   ModelInvocationResult,

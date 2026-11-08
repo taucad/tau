@@ -4,7 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import { verifyEvidenceDigest } from '@taucad/agent-observability/identity';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';

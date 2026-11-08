@@ -3,7 +3,7 @@ import type { DynamicModule, MiddlewareConsumer, NestModule } from '@nestjs/comm
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { StorageModule } from '#storage/storage.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import type { Environment } from '@taucad/api-core';

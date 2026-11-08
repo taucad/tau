@@ -10,7 +10,7 @@ import { composeTariff, parseCommercialOverlay, syncPolicy } from '#api/billing/
 import type { CommercialOverlay } from '#api/billing/billing-policy.sync.js';
 import { runBillingPolicySyncCommand } from '#api/billing/billing-policy.command.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 
 /* The checked-in development overlay is the only tariff input an operator owns; the rest of the
  * document is derived here from the same route table the API dispatches. */

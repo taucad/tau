@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
 import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance: no usage, then
  * `error` and `response.failed`. Staging sent the same shape for GPT-6 Luna on 2026-10-09 (FD-12). */

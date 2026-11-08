@@ -4,8 +4,8 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { financialEnvironmentSchema, financialIdentitySchema } from '@taucad/billing';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
-import type { DatabaseService } from '#database/database.service.js';
-import { billingRoutePause } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { billingRoutePause } from '@taucad/api-database/schema';
 
 const routePauseRequestSchema = z
   .object({

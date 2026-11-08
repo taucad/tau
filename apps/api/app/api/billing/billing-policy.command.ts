@@ -9,7 +9,7 @@ import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import { parseCommercialOverlay, syncPolicy } from '#api/billing/billing-policy.sync.js';
 import type { PolicySyncResult } from '#api/billing/billing-policy.sync.js';
 import type { BillingPolicyService, PolicyPublicationResult } from '#api/billing/billing-policy.service.js';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 
 const commandInstantSchema = z.iso.datetime({ offset: true });
 

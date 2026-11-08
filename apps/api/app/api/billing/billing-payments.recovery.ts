@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 /* oxlint-disable typescript/no-unnecessary-condition, typescript/prefer-optional-chain -- explicit Stripe evidence guards document every required field */
 import type { Stripe } from 'stripe';
-import { paidPaymentEvidenceSchema } from '#api/billing/billing-payment-contract.js';
-import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
+import { paidPaymentEvidenceSchema } from '@taucad/api-database/schema/billing-payment.types';
+import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
 import type {
   StripeInvoiceEvidence,
   StripePaymentEvidence,

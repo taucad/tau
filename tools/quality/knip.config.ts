@@ -164,7 +164,6 @@ const config: KnipConfig = {
         // tau-storage (DC1): the Dockerfile `storage` target runs it, built by vite.storage-worker.config.ts.
         'app/storage-worker.ts',
         'app/api/**/*.module.ts',
-        'app/database/**/*.ts',
         'app/types/**/*.d.ts',
         'scripts/*.mts',
         // Started by path: `test:billing-load` runs `run.ts`, which forks `driver.ts` and boots
@@ -184,6 +183,10 @@ const config: KnipConfig = {
         // `logger/logger-factory.ts` names it as a pino transport target, which knip cannot see.
         'pino-pretty',
       ],
+    },
+    'apps/libs/api-database': {
+      // Schema, migration job and test helpers are reached by subpath, and `drizzle.config.ts` by drizzle-kit.
+      entry: ['src/**/*.ts', 'drizzle.config.ts'],
     },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.

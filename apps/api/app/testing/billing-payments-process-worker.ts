@@ -87,7 +87,7 @@ const service = new BillingPaymentsService(
   },
   policy,
   ledger,
-  new BillingCashService({ database }, stripe, stripe, ledger, {
+  new BillingCashService({ database }, stripe, ledger, {
     environment: 'development',
     stripeAccountId: 'acct_fixture',
     livemode: false,

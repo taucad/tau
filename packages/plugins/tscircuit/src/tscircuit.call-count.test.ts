@@ -98,7 +98,11 @@ describe('tscircuit presentation board call counts', () => {
     });
   });
 
-  it('should free every cross-section and solid it derives while building a board', async () => {
+  /**
+   * Spy on every `CrossSection` and solid call that returns a handle Tau's board code owns.
+   * @returns The spied prototypes and a reader for the handles still alive.
+   */
+  const trackHandles = async () => {
     const m = await getManifoldModule();
     const probe = m.CrossSection.square([1, 1]);
     const prototype = Object.getPrototypeOf(probe) as typeof probe;
@@ -113,6 +117,17 @@ describe('tscircuit presentation board call counts', () => {
       ),
       vi.spyOn(solidPrototype, 'translate'),
     ];
+    const handles = (): Array<{ isDeleted(): boolean }> =>
+      spies.flatMap((spy) =>
+        spy.mock.results
+          .filter((result) => result.type === 'return')
+          .map((result) => result.value as { isDeleted(): boolean }),
+      );
+    return { prototype, live: () => handles().filter((handle) => !handle.isDeleted()), handles };
+  };
+
+  it('should free every cross-section and solid it derives while building a board', async () => {
+    const tracked = await trackHandles();
     const circuitJson = [
       ...boardWithTrace(4),
       { type: 'pcb_silkscreen_text', layer: 'bottom', text: 'U1', font_size: 1, anchor_position: { x: 0, y: 3 } },
@@ -122,15 +137,42 @@ describe('tscircuit presentation board call counts', () => {
       { type: 'pcb_silkscreen_circle', layer: 'top', center: { x: 10, y: -3 }, radius: 1, stroke_width: 0.1 },
       { type: 'pcb_silkscreen_rect', layer: 'top', center: { x: -10, y: 3 }, width: 2, height: 1, stroke_width: 0.1 },
     ];
-    try {
-      expect(await buildPresentationBoard(new Document(), circuitJson)).toBeDefined();
-      const handles = spies.flatMap((spy) =>
-        spy.mock.results.map((result) => result.value as { isDeleted(): boolean }),
-      );
-      expect(handles.length).toBeGreaterThan(0);
-      expect(handles.filter((handle) => !handle.isDeleted())).toEqual([]);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    expect(await buildPresentationBoard(new Document(), circuitJson)).toBeDefined();
+    expect(tracked.handles().length).toBeGreaterThan(0);
+    expect(tracked.live()).toEqual([]);
+  });
+
+  it('should free the pad and mask opening of a plated hole on neither outer layer', async () => {
+    const tracked = await trackHandles();
+    const circuitJson = [
+      ...boardWithTrace(1).slice(0, 1),
+      {
+        type: 'pcb_plated_hole',
+        shape: 'circle',
+        x: 0,
+        y: 0,
+        hole_diameter: 0.8,
+        outer_diameter: 1.4,
+        layers: ['inner1'],
+      },
+    ];
+    expect(await buildPresentationBoard(new Document(), circuitJson)).toBeDefined();
+    expect(tracked.live()).toEqual([]);
+  });
+
+  it('should free every region it collected when a later region fails', async () => {
+    const tracked = await trackHandles();
+    // The plated hole's barrel wall is the first offset; its pad, opening and drill exist by then.
+    vi.mocked(tracked.prototype.offset).mockImplementation(() => {
+      throw new Error('offset failed');
+    });
+    const circuitJson = [
+      ...boardWithTrace(2),
+      { type: 'pcb_smtpad', shape: 'rect', layer: 'top', x: -15, y: -2, width: 1, height: 0.6 },
+      { type: 'pcb_plated_hole', shape: 'circle', x: 15, y: 2, hole_diameter: 0.8, outer_diameter: 1.4 },
+    ];
+    await expect(buildPresentationBoard(new Document(), circuitJson)).rejects.toThrow('offset failed');
+    expect(tracked.handles().length).toBeGreaterThan(0);
+    expect(tracked.live()).toEqual([]);
   });
 });

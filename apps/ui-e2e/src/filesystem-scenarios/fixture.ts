@@ -125,7 +125,69 @@ const textExtensions = ['ts', 'ts', 'ts', 'tsx', 'js', 'json', 'md', 'scad', 'py
 /* Every area is versioned under Tau's path policy: a root `exports/` is Tau's generated
  * output, which no revision carries, so a checkout of a tree holding it is refused. */
 const binaryAreas = ['assets/meshes', 'assets/cad', 'assets/textures', 'renders', 'scans'] as const;
-const binaryExtensions = ['stl', 'step', 'glb', 'png', '3mf'] as const;
+/* Binary formats only: STEP is text (ISO 10303-21), so the CAD part is a SolidWorks part, an OLE container. */
+const binaryExtensions = ['stl', 'sldprt', 'glb', 'png', '3mf'] as const;
+
+const encoder = new TextEncoder();
+
+const littleEndian32 = (value: number): number[] => [
+  value & 0xff,
+  (value >>> 8) & 0xff,
+  (value >>> 16) & 0xff,
+  value >>> 24,
+];
+
+/**
+ * The leading bytes a real file of the format starts with, as the binary
+ * fixture's head (S12). Every one holds a NUL within its first 64 bytes, the
+ * smallest planned size, so the production head sniff (NUL in the first
+ * 512 bytes, D4) judges every fixture binary as binary, as it would the real
+ * format; none starts with a byte-order mark. The header depends on the
+ * format and the size only, never the revision.
+ *
+ * @param path - The entry's path, whose extension names the format.
+ * @param size - The entry's size, which a GLB header records.
+ * @returns The header bytes.
+ */
+const binaryHeader = (path: string, size: number): Uint8Array<ArrayBuffer> => {
+  const extension = path.slice(path.lastIndexOf('.') + 1);
+  switch (extension) {
+    case 'png': {
+      /* Signature, then the IHDR chunk's length (13) and type. */
+      return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+    }
+    case 'glb': {
+      /* `glTF`, container version 2, total length. */
+      return new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, ...littleEndian32(size)]);
+    }
+    case 'stl': {
+      /* An 80-byte header padded with NUL (never starting `solid`, which names ASCII STL), then the triangle count. */
+      const header = new Uint8Array(84);
+      header.set(encoder.encode('tau fixture binary stl'));
+      header.set(littleEndian32(Math.max(0, Math.floor((size - 84) / 50))), 80);
+      return header;
+    }
+    case '3mf': {
+      /* A zip local file header (version 2.0, deflate) for `[Content_Types].xml`. */
+      const name = encoder.encode('[Content_Types].xml');
+      const header = new Uint8Array(30 + name.length);
+      header.set([0x50, 0x4b, 0x03, 0x04, 0x14, 0, 0, 0, 0x08, 0]);
+      header.set([name.length, 0], 26);
+      header.set(name, 30);
+      return header;
+    }
+    case 'sldprt': {
+      /* OLE compound file: signature, a zero CLSID, minor version 0x3E, major version 3, little-endian mark. */
+      const header = new Uint8Array(32);
+      header.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+      header.set([0x3e, 0, 0x03, 0, 0xfe, 0xff], 24);
+      return header;
+    }
+    default: {
+      throw new Error(`No binary header for '${path}'.`);
+    }
+  }
+};
 
 const pick = <Value>(random: () => number, values: readonly Value[]): Value =>
   values[Math.floor(random() * values.length)] as Value;
@@ -250,7 +312,6 @@ export const planFixture = (options: Readonly<{ seed: number; scale: number }>):
   };
 };
 
-const encoder = new TextEncoder();
 const words = [
   'const',
   'export',
@@ -296,7 +357,8 @@ const gitattributes = (size: number): Uint8Array<ArrayBuffer> => {
  * Generate one entry's bytes as of `revision`.
  *
  * Text is ASCII pseudo-source (valid UTF-8, newline-terminated lines), and one
- * file in ten carries {@link fixtureMarker}; binaries are seeded noise.
+ * file in ten carries {@link fixtureMarker}; a binary is its format's real
+ * header followed by seeded noise.
  *
  * @param entry - The entry.
  * @param revision - The revision whose content to generate (default 0).
@@ -317,7 +379,9 @@ export const fixtureBytes = (entry: FixtureEntry, revision = 0): Uint8Array<Arra
       state ^= state << 5;
       words32[index] = state >>> 0;
     }
-    return new Uint8Array(words32.buffer, 0, entry.size).slice();
+    const bytes = new Uint8Array(words32.buffer, 0, entry.size).slice();
+    bytes.set(binaryHeader(entry.path, entry.size).subarray(0, entry.size));
+    return bytes;
   }
   const random = createRandom(seed);
   const bytes = new Uint8Array(entry.size);

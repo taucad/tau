@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import type { Model } from '#api/models/model.schema.js';
+import type { Model } from '@taucad/chat/model-catalog';
 import { ModelService } from '#api/models/model.service.js';
 
 @Controller({ path: 'models', version: '1' })

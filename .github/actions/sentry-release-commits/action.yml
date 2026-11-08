@@ -1,0 +1,59 @@
+name: 'Sentry release commits'
+description: >-
+  Tells Sentry which commits a deployed release carries and records the deploy,
+  so "Fixes TAU-UI-123" resolves an issue in the release that ships the fix and a
+  later recurrence is flagged as a regression.
+
+# Runs in a deploy job right after it published, from the job's checkout: `--auto`
+# reads HEAD and the `origin` remote, and Sentry walks the range from the previous
+# release's commit through its GitHub integration (taucad/tau only). The release
+# name must be the one the deployed build reports in every event; it is never
+# derived here. `--ignore-missing` covers a first release, or a previous commit
+# Sentry cannot find, with the default initial depth.
+#
+# Commits and deploy markers are bookkeeping, not a deploy gate: the calling step
+# sets `continue-on-error`, so a Sentry outage leaves a warning on the run and never
+# fails a deploy that already published.
+
+inputs:
+  release:
+    description: 'The Sentry release the deployed build reports, e.g. `tau-ui@1794082059554`'
+    required: true
+  project:
+    description: 'The Sentry project slug, e.g. `tau-ui`'
+    required: true
+  environment:
+    description: 'The Sentry environment the deploy serves (`staging` or `production`)'
+    required: true
+  auth-token:
+    description: "The deploy environment's Sentry token (the source-map upload token)"
+    required: true
+  cli:
+    description: 'A sentry-cli executable; empty runs the pinned version through npx'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Attach commits and record the deploy
+      shell: bash
+      env:
+        RELEASE: ${{ inputs.release }}
+        PROJECT: ${{ inputs.project }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        SENTRY_AUTH_TOKEN: ${{ inputs.auth-token }}
+        SENTRY_ORG: taucad
+        CLI: ${{ inputs.cli }}
+      run: |
+        set -euo pipefail
+        if [ -z "$RELEASE" ]; then
+          echo "::error::No Sentry release name to attach commits to."
+          exit 1
+        fi
+        # Matches the `@sentry/cli` catalog pin in pnpm-workspace.yaml.
+        if [ -n "$CLI" ]; then cli=("$CLI"); else cli=(npx --yes @sentry/cli@3.8.0); fi
+        "${cli[@]}" releases new --project "$PROJECT" "$RELEASE"
+        "${cli[@]}" releases set-commits "$RELEASE" --auto --ignore-missing
+        "${cli[@]}" deploys new --project "$PROJECT" --release "$RELEASE" --env "$ENVIRONMENT"
+        echo "Attached commits and a $ENVIRONMENT deploy to Sentry release $RELEASE."

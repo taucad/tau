@@ -13,7 +13,12 @@ import { credentialPrincipal } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, CredentialState } from '@taucad/agent-host/launcher';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
-import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import {
+  NodeFsAuthorityHost,
+  repositoryLargeObjectStore,
+  serveNodeFsProvider,
+  toNodeFsPort,
+} from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
@@ -339,6 +344,12 @@ type AgentFileSystemAuthority = Readonly<{
   workspaceRoot: string;
   /** Candidate and linked checkout roots, by how many holders admitted each. */
   admissions: Map<string, number>;
+  /**
+   * The large-object store each root lands objects from (W11.3): the live
+   * root's own, and an admitted checkout's for as long as it is admitted. A
+   * root with none takes no large-object source.
+   */
+  largeObjectStores: Map<string, string>;
   stopServer: () => Promise<void>;
   /** The in-process channel between the two; held open only while a close is in flight (R5). */
   ports: MessageChannel;
@@ -623,7 +634,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         code: 'EACCES',
       });
     }
-    return new NodeFsProviderClient(filesystem.channel, workspaceRoot);
+    return new NodeFsProviderClient(filesystem.channel, workspaceRoot, {
+      largeObjectSources: filesystem.largeObjectStores.has(workspaceRoot),
+    });
   };
 
   /**
@@ -778,15 +791,31 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    *
    * @param filesystem - The agent's authority.
    * @param root - The checkout root.
+   * @param options - The repository store the root lands large objects from, which must be the workspace's own.
    * @returns The release.
    */
-  const admitAgentRoot = (filesystem: AgentFileSystemAuthority, root: string): (() => void) => {
-    const { admissions } = filesystem;
+  const admitAgentRoot = (
+    filesystem: AgentFileSystemAuthority,
+    root: string,
+    options?: Readonly<{ largeObjectStore?: string }>,
+  ): (() => void) => {
+    const { admissions, largeObjectStores } = filesystem;
+    /* Checked before anything is admitted: only the repository's own LFS store, never a path the caller chose (I6). */
+    const store =
+      options?.largeObjectStore === undefined || root === filesystem.workspaceRoot
+        ? undefined
+        : repositoryLargeObjectStore(filesystem.workspaceRoot, options.largeObjectStore);
     admissions.set(root, (admissions.get(root) ?? 0) + 1);
+    if (store !== undefined) {
+      largeObjectStores.set(root, store);
+    }
     const drop = (): void => {
       const remaining = (admissions.get(root) ?? 1) - 1;
       if (remaining === 0) {
         admissions.delete(root);
+        if (root !== filesystem.workspaceRoot) {
+          largeObjectStores.delete(root);
+        }
       } else {
         admissions.set(root, remaining);
       }
@@ -872,9 +901,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       channel: new NodeFsChannel(toNodeFsPort(ports.port2)),
       workspaceRoot: agent.workspaceRoot,
       admissions: new Map(),
+      /* The live root lands objects from its own repository's store, which the native port fills. */
+      largeObjectStores: new Map([[agent.workspaceRoot, join(agent.workspaceRoot, '.git', 'lfs', 'objects')]]),
       stopServer: serveNodeFsProvider(toNodeFsPort(ports.port1), {
         authority,
         allowRoot: (root) => isAgentRootAdmitted(filesystem, root),
+        /* Resolved here, by root, never from the wire: a write names an object, not a path (I6). */
+        largeObjectStore: (root) => filesystem.largeObjectStores.get(root),
         /* A checkout on disk can hold a symlink, so an ordinary name may not
          * resolve into a path the views above hide (CI1). */
         policy: tauPathPolicy,
@@ -945,7 +978,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(machines ? { machines: agentMachineFacet(machines, 'tau') } : {}),
       fileSystem: {
         open: providerForAgentRoot,
-        admit: (root) => admitAgentRoot(filesystem, root),
+        admit: (root, admission) => admitAgentRoot(filesystem, root, admission),
         /* Native Git derives the physical worktree target before this callback.
          * Claiming its existing parent plus the absent/existing target excludes
          * ordinary candidate writes; Git keeps its own repository metadata

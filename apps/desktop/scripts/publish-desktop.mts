@@ -18,6 +18,8 @@ import { z } from 'zod';
 
 // oxlint-disable-next-line no-restricted-imports -- Readback is script-owned, not a runtime export.
 import { verifyMirrorReadback } from './mirror-readback.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Release-publication helper, script-owned like the readback.
+import { awsRetryEnvironment, awsRetryOptions } from './aws-retry.mjs';
 
 import { desktopArchiveName, desktopReleaseBaseUrl, desktopReleaseIdentity } from '#shared/desktop-release.js';
 import { isNewerVersion } from '#main/updater.js';
@@ -139,9 +141,10 @@ const main = async (): Promise<void> => {
   const bucket = required('DESKTOP_R2_BUCKET');
   const endpoint = required('DESKTOP_R2_ENDPOINT');
   const s3 = (args: string[]): string =>
-    execFileSync('aws', ['--endpoint-url', endpoint, 's3api', ...args], {
+    execFileSync('aws', ['--endpoint-url', endpoint, ...awsRetryOptions, 's3api', ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: awsRetryEnvironment(),
     });
   const readObject = async (key: string, path: string): Promise<boolean> => {
     try {

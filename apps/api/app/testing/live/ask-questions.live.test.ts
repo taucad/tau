@@ -45,7 +45,8 @@ import { expectCompleted, runUsage, toolCalls, usageBeforeFirstCall } from '#tes
  * modelling for real.
  */
 
-const modelId = 'anthropic-claude-haiku-5.5';
+/** The catalog row under test; `TAU_LIVE_MODEL` picks another, such as `anthropic-claude-opus-5.5`. */
+const modelId = process.env['TAU_LIVE_MODEL'] ?? 'anthropic-claude-haiku-5.5';
 
 const memoryRecord = (): QuestionRecordFileSystem & { readonly files: Map<string, string> } => {
   const files = new Map<string, string>();

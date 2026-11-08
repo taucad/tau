@@ -25,7 +25,15 @@ export type {
   WatchRequest,
   WatchEvent,
 } from '#types.js';
-export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+export type {
+  AuthorityCheckedFileWrite,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  CheckedWritePrecondition,
+  FileDigestPrecondition,
+  FileWritePrecondition,
+} from '@taucad/types';
+export { isDigestPrecondition } from '#checked-write-precondition.js';
 export {
   maximumChangesetBytes,
   maximumChangesetEntries,
@@ -33,6 +41,7 @@ export {
   changesetReceipt,
   inHandBytes,
   isBoundedChangeset,
+  isLargeObjectSource,
   isRefusal,
   splitChangeset,
 } from '#changeset.js';
@@ -50,6 +59,7 @@ export type {
   ChangesetPhase,
   ChangesetReceipt,
   ChangesetWriteData,
+  LargeObjectWriteSource,
 } from '#changeset.js';
 
 export { WorkspaceFileService } from '#workspace-file-service.js';

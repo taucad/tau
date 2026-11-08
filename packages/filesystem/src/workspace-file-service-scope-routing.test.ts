@@ -164,6 +164,20 @@ describe('WorkspaceFileService — unified scope routing', () => {
     expect(blob).toBeInstanceOf(Blob);
   });
 
+  it('getZippedDirectory({ scope, maxBytes }) refuses a subtree past the caller ceiling', async () => {
+    vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(
+      mock<FileSystemProvider>({
+        readdir: vi.fn().mockResolvedValue(['big.bin']),
+        readdirEntries: undefined,
+        stat: vi.fn().mockResolvedValue({ type: 'file', size: 64, mtimeMs: 1 }),
+      }),
+    );
+
+    await expect(service.getZippedDirectory('/scope/dir', { scope, maxBytes: 16 })).rejects.toMatchObject({
+      code: 'ARCHIVE_TOO_LARGE',
+    });
+  });
+
   it('without a scope, every method routes through the mount table (no standalone provider lookup)', async () => {
     const standaloneSpy = vi.spyOn(providerRegistry, 'getProvider');
 

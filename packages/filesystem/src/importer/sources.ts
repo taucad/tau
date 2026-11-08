@@ -26,7 +26,8 @@ import type { ImportDecodeRequest } from '#importer/decode.js';
  * @public
  */
 export type ImportSourcePin = Readonly<{
-  kind: 'zip' | 'files' | 'directory' | 'archive';
+  /** `linked`: a repository fetched as objects, whose worktree is the fetched revision's tree. */
+  kind: 'zip' | 'files' | 'directory' | 'archive' | 'linked';
   name: string;
   /** Total bytes the source holds (the archive, or the files' sum). */
   size: number;

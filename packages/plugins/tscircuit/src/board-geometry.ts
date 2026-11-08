@@ -109,16 +109,19 @@ type Shapes = {
 };
 
 /**
- * Free the handles a result was derived from.
- * @param result - The derived value.
+ * Derive a value, then free the handles it was derived from, whether the derivation returns or throws.
+ * @param derive - Builds the derived value.
  * @param inputs - Handles no longer needed.
- * @returns `result`.
+ * @returns The derived value.
  */
-const consume = <T>(result: T, ...inputs: ReadonlyArray<{ delete: () => void } | undefined>): T => {
-  for (const input of inputs) {
-    input?.delete();
+const consume = <T>(derive: () => T, ...inputs: ReadonlyArray<{ delete: () => void } | undefined>): T => {
+  try {
+    return derive();
+  } finally {
+    for (const input of inputs) {
+      input?.delete();
+    }
   }
-  return result;
 };
 
 /**
@@ -169,7 +172,7 @@ const createShapes = (m: ManifoldToplevel): Shapes => {
     );
   const circle = (x: number, y: number, radius: number): CrossSection => {
     const base = m.CrossSection.circle(Math.max(radius, 1e-4), circleSegments);
-    return consume(base.translate([x, y]), base);
+    return consume(() => base.translate([x, y]), base);
   };
   // oxlint-disable-next-line eslint/max-params -- matches `Shapes.rect`.
   const rect = (x: number, y: number, width: number, height: number, rotation = 0, radius = 0): CrossSection => {
@@ -177,12 +180,12 @@ const createShapes = (m: ManifoldToplevel): Shapes => {
     let core: CrossSection;
     if (r > 0) {
       const square = m.CrossSection.square([Math.max(width - 2 * r, 1e-4), Math.max(height - 2 * r, 1e-4)], true);
-      core = consume(square.offset(r, 'Round', 2, circleSegments), square);
+      core = consume(() => square.offset(r, 'Round', 2, circleSegments), square);
     } else {
       core = m.CrossSection.square([Math.max(width, 1e-4), Math.max(height, 1e-4)], true);
     }
-    const rotated = consume(core.rotate(rotation), core);
-    return consume(rotated.translate([x, y]), rotated);
+    const rotated = consume(() => core.rotate(rotation), core);
+    return consume(() => rotated.translate([x, y]), rotated);
   };
   const polygon = (points: Point[]): CrossSection | undefined =>
     points.length < 3 ? undefined : new m.CrossSection([points.map((point): Vec2 => [point.x, point.y])], 'Positive');
@@ -254,7 +257,7 @@ const smtPadShape = (shapes: Shapes, pad: Element, grow: number): CrossSection |
     }
     case 'polygon': {
       const polygon = shapes.polygon(pointsOf(pad['points']));
-      return polygon && grow > 0 ? consume(polygon.offset(grow, 'Round'), polygon) : polygon;
+      return polygon && grow > 0 ? consume(() => polygon.offset(grow, 'Round'), polygon) : polygon;
     }
     default: {
       const radius = numberOf(pad, 'corner_radius', numberOf(pad, 'rect_border_radius'));
@@ -303,7 +306,7 @@ const platedHoleShapes = (
     case 'hole_with_polygon_pad': {
       const outline = pointsOf(hole['pad_outline']).map((point) => ({ x: x + point.x, y: y + point.y }));
       const pad = shapes.polygon(outline);
-      return { pad: pad && grow > 0 ? consume(pad.offset(grow, 'Round'), pad) : pad, drill: drillOf() };
+      return { pad: pad && grow > 0 ? consume(() => pad.offset(grow, 'Round'), pad) : pad, drill: drillOf() };
     }
     default: {
       const width = numberOf(hole, 'rect_pad_width', numberOf(hole, 'outer_diameter')) + 2 * grow;
@@ -438,7 +441,7 @@ const brepPourShape = (shapes: Shapes, brep: BrepShape): CrossSection | undefine
     return outer;
   }
   const holes = shapes.union(inner);
-  return consume(outer.subtract(holes), outer, holes, ...inner);
+  return consume(() => outer.subtract(holes), outer, holes, ...inner);
 };
 
 const collectRegions = (shapes: Shapes, elements: Element[], board: Element): BoardRegions => {
@@ -459,197 +462,221 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
     bottom: { copper: [], silkscreen: [] },
   };
 
-  for (const element of elements) {
-    switch (element.type) {
-      case 'pcb_smtpad': {
-        const [side = 'top'] = layersOf(element);
-        push(side, 'copper', smtPadShape(shapes, element, 0));
-        if (element['is_covered_with_solder_mask'] !== true) {
-          push(side, 'openings', smtPadShape(shapes, element, numberOf(element, 'soldermask_margin', maskExpansion)));
-        }
-        break;
-      }
-      case 'pcb_plated_hole': {
-        const { pad, drill } = platedHoleShapes(shapes, element, 0);
-        const { pad: opening, drill: openingDrill } = platedHoleShapes(shapes, element, maskExpansion);
-        openingDrill?.delete();
-        const covered = element['is_covered_with_solder_mask'] === true;
-        for (const side of layersOf(element)) {
-          push(side, 'copper', pad);
-          if (!covered) {
-            push(side, 'openings', opening);
+  // A failure part-way through frees every region collected so far; the caller owns them only on success.
+  let outline: CrossSection;
+  try {
+    for (const element of elements) {
+      switch (element.type) {
+        case 'pcb_smtpad': {
+          const [side = 'top'] = layersOf(element);
+          push(side, 'copper', smtPadShape(shapes, element, 0));
+          if (element['is_covered_with_solder_mask'] !== true) {
+            push(side, 'openings', smtPadShape(shapes, element, numberOf(element, 'soldermask_margin', maskExpansion)));
           }
+          break;
         }
-        if (covered) {
-          opening?.delete();
+        case 'pcb_plated_hole': {
+          const { pad, drill } = platedHoleShapes(shapes, element, 0);
+          const { pad: opening, drill: openingDrill } = platedHoleShapes(shapes, element, maskExpansion);
+          openingDrill?.delete();
+          const covered = element['is_covered_with_solder_mask'] === true;
+          const holeSides = layersOf(element);
+          for (const side of holeSides) {
+            push(side, 'copper', pad);
+            if (!covered) {
+              push(side, 'openings', opening);
+            }
+          }
+          // A hole on neither outer layer (inner layers only) draws no pad or opening.
+          if (holeSides.length === 0) {
+            pad?.delete();
+          }
+          if (covered || holeSides.length === 0) {
+            opening?.delete();
+          }
+          if (drill) {
+            drills.push(drill);
+            const wall = drill.offset(barrelWall, 'Round');
+            barrels.push(consume(() => wall.subtract(drill), wall));
+          }
+          break;
         }
-        if (drill) {
+        case 'pcb_via': {
+          const x = numberOf(element, 'x');
+          const y = numberOf(element, 'y');
+          const pad = shapes.circle(x, y, numberOf(element, 'outer_diameter', 0.6) / 2);
+          const drill = shapes.circle(x, y, numberOf(element, 'hole_diameter', 0.3) / 2);
+          push('top', 'copper', pad);
+          push('bottom', 'copper', pad);
           drills.push(drill);
           const wall = drill.offset(barrelWall, 'Round');
-          barrels.push(consume(wall.subtract(drill), wall));
+          barrels.push(consume(() => wall.subtract(drill), wall));
+          break;
         }
-        break;
-      }
-      case 'pcb_via': {
-        const x = numberOf(element, 'x');
-        const y = numberOf(element, 'y');
-        const pad = shapes.circle(x, y, numberOf(element, 'outer_diameter', 0.6) / 2);
-        const drill = shapes.circle(x, y, numberOf(element, 'hole_diameter', 0.3) / 2);
-        push('top', 'copper', pad);
-        push('bottom', 'copper', pad);
-        drills.push(drill);
-        const wall = drill.offset(barrelWall, 'Round');
-        barrels.push(consume(wall.subtract(drill), wall));
-        break;
-      }
-      case 'pcb_hole': {
-        const drill = npthShape(shapes, element, 0);
-        if (drill) {
-          drills.push(drill);
-          push('top', 'openings', npthShape(shapes, element, holeMaskExpansion));
-          push('bottom', 'openings', npthShape(shapes, element, holeMaskExpansion));
+        case 'pcb_hole': {
+          const drill = npthShape(shapes, element, 0);
+          if (drill) {
+            drills.push(drill);
+            push('top', 'openings', npthShape(shapes, element, holeMaskExpansion));
+            push('bottom', 'openings', npthShape(shapes, element, holeMaskExpansion));
+          }
+          break;
         }
-        break;
-      }
-      case 'pcb_trace': {
-        const route = Array.isArray(element['route']) ? (element['route'] as Element[]) : [];
-        let run: Point[] = [];
-        let runLayer: Side | undefined;
-        let runWidth = 0;
-        const flush = (): void => {
-          if (runLayer && run.length > 1) {
-            shapes.strokeContours(strokes[runLayer].copper, run, runWidth);
+        case 'pcb_trace': {
+          const route = Array.isArray(element['route']) ? (element['route'] as Element[]) : [];
+          let run: Point[] = [];
+          let runLayer: Side | undefined;
+          let runWidth = 0;
+          const flush = (): void => {
+            if (runLayer && run.length > 1) {
+              shapes.strokeContours(strokes[runLayer].copper, run, runWidth);
+            }
+            run = [];
+          };
+          for (const point of route) {
+            if (point['route_type'] !== 'wire') {
+              flush();
+              runLayer = undefined;
+              continue;
+            }
+            const layer: Side = point['layer'] === 'bottom' ? 'bottom' : 'top';
+            if (layer !== runLayer) {
+              flush();
+              runLayer = layer;
+            }
+            runWidth = Math.max(runWidth, numberOf(point, 'width', 0.15));
+            run.push({ x: numberOf(point, 'x'), y: numberOf(point, 'y') });
           }
-          run = [];
-        };
-        for (const point of route) {
-          if (point['route_type'] !== 'wire') {
-            flush();
-            runLayer = undefined;
-            continue;
-          }
-          const layer: Side = point['layer'] === 'bottom' ? 'bottom' : 'top';
-          if (layer !== runLayer) {
-            flush();
-            runLayer = layer;
-          }
-          runWidth = Math.max(runWidth, numberOf(point, 'width', 0.15));
-          run.push({ x: numberOf(point, 'x'), y: numberOf(point, 'y') });
+          flush();
+          break;
         }
-        flush();
-        break;
-      }
-      case 'pcb_copper_pour': {
-        const [side = 'top'] = layersOf(element);
-        switch (element['shape']) {
-          case 'brep': {
-            push(side, 'copper', brepPourShape(shapes, element['brep_shape'] as BrepShape));
-            break;
+        case 'pcb_copper_pour': {
+          const [side = 'top'] = layersOf(element);
+          switch (element['shape']) {
+            case 'brep': {
+              push(side, 'copper', brepPourShape(shapes, element['brep_shape'] as BrepShape));
+              break;
+            }
+            case 'polygon': {
+              push(side, 'copper', shapes.polygon(pointsOf(element['points'])));
+              break;
+            }
+            case 'rect': {
+              const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
+              push(
+                side,
+                'copper',
+                shapes.rect(
+                  center.x,
+                  center.y,
+                  numberOf(element, 'width'),
+                  numberOf(element, 'height'),
+                  numberOf(element, 'rotation'),
+                ),
+              );
+              break;
+            }
+            default: {
+              break;
+            }
           }
-          case 'polygon': {
-            push(side, 'copper', shapes.polygon(pointsOf(element['points'])));
-            break;
-          }
-          case 'rect': {
-            const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
+          break;
+        }
+        case 'pcb_silkscreen_path': {
+          const [side = 'top'] = layersOf(element);
+          shapes.strokeContours(
+            strokes[side].silkscreen,
+            pointsOf(element['route']),
+            numberOf(element, 'stroke_width', 0.1),
+          );
+          break;
+        }
+        case 'pcb_silkscreen_line': {
+          const [side = 'top'] = layersOf(element);
+          const points = [
+            { x: numberOf(element, 'x1'), y: numberOf(element, 'y1') },
+            { x: numberOf(element, 'x2'), y: numberOf(element, 'y2') },
+          ];
+          shapes.strokeContours(strokes[side].silkscreen, points, numberOf(element, 'stroke_width', 0.1));
+          break;
+        }
+        case 'pcb_silkscreen_rect': {
+          const [side = 'top'] = layersOf(element);
+          const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
+          const width = numberOf(element, 'width');
+          const height = numberOf(element, 'height');
+          const strokeWidth = numberOf(element, 'stroke_width', 0.1);
+          const outer = shapes.rect(center.x, center.y, width + strokeWidth, height + strokeWidth);
+          if (element['is_filled'] === true) {
+            push(side, 'silkscreen', outer);
+          } else {
+            const inner = shapes.rect(
+              center.x,
+              center.y,
+              Math.max(width - strokeWidth, 0),
+              Math.max(height - strokeWidth, 0),
+            );
             push(
               side,
-              'copper',
-              shapes.rect(
-                center.x,
-                center.y,
-                numberOf(element, 'width'),
-                numberOf(element, 'height'),
-                numberOf(element, 'rotation'),
-              ),
+              'silkscreen',
+              consume(() => outer.subtract(inner), outer, inner),
             );
-            break;
           }
-          default: {
-            break;
-          }
+          break;
         }
-        break;
-      }
-      case 'pcb_silkscreen_path': {
-        const [side = 'top'] = layersOf(element);
-        shapes.strokeContours(
-          strokes[side].silkscreen,
-          pointsOf(element['route']),
-          numberOf(element, 'stroke_width', 0.1),
-        );
-        break;
-      }
-      case 'pcb_silkscreen_line': {
-        const [side = 'top'] = layersOf(element);
-        const points = [
-          { x: numberOf(element, 'x1'), y: numberOf(element, 'y1') },
-          { x: numberOf(element, 'x2'), y: numberOf(element, 'y2') },
-        ];
-        shapes.strokeContours(strokes[side].silkscreen, points, numberOf(element, 'stroke_width', 0.1));
-        break;
-      }
-      case 'pcb_silkscreen_rect': {
-        const [side = 'top'] = layersOf(element);
-        const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
-        const width = numberOf(element, 'width');
-        const height = numberOf(element, 'height');
-        const strokeWidth = numberOf(element, 'stroke_width', 0.1);
-        const outer = shapes.rect(center.x, center.y, width + strokeWidth, height + strokeWidth);
-        if (element['is_filled'] === true) {
-          push(side, 'silkscreen', outer);
-        } else {
-          const inner = shapes.rect(
-            center.x,
-            center.y,
-            Math.max(width - strokeWidth, 0),
-            Math.max(height - strokeWidth, 0),
+        case 'pcb_silkscreen_circle': {
+          const [side = 'top'] = layersOf(element);
+          const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
+          const radius = numberOf(element, 'radius');
+          const strokeWidth = numberOf(element, 'stroke_width', 0.1);
+          const outer = shapes.circle(center.x, center.y, radius + strokeWidth / 2);
+          const inner = shapes.circle(center.x, center.y, Math.max(radius - strokeWidth / 2, 0));
+          push(
+            side,
+            'silkscreen',
+            consume(() => outer.subtract(inner), outer, inner),
           );
-          push(side, 'silkscreen', consume(outer.subtract(inner), outer, inner));
+          break;
         }
-        break;
-      }
-      case 'pcb_silkscreen_circle': {
-        const [side = 'top'] = layersOf(element);
-        const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
-        const radius = numberOf(element, 'radius');
-        const strokeWidth = numberOf(element, 'stroke_width', 0.1);
-        const outer = shapes.circle(center.x, center.y, radius + strokeWidth / 2);
-        const inner = shapes.circle(center.x, center.y, Math.max(radius - strokeWidth / 2, 0));
-        push(side, 'silkscreen', consume(outer.subtract(inner), outer, inner));
-        break;
-      }
-      case 'pcb_silkscreen_text': {
-        const [side = 'top'] = layersOf(element);
-        const { segments, strokeWidth } = textSegments(element);
-        for (const [a, b] of segments) {
-          shapes.strokeContours(strokes[side].silkscreen, [a, b], strokeWidth);
+        case 'pcb_silkscreen_text': {
+          const [side = 'top'] = layersOf(element);
+          const { segments, strokeWidth } = textSegments(element);
+          for (const [a, b] of segments) {
+            shapes.strokeContours(strokes[side].silkscreen, [a, b], strokeWidth);
+          }
+          break;
         }
-        break;
-      }
-      default: {
-        break;
+        default: {
+          break;
+        }
       }
     }
+
+    for (const side of ['top', 'bottom'] as const) {
+      push(side, 'copper', shapes.fill(strokes[side].copper));
+      push(side, 'silkscreen', shapes.fill(strokes[side].silkscreen));
+    }
+
+    const center = (board['center'] ?? { x: 0, y: 0 }) as Point;
+    const outlinePoints = pointsOf(board['outline']);
+    outline =
+      shapes.polygon(outlinePoints) ??
+      shapes.rect(
+        center.x,
+        center.y,
+        numberOf(board, 'width', 10),
+        numberOf(board, 'height', 10),
+        0,
+        numberOf(board, 'border_radius'),
+      );
+  } catch (error) {
+    const collected = [...drills, ...barrels, ...Object.values(sides).flatMap((side) => Object.values(side).flat())];
+    for (const section of new Set(collected)) {
+      section.delete();
+    }
+    throw error;
   }
 
-  for (const side of ['top', 'bottom'] as const) {
-    push(side, 'copper', shapes.fill(strokes[side].copper));
-    push(side, 'silkscreen', shapes.fill(strokes[side].silkscreen));
-  }
-
-  const center = (board['center'] ?? { x: 0, y: 0 }) as Point;
-  const outlinePoints = pointsOf(board['outline']);
-  const outline =
-    shapes.polygon(outlinePoints) ??
-    shapes.rect(
-      center.x,
-      center.y,
-      numberOf(board, 'width', 10),
-      numberOf(board, 'height', 10),
-      0,
-      numberOf(board, 'border_radius'),
-    );
   const { maskColor, bottomMaskColor, silkColor, bottomSilkColor } = boardColorsOf(board);
   return {
     outline,
@@ -743,7 +770,7 @@ const addSlab = (
     return;
   }
   const extruded = region.extrude(z1 - z0);
-  const solid = consume(extruded.translate([0, 0, z0]), extruded);
+  const solid = consume(() => extruded.translate([0, 0, z0]), extruded);
   const mesh = solid.getMesh();
   solid.delete();
   const { numProp, vertProperties, triVerts } = mesh;

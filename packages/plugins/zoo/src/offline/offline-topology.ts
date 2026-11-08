@@ -14,6 +14,7 @@ import type { Oc, TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from '#offline/offlin
 import {
   ShapeIndex,
   compound,
+  deleteAllBut,
   edges,
   fromPnt,
   listToArray,
@@ -395,31 +396,32 @@ export function edgesBetween(
  * @returns the nearest edge, or undefined when the shape has no edges
  */
 export function closestEdge(oc: Oc, shape: TopoDS_Shape, point: Vec3): TopoDS_Edge | undefined {
-  const edgeIndex = new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher();
-  oc.TopExp.MapShapes(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, edgeIndex);
-  const edgeCount = edgeIndex.Extent();
-  if (edgeCount === 0) {
-    edgeIndex.delete();
-    return undefined;
-  }
-
-  const edgeShapes = Array.from({ length: edgeCount }, (_, index) => edgeIndex.FindKey(index + 1));
-  const wire = compound(oc, edgeShapes);
-  for (const edge of edgeShapes) {
-    edge.delete();
-  }
-
-  const probePoint = pnt(oc, point);
-  const probeBuilder = new oc.BRepBuilderAPI_MakeVertex(probePoint);
-  const probe = probeBuilder.Vertex();
-  const extrema = new oc.BRepExtrema_DistShapeShape(
-    probe,
-    wire,
-    oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
-    oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
-  );
-  let vertexEdges: AncestorMap | undefined;
+  // Every wrapper the query creates is freed on the way out, including when a constructor throws.
+  const owned: Array<{ delete(): void }> = [];
+  const own = <T extends { delete(): void }>(handle: T): T => {
+    owned.push(handle);
+    return handle;
+  };
   try {
+    const edgeIndex = own(new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher());
+    oc.TopExp.MapShapes(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, edgeIndex);
+    const edgeCount = edgeIndex.Extent();
+    if (edgeCount === 0) {
+      return undefined;
+    }
+
+    const edgeShapes = Array.from({ length: edgeCount }, (_, index) => own(edgeIndex.FindKey(index + 1)));
+    const wire = own(compound(oc, edgeShapes));
+    const probeBuilder = own(new oc.BRepBuilderAPI_MakeVertex(own(pnt(oc, point))));
+    const probe = own(probeBuilder.Vertex());
+    const extrema = own(
+      new oc.BRepExtrema_DistShapeShape(
+        probe,
+        wire,
+        oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+        oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+      ),
+    );
     if (!extrema.IsDone()) {
       return undefined;
     }
@@ -432,15 +434,16 @@ export function closestEdge(oc: Oc, shape: TopoDS_Shape, point: Vec3): TopoDS_Ed
         distances.set(index, distance);
       }
     };
+    let vertexEdges: AncestorMap | undefined;
     const solutionCount = extrema.NbSolution();
     for (let solution = 1; solution <= solutionCount; solution++) {
       const onShape = extrema.PointOnShape2(solution);
       const at = fromPnt(onShape);
       onShape.delete();
       const distance = Math.hypot(at.x - point.x, at.y - point.y, at.z - point.z);
-      const support = extrema.SupportOnShape2(solution);
+      const support = own(extrema.SupportOnShape2(solution));
       if (extrema.SupportTypeShape2(solution) === oc.BRepExtrema_SupportType.BRepExtrema_IsVertex) {
-        vertexEdges ??= edgesByVertex(oc, wire);
+        vertexEdges ??= own(edgesByVertex(oc, wire));
         for (const edge of ancestorsOf(oc, vertexEdges, support)) {
           record(edgeIndex.FindIndex(edge), distance);
           edge.delete();
@@ -448,8 +451,6 @@ export function closestEdge(oc: Oc, shape: TopoDS_Shape, point: Vec3): TopoDS_Ed
       } else {
         record(edgeIndex.FindIndex(support), distance);
       }
-
-      support.delete();
     }
 
     // The per-edge scan this replaces: a later edge wins only when it is more than 1e-9 nearer.
@@ -464,24 +465,20 @@ export function closestEdge(oc: Oc, shape: TopoDS_Shape, point: Vec3): TopoDS_Ed
       return undefined;
     }
 
-    const found = edgeIndex.FindKey(best.index);
-    const edge = oc.TopoDS.Edge(found);
-    found.delete();
-    return edge;
+    return oc.TopoDS.Edge(own(edgeIndex.FindKey(best.index)));
   } finally {
-    vertexEdges?.delete();
-    extrema.delete();
-    probe.delete();
-    probeBuilder.delete();
-    probePoint.delete();
-    wire.delete();
-    edgeIndex.delete();
+    deleteAllBut(owned.reverse());
   }
 }
 
 const shareVertex = (oc: Oc, a: TopoDS_Shape, b: TopoDS_Shape): boolean => {
   const av = vertices(oc, a);
-  return vertices(oc, b).some((vertex) => av.some((candidate) => candidate.IsSame(vertex)));
+  const bv = vertices(oc, b);
+  try {
+    return bv.some((vertex) => av.some((candidate) => candidate.IsSame(vertex)));
+  } finally {
+    deleteAllBut([...av, ...bv]);
+  }
 };
 
 /**
@@ -493,13 +490,10 @@ const shareVertex = (oc: Oc, a: TopoDS_Shape, b: TopoDS_Shape): boolean => {
  * @returns the opposite edge
  */
 export function oppositeEdge(oc: Oc, face: TopoDS_Face, edge: TopoDS_Edge): TopoDS_Edge {
-  const candidate = edges(oc, face).find(
-    (item) => !item.IsSame(edge) && !shareVertex(oc, item, edge) && !oc.BRep_Tool.IsClosed(item, face),
-  );
-  const fallback = edges(oc, face).filter(
-    (candidate) => !candidate.IsSame(edge) && !oc.BRep_Tool.IsClosed(candidate, face),
-  );
-  const found = candidate ?? fallback.at(-1);
+  const faceEdges = edges(oc, face);
+  const others = faceEdges.filter((item) => !item.IsSame(edge) && !oc.BRep_Tool.IsClosed(item, face));
+  const found = others.find((item) => !shareVertex(oc, item, edge)) ?? others.at(-1);
+  deleteAllBut(faceEdges, found);
   if (!found) {
     throw new OfflineEngineError('No opposite edge on this face', 'bad_request');
   }
@@ -523,12 +517,19 @@ export function adjacentEdge(
   which: 'next' | 'previous',
 ): TopoDS_Edge | undefined {
   const vertex = which === 'next' ? oc.TopExp.LastVertex(edge, true) : oc.TopExp.FirstVertex(edge, true);
-  return edges(oc, face).find(
-    (candidate) =>
-      !candidate.IsSame(edge) &&
-      vertices(oc, candidate).some((v) => v.IsSame(vertex)) &&
-      !oc.BRep_Tool.IsClosed(candidate, face),
+  const faceEdges = edges(oc, face);
+  const touches = (candidate: TopoDS_Edge): boolean => {
+    const candidateVertices = vertices(oc, candidate);
+    const found = candidateVertices.some((v) => v.IsSame(vertex));
+    deleteAllBut(candidateVertices);
+    return found;
+  };
+  const found = faceEdges.find(
+    (candidate) => !candidate.IsSame(edge) && touches(candidate) && !oc.BRep_Tool.IsClosed(candidate, face),
   );
+  deleteAllBut(faceEdges, found);
+  vertex.delete();
+  return found;
 }
 
 /**

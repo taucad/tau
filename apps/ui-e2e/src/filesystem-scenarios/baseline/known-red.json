@@ -10,11 +10,11 @@
       }
     },
     {
-      "id": "S12.binary-bytes",
+      "id": "S19.compute-worker",
       "limit": 0,
       "atHead": {
-        "chromium-full": 471859200,
-        "chromium-small": 296838
+        "chromium-full": 1501,
+        "chromium-small": 77
       }
     }
   ]

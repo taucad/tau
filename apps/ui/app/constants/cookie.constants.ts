@@ -71,6 +71,8 @@ export const cookieName = {
   projectViewMode: 'project-view-mode',
   // The last selected project list page size.
   projectPageSize: 'project-page-size',
+  // The project location the new-project composer last showed, drawn before locations are probed.
+  projectLocation: 'project-location',
 
   /* Community */
   // The last selected Community example page size.

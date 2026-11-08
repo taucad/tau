@@ -11,6 +11,7 @@
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
+import type { TelemetryEntry } from '@taucad/runtime/types';
 import { getOC } from 'replicad';
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
@@ -261,5 +262,54 @@ describe('Replicad STEP interface export call counts', () => {
     // interface face, stopping at the highest `faceIndex`. No interface makes no walk; the top
     // face (index 5) and then the top and the bottom face (index 4) both stop at index 5.
     expect(steps).toEqual([0, 5, 5]);
+  });
+});
+
+describe('Replicad ocTracing summary', () => {
+  /** Telemetry is posted after each operation's reply; give the batch time to arrive. */
+  const settleTelemetry = async (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 500);
+    });
+
+  it('should flush an oc.summary after run-main, after a render and after an export', async () => {
+    const telemetry: TelemetryEntry[] = [];
+    const client = createTestRuntimeClient({
+      runtime: defineRuntime({
+        kernels: [replicadKernel({ wasm: 'single', ocTracing: 'summary' })],
+        bundlers: [esbuildBundler()],
+      }),
+      files: { 'main.ts': cylindersCode },
+    });
+    testClients.add(client);
+    client.on('telemetry', (batch) => {
+      telemetry.push(...batch.entries);
+    });
+    const document = client.open({ source: { path: 'main.ts' }, parameters: { anisotropic: true }, watch: false });
+    const view = document.view('model', {
+      options: { tessellation: coarse },
+      content: { includeEdges: true },
+    });
+    const outcome = await view.rendering();
+    view.close();
+    if (outcome.superseded) {
+      throw new Error('render was superseded');
+    }
+    assertRenderingSuccess(outcome.rendering);
+    await expectExported(document.export('step'));
+    document.close();
+    await settleTelemetry();
+
+    const parents = new Map(telemetry.map((entry) => [entry.detail?.['spanId'], entry.name]));
+    const summaries = telemetry.filter((entry) => entry.name === 'oc.summary');
+    // Run-main flushes inside its span; render flushes inside its render-output span; export flushes as it
+    // settles. Before, render and export calls were held over to the next evaluation's summary.
+    expect(summaries.map((entry) => parents.get(entry.detail?.['parentSpanId']))).toEqual([
+      'replicad.run-main',
+      'replicad.render-output',
+      'kernel.export-compute',
+    ]);
+    // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 7, 13]);
   });
 });

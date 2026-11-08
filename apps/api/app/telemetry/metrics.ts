@@ -114,6 +114,68 @@ export class MetricsService {
     },
   );
 
+  // Funded LLM gateway latency and prompt cache (W3.1)
+  public readonly llmGatewayAdmissionDuration = this.apiMeter.createHistogram(
+    TauMetrics.llmGatewayAdmissionDuration.name,
+    {
+      description: TauMetrics.llmGatewayAdmissionDuration.description,
+      unit: TauMetrics.llmGatewayAdmissionDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.llmGatewayAdmissionDuration.buckets] },
+    },
+  );
+
+  public readonly llmGatewayRequestReceiveDuration = this.apiMeter.createHistogram(
+    TauMetrics.llmGatewayRequestReceiveDuration.name,
+    {
+      description: TauMetrics.llmGatewayRequestReceiveDuration.description,
+      unit: TauMetrics.llmGatewayRequestReceiveDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.llmGatewayRequestReceiveDuration.buckets] },
+    },
+  );
+
+  public readonly llmGatewayRequestParseDuration = this.apiMeter.createHistogram(
+    TauMetrics.llmGatewayRequestParseDuration.name,
+    {
+      description: TauMetrics.llmGatewayRequestParseDuration.description,
+      unit: TauMetrics.llmGatewayRequestParseDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.llmGatewayRequestParseDuration.buckets] },
+    },
+  );
+
+  public readonly llmGatewayRequestSize = this.apiMeter.createHistogram(TauMetrics.llmGatewayRequestSize.name, {
+    description: TauMetrics.llmGatewayRequestSize.description,
+    unit: TauMetrics.llmGatewayRequestSize.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.llmGatewayRequestSize.buckets] },
+  });
+
+  public readonly llmGatewayInlineImageBytes = this.apiMeter.createHistogram(
+    TauMetrics.llmGatewayInlineImageBytes.name,
+    {
+      description: TauMetrics.llmGatewayInlineImageBytes.description,
+      unit: TauMetrics.llmGatewayInlineImageBytes.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.llmGatewayInlineImageBytes.buckets] },
+    },
+  );
+
+  public readonly llmTurnStepCacheTokens = this.apiMeter.createCounter(TauMetrics.llmTurnStepCacheTokens.name, {
+    description: TauMetrics.llmTurnStepCacheTokens.description,
+    unit: TauMetrics.llmTurnStepCacheTokens.unit,
+  });
+
+  public readonly llmTurnStepCacheOutcomes = this.apiMeter.createCounter(TauMetrics.llmTurnStepCacheOutcomes.name, {
+    description: TauMetrics.llmTurnStepCacheOutcomes.description,
+    unit: TauMetrics.llmTurnStepCacheOutcomes.unit,
+  });
+
+  public readonly llmTurnStepTimeToFirstToken = this.apiMeter.createHistogram(
+    TauMetrics.llmTurnStepTimeToFirstToken.name,
+    {
+      description: TauMetrics.llmTurnStepTimeToFirstToken.description,
+      unit: TauMetrics.llmTurnStepTimeToFirstToken.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.llmTurnStepTimeToFirstToken.buckets] },
+    },
+  );
+
   public readonly genAiPromptSectionSize = this.apiMeter.createHistogram(TauMetrics.genAiPromptSectionSize.name, {
     description: TauMetrics.genAiPromptSectionSize.description,
     unit: TauMetrics.genAiPromptSectionSize.unit,

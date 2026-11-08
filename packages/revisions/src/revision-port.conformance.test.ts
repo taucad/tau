@@ -35,7 +35,7 @@ import { conflictLabels, materializeConflict, readConflictTerms } from '#revisio
 import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
-import { generatedIgnorePath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -66,6 +66,11 @@ const tree = (entries: Record<string, string | Uint8Array<ArrayBuffer>>): Immuta
       typeof content === 'string' ? encoder.encode(content) : content,
     ]),
   );
+/* Tau's generated attributes beside the files, as every Tau-created tree carries them: the tree's
+ * own `.gitattributes` decides which paths are pointers (D16). */
+const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
+const tauTree = (entries: Record<string, string | Uint8Array<ArrayBuffer>>): ImmutableRevisionTree =>
+  tree({ [tauAttributes[0]]: tauAttributes[1], ...entries });
 
 /* Review 4 R6: 1.5 KiB of non-UTF-8 bytes, NUL included (index 0, 256, …), so
  * identity covers a blob no text codec could have round-tripped by accident. */
@@ -932,7 +937,7 @@ describe.runIf(gitToolchainOnPath)('cross-adapter identity (I4)', () => {
           await harness.port.init({ author });
           const receipt = await harness.port.writeRevision({
             parents: [],
-            tree: tree({ 'models/bracket.step': large }),
+            tree: tauTree({ 'models/bracket.step': large }),
             provenance: provenance('user'),
             summary: summary('Large object'),
           });
@@ -968,7 +973,7 @@ describe.runIf(gitToolchainOnPath)('cross-adapter identity (I4)', () => {
           await harness.port.init({ author });
           const receipt = await harness.port.writeRevision({
             parents: [],
-            tree: tree({ 'attachments/photo.jpg': small }),
+            tree: tauTree({ 'attachments/photo.jpg': small }),
             largeObjects: false,
             provenance: provenance('user'),
             summary: summary('Verbatim attachment'),
@@ -993,7 +998,7 @@ describe.runIf(gitToolchainOnPath)('cross-adapter identity (I4)', () => {
       const [first] = harnesses;
       const cleaned = await first.port.writeRevision({
         parents: [],
-        tree: tree({ 'attachments/photo.jpg': small }),
+        tree: tauTree({ 'attachments/photo.jpg': small }),
         provenance: provenance('user'),
         summary: summary('Cleaned attachment'),
       });
@@ -1851,7 +1856,7 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: new ImmutableRevisionTree([['models/bracket.step', large]]),
+        tree: new ImmutableRevisionTree([tauAttributes, ['models/bracket.step', large]]),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -1898,7 +1903,7 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: new ImmutableRevisionTree(files),
+        tree: new ImmutableRevisionTree([tauAttributes, ...files]),
         provenance: provenance('user'),
         summary: summary('Large objects'),
       });
@@ -1977,7 +1982,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Bound large object'),
       });
@@ -2015,7 +2020,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const first = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large, 'main.ts': 'one\n' }),
+        tree: tauTree({ 'models/bracket.step': large, 'main.ts': 'one\n' }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2027,7 +2032,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       // A text edit: against the stale tracking ref, it sends no large object.
       const second = await port.writeRevision({
         parents: [revisionId(first.commitId)],
-        tree: tree({ 'models/bracket.step': large, 'main.ts': 'two\n' }),
+        tree: tauTree({ 'models/bracket.step': large, 'main.ts': 'two\n' }),
         provenance: provenance('user'),
         summary: summary('Text edit'),
       });
@@ -2061,7 +2066,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2137,7 +2142,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       const commit = async (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): Promise<void> => {
         const receipt = await port.writeRevision({
           parents: head === undefined ? [] : [head],
-          tree: tree(files),
+          tree: tauTree(files),
           provenance: provenance('user'),
           summary: summary('Revision'),
         });
@@ -2197,7 +2202,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2266,7 +2271,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2330,7 +2335,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
         await port.init({ author });
         const receipt = await port.writeRevision({
           parents: [],
-          tree: tree({ 'models/bracket.step': large }),
+          tree: tauTree({ 'models/bracket.step': large }),
           provenance: provenance('user'),
           summary: summary('Large object'),
         });
@@ -2411,7 +2416,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2469,7 +2474,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ ...Object.fromEntries(parts), 'main.ts': 'export {};\n' }),
+        tree: tauTree({ ...Object.fromEntries(parts), 'main.ts': 'export {};\n' }),
         provenance: provenance('user'),
         summary: summary('Five large objects'),
       });
@@ -2533,7 +2538,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2573,7 +2578,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });
@@ -2607,7 +2612,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await port.init({ author });
       const receipt = await port.writeRevision({
         parents: [],
-        tree: tree({ 'models/bracket.step': large }),
+        tree: tauTree({ 'models/bracket.step': large }),
         provenance: provenance('user'),
         summary: summary('Large object'),
       });

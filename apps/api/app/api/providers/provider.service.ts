@@ -13,7 +13,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
-import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
+import type { ProviderId, Provider } from '@taucad/chat/model-catalog';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';

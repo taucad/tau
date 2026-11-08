@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createLargeObjectFill, largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -702,5 +702,72 @@ describe('large-object fill', () => {
     expect(harness.materializeTree).not.toHaveBeenCalled();
     expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
     expect(harness.reports).toHaveLength(told);
+  });
+});
+
+/*
+ * W11.3 re-review: a store-landing fill whose final flush finds another object
+ * gone from the store fetches that one too, each object at most once.
+ */
+describe('a fill over the host store', () => {
+  it('fetches as bytes an object the store loses during the final flush, once', async () => {
+    const a = encoder.encode('solid a\n'.repeat(64));
+    const b = encoder.encode('solid b\n'.repeat(64));
+    const pa = lfsPointerFor(a);
+    const pb = lfsPointerFor(b);
+    const files = new Map<string, Uint8Array<ArrayBuffer>>([
+      ['a.step', pa.bytes],
+      ['b.step', pb.bytes],
+    ]);
+    /* The store lacks `a` from the start; `b` is lost once `a` has been fetched. */
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>([[pb.pointer.oid, b]]);
+    const remote = new Map([
+      [pa.pointer.oid, a],
+      [pb.pointer.oid, b],
+    ]);
+    const asked: string[][] = [];
+    const reports: LargeObjectsReport[] = [];
+    const fill = createLargeObjectFill({
+      port: {
+        readTree: async () =>
+          new ImmutableRevisionTree([
+            ['a.step', pa.bytes],
+            ['b.step', pb.bytes],
+          ]),
+        fetchLargeObjects: async (pointers) => {
+          asked.push(pointers.map(({ oid }) => oid));
+          if (asked.length === 1) {
+            /* Meanwhile `b`'s placeholder is copied, and a prune takes `b` from the store. */
+            files.set('c.step', pb.bytes);
+            stored.delete(pb.pointer.oid);
+          }
+          return new Map(pointers.map(({ oid }) => [oid, remote.get(oid)!] as const));
+        },
+      },
+      capture: async () => new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+      withCheckoutFence: async (_id, operation) => operation(),
+      landsFromStore: async () => true,
+      materializeTree: async (_place, target, { largeObjects }) => {
+        const lacking = [...(largeObjects?.values() ?? [])].flatMap(({ oid }) => (stored.has(oid) ? [] : [oid]));
+        if (lacking.length > 0) {
+          throw new UnstoredLargeObjectsError(lacking);
+        }
+        for (const { path, content } of target.entries()) {
+          const object = largeObjects?.get(path);
+          files.set(path, object === undefined ? content : stored.get(object.oid)!);
+        }
+      },
+      report: (report) => reports.push(report),
+      flushMilliseconds: 0,
+    });
+
+    await fill.fill(place, head);
+
+    expect(asked).toStrictEqual([[pa.pointer.oid], [pb.pointer.oid]]);
+    expect(decoder.decode(files.get('a.step'))).toBe(decoder.decode(a));
+    expect(decoder.decode(files.get('b.step'))).toBe(decoder.decode(b));
+    expect(decoder.decode(files.get('c.step'))).toBe(decoder.decode(b));
+    expect(reports.at(-1)?.facet).toBeUndefined();
+    await fill.stop();
   });
 });

@@ -64,6 +64,16 @@ export const httpHeader = {
    */
   xTauActivity: 'x-tau-activity',
   /**
+   * Telemetry labels the agent host asserts about a gateway step: whether it is
+   * the first model step of a user turn, and the pause bucket since the chat's
+   * previous step. Bounded enums, dropped when malformed, never part of the
+   * request digest, admission or price (`readTurnTelemetry` in
+   * `llm-gateway.headers.ts`). Listed here so CORS admits them before any
+   * client sends them (server before client).
+   */
+  xTauTurnStep: 'x-tau-turn-step',
+  xTauTurnGap: 'x-tau-turn-gap',
+  /**
    * The Zoo-scoped token a desktop kernel utility or `tau serve` child presents
    * on the `/v1/kernels/zoo` upgrade instead of the session
    * (`#api/kernels/zoo-token.service.ts`). A live credential: logs redact it.

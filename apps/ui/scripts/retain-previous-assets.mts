@@ -15,6 +15,17 @@
  * next deploy reads in turn. Netlify stores files by content, so a retained
  * asset is not uploaded again.
  *
+ * Besides `/assets/*`, it keeps the content-addressed runtime bundles a page starts later: the PicoGK
+ * browser host (`picogk-browser/<sha256>/`) and the C# language service (`csharp-language/<sha256>/`).
+ * A tab loaded before a deploy that changed one fetches the old bundle by the address its build named,
+ * so dropping it would fail PicoGK or the C# service in that tab. They are listed in their own index,
+ * `tau-served-runtimes.json`: a build from before them refuses any path outside `assets/` in
+ * `tau-served-assets.json`, and a rollback to such a build must still deploy. These bundles are large (PicoGK is about
+ * 150 MB per generation) and rarely change, so they are not downloaded again each deploy: with
+ * `TAU_RETAIN_ASSETS_STORE` set, the deploy reads them from that directory (a CI cache `deploy-ui.yml`
+ * restores) when their integrity matches, and leaves in it exactly the runtime bundle files this deploy
+ * serves, its own included, for the next deploy.
+ *
  * Generations age per distinct build: a redeploy of the build the live deploy
  * already serves keeps every asset at the age the live index lists.
  *
@@ -31,13 +42,16 @@
  *                            (`deploy-ui.yml`), never the public host. Unset: only the new deploy's index is written.
  *   TAU_RETAIN_ASSETS_SKIP   `1` retains nothing and asks the live deploy nothing, with a warning: the emergency
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
+ *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
+ *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
  *
  * Usage: node scripts/retain-previous-assets.mts   (from apps/ui, after the client build)
  * Exit codes: 0 success, 1 a malformed or unreadable index, or an asset that cannot be retained.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { pipeline } from 'node:stream/promises';
@@ -46,6 +60,13 @@ import { sri } from '#scripts/subresource-integrity.mts';
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
 export const servedAssetsIndexFileName = 'tau-served-assets.json';
+
+/**
+ * File the new deploy publishes at its root, listing the runtime bundle files it serves
+ * ({@link isRuntimeBundlePath}). It is separate from {@link servedAssetsIndexFileName} because a build from
+ * before runtime retention refuses any path outside `assets/` there, and a rollback to one must still deploy.
+ */
+export const servedRuntimesIndexFileName = 'tau-served-runtimes.json';
 
 /** `schema` of {@link ServedAssetsIndex}. */
 export const servedAssetsIndexSchema = 'tau-ui-served-assets-v1';
@@ -83,6 +104,36 @@ export type ServedAssetsIndex = {
 const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
 
 /**
+ * Roots of the content-addressed runtime bundles a deploy serves beside `/assets/*`, each under a
+ * `<sha256>/` directory: the PicoGK browser host and the C# language service (their Vite plugins).
+ */
+export const runtimeBundleRoots = ['picogk-browser', 'csharp-language'] as const;
+
+const contentAddress = /^[a-f\d]{64}$/u;
+
+/**
+ * Whether a path belongs to a content-addressed runtime bundle: `<root>/<sha256>/<file>`.
+ *
+ * @param path - A path relative to the client root, with `/` separators.
+ * @returns `true` for a runtime bundle file.
+ */
+export const isRuntimeBundlePath = (path: string): boolean => {
+  const [root, address, ...rest] = path.split('/');
+  return (
+    (runtimeBundleRoots as readonly string[]).includes(root ?? '') &&
+    contentAddress.test(address ?? '') &&
+    rest.length > 0
+  );
+};
+
+const isSafePath = (path: string): boolean =>
+  !forbiddenPathCharacter.test(path) &&
+  path
+    .split('/')
+    .slice(1)
+    .every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+
+/**
  * Whether a path can be published by one deploy and read back by the next: under `assets/`,
  * every segment a real name, nothing a URL or a file system would read differently. This is
  * the one check both sides apply, so no build can publish a name its successor refuses.
@@ -90,14 +141,46 @@ const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
  * @param path - A path relative to the client root, with `/` separators.
  * @returns `true` when the path is safe to publish and to retain.
  */
-export const isServableAssetPath = (path: string): boolean => {
-  const segments = path.split('/');
-  return (
-    segments[0] === 'assets' &&
-    segments.length > 1 &&
-    !forbiddenPathCharacter.test(path) &&
-    segments.slice(1).every((segment) => segment !== '' && segment !== '.' && segment !== '..')
-  );
+export const isServableAssetPath = (path: string): boolean =>
+  path.split('/')[0] === 'assets' && path.split('/').length > 1 && isSafePath(path);
+
+/**
+ * The same check for {@link servedRuntimesIndexFileName}: a file under a runtime bundle's content address.
+ *
+ * @param path - A path relative to the client root, with `/` separators.
+ * @returns `true` when the path is safe to publish and to retain as a runtime bundle file.
+ */
+export const isServableRuntimePath = (path: string): boolean => isRuntimeBundlePath(path) && isSafePath(path);
+
+/** Which index a retention pass reads and writes. */
+type IndexKind = {
+  readonly fileName: string;
+  readonly isServable: (path: string) => boolean;
+  /** The top-level directories the build's own files are listed from. */
+  readonly roots: readonly string[];
+  /** Whether a build may lack every root (a build without the PicoGK or C# bundle). */
+  readonly optional: boolean;
+  /**
+   * Whether a 200 that is not JSON means "no index yet": the live deploy's assets index was read just
+   * before, so such an answer is a catch-all on a build from before runtime retention, not an outage.
+   */
+  readonly catchAllMeansNone: boolean;
+};
+
+const assetsKind: IndexKind = {
+  fileName: servedAssetsIndexFileName,
+  isServable: isServableAssetPath,
+  roots: ['assets'],
+  optional: false,
+  catchAllMeansNone: false,
+};
+
+const runtimesKind: IndexKind = {
+  fileName: servedRuntimesIndexFileName,
+  isServable: isServableRuntimePath,
+  roots: runtimeBundleRoots,
+  optional: true,
+  catchAllMeansNone: true,
 };
 
 const refusePath = (path: string, where: string): Error =>
@@ -130,7 +213,7 @@ type Transport = {
 };
 
 /** Check one live index entry, which arrives as untrusted JSON. */
-const assertServedAsset = (entry: unknown): ServedAsset => {
+const assertServedAsset = (entry: unknown, isServable: (path: string) => boolean): ServedAsset => {
   if (typeof entry !== 'object' || entry === null) {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
@@ -138,7 +221,7 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
   if (typeof path !== 'string' || typeof integrity !== 'string' || typeof generation !== 'number') {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
-  if (!isServableAssetPath(path)) {
+  if (!isServable(path)) {
     throw refusePath(path, 'live asset index');
   }
   if (!sha384Integrity.test(integrity) || !Number.isInteger(generation) || generation < 0) {
@@ -162,7 +245,11 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
  * @returns The index with checked entries.
  * @throws When the schema, an entry or a path is not one this script publishes.
  */
-export const parseServedAssetsIndex = (value: unknown, source: string): ServedAssetsIndex => {
+export const parseServedAssetsIndex = (
+  value: unknown,
+  source: string,
+  isServable: (path: string) => boolean = isServableAssetPath,
+): ServedAssetsIndex => {
   const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
     Record<'schema' | 'assets', unknown>
   >;
@@ -171,7 +258,7 @@ export const parseServedAssetsIndex = (value: unknown, source: string): ServedAs
   }
   const youngest = new Map<string, ServedAsset>();
   for (const entry of index.assets as readonly unknown[]) {
-    const asset = assertServedAsset(entry);
+    const asset = assertServedAsset(entry, isServable);
     const known = youngest.get(asset.path);
     if (known === undefined || asset.generation < known.generation) {
       youngest.set(asset.path, asset);
@@ -276,14 +363,28 @@ const integrityOfFile = async (path: string): Promise<string> => {
   return `sha384-${hash.digest('base64')}`;
 };
 
-const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
+/** Every file under a root, or none when the build lacks it and it is optional. */
+const listRoot = async (directory: string, optional: boolean): Promise<Dirent[]> => {
+  try {
+    return await readdir(directory, { recursive: true, withFileTypes: true });
+  } catch (error) {
+    if (optional && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+};
+
+const listOwnAssets = async (clientDirectory: string, kind: IndexKind): Promise<readonly ServedAsset[]> => {
   // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
-  const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
-  const files = entries.filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
+  const listed = await Promise.all(
+    kind.roots.map(async (root) => listRoot(join(clientDirectory, root), kind.optional)),
+  );
+  const files = listed.flat().filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
   const paths = files.map((entry) => {
     const absolute = join(entry.parentPath, entry.name);
     const path = relative(clientDirectory, absolute).split(sep).join(posix.sep);
-    if (!isServableAssetPath(path)) {
+    if (!kind.isServable(path)) {
       // Published, it would fail every later deploy that reads this index.
       throw refusePath(path, 'new build');
     }
@@ -357,46 +458,106 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
 export const skipRetentionVariable = 'TAU_RETAIN_ASSETS_SKIP';
 
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
-const unreadableIndex = (origin: string, reason: string): Error =>
+const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
   new Error(
-    `Retention could not read the live asset index at ${origin}/${servedAssetsIndexFileName} (${reason}). ` +
+    `Retention could not read the live asset index at ${origin}/${fileName} (${reason}). ` +
       `Publishing now would drop every retained asset. Re-run once the live deploy answers, or set ` +
       `${skipRetentionVariable}=1 to ship this deploy without retention.`,
   );
 
-const readLiveIndex = async (origin: string, transport: Transport): Promise<ServedAssetsIndex | undefined> => {
+const readLiveIndex = async (
+  origin: string,
+  transport: Transport,
+  kind: IndexKind,
+): Promise<ServedAssetsIndex | undefined> => {
+  const { fileName } = kind;
   let response: Fetched;
   try {
-    response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`, transport);
+    response = await fetchWithRetry(`${origin}/${fileName}`, transport);
   } catch (error) {
     // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
-    throw unreadableIndex(origin, String(error));
+    throw unreadableIndex(origin, fileName, String(error));
   }
   // No index yet: only a 404. The first deploy that runs this on a site whose catch-all answers 200 skips once.
   if (response.status === 404) {
-    console.log(`→ ${origin} publishes no ${servedAssetsIndexFileName} yet; nothing to retain.`);
+    console.log(`→ ${origin} publishes no ${fileName} yet; nothing to retain.`);
     return undefined;
   }
   if (response.status !== 200) {
-    throw unreadableIndex(origin, `answered ${String(response.status)}`);
+    throw unreadableIndex(origin, fileName, `answered ${String(response.status)}`);
   }
   /* A 200 that is not the index (an SPA catch-all, a maintenance page, a rollback to a deploy from
    * before retention) may stand in front of assets pages still load: it fails rather than keep none. */
   if (!response.contentType.includes('application/json')) {
-    throw unreadableIndex(origin, `answered 200 ${response.contentType || 'without a content type'}, not the index`);
+    if (kind.catchAllMeansNone) {
+      console.log(`→ ${origin} answers ${fileName} with its catch-all, a build from before it; nothing to retain.`);
+      return undefined;
+    }
+    throw unreadableIndex(
+      origin,
+      fileName,
+      `answered 200 ${response.contentType || 'without a content type'}, not the index`,
+    );
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(response.body));
   } catch (error) {
-    throw unreadableIndex(origin, `answered JSON that does not parse (${String(error)})`);
+    throw unreadableIndex(origin, fileName, `answered JSON that does not parse (${String(error)})`);
   }
-  return parseServedAssetsIndex(parsed, `${origin}/${servedAssetsIndexFileName}`);
+  return parseServedAssetsIndex(parsed, `${origin}/${fileName}`, kind.isServable);
 };
 
-type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };
+type Download = {
+  readonly origin: string;
+  readonly clientDirectory: string;
+  readonly transport: Transport;
+  readonly store: string | undefined;
+};
 
-const downloadAsset = async ({ origin, clientDirectory, transport }: Download, asset: ServedAsset): Promise<number> => {
+/** A store file's name: its SRI integrity, made safe as a file name. */
+const storeFileName = (integrity: string): string => integrity.replaceAll('/', '_').replaceAll('+', '-');
+
+/** A runtime bundle file's bytes from the store, when it holds them unchanged. */
+const readFromStore = async (
+  store: string | undefined,
+  asset: ServedAsset,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  if (store === undefined || !isRuntimeBundlePath(asset.path)) {
+    return undefined;
+  }
+  const file = join(store, storeFileName(asset.integrity));
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = Uint8Array.from(await readFile(file));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+  if (sri(bytes) === asset.integrity) {
+    return bytes;
+  }
+  // A cache is not trusted: a changed file is dropped, fetched from the live deploy, and stored again.
+  await rm(file, { force: true });
+  return undefined;
+};
+
+/** Where one retained asset's bytes came from. */
+type Retained = { readonly bytes: number; readonly fromStore: boolean };
+
+const downloadAsset = async (
+  { origin, clientDirectory, transport, store }: Download,
+  asset: ServedAsset,
+): Promise<Retained> => {
+  const destination = join(clientDirectory, asset.path);
+  const stored = await readFromStore(store, asset);
+  if (stored !== undefined) {
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, stored);
+    return { bytes: stored.byteLength, fromStore: true };
+  }
   const response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
   if (response.status !== 200) {
     throw new Error(
@@ -407,17 +568,88 @@ const downloadAsset = async ({ origin, clientDirectory, transport }: Download, a
   if (sri(bytes) !== asset.integrity) {
     throw new Error(`${asset.path} does not match its integrity in the live index; refusing to publish it.`);
   }
-  const destination = join(clientDirectory, asset.path);
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, bytes);
-  return bytes.byteLength;
+  return { bytes: bytes.byteLength, fromStore: false };
 };
 
 /**
- * Retain the live deploy's assets in a new client build and write its index.
+ * Leave in the store exactly the runtime bundle files this deploy serves, its own and those it kept,
+ * so the next deploy reads them from it rather than downloading them again.
  *
- * @param options - The new client build directory and the live deploy's origin (none: index only).
- * @returns How many assets and bytes were retained, and the new index.
+ * @param store - The store directory.
+ * @param clientDirectory - The new client build, which now holds every served file.
+ * @param served - The new deploy's index entries.
+ */
+const refreshStore = async (store: string, clientDirectory: string, served: readonly ServedAsset[]): Promise<void> => {
+  const wanted = new Map(
+    served.filter((asset) => isRuntimeBundlePath(asset.path)).map((asset) => [storeFileName(asset.integrity), asset]),
+  );
+  await mkdir(store, { recursive: true });
+  const present = new Set(await readdir(store));
+  await Promise.all(
+    [...present].filter((name) => !wanted.has(name)).map(async (name) => rm(join(store, name), { recursive: true })),
+  );
+  await mapWithConcurrency(
+    [...wanted].filter(([name]) => !present.has(name)),
+    hashConcurrency,
+    async ([name, asset]) => copyFile(join(clientDirectory, asset.path), join(store, name)),
+  );
+};
+
+type Pass = {
+  readonly clientDirectory: string;
+  readonly origin: string | undefined;
+  readonly transport: Transport;
+  readonly skip: boolean;
+  readonly now: number;
+  readonly store: string | undefined;
+};
+
+type PassResult = {
+  readonly retained: number;
+  readonly bytes: number;
+  readonly storedBytes: number;
+  readonly index: ServedAssetsIndex;
+};
+
+/** One index: list the build's own files, keep the live deploy's, write the new index. */
+const retainIndex = async (pass: Pass, kind: IndexKind): Promise<PassResult> => {
+  const own = await listOwnAssets(pass.clientDirectory, kind);
+  const previous =
+    pass.origin === undefined || pass.skip ? undefined : await readLiveIndex(pass.origin, pass.transport, kind);
+  const kept =
+    previous === undefined
+      ? []
+      : planRetention(previous, new Set(own.map((asset) => asset.path)), {
+          now: pass.now,
+          shouldAge: !isSameBuild(previous, own),
+        });
+  const download: Download = {
+    origin: pass.origin ?? '',
+    clientDirectory: pass.clientDirectory,
+    transport: pass.transport,
+    store: pass.store,
+  };
+  const results = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));
+  const index: ServedAssetsIndex = {
+    schema: servedAssetsIndexSchema,
+    assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
+  };
+  await writeFile(join(pass.clientDirectory, kind.fileName), `${JSON.stringify(index)}\n`);
+  return {
+    retained: kept.length,
+    bytes: results.reduce((total, result) => total + result.bytes, 0),
+    storedBytes: results.reduce((total, result) => total + (result.fromStore ? result.bytes : 0), 0),
+    index,
+  };
+};
+
+/**
+ * Retain the live deploy's assets and runtime bundles in a new client build and write both indexes.
+ *
+ * @param options - The new client build directory and the live deploy's origin (none: indexes only).
+ * @returns How many files and bytes were retained (both indexes), and the two new indexes.
  */
 export const retainPreviousAssets = async (options: {
   readonly clientDirectory: string;
@@ -430,32 +662,42 @@ export const retainPreviousAssets = async (options: {
   readonly skip?: boolean;
   /** This deploy's time in milliseconds since the epoch; replaceable in tests. */
   readonly now?: number;
-}): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
-  const transport: Transport = {
-    requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
-    wait: options.wait ?? (async (milliseconds) => setTimeout(milliseconds)),
+  /** Directory of runtime bundle files kept between deploys (`TAU_RETAIN_ASSETS_STORE`); none: download them all. */
+  readonly store?: string;
+}): Promise<{
+  readonly retained: number;
+  readonly bytes: number;
+  /** Of `bytes`, those read from the store rather than downloaded. */
+  readonly storedBytes: number;
+  /** The `/assets/*` index (`tau-served-assets.json`). */
+  readonly index: ServedAssetsIndex;
+  /** The runtime bundle index (`tau-served-runtimes.json`). */
+  readonly runtimes: ServedAssetsIndex;
+}> => {
+  const pass: Pass = {
+    clientDirectory: options.clientDirectory,
+    origin: options.origin?.replace(/\/+$/u, ''),
+    transport: {
+      requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
+      wait: options.wait ?? (async (milliseconds) => setTimeout(milliseconds)),
+    },
+    skip: options.skip === true,
+    now: options.now ?? Date.now(),
+    store: options.store,
   };
-  const own = await listOwnAssets(options.clientDirectory);
-  const origin = options.origin?.replace(/\/+$/u, '');
-  const previous = origin === undefined || options.skip === true ? undefined : await readLiveIndex(origin, transport);
-  const kept =
-    previous === undefined
-      ? []
-      : planRetention(previous, new Set(own.map((asset) => asset.path)), {
-          now: options.now ?? Date.now(),
-          shouldAge: !isSameBuild(previous, own),
-        });
-
-  const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
-  const sizes = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));
-  const bytes = sizes.reduce((total, size) => total + size, 0);
-
-  const index: ServedAssetsIndex = {
-    schema: servedAssetsIndexSchema,
-    assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
+  // The assets index first: it fails closed on an unreadable live deploy before any runtime is fetched.
+  const assets = await retainIndex(pass, assetsKind);
+  const runtimes = await retainIndex(pass, runtimesKind);
+  if (options.store !== undefined) {
+    await refreshStore(options.store, options.clientDirectory, runtimes.index.assets);
+  }
+  return {
+    retained: assets.retained + runtimes.retained,
+    bytes: assets.bytes + runtimes.bytes,
+    storedBytes: assets.storedBytes + runtimes.storedBytes,
+    index: assets.index,
+    runtimes: runtimes.index,
   };
-  await writeFile(join(options.clientDirectory, servedAssetsIndexFileName), `${JSON.stringify(index)}\n`);
-  return { retained: kept.length, bytes, index };
 };
 
 const main = async (): Promise<void> => {
@@ -468,13 +710,16 @@ const main = async (): Promise<void> => {
         'may fail their next lazy import until they reload. Use only to ship a fix while the live origin is down.',
     );
   }
-  const { retained, bytes, index } = await retainPreviousAssets({
+  const configuredStore = process.env['TAU_RETAIN_ASSETS_STORE']?.trim();
+  const store = configuredStore === undefined || configuredStore === '' ? undefined : resolve(configuredStore);
+  const { retained, bytes, storedBytes, index, runtimes } = await retainPreviousAssets({
     clientDirectory: resolve(import.meta.dirname, '../build/client'),
     origin,
     skip,
+    store,
   });
   console.log(
-    `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,
+    `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB, ${String(Math.round(storedBytes / 1024))} KiB of it from the store) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} assets and ${String(runtimes.assets.length)} runtime files served.`,
   );
 };
 

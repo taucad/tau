@@ -1029,6 +1029,7 @@ pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 patchedDependencies:
   '@agentclientprotocol/codex-acp@1.7.0': 81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
+  '@aurigax-ai/ghostty-web@0.3.6': ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   react-router@7.18.2: 273b1007189eee3007a17799b583101a4fb303786d75f617016b232876c63166
@@ -2722,7 +2723,7 @@ importers:
     dependencies:
       '@aurigax-ai/ghostty-web':
         specifier: 'catalog:'
-        version: 0.3.6
+        version: 0.3.6(patch_hash=ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84)
       '@base-ui/react':
         specifier: 'catalog:'
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -4258,9 +4259,6 @@ importers:
       '@taucad/project-core':
         specifier: workspace:*
         version: link:../core/project
-      jszip:
-        specifier: ^3.10.1
-        version: 3.10.2
       nanoid:
         specifier: 'catalog:'
         version: 5.1.16
@@ -4289,6 +4287,9 @@ importers:
       fast-check:
         specifier: 'catalog:'
         version: 4.10.2
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -26613,7 +26614,7 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
 
-  '@aurigax-ai/ghostty-web@0.3.6': {}
+  '@aurigax-ai/ghostty-web@0.3.6(patch_hash=ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84)': {}
 
   '@aws-sdk/checksums@3.1001.3':
     dependencies:

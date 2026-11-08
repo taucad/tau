@@ -485,8 +485,8 @@ async function readDifferences(
       (a.purchased_atoms - j.purchased)::text as "purchasedDrift",
       (a.debt_atoms - j.debt)::text as "debtDrift",
       (a.promo_held_atoms - h.promo)::text as "promoHoldDrift",
-      (a.plan_held_atoms - h.plan - r.plan)::text as "planHoldDrift",
-      (a.purchased_held_atoms - h.purchased - r.purchased)::text as "purchasedHoldDrift",
+      (a.plan_held_atoms - h.plan)::text as "planHoldDrift",
+      (a.purchased_held_atoms - h.purchased)::text as "purchasedHoldDrift",
       res.unresolved::text as "unresolvedOperations",
       res.orphan::text as "orphanResolutions",
       cause.total::text as "missingCause",
@@ -501,11 +501,6 @@ async function readDifferences(
     join lateral (select coalesce(sum(o.promo_held_atoms), 0) as promo,
         coalesce(sum(o.plan_held_atoms), 0) as plan, coalesce(sum(o.purchased_held_atoms), 0) as purchased
       from billing.credit_operation o where o.account_id = a.id and o.customer_state = 'pending') h on true
-    join lateral (select coalesce(sum(i.hold_atoms) filter (where c.source = 'plan'), 0) as plan,
-        coalesce(sum(i.hold_atoms) filter (where c.source = 'purchased'), 0) as purchased
-      from billing.billing_refund_intent i
-      join billing.billing_reversal_case c on c.id = i.reversal_case_id
-      where i.account_id = a.id and i.hold_state = 'held') r on true
     join lateral (select count(*) filter (where o.customer_state <> 'pending' and n.total <> 1) as unresolved,
         count(*) filter (where o.customer_state = 'pending' and n.total <> 0) as orphan
       from billing.credit_operation o
@@ -520,7 +515,8 @@ async function readDifferences(
         or (t.kind = 'promotion_grant' and t.promotion_issuance_id is not null)
         or (t.kind = 'reversal' and t.reversal_case_id is not null)
         or (t.kind = 'deferred_grant' and t.reversal_case_id is not null and t.correction_of is not null)
-        or (t.kind = 'compensation' and t.correction_of is not null))) cause on true
+        or (t.kind = 'compensation' and t.correction_of is not null)
+        or (t.kind = 'plan_expiry' and t.period_id is not null))) cause on true
     join lateral (select count(*) - count(distinct t.revision) as duplicates,
         coalesce(max(t.revision), 0) as maximum
       from billing.credit_transaction t where t.account_id = a.id) rev on true

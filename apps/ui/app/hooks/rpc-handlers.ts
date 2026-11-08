@@ -122,6 +122,11 @@ export type RpcHandlerDependencies = {
       }): Promise<CheckedFileWriteResult>;
     };
     readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+    /**
+     * Bytes as they are, text or binary, up to `sizeLimit` (the open-time limit
+     * when omitted), never entering the editor's content cache (D17).
+     */
+    readRawBytes: (path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>;
     writeFile: (path: string, data: Uint8Array<ArrayBuffer>, options: { source: FileWriteSource }) => Promise<void>;
     deleteFile: (path: string, options: { source: FileWriteSource }) => Promise<void>;
     stat: (path: string) => Promise<FileStat>;
@@ -176,8 +181,8 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     resolveAuthorityPath(`${fileManager.fileManagerRef.getSnapshot().context.rootDirectory}/${assertRootedPath(path)}`);
   const absolutePreconditions = (preconditions: readonly FileWritePrecondition[]): FileWritePrecondition[] =>
     preconditions.map((precondition) => ({ ...precondition, path: absolute(precondition.path) }));
-  const readFileBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
-    new Uint8Array(await fileManager.readFile(path));
+  /* Agent and runtime reads are incidental (D17): raw bytes, binary or text, outside the editor's cache. */
+  const readFileBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> => fileManager.readRawBytes(path);
   /* A stat or listing carries content facts only when already known (I3), so
    * a missing one is measured here from one read. This client has no ranged
    * read to classify from a head, so a stat or listing measures only files
@@ -238,7 +243,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
           code: rpcClientErrorCode.resultTooLarge,
         });
       }
-      const data = await readFileBytes(rootedPath);
+      const data = await fileManager.readRawBytes(rootedPath, { sizeLimit: maximumReadBytes });
       if (data.byteLength > maximumReadBytes) {
         throw Object.assign(new Error(`File '${path}' exceeds the binary read limit.`), {
           code: rpcClientErrorCode.resultTooLarge,
@@ -247,7 +252,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       return data;
     },
     async readFile(path: string): Promise<string> {
-      const data = await fileManager.readFile(path);
+      const data = await readFileBytes(path);
       /* A stat past the line-count cap carries no kind (no ranged read crosses
        * this client's bridge), so the 512 B head of the bytes read here is what
        * keeps a text read of a binary refused (D4). */
@@ -339,7 +344,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       await mutationQueue.queueFor(path, async () => {
         let existing = '';
         try {
-          const data = await fileManager.readFile(path);
+          const data = await readFileBytes(path);
           existing = decodeTextFile(data);
         } catch (error) {
           if (!(error instanceof FileNotFoundError) && getErrno(error) !== 'ENOENT') {
@@ -830,7 +835,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
   const operationTimeoutForFile = async (path: string): Promise<number | undefined> => {
     let bytes: Uint8Array<ArrayBuffer>;
     try {
-      bytes = await fileManager.readFile(workbenchPaths.entries);
+      bytes = await fileManager.readRawBytes(workbenchPaths.entries);
     } catch (error) {
       if (error instanceof FileNotFoundError || getErrno(error) === 'ENOENT') {
         return undefined;
@@ -854,7 +859,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
   const fileSystem = guardLargeObjectFiles(createBrowserRpcFileSystem(fileManager));
   const skillResolver = createSkillResolver({
     async readFile(path) {
-      return fileManager.readFile(path);
+      return fileManager.readRawBytes(path);
     },
     async listDirectory(path) {
       const { treeService } = await fileManager.whenServicesReady();

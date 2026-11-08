@@ -1,5 +1,4 @@
-import type { Model, ModelModalities, ModelReasoningSupport } from '#api/models/model.schema.js';
-import type { ProviderId } from '#api/providers/provider.schema.js';
+import type { Model, ModelModalities, ModelReasoningSupport, ProviderId } from '@taucad/chat/model-catalog';
 
 // 'ollama' is runtime-discovered and never part of the static cloud catalog.
 type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;

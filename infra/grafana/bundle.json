@@ -11,7 +11,7 @@
     "dashboards/profiling.json": "51436f6ad4244dd7db2844aff04eebb04c6c5f414ff80eedb0d2dcb7b9ea39e3",
     "dashboards/redis.json": "b62d94e1b03a4271694ce516674c983aca275de5e4409b6c7d5fbd5a5c8c7d8d",
     "dashboards/runtime-operations.json": "4e83b4053703edb85b260467825a7920903328c59e812a1940e7fd4eb06605da",
-    "dashboards/runtime-product.json": "6cfb0673a290f720d7a2aced7374b760955dccb249528738b5954b062e50756c",
+    "dashboards/runtime-product.json": "a5b794723bbd452fe457542d15558f6934c5bcd33763ba9967cf5f6b39eaea9f",
     "dashboards/runtime.json": "3cc9701e351d0c30355cb786776faedcc35e2af08746c7b745b1135788facb44",
     "dashboards/slo-executive.json": "0688587613d3ed6948a8e527fd3cbd83889cc6fcff6e95822dcf8fdc3d4ed9f0",
     "dashboards/storage-critical.json": "c4ee80b5c3d5b72d0de405ee0b0bd70c2153f64163b1a63a876497eafdcdb7ad",

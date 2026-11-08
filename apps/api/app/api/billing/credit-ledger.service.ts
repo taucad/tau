@@ -1,4 +1,5 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
+import { turnStepTokenType } from '#api/billing/turn-step-telemetry.js';
 import { spendBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
   paymentOfferSnapshotSchema,
@@ -370,12 +371,6 @@ const hasConstraint = (error: unknown, constraint: string): boolean => {
   return false;
 };
 
-const genAiTokenTypes = new Map([
-  ['uncached_input', 'input'],
-  ['cache_read', 'cache_read'],
-  ['cache_write', 'cache_write'],
-  ['output', 'output'],
-]);
 /** One credit atom is one micro-USD. */
 const creditAtomsPerUsd = 1_000_000;
 
@@ -407,7 +402,8 @@ export const recordSettledGenAiUsage = (
   const meterItems =
     evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
   for (const item of meterItems) {
-    const tokenType = genAiTokenTypes.get(item.dimension);
+    // Tier-aware: the `cache_write` dimension's `1h` tier is `cache_write_1h`, priced at twice the input rate.
+    const tokenType = turnStepTokenType(item);
     if (tokenType !== undefined) {
       metrics?.genAiTokenUsage.record(Number(item.quantity), { ...attributes, 'gen_ai.token.type': tokenType });
     }
@@ -2044,6 +2040,81 @@ export class CreditLedgerService {
       occurredAt: input.occurredAt,
     });
     return true;
+  }
+
+  /**
+   * Expires the unheld plan credit of accounts whose every subscription has ended (terms §3.3: Credits
+   * included with Pro expire when the subscription ends). Plan credit still held by an in-flight
+   * operation is left for a later pass. Purchased and promotional credit are never touched. Each
+   * expiry cites the account's latest billing period, the grant the expired allowance came from.
+   */
+  public async expireEndedPlanCredits(input: {
+    environment: string;
+    limit: number;
+    occurredAt?: Date;
+  }): Promise<{ expired: number; expiredAtoms: bigint }> {
+    const candidates = await this.databaseService.database.execute(sql`
+      select a.id as "accountId"
+      from billing.credit_account a
+      where a.environment = ${input.environment}
+        and a.plan_atoms > a.plan_held_atoms
+        and exists (select from public.subscription s where s.account_id = a.id)
+        and not exists (select from public.subscription s where s.account_id = a.id and s.slot_state <> 'ended')
+      order by a.id
+      limit ${input.limit}
+    `);
+    let expired = 0;
+    let expiredAtoms = 0n;
+    for (const row of candidates) {
+      const { accountId } = z.object({ accountId: z.string() }).parse(row);
+      const atoms = await this.databaseService.database.transaction(async (tx) => {
+        const account = await this.lockAccount(tx, accountId);
+        const live = await tx
+          .select({ id: subscription.id })
+          .from(subscription)
+          .where(and(eq(subscription.accountId, account.id), ne(subscription.slotState, 'ended')))
+          .limit(1);
+        const amount = account.planAtoms - account.planHeldAtoms;
+        if (live.length > 0 || amount <= 0n) {
+          return 0n;
+        }
+        const [period] = await tx
+          .select({ id: billingPeriod.id })
+          .from(billingPeriod)
+          .where(eq(billingPeriod.accountId, account.id))
+          .orderBy(desc(billingPeriod.periodEnd))
+          .limit(1);
+        if (period === undefined) {
+          return 0n;
+        }
+        const revision = account.revision + 1n;
+        await tx
+          .update(creditAccount)
+          .set({ planAtoms: account.planAtoms - amount, revision })
+          .where(eq(creditAccount.id, account.id));
+        await tx.insert(creditTransaction).values({
+          id: randomUUID(),
+          accountId: account.id,
+          revision,
+          kind: 'plan_expiry',
+          periodId: period.id,
+          promoDeltaAtoms: 0n,
+          planDeltaAtoms: -amount,
+          purchasedDeltaAtoms: 0n,
+          debtDeltaAtoms: 0n,
+          accountDeltaAtoms: -amount,
+          balanceAfterAtoms:
+            account.promoAtoms + account.planAtoms + account.purchasedAtoms - account.debtAtoms - amount,
+          occurredAt: input.occurredAt ?? new Date(),
+        });
+        return amount;
+      });
+      if (atoms > 0n) {
+        expired += 1;
+        expiredAtoms += atoms;
+      }
+    }
+    return { expired, expiredAtoms };
   }
 
   /** Issues the current-period promotion once; disabled periods never backfill. */

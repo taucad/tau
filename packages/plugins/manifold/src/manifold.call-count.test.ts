@@ -147,6 +147,38 @@ describe('Manifold kernel call counts', () => {
   });
 });
 
+describe('Manifold render at the evaluated detail', () => {
+  it('should reuse the evaluated mesh, without running the model again, when the request is the default detail', async () => {
+    const client = createClient({ 'main.ts': tracedCode });
+    const document = client.open({ source: { path: 'main.ts' }, watch: false });
+    try {
+      const evaluated = await document.evaluation();
+      expect(evaluated.superseded).toBe(false);
+      // Manifold's own circular detail: the one the evaluation already meshed at.
+      const tessellation = { linearTolerance: 1, angularTolerance: 10 };
+
+      const read = await spyOnManifold();
+      const view = document.view('model', { options: { tessellation } });
+      const outcome = await view.rendering();
+      view.close();
+      if (outcome.superseded) {
+        throw new Error('render was superseded');
+      }
+      assertRenderingSuccess(outcome.rendering);
+      const exported = await document.export('glb', { options: { tessellation } });
+      expect(exported.success).toBe(true);
+
+      // A re-run would mesh every source manifold again (`getMesh`, `calculateNormals`, `numProp`).
+      expect(read()).toEqual({ 'Manifold.getMesh': 0, 'Manifold.calculateNormals': 0, 'Manifold.numProp': 0 });
+      // The report carries the evaluated mesh's counts.
+      expect(outcome.rendering.artifact.tessellation?.requested).toBe('explicit');
+      expect(outcome.rendering.artifact.tessellation?.triangles).toBeGreaterThan(0);
+    } finally {
+      document.close();
+    }
+  });
+});
+
 describe('Manifold library call tracing', () => {
   /** Telemetry is posted after each operation's reply; give the batch time to arrive. */
   const settleTelemetry = async (): Promise<void> =>

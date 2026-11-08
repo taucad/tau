@@ -10,6 +10,9 @@ const purposeSchema = z.enum([
   'billing_portal',
 ]);
 
+/** A card setup or a portal visit can complete without issuing anything; every purchase completes with a receipt. */
+const receiptlessCompletions = new Set<string>(['reload_setup', 'billing_portal']);
+
 /** Owned payment progress; a receipt records issuance, never a separate balance. */
 export const wirePaymentActionSchema = z
   .object({
@@ -73,8 +76,11 @@ export const wirePaymentActionSchema = z
     ) {
       context.addIssue({ code: 'custom', message: 'Payment state and evidence disagree' });
     }
-    if (action.state === 'completed' && action.purpose !== 'reload_setup') {
-      context.addIssue({ code: 'custom', message: 'Only method setup completes without an issuance receipt' });
+    if (action.state === 'completed' && !receiptlessCompletions.has(action.purpose)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only method setup or a portal visit completes without an issuance receipt',
+      });
     }
     if (action.purpose === 'reload_setup' && ['funds_received', 'fulfilled'].includes(action.state)) {
       context.addIssue({ code: 'custom', message: 'Method setup cannot attest payment or issuance' });
@@ -153,5 +159,5 @@ export const topupActionRequestSchema = paymentActionRequestSchema
   })
   .strict();
 
-/** Bounded owned recovery listing; unrelated Portal actions cannot block a purchase. */
+/** Bounded owned recovery listing; portal visits are never listed, so they cannot block a purchase. */
 export const paymentActionListQuerySchema = z.object({ purpose: purposeSchema.optional() }).strict();

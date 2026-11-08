@@ -38,6 +38,7 @@ import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/proj
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { revisionTreeId } from '#git-tree-id.js';
+import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
@@ -783,7 +784,7 @@ describe('landing large objects from the store (W11.3)', () => {
     await fs.writeFile(join(root, 'project', 'models', 'b.step'), 'old bytes\n');
     const tree = new NodeFsProvider(join(root, 'project'), withStore ? { largeObjectStore: store } : {});
     const batch = vi.spyOn(tree, 'applyBatch');
-    return { tree, batch };
+    return { tree, batch, store };
   };
   const before = new ImmutableRevisionTree([['models/b.step', 'old bytes\n']]);
   const target = new ImmutableRevisionTree([
@@ -814,6 +815,23 @@ describe('landing large objects from the store (W11.3)', () => {
       materializer(tree)(liveCheckout, target, { before, purpose: 'fill', largeObjects: sourced }),
     ).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
     expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+  });
+
+  it('should name the objects a store lost, before moving any file aside, so the fill brings their bytes', async () => {
+    const { tree, store } = await storeProject(true);
+    await fs.rm(join(store, pointer.oid.slice(0, 2), pointer.oid.slice(2, 4), pointer.oid));
+    const replacedOnly = new ImmutableRevisionTree([['models/b.step', pointerBytes]]);
+
+    const failure = await materializer(tree)(liveCheckout, replacedOnly, {
+      before,
+      purpose: 'fill',
+      largeObjects: sourced,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(UnstoredLargeObjectsError);
+    expect((failure as UnstoredLargeObjectsError).oids).toStrictEqual([pointer.oid]);
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+    expect(litterIn(await filesOf(tree))).toEqual([]);
   });
 
   it('should write the bytes of a path whose target is not the mapped pointer', async () => {

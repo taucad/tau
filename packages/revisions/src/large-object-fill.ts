@@ -43,6 +43,8 @@ type Fill = {
    * and a flush writes `{ largeObject, size }` for the checkout to clone.
    */
   fromStore: boolean;
+  /** Objects the host's store turned out not to hold when a write named them: fetched as bytes instead. */
+  readonly unstored: Set<string>;
   /** Objects an opened path names: fetched before the rest and written as soon as they land (D10). */
   readonly promoted: Set<string>;
   /** Woken on every arrival, flush, report and end, so a read or `materialize` waiting on this fill re-checks (D9). */
@@ -64,6 +66,27 @@ type Fill = {
   /** Bytes arrived since the last flush that wrote, which start the next one early once they reach the batch. */
   unflushedBytes: number;
 };
+
+/**
+ * A write that named large objects by id found them missing from the host's
+ * store (W11.3): the paths are left as they were, and the fill brings those
+ * objects' bytes instead (a fetch by oid), so one object a prune or another
+ * writer took from the store never fails the fill.
+ *
+ * @internal
+ */
+export class UnstoredLargeObjectsError extends RevisionPortError {
+  public readonly oids: readonly string[];
+
+  /**
+   * @param oids - The objects the store did not hold.
+   */
+  public constructor(oids: readonly string[]) {
+    super('MISSING_LARGE_OBJECT', 'The large-object store no longer holds an object this write named.');
+    this.name = 'UnstoredLargeObjectsError';
+    this.oids = oids;
+  }
+}
 
 /** How often arrived objects are written into the checkout, and progress told. Milliseconds. */
 const defaultFlushMilliseconds = 1000;
@@ -322,7 +345,7 @@ export const createLargeObjectFill = (
         return [path, content, mode];
       }
       const bytes = fill.landed.get(placeholder.oid);
-      const fromStore = fill.fromStore && fill.arrived.has(placeholder.oid);
+      const fromStore = bytes === undefined && fill.fromStore && fill.arrived.has(placeholder.oid);
       if (bytes === undefined && !fromStore) {
         fill.pending.set(path, placeholder);
         return [path, content, mode];
@@ -349,11 +372,41 @@ export const createLargeObjectFill = (
       }
     }
     if (filled.length > 0) {
-      await materializeTree(fill.place, new ImmutableRevisionTree(entries), {
-        before,
-        purpose: 'fill',
-        ...(sourced.size === 0 ? {} : { largeObjects: sourced }),
-      });
+      try {
+        await materializeTree(fill.place, new ImmutableRevisionTree(entries), {
+          before,
+          purpose: 'fill',
+          ...(sourced.size === 0 ? {} : { largeObjects: sourced }),
+        });
+      } catch (error) {
+        if (!(error instanceof UnstoredLargeObjectsError)) {
+          throw error;
+        }
+        /* Nothing this sweep meant is written: every placeholder stays tracked, and the objects the store
+         * lacks are owed as bytes, which the run fetches by their oids. */
+        let marked = 0;
+        for (const oid of error.oids) {
+          if (!fill.unstored.has(oid)) {
+            fill.unstored.add(oid);
+            marked += 1;
+          }
+          if (fill.arrived.delete(oid)) {
+            fill.bytes -= fill.wanted.get(oid) ?? 0;
+          }
+        }
+        if (marked === 0) {
+          throw error;
+        }
+        for (const path of filled) {
+          const placeholder = placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array());
+          if (placeholder !== undefined) {
+            fill.pending.set(path, placeholder);
+          }
+        }
+        fill.unflushedBytes = unflushedOf(fill);
+        wake(fill);
+        return true;
+      }
     }
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
@@ -487,7 +540,7 @@ export const createLargeObjectFill = (
   /* An object the host's store now holds whole: arrived by its oid, its bytes never in hand (W11.3). */
   const arriveStored = (fill: Fill, oid: string): void => {
     const size = fill.wanted.get(oid);
-    if (size === undefined || fill.arrived.has(oid)) {
+    if (size === undefined || fill.arrived.has(oid) || fill.unstored.has(oid)) {
       return;
     }
     fill.arrived.add(oid);
@@ -563,6 +616,25 @@ export const createLargeObjectFill = (
       if (!isCurrent(fill)) {
         return;
       }
+      /* Objects a write found missing from the store after all: their bytes, fetched by oid, are written instead. */
+      const unstored = [...fill.unstored].flatMap((oid) =>
+        fill.arrived.has(oid) ? [] : [{ oid, size: fill.wanted.get(oid)! }],
+      );
+      if (unstored.length > 0 && port.fetchLargeObjects !== undefined) {
+        const fetched = await port.fetchLargeObjects(unstored, transfer);
+        if (!isCurrent(fill)) {
+          return;
+        }
+        for (const [oid, content] of fetched) {
+          if (fill.wanted.has(oid)) {
+            arrive(fill, oid, content);
+          }
+        }
+        await flushAll(fill);
+        if (!isCurrent(fill)) {
+          return;
+        }
+      }
       /* A placeholder neither the head nor the store delivered is still owed: the fill fails, never reads done (D10). */
       if ([...fill.pending.values()].some(({ oid }) => !fill.arrived.has(oid))) {
         throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds could not be fetched.');
@@ -617,6 +689,7 @@ export const createLargeObjectFill = (
       landed: new Map(),
       arrived: new Set(),
       fromStore: false,
+      unstored: new Set(),
       /* A refill keeps what open files asked for. */
       promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
       waiters: new Set(),

@@ -36,7 +36,12 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
-import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import {
+  NodeFsAuthorityHost,
+  repositoryLargeObjectStore,
+  serveNodeFsProvider,
+  toNodeFsPort,
+} from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
@@ -949,10 +954,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     (projectRoot: string) =>
     (root: string, admission?: Readonly<{ largeObjectStore?: string }>): (() => void) => {
       const key = resolve(root);
+      /* Checked before anything is admitted: only the project repository's own LFS store (I6). */
+      const store =
+        admission?.largeObjectStore === undefined || key === resolve(projectRoot)
+          ? undefined
+          : repositoryLargeObjectStore(projectRoot, admission.largeObjectStore);
       const held = candidateRoots.get(key) ?? 0;
       candidateRoots.set(key, held + 1);
-      if (admission?.largeObjectStore !== undefined && key !== resolve(projectRoot)) {
-        largeObjectStores.set(key, admission.largeObjectStore);
+      if (store !== undefined) {
+        largeObjectStores.set(key, store);
       }
       if (held === 0) {
         runtimeContext?.('register', root, projectRoot);

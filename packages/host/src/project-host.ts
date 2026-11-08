@@ -69,7 +69,8 @@ export type ProjectFileSystem = Readonly<{
    * Admit a candidate or linked checkout's root until the returned release runs. Admissions of one root nest; the
    * caller releases whatever it keeps for the root (its runtime client, its runtime grant) when the last one ends.
    * `largeObjectStore` is the repository store the root lands large objects from while admitted (W11.3); the
-   * authority resolves it by root, so no write names a path under `.git/` (I6).
+   * authority resolves it by root, so no write names a path under `.git/`, and refuses (`EINVAL`) a store that is not
+   * the workspace repository's own `.git/lfs/objects` (I6).
    */
   admit: (root: string, options?: Readonly<{ largeObjectStore?: string }>) => () => void;
   /** Run one checkout mutation under the authority's claim. */

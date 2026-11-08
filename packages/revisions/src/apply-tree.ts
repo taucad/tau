@@ -15,7 +15,7 @@ import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js'
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
-import { largeObjectPlaceholders } from '#large-object-fill.js';
+import { largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { entryClosurePaths } from '#open/entry-closure.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -99,8 +99,10 @@ type MaterializeTreeOptions<Result> = Readonly<{
    * Paths whose target entry is a pointer to land as its stored object
    * (W11.3): each is written as a large-object source, `{ largeObject, size }`,
    * which a checkout that declares `largeObjectSources` materialises from its
-   * own store, and verified by the receipt's hashed read-back rather than by
-   * comparing bytes. A checkout without the capability refuses the write.
+   * own store, and verified by its receipt (the provider hashes the object
+   * before it renames it into place) rather than by comparing bytes. One the
+   * store no longer holds fails the write with `UnstoredLargeObjectsError`,
+   * before anything is moved aside. A checkout without the capability refuses the write.
    */
   largeObjects?: ReadonlyMap<string, LfsPointer>;
 }>;
@@ -450,7 +452,21 @@ export const createApplyTreeEffects = (
         const object = sourced.get(path);
         return object === undefined ? entry.content : { largeObject: object.oid, size: object.size };
       };
-      /* Sourced paths whose receipt names the object they were written from, after its hashed read-back. */
+      /* A sourced write the store could not serve (ENOENT: the object is gone from it) is the fill's to bring as bytes. */
+      const raiseUnstored = (receipts: readonly ChangesetEntryReceipt[], paths: readonly string[]): void => {
+        const lacking = receipts.flatMap((receipt, index) => {
+          const object = sourced.get(paths[index] ?? '');
+          return object !== undefined &&
+            receipt.outcome === 'failed' &&
+            (receipt.error as { code?: unknown } | undefined)?.code === 'ENOENT'
+            ? [object.oid]
+            : [];
+        });
+        if (lacking.length > 0) {
+          throw new UnstoredLargeObjectsError([...new Set(lacking)]);
+        }
+      };
+      /* Sourced paths whose receipt names the object they were written from, hashed by the provider before its rename. */
       const landedObjects = new Set<string>();
       const noteLanded = (receipts: readonly ChangesetEntryReceipt[], paths: readonly string[]): void => {
         for (const [index, receipt] of receipts.entries()) {
@@ -559,6 +575,10 @@ export const createApplyTreeEffects = (
             createdReceipts,
             created.map(([path]) => path),
           );
+          raiseUnstored(
+            createdReceipts,
+            created.map(([path]) => path),
+          );
           raiseRefusal(
             createdReceipts,
             created.map(([path]) => path),
@@ -604,6 +624,11 @@ export const createApplyTreeEffects = (
                 staged.add(stagedPath);
               }
             }
+            /* Before anything is moved aside: every replaced file is still the one the checkout held. */
+            raiseUnstored(
+              stagedReceipts,
+              replaced.map(({ path }) => path),
+            );
             raiseRefusal(
               stagedReceipts,
               replaced.map(({ staged: stagedPath }) => stagedPath),
@@ -687,7 +712,9 @@ export const createApplyTreeEffects = (
             const wanted = targetFiles.get(path);
             const object = sourced.get(path);
             if (object !== undefined) {
-              /* The provider hashed what it landed; the re-read proves it is still there, at its size. */
+              /* Receipt, size and mode, never a second hash: the provider hashed the
+               * object before its rename, and hashing every landed part again here
+               * is the cost the clone exists to avoid (W11.3 review). */
               return (
                 applied === undefined ||
                 wanted === undefined ||

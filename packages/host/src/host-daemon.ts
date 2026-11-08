@@ -13,7 +13,12 @@ import { credentialPrincipal } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, CredentialState } from '@taucad/agent-host/launcher';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
-import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import {
+  NodeFsAuthorityHost,
+  repositoryLargeObjectStore,
+  serveNodeFsProvider,
+  toNodeFsPort,
+} from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
@@ -786,6 +791,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    *
    * @param filesystem - The agent's authority.
    * @param root - The checkout root.
+   * @param options - The repository store the root lands large objects from, which must be the workspace's own.
    * @returns The release.
    */
   const admitAgentRoot = (
@@ -794,9 +800,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     options?: Readonly<{ largeObjectStore?: string }>,
   ): (() => void) => {
     const { admissions, largeObjectStores } = filesystem;
+    /* Checked before anything is admitted: only the repository's own LFS store, never a path the caller chose (I6). */
+    const store =
+      options?.largeObjectStore === undefined || root === filesystem.workspaceRoot
+        ? undefined
+        : repositoryLargeObjectStore(filesystem.workspaceRoot, options.largeObjectStore);
     admissions.set(root, (admissions.get(root) ?? 0) + 1);
-    if (options?.largeObjectStore !== undefined && root !== filesystem.workspaceRoot) {
-      largeObjectStores.set(root, options.largeObjectStore);
+    if (store !== undefined) {
+      largeObjectStores.set(root, store);
     }
     const drop = (): void => {
       const remaining = (admissions.get(root) ?? 1) - 1;

@@ -110,7 +110,8 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { publishMachine } from '#publish.machine.js';
@@ -1184,12 +1185,47 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * one captured from disk, and the I5 gate compares a cut against a recorded
    * head — so the cut runs the same host-neutral clean step the writer does.
    *
+   * The writer keeps the representation of every entry unchanged from the
+   * cut's first parent (rule 13), so the prediction reads the same parent's
+   * listing — blob ids only — and folds case exactly where the writer does.
+   *
    * @param tree - The captured tree.
+   * @param parent - The revision the cut would follow: the checkout's head.
    * @returns The tree as the store will hold it.
    */
-  const recordedTree = async (tree: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+  const recordedTree = async (
+    tree: ImmutableRevisionTree,
+    parent: string | undefined,
+  ): Promise<ImmutableRevisionTree> => {
     const descriptor = await describePort();
-    return descriptor.largeObjects ? cleanLargeObjects(tree).tree : tree;
+    if (!descriptor.largeObjects) {
+      return tree;
+    }
+    return cleanLargeObjects(tree, {
+      basis: parent === undefined ? undefined : await largeObjectBasisFor(parent),
+      ignoreCase: descriptor.ignoreCase === true,
+    }).tree;
+  };
+  /* ponytail: a handful of heads are live at once; one entry per head keeps the clean step's per-basis cache warm. */
+  const largeObjectBases = new Map<string, Promise<LargeObjectBasis | undefined>>();
+  const largeObjectBasisFor = async (head: string): Promise<LargeObjectBasis | undefined> => {
+    let held = largeObjectBases.get(head);
+    if (held === undefined) {
+      held = (async () => {
+        try {
+          const listing = await port.listTree?.(revisionId(head));
+          return listing === undefined ? undefined : largeObjectBasisOf(await formatOf(), listing);
+        } catch (error) {
+          largeObjectBases.delete(head);
+          throw error;
+        }
+      })();
+      largeObjectBases.set(head, held);
+      if (largeObjectBases.size > 8) {
+        largeObjectBases.delete(largeObjectBases.keys().next().value!);
+      }
+    }
+    return held;
   };
 
   /*
@@ -1630,7 +1666,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
-    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree), await formatOf());
+    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());
+  /* The head a cut of this checkout would follow — asked only of a store that pointerises. */
+  const recordingParentOf = async (checkoutId: string): Promise<string | undefined> => {
+    const descriptor = await describePort();
+    return descriptor.largeObjects ? headOf(await placeOf(checkoutId)) : undefined;
+  };
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
@@ -1986,8 +2027,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const head = await headOf(await readPlaceOf(checkoutId));
     return head === undefined ? undefined : readEntryClosure(port, revisionId(head));
   };
-  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
-    adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
+  /* A host whose checkouts keep the file beside the store (D9, desktop) never swaps it for its pointer. */
+  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> => {
+    const descriptor = await describePort();
+    return adoption === undefined || descriptor.keepsLargeObjectFiles === true
+      ? { adopted: [], left: [] }
+      : adoption.adopt(await readPlaceOf(checkoutId));
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -2209,7 +2255,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const currentTreeId = await treeIdOf(current);
       if (
-        currentTreeId === revisionTreeId(await recordedTree(tree), await formatOf()) &&
+        currentTreeId === revisionTreeId(await recordedTree(tree, current ?? remoteHead), await formatOf()) &&
         (remoteHead === undefined || current === remoteHead)
       ) {
         return [{ name: evidenceRefName, status: 'upToDate', head: current }];

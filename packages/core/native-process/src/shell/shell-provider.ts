@@ -169,12 +169,16 @@ export type ShellProcess = ShellPipesProcess | ShellTerminalProcess;
  * is a missing or broken prerequisite on this device (a later launch may succeed once it is repaired). Neither
  * started anything.
  *
+ * `retryable` marks a sandbox that failed to set up after the launch's profile was computed, proven before the
+ * workload could start: a protected path the profile named as present may have been removed before the sandbox bound
+ * it. A launch freshly prepared computes a fresh profile, so a host may retry it once, after it recovered this one.
+ *
  * @public
  */
 export type ShellLaunchOutcome =
   | Readonly<{ status: 'started'; process: ShellProcess }>
   | Readonly<{ status: 'unsupported'; requirement: ShellRequirement; message: string }>
-  | Readonly<{ status: 'sandbox-unavailable'; message: string }>;
+  | Readonly<{ status: 'sandbox-unavailable'; message: string; retryable?: true | undefined }>;
 
 /**
  * The replaceable boundary: one implementation per platform family plus a deterministic test fake.

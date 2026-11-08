@@ -1,0 +1,7 @@
+{
+  "name": "api-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-core",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:util", "api:core"]
+}

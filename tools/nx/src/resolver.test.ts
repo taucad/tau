@@ -214,6 +214,28 @@ describe('validateTags()', () => {
       'fixture/unknown-layer: unknown tag "layer:shell" (layer: must be one of feature, ui, data-access, util)',
     ]);
   });
+
+  it('requires one valid api name for API server libraries and refuses it on every other project', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('api-without-name', ['scope:api', 'type:app-lib', 'layer:util'], undefined),
+          project('api-two-names', ['scope:api', 'type:app-lib', 'layer:util', 'api:core', 'api:redis'], undefined),
+          project('api-unknown-name', ['scope:api', 'type:app-lib', 'layer:util', 'api:git'], undefined),
+          project('named-app', ['scope:api', 'type:app', 'api:core'], undefined),
+          project('named-ui-lib', ['scope:ui', 'type:app-lib', 'layer:util', 'api:core'], undefined),
+          project('valid-api-lib', ['scope:api', 'type:app-lib', 'layer:feature', 'api:billing'], undefined),
+          project('unnamed-api-app', ['scope:api', 'type:app'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/api-without-name: expected exactly one api: tag, found none',
+      'fixture/api-two-names: expected exactly one api: tag, found api:core, api:redis',
+      'fixture/api-unknown-name: unknown tag "api:git" (api: must be one of core, observability, lifecycle, database, redis, email, auth, hosts, llm-gateway, billing)',
+      'fixture/named-app: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
+      'fixture/named-ui-lib: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
+    ]);
+  });
 });
 
 describe('bundledLibraries()', () => {

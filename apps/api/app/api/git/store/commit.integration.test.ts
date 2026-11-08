@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';

@@ -5,12 +5,9 @@ import { AIMessageChunk } from '@langchain/core/messages';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatService } from '#api/chat/chat.service.js';
-import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import { providerDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
-import type { ModelInvocationIntent } from '#api/llm/model-invocation.types.js';
-import type { ModelService } from '#api/models/model.service.js';
-import type { Environment } from '#config/environment.config.js';
+import { DirectModelInvocationService, LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent, ModelService } from '@taucad/api-llm-gateway';
+import type { Environment } from '@taucad/api-core';
 
 const providerMessage =
   'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.';

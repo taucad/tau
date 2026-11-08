@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import {
   StorageReceiptsController,
   receiptPostWindowSeconds,

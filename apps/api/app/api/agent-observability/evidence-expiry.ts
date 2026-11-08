@@ -1,6 +1,6 @@
 import { inArray, lte } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { agentEvidenceReceipt } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { agentEvidenceReceipt } from '@taucad/api-database/schema';
 
 /*
  * Expiry of Tau's own agent-evidence records (blueprint T13).

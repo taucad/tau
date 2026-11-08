@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire fields use snake_case. */
 import type { Evidence } from '@taucad/agent-observability/contract';
-import type { ModelProviderWire } from '#api/llm/model-invocation.types.js';
+import type { ModelProviderWire } from '@taucad/api-llm-gateway';
 
 /** The contract's provider summary fact. */
 export type ProviderFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'provider' };

@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { inspectProjectPreview, ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { projectPreviewSchema } from '#api/projects/project-preview.dto.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { OwnerLockTransaction } from '#database/owner-lock.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node Buffer fixture encodes WebP integer headers.
 const image = (width = 768, height = 576): Buffer<ArrayBuffer> => {

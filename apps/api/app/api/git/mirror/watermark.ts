@@ -1,7 +1,13 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { project, projectDeletion, projectGit, projectGitLfsObject, storageTombstone } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import {
+  project,
+  projectDeletion,
+  projectGit,
+  projectGitLfsObject,
+  storageTombstone,
+} from '@taucad/api-database/schema';
 
 /**
  * The copy's work signal and watermark in Postgres (W13 B4), behind a port so the

@@ -17,13 +17,13 @@ import {
 } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { storageLimitBytesByTier } from '@taucad/billing';
-import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
-import { withOwnerLock, readOwnerUsage } from '#database/owner-lock.js';
-import { DatabaseService } from '#database/database.service.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { GitOperation, GitReceiptOutcome } from '#telemetry/metrics.js';
-import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
+import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock, readOwnerUsage } from '@taucad/api-database/owner-lock';
+import { DatabaseService } from '@taucad/api-database';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { GitOperation, GitReceiptOutcome } from '@taucad/api-observability/metrics';
+import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '@taucad/api-database/schema';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
@@ -65,7 +65,7 @@ import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
 /**

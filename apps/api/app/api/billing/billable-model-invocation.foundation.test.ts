@@ -1,5 +1,22 @@
-import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
+import {
+  assertNewCollectionCashScope,
+  BillableModelInvocationService,
+  BillingAccountClosureService,
+  BillingAttemptController,
+  BillingController,
+  BillingEstimatesService,
+  BillingPaymentsService,
+  BillingPolicyService,
+  BillingService,
+  BillingUsageService,
+  CodeOwnedBillableModelQualificationResolver,
+  createBillableModelProviderAdapters,
+  CreditLedgerService,
+  qualifiedMeterContracts,
+  registerBillableModelMeterContracts,
+  validateCommercialPolicy,
+} from '@taucad/api-billing';
+import type { InputCountCapability } from '@taucad/api-billing';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { fork } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -18,7 +35,7 @@ import { mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '#database/schema.js';
+import * as schema from '@taucad/api-database/schema';
 import {
   billingBudget,
   billingBudgetFunding,
@@ -28,36 +45,21 @@ import {
   creditAccount,
   creditOperation,
   user,
-} from '#database/schema.js';
-import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
-import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
-import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
-import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+} from '@taucad/api-database/schema';
 import {
-  CodeOwnedBillableModelQualificationResolver,
-  registerBillableModelMeterContracts,
-} from '#api/billing/billable-model-qualification.js';
-import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
-import { BillingController } from '#api/billing/billing.controller.js';
-import { BillingAttemptController } from '#api/billing/billing-attempt.controller.js';
-import { BillingService } from '#api/billing/billing.service.js';
-import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
-import { BillingUsageService } from '#api/billing/billing-usage.service.js';
-import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayError,
+  LlmGatewayService,
+  modelInvocationServiceKey,
+} from '@taucad/api-llm-gateway';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { HostsService } from '@taucad/api-hosts';
+import { DatabaseService } from '@taucad/api-database';
+import type { MetricsService } from '@taucad/api-observability/metrics';
+import { seedBillingFixturePolicy } from '@taucad/api-billing/testing/billing-policy.fixture';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -124,11 +126,15 @@ const startChild = async (input: {
 }) => {
   const childEnvironment = { ...process.env };
   childEnvironment['TSX_TSCONFIG_PATH'] = resolve(import.meta.dirname, '../../../tsconfig.spec.json');
-  const child = fork(resolve(import.meta.dirname, '../../testing/billable-invocation-child.ts'), [], {
-    execArgv: ['--import', 'tsx'],
-    env: childEnvironment,
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-  });
+  const child = fork(
+    resolve(import.meta.dirname, '../../../../libs/api-billing/src/testing/billable-invocation-child.ts'),
+    [],
+    {
+      execArgv: ['--import', 'tsx'],
+      env: childEnvironment,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    },
+  );
   children.add(child);
   childDiagnostics.set(child, '');
   child.stderr?.on('data', (chunk: unknown) => {

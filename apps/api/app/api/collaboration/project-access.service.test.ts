@@ -4,9 +4,9 @@ import { mock } from 'vitest-mock-extended';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
-import type { DatabaseService } from '#database/database.service.js';
-import type { OwnerLockTransaction } from '#database/owner-lock.js';
-import { projectCollaborator, projectDeletion, projectInvitation, user } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
+import { projectCollaborator, projectDeletion, projectInvitation, user } from '@taucad/api-database/schema';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 
 /**

@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase. */
 import { Controller, Get } from '@nestjs/common';
-import { AutomatedRunFailure } from '#telemetry/sentry.js';
+import { AutomatedRunFailure } from '@taucad/api-observability/sentry';
 
 /**
  * The error the failure route throws: an unhandled server error the exception filter reports to Sentry, under the

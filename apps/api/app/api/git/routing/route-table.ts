@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull, lte, min, or, sql, count } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { gitRouteFreeze, projectGitRoute } from '#database/schema.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { gitRouteFreeze, projectGitRoute } from '@taucad/api-database/schema';
 import { defaultRepositoryStore, defaultRoute } from '#api/git/routing/route.js';
 import type { RepositoryRoute, RepositoryStoreName } from '#api/git/routing/route.js';
 

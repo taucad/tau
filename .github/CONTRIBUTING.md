@@ -80,7 +80,7 @@ docker-compose -f infra/docker-compose.yml logs -f
 #### Drizzle Commands
 
 ```bash
-# Generate migrations. This is required when making changes to the database schema. SQL files are generated in the apps/api/app/database/migrations directory.
+# Generate migrations. This is required when making changes to the database schema. SQL files are generated in the apps/libs/api-database/src/migrations directory.
 pnpm db:generate
 
 # Run migrations. This is a manual alternative to the application startup migrations.

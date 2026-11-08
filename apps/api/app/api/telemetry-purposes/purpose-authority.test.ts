@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PurposeAuthorityInput, RecordedPurposeDecision } from '#api/telemetry-purposes/purpose-authority.js';
 import { purposeEpoch, resolvePurposeAuthority } from '#api/telemetry-purposes/purpose-authority.js';
-import type { PurposeRefusal, TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
-import { telemetryPurposes } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { PurposeRefusal } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
+import { telemetryPurposes } from '@taucad/api-database/schema/telemetry-purpose.types';
 
 const notice = 'observability-notice-2026-10-29';
 const superseded = 'observability-notice-2026-09-01';

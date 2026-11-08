@@ -198,10 +198,19 @@ if [[ "$host" == gcp ]]; then
   # reboot ended it.
   first_boot="$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')"
   printf 'Rebooting into the NVIDIA driver\n'
-  timeout 30 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo systemctl reboot' || true
-  sleep 20
-  wait_for_guest
-  [[ "$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id')" != "$first_boot" ]]
+  reboot_status=0
+  timeout 30 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo systemctl reboot' || reboot_status=$?
+  printf 'Reboot request returned %s\n' "$reboot_status"
+  # sshd keeps answering while the old boot shuts down, so a reachable guest is not yet a rebooted one: wait for a new
+  # boot id (run 42464539303 reconnected to the old boot within seconds and failed the comparison).
+  new_boot=''
+  for _attempt in $(seq 1 90); do
+    sleep 5
+    wait_for_guest || { printf 'Guest unreachable after the driver reboot\n' >&2; exit 1; }
+    new_boot="$(ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true)"
+    if [[ -n "$new_boot" && "$new_boot" != "$first_boot" ]]; then break; fi
+  done
+  [[ -n "$new_boot" && "$new_boot" != "$first_boot" ]] || { printf 'Guest did not come back on a new boot\n' >&2; exit 1; }
   printf 'Guest is back on a new boot\n'
 fi
 # Distro is constrained to three literals above, intentionally passed to the guest.

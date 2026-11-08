@@ -16,10 +16,10 @@ import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { decodeManifest, encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
 import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
-import { assertProjectActive, readProjectDeletion } from '#database/project-lifecycle.js';
-import { readOwnerUsage, withOwnerLock } from '#database/owner-lock.js';
-import type { Database } from '#database/owner-lock.js';
-import * as schema from '#database/schema.js';
+import { assertProjectActive, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import { readOwnerUsage, withOwnerLock } from '@taucad/api-database/owner-lock';
+import type { Database } from '@taucad/api-database/owner-lock';
+import * as schema from '@taucad/api-database/schema';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
 

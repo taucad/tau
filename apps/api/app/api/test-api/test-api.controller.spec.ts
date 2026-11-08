@@ -5,10 +5,10 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
-import { DatabaseService } from '#database/database.service.js';
-import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
-import { RedisService } from '#redis/redis.service.js';
-import { getEnvironment } from '#config/environment.config.js';
+import { DatabaseService } from '@taucad/api-database';
+import { BillingPolicyReadiness } from '@taucad/api-billing';
+import { RedisService } from '@taucad/api-redis';
+import { getEnvironment } from '@taucad/api-core';
 
 // Mock DatabaseService for tests that don't need database access
 const mockDatabaseService = {

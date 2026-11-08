@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { projectDeletion } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { projectDeletion } from '@taucad/api-database/schema';
 import { completeProjectDeletion } from '#api/projects/project-deletion.js';
 import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import type { RepositoryStore } from '#api/git/store/port.js';

@@ -75,7 +75,7 @@ export const placementMetadata: Record<Placement, PlacementMetadata> = {
     layerRequired: true,
     build: false,
     react: true,
-    scopeTags: ['shared', 'ui'],
+    scopeTags: ['shared', 'ui', 'api'],
   },
 };
 
@@ -104,6 +104,12 @@ const packageMode = (schema: PackageGeneratorSchema, scope: Placement, placement
   if (schema.react === true && !placement.react) {
     throw new Error(`--react is only supported when --scope=apps/libs.`);
   }
+  if (scopeTag === 'api' && !/^api-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(schema.name)) {
+    throw new Error(`--scopeTag=api requires a name of the form api-<name>; got ${schema.name}.`);
+  }
+  if (scopeTag === 'api' && schema.react === true) {
+    throw new Error(`--react is not supported for an API server library.`);
+  }
   return { build: placement.build, react: schema.react ?? false, scopeTag };
 };
 
@@ -115,7 +121,12 @@ export const packageGenerator = async (tree: Tree, schema: PackageGeneratorSchem
 
   const projectRoot = `${scope}/${name}`;
   const importPath = `@taucad/${name}`;
-  const tags = [`scope:${scopeTag}`, ...placement.tags.slice(1), ...(layer ? [`layer:${layer}`] : [])];
+  /*
+   * An API server library is named in the `api:` tag dimension, which
+   * `eslint.config.mjs` uses to say which other API libraries it may depend on.
+   */
+  const apiName = scopeTag === 'api' ? [`api:${name.slice('api-'.length)}`] : [];
+  const tags = [`scope:${scopeTag}`, ...placement.tags.slice(1), ...(layer ? [`layer:${layer}`] : []), ...apiName];
 
   assertProjectCreationAvailable(tree, name, projectRoot);
 

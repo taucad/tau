@@ -3,14 +3,13 @@ import { createUIMessageStream, createUIMessageStreamResponse, streamText } from
 import { Inject, Injectable } from '@nestjs/common';
 import type { ModelMessage } from 'ai';
 import { commitMessageGenerationSystemPrompt, projectNameGenerationSystemPrompt } from '@taucad/chat/prompts';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
+import { LlmGatewayError, modelInvocationServiceKey } from '@taucad/api-llm-gateway';
 import type {
+  LlmGatewayErrorType,
   ModelInvocationResult,
   ModelInvocationService,
   ModelInvocationSurface,
-} from '#api/llm/model-invocation.types.js';
-import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
+} from '@taucad/api-llm-gateway';
 
 /**
  * Refusals a helper absorbs instead of surfacing (W6, W11a): an operator-paused route and a restricted account. Both

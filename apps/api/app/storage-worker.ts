@@ -1,4 +1,4 @@
-import '#telemetry/otel.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module; OTEL_SERVICE_NAME names it tau-storage
+import '@taucad/api-observability/otel'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module; OTEL_SERVICE_NAME names it tau-storage
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators on the store and driver need metadata before they load
 import process from 'node:process';
 import { Logger } from '@nestjs/common';

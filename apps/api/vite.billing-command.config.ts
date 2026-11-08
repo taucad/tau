@@ -13,7 +13,7 @@ export default defineConfig({
      * in `dist/`. `runMigrationJob` resolves it from `import.meta.dirname`, i.e. `dist/migrations`. */
     viteStaticCopy({
       environment: 'ssr',
-      targets: [{ src: 'app/database/migrations/**/*', dest: 'migrations', rename: { stripBase: 3 } }],
+      targets: [{ src: '../libs/api-database/src/migrations/**/*', dest: 'migrations', rename: { stripBase: 4 } }],
     }),
   ],
   build: {

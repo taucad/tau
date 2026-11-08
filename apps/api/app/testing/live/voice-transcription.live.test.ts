@@ -6,7 +6,7 @@ import process from 'node:process';
 import { promisify } from 'node:util';
 import type { ConfigService } from '@nestjs/config';
 import { describe, expect, it } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { OpenAiTranscriptionProvider } from '#api/voice/openai-transcription.provider.js';
 
 const key = process.env.OPENAI_API_KEY ?? '';

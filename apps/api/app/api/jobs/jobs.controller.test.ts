@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { HostsService } from '#api/hosts/hosts.service.js';
+import type { HostsService } from '@taucad/api-hosts';
 import { JobsController } from '#api/jobs/jobs.controller.js';
 import type { JobsService } from '#api/jobs/jobs.service.js';
 import type { WorkerActionPublishDto } from '#api/jobs/jobs.dto.js';

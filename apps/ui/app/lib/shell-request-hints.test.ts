@@ -10,7 +10,7 @@ describe('readShellRequestHints', () => {
     expect(
       readShellRequestHints(
         requestWith({
-          Cookie: `other=1; ${sidebarOpenCookieName}=0`,
+          cookie: `other=1; ${sidebarOpenCookieName}=0`,
           'Sec-CH-UA-Platform': '"Windows"',
         }),
       ),
@@ -18,7 +18,7 @@ describe('readShellRequestHints', () => {
     expect(
       readShellRequestHints(
         requestWith({
-          Cookie: `${sidebarOpenCookieName}=1`,
+          cookie: `${sidebarOpenCookieName}=1`,
           'Sec-CH-UA-Platform': '"macOS"',
         }),
       ),
@@ -27,7 +27,7 @@ describe('readShellRequestHints', () => {
 
   it('uses the sidebar default for a request without a valid mirror', () => {
     expect(readShellRequestHints(requestWith({})).isSidebarOpen).toBe(sidebarDefaultOpen);
-    expect(readShellRequestHints(requestWith({ Cookie: `${sidebarOpenCookieName}=maybe` })).isSidebarOpen).toBe(
+    expect(readShellRequestHints(requestWith({ cookie: `${sidebarOpenCookieName}=maybe` })).isSidebarOpen).toBe(
       sidebarDefaultOpen,
     );
   });

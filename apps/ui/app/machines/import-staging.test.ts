@@ -440,6 +440,48 @@ describe('the import channel', () => {
       expect(staged.files).toBe(1);
     });
 
+    it('clears a plan whose cancel crossed its answer, and never a newer plan', async () => {
+      const { port1, port2 } = new MessageChannel();
+      serveImportChannel(port1, {
+        importStaging: async () => portOf(new MemoryProvider()),
+        decode: createInlineImportDecoder(),
+        policy: tauPathPolicy,
+      });
+      const answers = new Map<number, PromiseWithResolvers<{ result?: unknown; error?: { message: string } }>>();
+      const answerOf = async (id: number): Promise<{ result?: unknown; error?: { message: string } }> => {
+        const held = answers.get(id) ?? Promise.withResolvers();
+        answers.set(id, held);
+        return held.promise;
+      };
+      port2.addEventListener('message', (event: MessageEvent<{ id: number; result?: unknown; error?: unknown }>) => {
+        const { id } = event.data;
+        if ('result' in event.data || 'error' in event.data) {
+          void answerOf(id);
+          answers.get(id)?.resolve(event.data as { result?: unknown; error?: { message: string } });
+        }
+      });
+      port2.start();
+      const send = (message: Record<string, unknown>): void => {
+        port2.postMessage(message);
+      };
+      /* The worker adopts plan 0 and answers it; the page's cancel of it arrives after. */
+      send({ id: 0, type: 'plan', source: { kind: 'zip', file: await zipOf({ 'a.kcl': 'a' }) } });
+      await answerOf(0);
+      send({ id: -1, type: 'cancel', plan: 0 });
+      send({ id: 1, type: 'stage', operationId: 'req_a', scope, target: 'a' });
+      const refused = await answerOf(1);
+      expect(refused.error?.message).toBe('Nothing is planned to stage.');
+      /* A late cancel of an older plan leaves the newer one in place. */
+      send({ id: 2, type: 'plan', source: { kind: 'zip', file: await zipOf({ 'b.kcl': 'b' }) } });
+      await answerOf(2);
+      send({ id: -1, type: 'cancel', plan: 0 });
+      send({ id: 3, type: 'stage', operationId: 'req_b', scope, target: 'b' });
+      const staged = await answerOf(3);
+      expect(staged.result).toMatchObject({ files: 1 });
+      port2.postMessage({ type: 'cancel', close: true, id: -1 });
+      port2.close();
+    });
+
     it('refuses a download that ends before its declared length as corrupt', async () => {
       const zip = await zipOf({ 'r-abc/main.kcl': 'm' });
       answering(

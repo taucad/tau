@@ -527,6 +527,8 @@ export const serveImportChannel = (
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
+  /* The request whose plan `plan` is: a cancel that crossed its answer clears it, and never a newer one. */
+  let planRequest: number | undefined;
   const measuring = dependencies.measure === undefined ? {} : { measure: dependencies.measure };
   /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
   let latestPlan: number | undefined;
@@ -603,6 +605,10 @@ export const serveImportChannel = (
     if (latestPlan === id) {
       latestPlan = undefined;
     }
+    if (planRequest === id) {
+      plan = undefined;
+      planRequest = undefined;
+    }
   };
   const stageUnder = async (request: Extract<Request, { type: 'stage' }>, signal: AbortSignal): Promise<void> => {
     const { linked } = request;
@@ -664,6 +670,7 @@ export const serveImportChannel = (
     switch (request.type) {
       case 'plan': {
         plan = await newestPlan(request);
+        planRequest = request.id;
         answer({
           id: request.id,
           result: {

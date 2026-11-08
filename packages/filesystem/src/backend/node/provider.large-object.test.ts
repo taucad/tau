@@ -13,7 +13,7 @@ import { mkdtempSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeFsProvider } from '#backend/node/provider.js';
 import { applyChangesetToProvider } from '#changeset-provider.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
@@ -118,6 +118,30 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     expect(receipt?.largeObject).toBeUndefined();
     expect(await fs.readFile(join(root, 'x.bin'), 'utf8')).toBe('the pointer the checkout holds\n');
     expect(await fs.readdir(root)).toStrictEqual(['x.bin']);
+  });
+
+  it('should answer uncertain, never applied, when the published entry is not the file it hashed', async () => {
+    const { root, store } = await arrange();
+    const provider = new NodeFsProvider(root, { largeObjectStore: store });
+    const rename = fs.rename.bind(fs);
+    /* Another writer's entry lands at the path between this rename and its check. */
+    const renamed = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to);
+      if (String(to).endsWith('swapped.bin')) {
+        await fs.writeFile(join(root, 'other.tmp'), content);
+        await rename(join(root, 'other.tmp'), to);
+      }
+    });
+    try {
+      const [receipt] = await provider.applyBatch([
+        { op: 'write', path: 'swapped.bin', data: { largeObject: oid, size: content.byteLength }, create: true },
+      ]);
+
+      expect(receipt).toMatchObject({ outcome: 'uncertain', error: { code: 'WRITE_VERIFICATION_FAILED' } });
+      expect(receipt?.largeObject).toBeUndefined();
+    } finally {
+      renamed.mockRestore();
+    }
   });
 
   it("should give a new file the umask's default mode, never the stored object's", async () => {

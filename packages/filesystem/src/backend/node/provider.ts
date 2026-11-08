@@ -99,8 +99,8 @@ type StagedWrite = {
   readonly permissions: number | undefined;
   data?: Uint8Array<ArrayBuffer>;
   streamed?: Readonly<{ size: number; sha256: string }>;
-  /** A clone of a stored large object, hashed through its own handle before the rename: the published entry is checked by identity alone. */
-  cloned?: boolean;
+  /** A clone of a stored large object, hashed through its own handle before the rename: that handle's identity, which the published entry is checked against instead of a second read. */
+  cloned?: Readonly<{ dev: bigint; ino: bigint }>;
   retainedHandle?: FileHandle;
   written?: BigIntStats;
   /** Set once the rename is attempted: a rename that throws may still have published (rename-then-throw). */
@@ -1678,12 +1678,13 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (!(await publishedDigestEquals(handle, { size: source.size, sha256: source.largeObject }))) {
         throw this._errno('EINVAL', 'the stored large object does not hash to its id', staged.rootedPath);
       }
+      const { dev, ino } = await handle.stat({ bigint: true });
+      staged.cloned = { dev, ino };
     } finally {
       if (staged.retainedHandle === undefined) {
         await handle.close();
       }
     }
-    staged.cloned = true;
   }
 
   /**
@@ -1761,12 +1762,15 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    */
   private async _verifyPublished(staged: StagedWrite): Promise<void> {
     const { rootedPath, admittedTarget, data, streamed, written } = staged;
-    if (staged.cloned === true) {
+    if (staged.cloned !== undefined) {
       /* Its bytes were hashed through the sibling's handle before the rename,
-       * and `written` is the sibling's lstat identity taken just before it: the
-       * rename keeps the inode, so the entry it published is that file, and a
-       * later writer's entry says nothing about this one. Nothing is read again. */
-      if (written === undefined) {
+       * and a rename keeps the inode: the entry at the path is verified when
+       * it is that very file (the hashed handle's device and inode), and is
+       * never read again. Any other entry there is not known to be these
+       * bytes, so the write is uncertain rather than applied. */
+      const published = await fs.lstat(admittedTarget, { bigint: true }).catch(() => undefined);
+      const known = staged.cloned.ino > 0n;
+      if (known && (published?.dev !== staged.cloned.dev || published.ino !== staged.cloned.ino)) {
         throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
       }
       return;

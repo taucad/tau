@@ -41,7 +41,9 @@ import {
   resolveImportRoute,
   supportedKernelExtensions,
   findMainFile,
+  handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
+import { toast } from '#components/ui/sonner.js';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
@@ -609,6 +611,29 @@ export default function ImportRoute(): React.JSX.Element {
 
   // Disk machine selectors
   const diskState = useSelector(diskActorRef, (snapshot) => snapshot);
+  /* A host pick starts an import only when the machine takes it; one it refuses mid-review or mid-create
+   * is let go, and the import in progress keeps its grants (W7.4). */
+  const startHostImport = useCallback(
+    (grants: readonly HostImportGrant[]): void => {
+      const event = { type: 'processHost', grants } as const;
+      const accepted = handOverHostGrants({
+        accepted: routeActiveRef.current && diskActorRef.getSnapshot().can(event),
+        incoming: grants.map(({ grant }) => grant),
+        held: hostGrantsRef.current,
+        release: releaseHostGrants,
+      });
+      if (!accepted) {
+        if (routeActiveRef.current) {
+          toast.error('Finish or cancel the current import before opening another.');
+        }
+        return;
+      }
+      setActiveMode('disk');
+      setLocalOperation('read');
+      diskActorRef.send(event);
+    },
+    [diskActorRef, releaseHostGrants],
+  );
   const diskListing = useSelector(diskActorRef, (snapshot) => snapshot.context.listing);
   const loadDiskPreview = useCallback(
     async (paths: readonly string[]) => {
@@ -653,14 +678,8 @@ export default function ImportRoute(): React.JSX.Element {
         if (opened.length === 0) {
           return;
         }
-        setActiveMode('disk');
-        setLocalOperation('read');
         /* Grants, not bytes: the desktop host copies the opened files into the staging itself (W7.4). */
-        holdHostGrants(opened.map(({ grant }) => grant));
-        diskActorRef.send({
-          type: 'processHost',
-          grants: opened.map(({ grant, name }): HostImportGrant => ({ grant, name, kind: 'file' })),
-        });
+        startHostImport(opened.map(({ grant, name }): HostImportGrant => ({ grant, name, kind: 'file' })));
         clearDesktopOpen(false);
       } catch (error) {
         if (active) {
@@ -676,7 +695,7 @@ export default function ImportRoute(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [clearDesktopOpen, diskActorRef, holdHostGrants, isDesktopOpen, releaseHostGrants]);
+  }, [clearDesktopOpen, diskActorRef, isDesktopOpen, releaseHostGrants, startHostImport]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state
@@ -813,14 +832,11 @@ export default function ImportRoute(): React.JSX.Element {
         releaseHostGrants([picked.grant]);
         return;
       }
-      setActiveMode('disk');
-      setLocalOperation('read');
-      holdHostGrants([picked.grant]);
-      diskActorRef.send({ type: 'processHost', grants: [{ ...picked, kind: 'directory' }] });
+      startHostImport([{ ...picked, kind: 'directory' }]);
     } catch (error) {
       diskActorRef.send({ type: 'externalError', error: error instanceof Error ? error : new Error(String(error)) });
     }
-  }, [diskActorRef, holdHostGrants, releaseHostGrants]);
+  }, [diskActorRef, releaseHostGrants, startHostImport]);
   const isDesktopHost = desktopBridge() !== undefined;
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import Home, { handle, loader, meta } from '#routes/_index/route.js';
+import Home, { handle, meta } from '#routes/_index/route.js';
 
 vi.mock('#components/project-library/project-library.js', () => ({
   ProjectLibrary: () => <div data-testid='project-library' />,
@@ -29,17 +29,5 @@ describe('Home route', () => {
 
     expect(descriptors.find((descriptor) => 'title' in descriptor)?.['title']).toContain('Tau');
     expect(typeof descriptors.find((descriptor) => descriptor['name'] === 'description')?.['content']).toBe('string');
-  });
-
-  it('should hand the remembered project count to the server render', () => {
-    const request = new Request('https://tau.new/', { headers: { Cookie: 'tau-project-count=7; other=1' } });
-
-    expect(loader({ request } as Parameters<typeof loader>[0])).toEqual({ projectListCount: 7 });
-  });
-
-  it('should report an unknown project count when the browser has never listed its projects', () => {
-    const request = new Request('https://tau.new/');
-
-    expect(loader({ request } as Parameters<typeof loader>[0])).toEqual({ projectListCount: undefined });
   });
 });

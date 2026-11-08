@@ -480,7 +480,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S19',
     title: 'Grep while saving and reading',
     model:
-      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return) and authorityCalls (what the port served) are recorded for information and never gated; authorityReads (the reads the port served) is gated by S19.compute-worker.",
+      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return) and authorityCalls (what the port served) are recorded for information and never gated; authorityReads (the port's reads of fixture files; the concurrent save's own file, which grep lists or not by when the save lands, is left out so the count does not move between runs) is gated by S19.compute-worker.",
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },
@@ -632,6 +632,21 @@ const noWorse = ({ comparison, limit }: GateBound, value: number, atHead: number
   comparison === 'equals'
     ? value >= Math.min(atHead, limit) - Number.EPSILON && value <= Math.max(atHead, limit) + Number.EPSILON
     : value <= atHead + Number.EPSILON;
+
+/**
+ * Whether an authority read counts toward S19's `authorityReads`.
+ *
+ * Only the fixture's own files count. S19's concurrent save writes a file the
+ * fixture does not hold, and grep lists it or not by when the save lands, so
+ * counting it would move the count by one from run to run and fail a known-red
+ * gate that held.
+ *
+ * @param fixturePaths - The fixture plan's paths.
+ * @param path - The path the authority was asked to read.
+ * @returns True when the read is of a fixture file.
+ */
+export const countsAsFixtureRead = (fixturePaths: ReadonlyMap<string, unknown>, path: string): boolean =>
+  fixturePaths.has(path);
 
 /**
  * Whether a known-red gate has held or improved on its value at HEAD.

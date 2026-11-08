@@ -23,6 +23,7 @@ import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
 import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { fixtureMarker } from '#filesystem-scenarios/fixture.js';
 import type { FixturePlan } from '#filesystem-scenarios/fixture.js';
+import { countsAsFixtureRead } from '#filesystem-scenarios/scenarios.js';
 
 /** Calls whose work is a grep or glob: one the authority serves runs the search on its own thread. */
 const searchCalls = new Set(['grep', 'glob']);
@@ -94,7 +95,7 @@ export type OffAuthorityGrep = Readonly<{
   authoritySearchCalls: number;
   /** Every call the authority served, the reads included (information). */
   authorityCalls: number;
-  /** File reads the authority served (information). */
+  /** Fixture-file reads the authority served (S19.compute-worker: 0); the concurrent save's file is left out. */
   authorityReads: number;
   binaryBytesRead: number;
 }>;
@@ -117,7 +118,7 @@ export const openOffAuthorityAgent = async (port: MessagePort, plan: FixturePlan
   const kinds = new Map(plan.entries.map((entry) => [entry.path, entry.kind]));
   const proxy = createTransferredFileSystemBridgeProxy(port);
   await proxy.ready;
-  const tally = { calls: new Map<string, number>(), binaryBytesRead: 0 };
+  const tally = { calls: new Map<string, number>(), binaryBytesRead: 0, fixtureReads: 0 };
   const counted = new Proxy(proxy, {
     get: (target, property, receiver) => {
       const value: unknown = Reflect.get(target, property, receiver);
@@ -128,6 +129,9 @@ export const openOffAuthorityAgent = async (port: MessagePort, plan: FixturePlan
       if (property === 'readFile') {
         return async (...parameters: unknown[]): Promise<unknown> => {
           tally.calls.set(property, (tally.calls.get(property) ?? 0) + 1);
+          if (countsAsFixtureRead(kinds, String(parameters[0]))) {
+            tally.fixtureReads += 1;
+          }
           const read = (await Reflect.apply(call, target, parameters)) as Uint8Array<ArrayBuffer> | string;
           if (typeof read !== 'string' && kinds.get(String(parameters[0])) === 'binary') {
             tally.binaryBytesRead += read.byteLength;
@@ -147,6 +151,7 @@ export const openOffAuthorityAgent = async (port: MessagePort, plan: FixturePlan
     grepAndGlob: async () => {
       tally.calls.clear();
       tally.binaryBytesRead = 0;
+      tally.fixtureReads = 0;
       const grepStart = performance.now();
       const grep = await handleGrep({ pattern: fixtureMarker, path: '' }, fileSystem);
       const grepDuration = performance.now() - grepStart;
@@ -165,7 +170,7 @@ export const openOffAuthorityAgent = async (port: MessagePort, plan: FixturePlan
         globDuration,
         authoritySearchCalls: calls.reduce((sum, [name, count]) => sum + (searchCalls.has(name) ? count : 0), 0),
         authorityCalls: calls.reduce((sum, [, count]) => sum + count, 0),
-        authorityReads: tally.calls.get('readFile') ?? 0,
+        authorityReads: tally.fixtureReads,
         binaryBytesRead: tally.binaryBytesRead,
       };
     },

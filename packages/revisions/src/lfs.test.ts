@@ -126,6 +126,68 @@ describe("when a cut rewrites Tau's block (W11.2 review)", () => {
     expect(sameRecord(recorded, next, 'part.step')).toBe(true);
   });
 
+  it("escapes an older build's unescaped line in the cut whose new content it names, never in one that changed nothing", () => {
+    const older = tauBlock.replace(
+      '# END Tau generated',
+      '/renders/shot[final].bin filter=lfs diff=lfs merge=lfs -text\n# END Tau generated',
+    );
+    const shot = new Uint8Array(4096).fill(8);
+    const parent = new ImmutableRevisionTree([
+      ['.gitattributes', older],
+      ['renders/shot[final].bin', lfsPointerFor(shot).bytes],
+    ]);
+    const basis = largeObjectBasisOf(
+      'sha1',
+      [...revisionTreeFiles(parent)].map(([path, { content }]) => ({ path, oid: blobOid(content, 'sha1') })),
+    );
+    const unchanged = new ImmutableRevisionTree([
+      ['.gitattributes', older],
+      ['renders/shot[final].bin', shot],
+    ]);
+    const reshot = new Uint8Array(4096).fill(9);
+    const changed = new ImmutableRevisionTree([
+      ['.gitattributes', older],
+      ['renders/shot[final].bin', reshot],
+    ]);
+
+    const kept = cleanLargeObjects(unchanged, { basis }).tree;
+    const rewritten = cleanLargeObjects(changed, { basis }).tree;
+
+    expect(sameRecord(kept, unchanged, '.gitattributes')).toBe(true);
+    expect(decoder.decode(kept.get('renders/shot[final].bin'))).toBe(decoder.decode(lfsPointerFor(shot).bytes));
+    expect(decoder.decode(rewritten.get('.gitattributes'))).toBe(generatedGitattributesContent(older));
+    expect(decoder.decode(rewritten.get('.gitattributes'))).toContain(String.raw`/renders/shot\[final].bin`);
+    expect(readLfsPointer(rewritten.get('renders/shot[final].bin')!)).toStrictEqual(lfsPointerFor(reshot).pointer);
+  });
+
+  it('keeps content any parent of a merge holds, in that parent’s representation', () => {
+    const attributes = '*.bin filter=lfs diff=lfs merge=lfs -text\n';
+    const theirs = new Uint8Array(512).fill(4);
+    const ours = new Uint8Array(512).fill(5);
+    const first = new ImmutableRevisionTree([
+      ['.gitattributes', attributes],
+      ['ours.bin', lfsPointerFor(ours).bytes],
+    ]);
+    /* The second parent recorded its file as a plain blob, before the attributes named it. */
+    const second = new ImmutableRevisionTree([['theirs.bin', theirs]]);
+    const listing = (tree: ImmutableRevisionTree) =>
+      [...revisionTreeFiles(tree)].map(([path, { content }]) => ({ path, oid: blobOid(content, 'sha1') }));
+    const merged = new ImmutableRevisionTree([
+      ['.gitattributes', attributes],
+      ['ours.bin', ours],
+      ['theirs.bin', theirs],
+    ]);
+
+    const recorded = cleanLargeObjects(merged, {
+      basis: largeObjectBasisOf('sha1', listing(first), listing(second)),
+    }).tree;
+    const firstOnly = cleanLargeObjects(merged, { basis: largeObjectBasisOf('sha1', listing(first)) }).tree;
+
+    expect(readLfsPointer(recorded.get('ours.bin')!)).toStrictEqual(lfsPointerFor(ours).pointer);
+    expect(sameRecord(recorded, merged, 'theirs.bin')).toBe(true);
+    expect(readLfsPointer(firstOnly.get('theirs.bin')!)).toBeDefined();
+  });
+
   it('never adds a line to a block that lost its end marker', () => {
     const malformed =
       '# BEGIN Tau generated — large objects are git LFS objects\n*.stl filter=lfs diff=lfs merge=lfs -text\n';

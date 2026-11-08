@@ -319,20 +319,44 @@ const attributePattern = (path: string): string =>
 /**
  * One per-path line of Tau's block as an older build wrote it, before glob
  * characters were escaped: everything literal except `?`, which stood for
- * whitespace. Read beside the pattern's own glob meaning, so a block written
- * then still tracks the path it named (W11.2 review).
+ * whitespace. Only ever asked which path the line meant, so the block is
+ * rewritten escaped before a cut decides that path (W11.2 re-review).
  *
  * @param pattern - An anchored per-path pattern from Tau's block.
- * @param ignoreCase - Whether case is folded.
  * @returns A matcher over a root-relative path.
  */
-const legacyPathMatcher = (pattern: string, ignoreCase = false): ((relative: string) => boolean) => {
+const legacyPathMatcher = (pattern: string): ((relative: string) => boolean) => {
   const body = pattern.slice(1);
   const expression = new RegExp(
     `^${[...body].map((character) => (character === '?' ? '[^/]' : character.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`))).join('')}$`,
-    ignoreCase ? 'iu' : 'u',
+    'u',
   );
   return (relative) => expression.test(relative);
+};
+
+/**
+ * The paths an older build's unescaped per-path lines in Tau's block named,
+ * where Git no longer reads them as naming (`/renders/shot[final].bin` is a
+ * class to Git, so the file itself is unspecified). Never a verdict: a cut
+ * whose new or changed content such a line names rewrites the block, escaped,
+ * and the verdict is read from what Git reads (W11.2 re-review).
+ *
+ * @param content - The root attributes file, or `undefined`.
+ * @returns A matcher over project-relative paths, or `undefined` when no such line stands.
+ * @internal
+ */
+export const legacyBlockMatcher = (content: string | undefined): ((path: string) => boolean) | undefined => {
+  const legacy =
+    generatedAttributesBlock(content)
+      ?.split(/\r?\n/u)
+      .filter((line) => line.startsWith('/'))
+      .map((line) => line.split(/\s/u, 1)[0]!)
+      .filter((pattern) => escapedLegacyPattern(pattern) !== pattern) ?? [];
+  if (legacy.length === 0) {
+    return undefined;
+  }
+  const matchers = legacy.map((pattern) => legacyPathMatcher(pattern));
+  return (path) => matchers.some((matches) => matches(path));
 };
 
 /**
@@ -520,8 +544,8 @@ const attributeMatcher = (pattern: string, ignoreCase = false): ((relative: stri
     : (relative) => expression.test(relative.slice(relative.lastIndexOf('/') + 1));
 };
 
-/** Whether one attributes line sets, unsets or leaves `filter`, and what to. */
-type FilterRule = Readonly<{ matches: (relative: string) => boolean; lfs: boolean }>;
+/** One attributes line that can decide `filter`, directly or through a macro, with its tokens as written. */
+type FilterRule = Readonly<{ matches: (relative: string) => boolean; tokens: readonly string[] }>;
 
 /** How a tree's attributes are read: git's case folding, when the host's repository asks for it. @internal */
 export type AttributesReading = Readonly<{
@@ -557,49 +581,83 @@ const macrosOf = (content: string | undefined): ReadonlyMap<string, readonly str
   return macros;
 };
 
+/* A token's attribute name, and its state: `set`, `unset` (`-name`), `unspecified` (`!name`) or a value. */
+const tokenState = (token: string): Readonly<{ name: string; state: string }> => {
+  if (token.startsWith('-')) {
+    return { name: token.slice(1), state: 'unset' };
+  }
+  if (token.startsWith('!')) {
+    return { name: token.slice(1), state: 'unspecified' };
+  }
+  const equals = token.indexOf('=');
+  return equals === -1
+    ? { name: token, state: 'set' }
+    : { name: token.slice(0, equals), state: `=${token.slice(equals + 1)}` };
+};
+
 /**
- * What one line's attribute tokens do to `filter`, as `git check-attr` reads
- * them: `filter=lfs` puts the path on LFS; another value, a bare `filter`,
- * `-filter` and `!filter` take it off; a macro expands to its own tokens, and
- * an unset or unspecified macro (`-name`, `!name`) leaves `filter`
- * unspecified, which is off LFS too.
+ * The macros whose expansion reaches `filter`, however deep.
  *
- * @param tokens - The line's attribute tokens, in order.
- * @param macros - The macros the root file defines.
- * @param depth - How deep in macro expansion this is; a cycle stops.
- * @returns `true` or `false` for the last token that speaks to `filter`, else `undefined`.
+ * @param macros - Every macro the root file defines.
+ * @returns Their names.
  */
-const filterVerdictOf = (
-  tokens: readonly string[],
-  macros: ReadonlyMap<string, readonly string[]>,
-  depth = 0,
-): boolean | undefined => {
-  let lfs: boolean | undefined;
-  for (const token of tokens) {
-    if (token === 'filter=lfs') {
-      lfs = true;
-    } else if (token === 'filter' || token.startsWith('filter=') || token === '-filter' || token === '!filter') {
-      lfs = false;
-    } else if (depth < 8) {
-      const negated = token.startsWith('-') || token.startsWith('!');
-      const expanded = macros.get(negated ? token.slice(1) : token);
-      const verdict = expanded === undefined ? undefined : filterVerdictOf(expanded, macros, depth + 1);
-      if (verdict !== undefined) {
-        lfs = negated ? false : verdict;
+const filterMacrosOf = (macros: ReadonlyMap<string, readonly string[]>): ReadonlySet<string> => {
+  const reaching = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [name, tokens] of macros) {
+      if (
+        !reaching.has(name) &&
+        tokens.some((token) => {
+          const { name: named } = tokenState(token);
+          return named === 'filter' || reaching.has(named);
+        })
+      ) {
+        reaching.add(name);
+        grew = true;
       }
     }
   }
-  return lfs;
+  return reaching;
+};
+
+/**
+ * Fill attributes from one line's tokens as git's `fill_one` does: the
+ * line's tokens last to first, each attribute taking the first state it is
+ * given (lines are visited last to first, so the last line wins), and a macro
+ * expanding only when it is set — `-name` and `!name` decide the macro
+ * itself and stop a set it would have made, never undo one already made.
+ *
+ * @param tokens - One line's or one macro's tokens, in order.
+ * @param fill - The attributes decided so far, and every macro the root file defines.
+ * @param depth - How deep in macro expansion this is; a cycle stops.
+ */
+const fillAttributes = (
+  tokens: readonly string[],
+  fill: Readonly<{ filled: Map<string, string>; macros: ReadonlyMap<string, readonly string[]> }>,
+  depth = 0,
+): void => {
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const { name, state } = tokenState(tokens[index]!);
+    if (fill.filled.has(name)) {
+      continue;
+    }
+    fill.filled.set(name, state);
+    const expanded = state === 'set' && depth < 8 ? fill.macros.get(name) : undefined;
+    if (expanded !== undefined) {
+      fillAttributes(expanded, fill, depth + 1);
+    }
+  }
 };
 
 /**
  * The `filter` rules of one attributes file, in file order.
  *
- * Only lines that speak to `filter` count, directly or through a macro (see
- * {@link filterVerdictOf}). A negative pattern is refused by git and ignored
+ * Only lines that can decide `filter` count, directly or through a macro (see
+ * {@link fillAttributes}). A negative pattern is refused by git and ignored
  * here too, as are macro definitions and a directory pattern (`dir/`), which
- * matches no file. A per-path line inside Tau's well-formed block also matches
- * the path an older build meant by it, before glob characters were escaped.
+ * matches no file. Every pattern means what Git reads it as, an older build's
+ * unescaped line in Tau's block included (see {@link legacyBlockMatcher}).
  *
  * ponytail: a C-quoted pattern (`"a b" filter=lfs`) is read with its quotes
  * dropped and `\"` unescaped; octal escapes are left as written.
@@ -614,8 +672,7 @@ const filterRules = (
   macros: ReadonlyMap<string, readonly string[]>,
   reading: AttributesReading,
 ): readonly FilterRule[] => {
-  const block = generatedAttributesBlock(content);
-  const tauLines = new Set(block?.split(/\r?\n/u).filter((line) => line.startsWith('/')) ?? []);
+  const reaching = filterMacrosOf(macros);
   return content.split(/\r?\n/u).flatMap((raw): FilterRule[] => {
     const line = raw.trim();
     if (line === '' || line.startsWith('#') || line.startsWith('[attr]') || line.startsWith('!')) {
@@ -624,19 +681,15 @@ const filterRules = (
     const quoted = line.startsWith('"') ? /^"((?:[^"\\]|\\.)*)"/u.exec(line) : undefined;
     const pattern = quoted?.[1]?.replaceAll(/\\(.)/gu, '$1') ?? line.split(/\s/u, 1)[0]!;
     const rest = line.slice(quoted ? quoted[0].length : pattern.length);
-    const lfs = filterVerdictOf(
-      rest.split(/\s+/u).filter((token) => token !== ''),
-      macros,
-    );
-    if (lfs === undefined || pattern === '' || pattern.endsWith('/')) {
+    const tokens = rest.split(/\s+/u).filter((token) => token !== '');
+    const decides = tokens.some((token) => {
+      const { name } = tokenState(token);
+      return name === 'filter' || reaching.has(name);
+    });
+    if (!decides || pattern === '' || pattern.endsWith('/')) {
       return [];
     }
-    const matches = attributeMatcher(pattern, reading.ignoreCase === true);
-    if (!tauLines.has(raw)) {
-      return [{ matches, lfs }];
-    }
-    const legacy = legacyPathMatcher(pattern, reading.ignoreCase === true);
-    return [{ matches: (relative) => matches(relative) || legacy(relative), lfs }];
+    return [{ matches: attributeMatcher(pattern, reading.ignoreCase === true), tokens }];
   });
 };
 
@@ -696,20 +749,26 @@ export const largeObjectVerdict = (
   if (files.length === 0) {
     return () => undefined;
   }
+  /* Deepest file first and each file's last line first, as git fills: the first state an attribute gets stands. */
+  const reversed = files.toReversed().map(({ directory, rules }) => ({ directory, rules: rules.toReversed() }));
   return (path) => {
-    let lfs: boolean | undefined;
-    for (const { directory, rules } of files) {
+    const filled = new Map<string, string>();
+    for (const { directory, rules } of reversed) {
       if (!fold(path).startsWith(directory)) {
         continue;
       }
       const relative = path.slice(directory.length);
       for (const rule of rules) {
         if (rule.matches(relative)) {
-          lfs = rule.lfs;
+          fillAttributes(rule.tokens, { filled, macros });
+          const filter = filled.get('filter');
+          if (filter !== undefined) {
+            return filter === '=lfs';
+          }
         }
       }
     }
-    return lfs;
+    return undefined;
   };
 };
 

@@ -421,3 +421,18 @@ describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no rep
     expect(reopened.config).toContain('[filter "lfs"]');
   });
 });
+
+describe.runIf(gitToolchainOnPath)("the repository's core.ignoreCase", () => {
+  it('is read from the store init made', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-ignorecase-'));
+    roots.push(root);
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+
+    await port.init({ author });
+    /* What `git init` records on a case-insensitive disk, written by hand on this one. */
+    git(root, ['config', 'core.ignoreCase', 'true']);
+    const after = await port.describe();
+
+    expect(after.ignoreCase).toBe(true);
+  });
+});

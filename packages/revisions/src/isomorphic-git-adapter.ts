@@ -608,18 +608,21 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /*
-   * The first parent's entries, which unchanged content keeps the
-   * representation of (rule 13) — blob ids only, no blob is read. A browser
-   * host is case-sensitive, so its cut never folds case.
+   * The parents' entries, which unchanged content keeps the representation of
+   * (rule 13) — blob ids only, no blob is read. A browser host is
+   * case-sensitive, so its cut never folds case.
    */
-  const largeObjectBasisFor = async (parent: RevisionId | undefined): Promise<LargeObjectBasis | undefined> => {
-    const commit = parent === undefined ? undefined : await commitOf(parent);
-    return commit === undefined
-      ? undefined
-      : largeObjectBasisOf(
-          objectFormat,
-          [...(await flatTree(commit.tree))].map(([path, { oid }]) => ({ path, oid })),
-        );
+  const largeObjectBasisFor = async (parents: readonly RevisionId[]): Promise<LargeObjectBasis | undefined> => {
+    const read = await Promise.all(parents.map(async (parent) => commitOf(parent)));
+    const commits = read.filter((commit): commit is DecodedCommit => commit !== undefined);
+    if (commits.length === 0) {
+      return undefined;
+    }
+    const listings = await Promise.all(commits.map(async (commit) => flatTree(commit.tree)));
+    return largeObjectBasisOf(
+      objectFormat,
+      ...listings.map((listing) => [...listing].map(([path, { oid }]) => ({ path, oid }))),
+    );
   };
 
   /**
@@ -1940,7 +1943,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const recorded =
         input.largeObjects === false
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
-          : cleanLargeObjects(input.tree, { basis: await largeObjectBasisFor(input.parents[0]) });
+          : cleanLargeObjects(input.tree, { basis: await largeObjectBasisFor(input.parents) });
       await Promise.all(
         [...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content.byteLength, content)),
       );

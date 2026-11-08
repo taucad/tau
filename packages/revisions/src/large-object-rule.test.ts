@@ -272,3 +272,85 @@ describe('an entry unchanged from its parent keeps its representation on both le
     );
   }
 });
+
+describe('a merge keeps content either parent holds, in that parent’s representation, on both legs (rule 13, I5)', () => {
+  it('records a plain blob from the second parent as the blob it was, under a newer `*.bin filter=lfs`', async () => {
+    const theirs = encoder.encode('their binary\n'.repeat(300));
+    const ours = encoder.encode('our binary\n'.repeat(300));
+    const fresh = encoder.encode('fresh binary\n'.repeat(300));
+    const attributes = '*.bin filter=lfs diff=lfs merge=lfs -text\n';
+    const legs = [
+      () => createIsomorphicGitRevisionPort({ filesystem: new MemoryProvider() }),
+      ...(gitToolchainOnPath
+        ? [
+            async () => {
+              const root = await mkdtemp(join(tmpdir(), 'tau-rule-13-merge-'));
+              roots.push(root);
+              return createNativeGitRevisionPort({ repositoryPath: root });
+            },
+          ]
+        : []),
+    ];
+
+    const recorded = await Promise.all(
+      legs.map(async (leg) => {
+        const port = await leg();
+        await port.init({ author, createSetupFiles: false });
+        const write = async (tree: ImmutableRevisionTree, parents: readonly string[], largeObjects = true) => {
+          const receipt = await port.writeRevision({
+            parents: parents.map((parent) => revisionId(parent)),
+            tree,
+            largeObjects,
+            provenance,
+            summary: { generated: 'Merge leg' },
+          });
+          return receipt.commitId;
+        };
+        const base = await write(new ImmutableRevisionTree([['main.scad', 'cube(1);\n']]), []);
+        const first = await write(
+          new ImmutableRevisionTree([
+            [generatedGitattributesPath, attributes],
+            ['main.scad', 'cube(1);\n'],
+            ['ours.bin', ours],
+          ]),
+          [base],
+        );
+        /* Recorded verbatim: the second line's file is a blob, as an older client or another tool left it. */
+        const second = await write(
+          new ImmutableRevisionTree([
+            ['main.scad', 'cube(1);\n'],
+            ['theirs.bin', theirs],
+          ]),
+          [base],
+          false,
+        );
+        const merged = await write(
+          new ImmutableRevisionTree([
+            [generatedGitattributesPath, attributes],
+            ['main.scad', 'cube(1);\n'],
+            ['ours.bin', ours],
+            ['theirs.bin', theirs],
+            ['fresh.bin', fresh],
+          ]),
+          [first, second],
+        );
+        const record = await port.readRevision(revisionId(merged));
+        return record?.treeId;
+      }),
+    );
+
+    expect(new Set(recorded).size).toBe(1);
+    expect(recorded[0]).toBe(
+      revisionTreeId(
+        new ImmutableRevisionTree([
+          [generatedGitattributesPath, attributes],
+          ['main.scad', 'cube(1);\n'],
+          ['ours.bin', lfsPointerFor(ours).bytes],
+          ['theirs.bin', theirs],
+          ['fresh.bin', lfsPointerFor(fresh).bytes],
+        ]),
+        'sha1',
+      ),
+    );
+  }, 120_000);
+});

@@ -1374,20 +1374,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * @param tree - The tree to store.
    * @param largeObjects - Whether the clean step runs; `false` stores the tree verbatim.
-   * @param parent - The first parent, whose unchanged entries keep their representation (rule 13).
+   * @param parents - The revision's parents, whose unchanged entries keep their representation (rule 13).
    * @returns The root tree's object id.
    */
   const writeTreeObject = async (
     tree: ImmutableRevisionTree,
     largeObjects: boolean,
-    parent?: RevisionId,
+    parents: readonly RevisionId[] = [],
   ): Promise<string> => {
     /* The pointer decision is the host-neutral cut's (`lfs.ts`), which the cut's `treeId` is computed from,
      * so the id this engine records is the id the host predicted; Git's clean filter never runs. The tree's
      * own attributes decide new and changed content, adopted or not (D16). */
     const recorded = largeObjects
       ? cleanLargeObjects(tree, {
-          basis: parent === undefined ? undefined : await basisOf(parent),
+          basis: parents.length === 0 ? undefined : await basisOf(parents),
           ignoreCase: await ignoresCase(),
         })
       : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
@@ -1479,25 +1479,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return paths;
   };
 
-  /* The parent's blob ids, from its tree objects alone (rule 13); the last few are kept, as a save asks for the same parent twice. */
+  /* The parents' blob ids, from their tree objects alone (rule 13); the last few are kept, as a save asks for the same parent twice. */
   const bases = new Map<string, Promise<LargeObjectBasis>>();
-  const basisOf = async (parent: RevisionId): Promise<LargeObjectBasis> => {
-    let held = bases.get(parent);
+  const basisOf = async (parents: readonly RevisionId[]): Promise<LargeObjectBasis> => {
+    const key = parents.join(' ');
+    let held = bases.get(key);
     if (held === undefined) {
-      /* `ls-tree` takes the commit itself: one process, and no blob is read. A failed listing is forgotten. */
+      /* `ls-tree` takes each commit itself: one process a parent, and no blob is read. A failed listing is forgotten. */
       held = (async () => {
         try {
-          const listing = await listTree(parent);
+          const listings = await Promise.all(parents.map(async (parent) => listTree(parent)));
           return largeObjectBasisOf(
             await format(),
-            [...listing].map(([path, { oid }]) => ({ path, oid })),
+            ...listings.map((listing) => [...listing].map(([path, { oid }]) => ({ path, oid }))),
           );
         } catch (error) {
-          bases.delete(parent);
+          bases.delete(key);
           throw error;
         }
       })();
-      bases.set(parent, held);
+      bases.set(key, held);
       if (bases.size > 4) {
         bases.delete(bases.keys().next().value!);
       }
@@ -1505,7 +1506,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return held;
   };
 
-  /* `core.ignoreCase`, read once: the repository's own answer for how its attributes match (git-config(1)). */
+  /* `core.ignoreCase`, read once the store exists: the repository's own answer for how its attributes match
+   * (git-config(1)). `init` forgets it, since `git init` is what probes the disk and writes it. */
   let ignoreCase: Promise<boolean> | undefined;
   const ignoresCase = async (): Promise<boolean> => {
     ignoreCase ??= (async () => {
@@ -2002,6 +2004,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
       /* The store exists now: the next question reads the disk again, and reaches the answer a second session would. */
       opened = undefined;
+      ignoreCase = undefined;
     }
     /* Tau's derived-content ignores go where stock Git reads them and no
      * revision records them, in every store, so the records Tau keeps under
@@ -2196,7 +2199,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false, input.parents[0]);
+      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false, input.parents);
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

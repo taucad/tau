@@ -16,6 +16,7 @@ import {
   isAttributesPath,
   isLargeObjectPath,
   isTrackedLargeObjectPath,
+  legacyBlockMatcher,
   largeObjectThresholdBytes,
   repositoryLargeObjectMatcher,
   tauRevisionPolicy,
@@ -491,6 +492,8 @@ describe('attributes as git reads them (W11.2 review)', () => {
         '[attr]plain -big',
         '*.bin filter=lfs',
         'raw.bin binary',
+        'unsetmacro.bin -big',
+        'unspecifiedmacro.bin !big',
         '*.big big',
         'off.big -big',
         'neg.big !big',
@@ -507,6 +510,8 @@ describe('attributes as git reads them (W11.2 review)', () => {
     const paths = [
       'a.bin',
       'raw.bin',
+      'unsetmacro.bin',
+      'unspecifiedmacro.bin',
       'sub/a.bin',
       'a.big',
       'off.big',
@@ -549,22 +554,27 @@ describe('attributes as git reads them (W11.2 review)', () => {
     },
   );
 
-  it("still names the path an older build's unescaped line in Tau's block named", () => {
-    const block = generatedGitattributesContent(undefined);
-    const older = block.replace(
-      '# END Tau generated',
-      '/models/a[1].stl filter=lfs diff=lfs merge=lfs -text\n# END Tau generated',
-    );
-    const isLarge = repositoryLargeObjectMatcher(new Map([['.gitattributes', older]]));
+  it.runIf(gitToolchainOnPath)(
+    "reads an older build's unescaped line in Tau's block as Git does, and escapes it when regenerated",
+    async () => {
+      const older = generatedGitattributesContent(undefined).replace(
+        '# END Tau generated',
+        '/renders/shot[final].bin filter=lfs diff=lfs merge=lfs -text\n# END Tau generated',
+      );
+      const paths = ['renders/shot[final].bin', 'renders/shotf.bin', 'renders/shotx.bin'];
+      const files = { '.gitattributes': older };
 
-    expect(isLarge('models/a[1].stl')).toBe(true);
-    /* The line's glob reading, which Git itself gives it, still stands too. */
-    expect(isLarge('models/a1.stl')).toBe(true);
-    /* Regenerated, the line is written escaped and keeps naming the same path. */
-    const regenerated = generatedGitattributesContent(older);
-    expect(regenerated).toContain(String.raw`/models/a\[1].stl filter=lfs`);
-    expect(repositoryLargeObjectMatcher(new Map([['.gitattributes', regenerated]]))('models/a[1].stl')).toBe(true);
-  });
+      /* A class to Git: the file itself is unspecified, so a pointer there could not be smudged by a stock clone. */
+      expect(verdicts(files, paths, false)).toStrictEqual(await checkAttribute(files, paths, false));
+      expect(verdicts(files, paths, false)).toStrictEqual([false, true, false]);
+      expect(legacyBlockMatcher(older)?.('renders/shot[final].bin')).toBe(true);
+      const regenerated = { '.gitattributes': generatedGitattributesContent(older) };
+      expect(regenerated['.gitattributes']).toContain(String.raw`/renders/shot\[final].bin filter=lfs`);
+      expect(verdicts(regenerated, paths, false)).toStrictEqual(await checkAttribute(regenerated, paths, false));
+      expect(verdicts(regenerated, paths, false)).toStrictEqual([true, false, false]);
+      expect(legacyBlockMatcher(regenerated['.gitattributes'])).toBeUndefined();
+    },
+  );
 
   it('leaves a file whose Tau block lost its end marker exactly as it is', () => {
     const malformed = `*.psd filter=lfs\n# BEGIN Tau generated — large objects are git LFS objects\n*.stl filter=lfs\nmine.txt -filter\n`;

@@ -33,6 +33,7 @@ import {
   isLargeObjectPath,
   largeObjectThresholdBytes,
   largeObjectVerdict,
+  legacyBlockMatcher,
   repositoryLargeObjectMatcher,
 } from '#workspace-config.js';
 
@@ -130,21 +131,36 @@ export const lfsObjectPath = (oid: string): string => `lfs/objects/${oid.slice(0
  */
 export type LargeObjectBasis = Readonly<{
   format: ObjectFormat;
-  blobs: ReadonlyMap<string, string>;
+  /** Each path's blob id in every parent that holds it, first parent first. */
+  blobs: ReadonlyMap<string, readonly string[]>;
 }>;
 
 /**
- * A cut's basis from its parent's tree listing.
+ * A cut's basis from its parents' tree listings, first parent first: a merge
+ * keeps content that any parent holds, in that parent's representation.
  *
  * @param format - The store's object format.
- * @param listing - The parent's files, as `listTree` lists them.
+ * @param listings - Each parent's files, as `listTree` lists them, in parent order.
  * @returns The basis.
  * @public
  */
 export const largeObjectBasisOf = (
   format: ObjectFormat,
-  listing: Iterable<Readonly<{ path: string; oid: string }>>,
-): LargeObjectBasis => Object.freeze({ format, blobs: new Map([...listing].map(({ path, oid }) => [path, oid])) });
+  ...listings: ReadonlyArray<Iterable<Readonly<{ path: string; oid: string }>>>
+): LargeObjectBasis => {
+  const blobs = new Map<string, string[]>();
+  for (const listing of listings) {
+    for (const { path, oid } of listing) {
+      const held = blobs.get(path);
+      if (held === undefined) {
+        blobs.set(path, [oid]);
+      } else if (!held.includes(oid)) {
+        held.push(oid);
+      }
+    }
+  }
+  return Object.freeze({ format, blobs });
+};
 
 /** How one cut is cleaned: its parent's representation, and the host's case folding. @public */
 export type CleanLargeObjectsOptions = Readonly<{
@@ -210,17 +226,24 @@ export const cleanLargeObjects = (
   const texts = new Map(
     [...files].flatMap(([path, { content }]) => (isAttributesPath(path) ? [[path, decoder.decode(content)]] : [])),
   );
-  /* What the parent held at a path, when this content is that very thing (rule 13). Asked only where it decides. */
+  /* What a parent held at a path, when this content is that very thing (rule 13): the first parent that
+   * holds it as a blob or as its pointer decides. Asked only where it decides. */
   const kept = (path: string, content: Uint8Array<ArrayBuffer>): 'pointer' | 'blob' | undefined => {
     const held = options.basis?.blobs.get(path);
     if (held === undefined) {
       return undefined;
     }
     const { format } = options.basis!;
-    if (blobOid(content, format) === held) {
-      return 'blob';
+    const asBlob = blobOid(content, format);
+    for (const oid of held) {
+      if (oid === asBlob) {
+        return 'blob';
+      }
+      if (oid === blobOid(pointerOf(content).bytes, format)) {
+        return 'pointer';
+      }
     }
-    return blobOid(pointerOf(content).bytes, format) === held ? 'pointer' : undefined;
+    return undefined;
   };
   const existing = texts.get(generatedGitattributesPath);
   let attributes = existing;
@@ -242,7 +265,20 @@ export const cleanLargeObjects = (
     /* Asked case-sensitively on every host, so the block Tau writes is the same
      * text on both legs: a case-variant file gets its own line even where
      * `core.ignoreCase` would fold it onto a family. */
-    if (owed(largeObjectVerdict(texts)).length > 0) {
+    /* An older build's unescaped per-path line no longer names its path as Git
+     * reads it, so new or changed content there is owed the escaped line too;
+     * an unchanged entry keeps its representation through the basis. */
+    const legacy = legacyBlockMatcher(existing);
+    const legacyOwed =
+      legacy !== undefined &&
+      [...files].some(
+        ([path, { content }]) =>
+          !isAttributesPath(path) &&
+          legacy(path) &&
+          readLfsPointer(content) === undefined &&
+          kept(path, content) === undefined,
+      );
+    if (legacyOwed || owed(largeObjectVerdict(texts)).length > 0) {
       /* Only now is the block rewritten: the current families first, then a line for what they still leave out. */
       const current = generatedGitattributesContent(existing);
       const untracked = owed(largeObjectVerdict(new Map([...texts, [generatedGitattributesPath, current]])));
@@ -292,7 +328,7 @@ export const cleanLargeObjects = (
 
 type CleanedTree = Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>;
 /* The basis key of a cut with no parent. */
-const noBasis: LargeObjectBasis = Object.freeze({ format: 'sha1', blobs: new Map<string, string>() });
+const noBasis: LargeObjectBasis = Object.freeze({ format: 'sha1', blobs: new Map<string, readonly string[]>() });
 /** Cleaned cuts, held only while their caller still holds the tree, by basis and case folding. */
 const cleanedTrees = new WeakMap<ImmutableRevisionTree, WeakMap<LargeObjectBasis, Map<string, CleanedTree>>>();
 

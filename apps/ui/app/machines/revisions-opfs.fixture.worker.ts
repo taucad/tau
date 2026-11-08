@@ -8,7 +8,11 @@ import { createActor } from 'xstate';
 import type { AnyActorLogic } from 'xstate';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { OPFSProvider } from '@taucad/filesystem/backend';
-import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import {
+  createIsomorphicGitRevisionPort,
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+} from '@taucad/revisions';
 import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import { createRevisionActors } from '@taucad/revisions/revision-effects';
@@ -121,7 +125,11 @@ const applyPointerTree = async (
   const paths = Array.from({ length: files }, (_, index) => `models/part-${Math.floor(index / 40)}/${index}.step`);
   const receipt = await port.writeRevision({
     parents: [],
-    tree: new ImmutableRevisionTree(paths.map((path, index) => [path, encoder.encode(pointerSized(index))] as const)),
+    /* Tau's block names the family, so every part is a large object, as in a Tau-created project (D16). */
+    tree: new ImmutableRevisionTree([
+      [generatedGitattributesPath, encoder.encode(generatedGitattributesContent(undefined))],
+      ...paths.map((path, index) => [path, encoder.encode(pointerSized(index))] as const),
+    ]),
     provenance: { source: 'user', actorId: 'cold-open', createdAt: Date.UTC(2026, 10, 4) },
     summary: { generated: 'pointer tree' },
   });

@@ -31,6 +31,7 @@ import type {
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
 import type { PendingObject } from '#pending-content.js';
+import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -72,7 +73,27 @@ export type ProjectIndexesOptions = Readonly<{
 }>;
 
 /** A lazy facts request: what to measure beyond the classification. @public */
-export type IndexFactsOptions = ContentFactsOptions & Readonly<{ digests?: ReadonlyArray<'sha256' | 'blobOid'> }>;
+export type IndexFactsOptions = ContentFactsOptions &
+  Readonly<{
+    digests?: ReadonlyArray<'sha256' | 'blobOid'>;
+    /**
+     * `false` answers only what the index already holds and trusts (a
+     * committed import's recorded facts among them), and never reads a file:
+     * for a caller that already holds the bytes and would only hash them
+     * again (D12: the first revision is built from recorded oids).
+     */
+    measure?: boolean;
+    /**
+     * With `measure: false`, `'import'` answers only the facts a committed
+     * import's record seeded (D12), each confirmed as it is answered by a
+     * provider stat at exactly the size and mtime the record holds, so a
+     * change the index has not observed yet is never answered with the
+     * record's ids. A file placed within the racy window of the record (EQ7)
+     * is not trusted, so it is measured again by its caller. Each recorded
+     * path is answered once, taken or refused; asked again, it is not.
+     */
+    recorded?: 'import';
+  }>;
 
 const textEncoder = new TextEncoder();
 
@@ -149,6 +170,19 @@ export class ProjectIndexes {
    * read began. No write hook needs to forget them: a write changes the mtime.
    */
   private readonly _readFacts = new Map<string, Map<string, ReadFacts>>();
+
+  /** Roots opened by a scan whose import facts, if any, no digest request has taken yet (D12). */
+  private readonly _importFactsPending = new Set<string>();
+
+  /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
+  private readonly _importFactsTaken = new Set<string>();
+
+  /**
+   * What each root's import record seeded, at the size and mtime it holds:
+   * what `recorded: 'import'` may answer, once per path. A path leaves once
+   * asked (the first capture after the import), so no later walk trusts it.
+   */
+  private readonly _importSeeded = new Map<string, Map<string, Readonly<{ size: number; mtimeMs: number }>>>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -269,6 +303,9 @@ export class ProjectIndexes {
       return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal, listed: options?.listed });
     }
     const index = await this.ready(key);
+    if (digests.length > 0 && this._importFactsPending.delete(key)) {
+      await this._seedImportFacts(key, index);
+    }
     const resolution = this._resolve(key);
     const trustworthy = resolution.persist !== undefined;
     const answers = (path: string, known: ContentFacts | undefined): known is ContentFacts => {
@@ -285,11 +322,32 @@ export class ProjectIndexes {
         (index.entry(path)?.size ?? 0) > byteCap
       );
     };
+    /* An import record's facts, answered only while the file the provider holds now is the one it recorded. */
+    const importRecorded = async (path: string, known: ContentFacts | undefined): Promise<ContentFacts | undefined> => {
+      const seeded = this._importSeeded.get(key);
+      const at = seeded?.get(path);
+      /* A record answers each path once, taken or refused: a later walk measures, and stats no seeded path again. */
+      seeded?.delete(path);
+      if (seeded?.size === 0) {
+        this._importSeeded.delete(key);
+      }
+      if (at === undefined || !answers(path, known)) {
+        return undefined;
+      }
+      const stat = await resolution.provider.stat(joinRelativePath(resolution.path, path)).catch(() => undefined);
+      return stat?.type === 'file' && stat.size === at.size && stat.mtimeMs === at.mtimeMs ? known : undefined;
+    };
     const answered = await mapConcurrent(paths, factsConcurrency, async (path) => {
       options?.signal?.throwIfAborted();
       const known = index.factsFor(path);
+      if (options?.recorded === 'import') {
+        return { facts: await importRecorded(path, known), recorded: false };
+      }
       if (answers(path, known)) {
         return { facts: known, recorded: false };
+      }
+      if (options?.measure === false) {
+        return { facts: undefined, recorded: false };
       }
       const entry = index.entry(path);
       if (entry?.kind === 'dir') {
@@ -681,6 +739,8 @@ export class ProjectIndexes {
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
   public clear(): void {
     this._readFacts.clear();
+    this._importFactsPending.clear();
+    this._importSeeded.clear();
     for (const state of this._states.values()) {
       clearTimeout(state.persistTimer);
     }
@@ -803,8 +863,62 @@ export class ProjectIndexes {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
     }
+    if (!usable) {
+      /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */
+      this._importFactsPending.add(root);
+    }
     this._schedulePersist(root);
     return index;
+  }
+
+  /**
+   * Take a committed import's recorded facts (charter D12) for every file
+   * they still describe, so a digest request finds blob ids and SHA-256
+   * without hashing the import again. Asked once, by the first digest request
+   * after a scan, so opening a root costs nothing more. Only on a provider
+   * whose mtimes are trustworthy, and only what {@link verifiedImportFacts}
+   * holds to the file: anything else is measured like any file. A record
+   * seeds once: a later rescan of the root measures its files. The record
+   * is trusted as of its own mtime, so a file written within the racy window
+   * of it stays untrusted (EQ7).
+   */
+  private async _seedImportFacts(root: string, index: ProjectIndex): Promise<void> {
+    if (!this._trustsMtime(root)) {
+      return;
+    }
+    const { provider, path } = this._resolve(root);
+    const recordPath = joinRelativePath(path, importFactsPath);
+    let record: ReturnType<typeof parseImportFacts>;
+    let recordMtime: number;
+    try {
+      const stat = await provider.stat(recordPath);
+      /* A record for the largest import admitted is a few megabytes; anything far past that is not one. */
+      if (stat.type !== 'file' || stat.size > importFactsMaximumBytes) {
+        return;
+      }
+      recordMtime = stat.mtimeMs;
+      record = parseImportFacts(await provider.readFile(recordPath));
+    } catch {
+      return;
+    }
+    const taken = `${root}\0${record?.operationId ?? ''}`;
+    if (record === undefined || this._importFactsTaken.has(taken)) {
+      return;
+    }
+    this._importFactsTaken.add(taken);
+    const seeded = verifiedImportFacts(record, { recordMtime, now: Date.now() }, (entryPath) => {
+      const entry = index.settled(entryPath) ? index.entry(entryPath) : undefined;
+      return entry === undefined || entry.kind === 'dir'
+        ? undefined
+        : { kind: 'file', size: entry.size, mtimeMs: entry.mtimeMs };
+    });
+    const held = this._importSeeded.get(root) ?? new Map<string, Readonly<{ size: number; mtimeMs: number }>>();
+    for (const [entryPath, { facts, size, mtimeMs }] of seeded) {
+      index.recordFacts(entryPath, facts, { size, mtimeMs, observedAt: recordMtime });
+      held.set(entryPath, { size, mtimeMs });
+    }
+    this._importSeeded.set(root, held);
+    workerTimings.count('index.importFacts', seeded.size);
   }
 
   /**

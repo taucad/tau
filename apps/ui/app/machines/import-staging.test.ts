@@ -7,6 +7,7 @@ import {
   importStagingDirectory,
   importStagingStaleMilliseconds,
   planImport,
+  readStagedImport,
   stageImport,
   zipImportSource,
 } from '@taucad/filesystem/importer';
@@ -16,7 +17,10 @@ import type { BatchEntry } from '@taucad/filesystem';
 import {
   ImportChannelError,
   createFromStagedImport,
+  downloadInterrupted,
+  downloadRefusal,
   holdLease,
+  importCommitHeader,
   importConnectMessageType,
   openImportSession,
   serveImportChannel,
@@ -293,6 +297,269 @@ describe('the import channel', () => {
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
 
     expect(touch).toHaveBeenCalledTimes(2);
+  });
+
+  describe('a repository archive', () => {
+    const archiveUrl = 'https://api.tau.test/v1/repositories/archive?owner=o&repo=r';
+    const answering = (response: Response) => {
+      const fetched = vi.fn(async (_url: URL, _init?: RequestInit) => response);
+      vi.stubGlobal('fetch', fetched);
+      return fetched;
+    };
+
+    it('downloads it in the worker with no credential, and plans only the folder asked for', async () => {
+      const zip = await zipOf({
+        'r-abc/README.md': 'r',
+        'r-abc/public/kcl-samples/gear/main.kcl': 'gear',
+        'r-abc/rust/ops.snap': 's',
+      });
+      const fetched = answering(new Response(zip, { status: 200, headers: { 'content-length': String(zip.size) } }));
+      const downloads: number[] = [];
+      const session = connect(new MemoryProvider());
+
+      const listing = await session.plan(
+        { kind: 'archive', url: archiveUrl, name: 'o/r', headers: { accept: 'application/zip' } },
+        {
+          root: 'public/kcl-samples',
+          onDownload: ({ loaded }) => {
+            downloads.push(loaded);
+          },
+        },
+      );
+
+      expect(listing.files).toStrictEqual([{ path: 'gear/main.kcl', size: 4 }]);
+      expect(listing.name).toBe('o/r');
+      expect(downloads.at(-1)).toBe(zip.size);
+      expect(fetched.mock.calls[0]![1]).toMatchObject({ credentials: 'omit', headers: { accept: 'application/zip' } });
+
+      /* What it planned stages like any other source. */
+      const staged = await session.stage('req_archive', scope, { target: 'gear' });
+      expect(staged.files).toBe(1);
+    });
+
+    /* What a call settled with, kept as a value so the test can look later. */
+    const outcome = async (work: Promise<unknown>): Promise<unknown> => {
+      try {
+        return await work;
+      } catch (error) {
+        return error;
+      }
+    };
+
+    /* An archive whose bytes arrive only when the test sends them; the download's abort errors it, as fetch does. */
+    const heldArchive = () => {
+      let controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>> | undefined;
+      let signal: AbortSignal | undefined;
+      const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(held) {
+          controller = held;
+        },
+      });
+      return {
+        respond: (init?: RequestInit) => {
+          signal = init?.signal ?? undefined;
+          signal?.addEventListener('abort', () => {
+            controller?.error(signal?.reason);
+          });
+          return new Response(stream, { status: 200 });
+        },
+        signal: () => signal,
+        send: async (zip: Blob) => {
+          try {
+            controller?.enqueue(new Uint8Array(await zip.arrayBuffer()));
+            controller?.close();
+          } catch {
+            /* Already errored by the abort. */
+          }
+        },
+      };
+    };
+
+    it('never lets an earlier plan that finishes later replace a newer one', async () => {
+      const first = heldArchive();
+      const zipB = await zipOf({ 'b-abc/b.kcl': 'b' });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: URL, init?: RequestInit) =>
+          String(url).includes('repo=a') ? first.respond(init) : new Response(zipB, { status: 200 }),
+        ),
+      );
+      const session = connect(new MemoryProvider());
+
+      const planA = outcome(session.plan({ kind: 'archive', url: `${archiveUrl}&repo=a`, name: 'o/a' }));
+      await vi.waitFor(() => {
+        expect(first.signal()).toBeDefined();
+      });
+      const planB = await session.plan({ kind: 'archive', url: `${archiveUrl}&repo=b`, name: 'o/b' });
+      await first.send(await zipOf({ 'a-abc/a1.kcl': 'a', 'a-abc/a2.kcl': 'a' }));
+
+      expect(planB.files).toStrictEqual([{ path: 'b.kcl', size: 1 }]);
+      expect(await planA).toBeInstanceOf(ImportChannelError);
+      expect(first.signal()?.aborted).toBe(true);
+      /* The plan the review shows is the one that stages. */
+      const staged = await session.stage('req_b', scope, { target: 'b' });
+      expect(staged.files).toBe(1);
+    });
+
+    it('stops a cancelled download in the worker, and it never becomes the plan', async () => {
+      const first = heldArchive();
+      const zipB = await zipOf({ 'b-abc/b.kcl': 'b' });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: URL, init?: RequestInit) =>
+          String(url).includes('repo=a') ? first.respond(init) : new Response(zipB, { status: 200 }),
+        ),
+      );
+      const session = connect(new MemoryProvider());
+      const cancel = new AbortController();
+
+      const planA = outcome(
+        session.plan({ kind: 'archive', url: `${archiveUrl}&repo=a`, name: 'o/a' }, { signal: cancel.signal }),
+      );
+      await vi.waitFor(() => {
+        expect(first.signal()).toBeDefined();
+      });
+      cancel.abort();
+
+      expect(await planA).toBeInstanceOf(ImportChannelError);
+      await vi.waitFor(() => {
+        expect(first.signal()?.aborted).toBe(true);
+      });
+      await first.send(await zipOf({ 'a-abc/a1.kcl': 'a', 'a-abc/a2.kcl': 'a' }));
+      /* Nothing is planned until the next import asks. */
+      await expect(session.stage('req_a', scope, { target: 'a' })).rejects.toThrow('Nothing is planned to stage.');
+
+      await session.plan({ kind: 'archive', url: `${archiveUrl}&repo=b`, name: 'o/b' });
+      const staged = await session.stage('req_b', scope, { target: 'b' });
+      expect(staged.files).toBe(1);
+    });
+
+    it('refuses a download that ends before its declared length as corrupt', async () => {
+      const zip = await zipOf({ 'r-abc/main.kcl': 'm' });
+      answering(
+        new Response(zip.slice(0, zip.size - 10), { status: 200, headers: { 'content-length': String(zip.size) } }),
+      );
+      const session = connect(new MemoryProvider());
+
+      const refused = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect((refused as ImportChannelError).reason).toBe('corrupt');
+    });
+
+    it.each([
+      ['the commit the gateway names', { [importCommitHeader]: 'B'.repeat(40) }, 'b'.repeat(40)],
+      ["the top folder's short sha when it names none", {}, 'abc1234'],
+      ["the top folder's short sha when what it names is no commit", { [importCommitHeader]: 'main' }, 'abc1234'],
+    ])('pins a GitHub archive at %s', async (_, headers: Record<string, string>, revision) => {
+      const provider = new MemoryProvider();
+      answering(new Response(await zipOf({ 'o-r-abc1234/main.kcl': 'm' }), { status: 200, headers }));
+      const session = connect(provider);
+
+      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r', provider: 'github' });
+      await session.stage('req_pinned', scope, { target: 'r' });
+
+      const staged = await readStagedImport(provider, 'req_pinned');
+      expect(staged?.pin.revision).toBe(revision);
+    });
+
+    it('pins an archive from elsewhere at no revision when no commit is named, whatever its top folder says', async () => {
+      const provider = new MemoryProvider();
+      answering(new Response(await zipOf({ 'o-r-abc1234/main.kcl': 'm' }), { status: 200 }));
+      const session = connect(provider);
+
+      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' });
+      await session.stage('req_unpinned', scope, { target: 'r' });
+
+      const staged = await readStagedImport(provider, 'req_unpinned');
+      expect(staged?.pin.revision).toBeUndefined();
+    });
+
+    it('says a download that failed partway may be rate limited, not damaged', async () => {
+      let sent = false;
+      const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        pull(controller) {
+          if (sent) {
+            controller.error(new TypeError('network error'));
+            return;
+          }
+          sent = true;
+          controller.enqueue(new Uint8Array(1024));
+        },
+      });
+      answering(new Response(body, { status: 200 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await outcome(session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' }));
+
+      expect(refused).toBeInstanceOf(ImportChannelError);
+      expect((refused as ImportChannelError).message).toBe(downloadInterrupted);
+      expect((refused as ImportChannelError).reason).toBeUndefined();
+    });
+
+    it("refuses the gateway's 413 and a declared size past the limit as too large", async () => {
+      answering(new Response('The repository archive exceeds the import size limit.', { status: 413 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect((refused as ImportChannelError).reason).toBe('archiveTooLarge');
+
+      answering(new Response('zip', { status: 200, headers: { 'content-length': String(1024 * 1024 * 1024 + 1) } }));
+      const declared = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect((declared as ImportChannelError).reason).toBe('archiveTooLarge');
+    });
+
+    it("says why another refusal failed, in the server's words, with no reason", async () => {
+      answering(new Response('The repository provider could not be reached.', { status: 502 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(ImportChannelError);
+      expect((refused as ImportChannelError).message).toBe('The repository provider could not be reached.');
+      expect((refused as ImportChannelError).reason).toBeUndefined();
+    });
+
+    it('downloads over HTTP only', async () => {
+      const fetched = answering(new Response('x'));
+      const session = connect(new MemoryProvider());
+
+      await expect(session.plan({ kind: 'archive', url: 'file:///etc/passwd', name: 'x' })).rejects.toThrow(
+        'An archive downloads over HTTP only',
+      );
+      expect(fetched).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'an API refusal',
+        new Response(JSON.stringify({ error: 'Too many GitHub imports.', code: 'REPOSITORY_RATE_LIMITED' }), {
+          status: 429,
+        }),
+        'Too many GitHub imports.',
+      ],
+      [
+        "the archive gateway's sentence",
+        new Response('The repository archive could not be fetched.', { status: 404 }),
+        'The repository archive could not be fetched.',
+      ],
+      [
+        'an empty body',
+        new Response('', { status: 502, statusText: 'Bad Gateway' }),
+        'Download failed: 502 Bad Gateway',
+      ],
+    ])('says why a refused download failed for %s', async (_case, response, sentence) => {
+      await expect(downloadRefusal(response)).resolves.toBe(sentence);
+    });
   });
 
   describe('creating from a staged import', () => {

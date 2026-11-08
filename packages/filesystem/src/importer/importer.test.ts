@@ -5,10 +5,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { applyBatchWithPrimitives } from '#backend/batch.js';
 import type { BatchEntry } from '#changeset.js';
+import { inHandBytes } from '#changeset.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { ImportRefusedError, importLimits } from '#importer/limits.js';
 import { readZipDirectory, blobRangeSource } from '#importer/zip.js';
-import { createInlineImportDecoder, decodeImportEntry, readImportEntry } from '#importer/decode.js';
+import {
+  createInlineImportDecoder,
+  createInlineImportMeasurer,
+  decodeImportEntry,
+  importMeasureMaximumBytes,
+  measureImportBytes,
+  readImportEntry,
+} from '#importer/decode.js';
 import { crc32 } from '#importer/crc32.js';
 import type { ImportDecoder } from '#importer/decode.js';
 import {
@@ -62,6 +70,12 @@ type RawEntry = Readonly<{
   sameOffsetAs?: number;
   /** Declare this many extra-field bytes in the local header without writing them, so its data seems to start later. */
   localExtra?: number;
+  /** The stored name's exact bytes, in place of `name` encoded as UTF-8. */
+  nameBytes?: Uint8Array<ArrayBuffer>;
+  /** General-purpose flags for the central record (bit 11: the name is UTF-8). */
+  flags?: number;
+  /** A central extra field, in place of the ZIP64 one. */
+  extra?: Uint8Array<ArrayBuffer>;
 }>;
 
 /* A stored zip written field by field, for archives JSZip never writes: ZIP64 records, shared ranges, padded directories. */
@@ -71,7 +85,7 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
   const offsets: number[] = [];
   let offset = 0;
   for (const entry of entries) {
-    const name = encoder.encode(entry.name);
+    const name = entry.nameBytes ?? encoder.encode(entry.name);
     const local = new Uint8Array(30 + name.byteLength + entry.data.byteLength);
     const view = new DataView(local.buffer);
     view.setUint32(0, 0x04_03_4b_50, true);
@@ -89,9 +103,10 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
   }
   const centrals: Array<Uint8Array<ArrayBuffer>> = [];
   for (const [index, entry] of entries.entries()) {
-    const name = encoder.encode(entry.name);
+    const name = entry.nameBytes ?? encoder.encode(entry.name);
     const localOffset = offsets[entry.sameOffsetAs ?? index]!;
-    const extra = entry.zip64 === true ? new Uint8Array(entry.shortZip64 === true ? 12 : 28) : new Uint8Array(0);
+    const extra =
+      entry.extra ?? (entry.zip64 === true ? new Uint8Array(entry.shortZip64 === true ? 12 : 28) : new Uint8Array(0));
     if (entry.zip64 === true) {
       const view = new DataView(extra.buffer);
       view.setUint16(0, 0x00_01, true);
@@ -107,6 +122,7 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
     view.setUint32(0, 0x02_01_4b_50, true);
     view.setUint16(4, (3 << 8) | 20, true);
     view.setUint16(6, 20, true);
+    view.setUint16(8, entry.flags ?? 0, true);
     view.setUint32(16, crc32(entry.data), true);
     const wide = entry.zip64 === true ? 0xff_ff_ff_ff : undefined;
     view.setUint32(20, wide ?? entry.data.byteLength, true);
@@ -146,7 +162,7 @@ const port = (provider: MemoryProvider): ImportStagingPort & { writes: () => num
       for (const entry of entries) {
         if (entry.op === 'write' && entry.path.includes('/tree/')) {
           writes += 1;
-          writtenBytes += entry.data instanceof Blob ? entry.data.size : entry.data.byteLength;
+          writtenBytes += inHandBytes(entry);
         }
       }
       return applyBatchWithPrimitives(provider, entries);
@@ -264,6 +280,43 @@ describe('readZipDirectory', () => {
     );
   });
 
+  it('should read an unflagged name as CP437 unless it is valid UTF-8, and a flagged one as UTF-8', async () => {
+    const blob = rawZip([
+      /* "Ärger.txt" as DOS wrote it: 0x8e is Ä in CP437 and no valid UTF-8. */
+      { name: '', nameBytes: new Uint8Array([0x8e, ...text('rger.txt')]), data: text('a') },
+      /* The macOS archiver: UTF-8 without the flag. */
+      { name: 'café.txt', data: text('b') },
+      { name: 'flagged-é.txt', data: text('c'), flags: 0x08_00 },
+    ]);
+
+    const { entries } = await readZipDirectory(blobRangeSource(blob));
+
+    expect(entries.map(({ name }) => name)).toEqual(['Ärger.txt', 'café.txt', 'flagged-é.txt']);
+  });
+
+  it('should take an Info-ZIP Unicode Path field only when its CRC names the stored bytes', async () => {
+    const stored = new Uint8Array([0x84, ...text('.txt')]);
+    const unicodeField = (crc: number): Uint8Array<ArrayBuffer> => {
+      const unicode = text('ü-unicode.txt');
+      const field = new Uint8Array(4 + 5 + unicode.byteLength);
+      const view = new DataView(field.buffer);
+      view.setUint16(0, 0x70_75, true);
+      view.setUint16(2, 5 + unicode.byteLength, true);
+      view.setUint8(4, 1);
+      view.setUint32(5, crc, true);
+      field.set(unicode, 9);
+      return field;
+    };
+    const blob = rawZip([
+      { name: '', nameBytes: stored, data: text('a'), extra: unicodeField(crc32(stored)) },
+      { name: '', nameBytes: new Uint8Array([0x84, ...text('2.txt')]), data: text('b'), extra: unicodeField(1) },
+    ]);
+
+    const { entries } = await readZipDirectory(blobRangeSource(blob));
+
+    expect(entries.map(({ name }) => name)).toEqual(['ü-unicode.txt', 'ä2.txt']);
+  });
+
   it('should give a directory an identity its bytes decide', async () => {
     const one = await readZipDirectory(blobRangeSource(rawZip([{ name: 'a.txt', data: text('alpha') }])));
     const same = await readZipDirectory(blobRangeSource(rawZip([{ name: 'a.txt', data: text('alpha') }])));
@@ -288,19 +341,49 @@ describe('readZipDirectory', () => {
 });
 
 describe('decodeImportEntry', () => {
-  it('should inflate a deflated entry and digest exactly its bytes in the same pass', async () => {
+  it('should inflate a deflated entry, checked by its CRC, and hash nothing', async () => {
     const content = text('x'.repeat(10_000));
     const blob = await zipOf({ 'a.txt': content });
     const {
       entries: [entry],
     } = await readZipDirectory(blobRangeSource(blob));
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
 
     const decoded = await decodeImportEntry({ blob, path: 'a.txt', size: entry!.size, zip: entry! });
 
     expect(decoded.data).toEqual(content);
-    expect(decoded.facts.blobOid).toBe(gitBlobOid(content));
-    expect(decoded.facts.sha256).toBe(createHash('sha256').update(content).digest('hex'));
-    expect(decoded.facts.contentKind).toBe('text');
+    expect(Object.keys(decoded)).toStrictEqual(['data']);
+    expect(digest).not.toHaveBeenCalled();
+    digest.mockRestore();
+  });
+
+  it("should measure a read-back's blob id, SHA-256 and kind, one digest call each", async () => {
+    const content = text('x'.repeat(10_000));
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+
+    const facts = await measureImportBytes(content, content.byteLength);
+
+    expect(facts.blobOid).toBe(gitBlobOid(content));
+    expect(facts.sha256).toBe(createHash('sha256').update(content).digest('hex'));
+    expect(facts.contentKind).toBe('text');
+    expect(facts.size).toBe(content.byteLength);
+    expect(digest).toHaveBeenCalledTimes(2);
+    digest.mockRestore();
+  });
+
+  it('should refuse to measure more than one shot admits', async () => {
+    /* A length past the limit, without allocating it. */
+    const tooLarge = Object.defineProperty(new Uint8Array(1), 'byteLength', { value: importMeasureMaximumBytes + 1 });
+
+    await expect(measureImportBytes(tooLarge, tooLarge.byteLength)).rejects.toThrow(RangeError);
+  });
+
+  it('should refuse to measure bytes lost on the way (a detached buffer), never answering the empty blob', async () => {
+    const bytes = text('cube(1);');
+    structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+
+    expect(bytes.byteLength).toBe(0);
+    await expect(measureImportBytes(bytes, 8)).rejects.toThrow(/lost on the way/u);
   });
 
   it('should refuse an entry whose bytes inflate past the size its header declares (a lying bomb)', async () => {
@@ -460,6 +543,47 @@ describe('planImport', () => {
     expect(first.pin.identity).not.toBe(second.pin.identity);
   });
 
+  it('should import only a chosen folder of an archive, as the project root, and pin it', async () => {
+    const source = zipImportSource(
+      await zipOf({
+        'repo-abc/README.md': 'r',
+        'repo-abc/parts/gear/main.scad': 'g',
+        'repo-abc/parts/gear/lib/a.scad': 'a',
+      }),
+    );
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'parts/gear' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['lib/a.scad', 'main.scad']);
+    expect(judged.pin.root).toBe('parts/gear');
+    expect(await refusal(planImport(source, { policy: tauPathPolicy, root: 'missing' }))).toBe('empty');
+  });
+
+  it('should find a root that is the only folder an archive holds', async () => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/gear/main.scad': 'g', 'repo-abc/gear/b.scad': 'b' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'gear' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['b.scad', 'main.scad']);
+  });
+
+  it('should resolve a root from the top folder, not from every shared folder', async () => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/a/a/x.scad': 'x', 'repo-abc/a/y.scad': 'y' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'a' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['a/x.scad', 'y.scad']);
+  });
+
+  it.each(['.', '', './'])('should import the whole repository for root %j', async (root) => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/main.scad': 'm', 'repo-abc/lib/b.scad': 'b' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['lib/b.scad', 'main.scad']);
+    expect(judged.pin.root).toBeUndefined();
+  });
+
   it('should name a folder pick after its shared folder', async () => {
     const judged = await plan(
       fileListImportSource([
@@ -538,6 +662,138 @@ describe('stageImport', () => {
 
     expect(ledger).not.toContain('export const');
     expect(await readStagedImport(provider, operationId)).toMatchObject({ pin: judged.pin, bytes: 24 });
+  });
+
+  /* A store that lands other bytes than it was handed for `a.ts`: the same size, or one byte short. */
+  const landing = (provider: MemoryProvider, landed: string): ImportStagingPort => ({
+    provider,
+    apply: async (entries: readonly BatchEntry[]) =>
+      applyBatchWithPrimitives(
+        provider,
+        entries.map((entry) =>
+          entry.op === 'write' && entry.path.endsWith('/tree/a.ts') ? { ...entry, data: text(landed) } : entry,
+        ),
+      ),
+  });
+
+  it('should record the facts of the bytes that landed, read back, not of those it decoded (EQ6)', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right', 'p/b.ts': 'b' })));
+
+    const staged = await stageImport({
+      port: landing(provider, 'wrong'),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+    });
+
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('wrong')));
+    expect(staged.entries[0]!.facts.blobOid).not.toBe(gitBlobOid(text('right')));
+  });
+
+  it('should refuse a measure that answers another size than the file was written at', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+
+    const refused = stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => ({ ...(await inline(bytes, expected)), size: 0 }),
+    });
+
+    await expect(refused).rejects.toThrow(/measured at 0 bytes/u);
+  });
+
+  it('should read a file again when the measurer died holding its bytes, and record the real facts', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+    let calls = 0;
+
+    const staged = await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => {
+        calls += 1;
+        if (calls === 1) {
+          /* As a worker that died after the bytes were transferred to it. */
+          structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        }
+        return inline(bytes, expected);
+      },
+    });
+
+    expect(calls).toBe(2);
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('right')));
+    expect(staged.entries[0]!.facts).not.toHaveProperty('size');
+  });
+
+  it('should keep reading a file again while a worker that never loads dies with its bytes, until one measures it', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+    let calls = 0;
+
+    const staged = await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => {
+        calls += 1;
+        if (calls <= 4) {
+          /* As a supervisor whose worker dies on every spawn until it gives up and measures inline. */
+          structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        }
+        return inline(bytes, expected);
+      },
+    });
+
+    expect(calls).toBe(5);
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('right')));
+  });
+
+  it('should fail an import whose measurer keeps dying past its retries', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    let calls = 0;
+
+    await expect(
+      stageImport({
+        port: port(provider),
+        operationId,
+        plan: judged,
+        decode: createInlineImportDecoder(),
+        measure: async () => {
+          calls += 1;
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        },
+      }),
+    ).rejects.toThrow(/compute worker stopped/u);
+    expect(calls).toBe(6);
+  });
+
+  it('should refuse a staged file that reads back at another size than it was written', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right', 'p/b.ts': 'b' })));
+
+    expect(
+      await refusal(
+        stageImport({
+          port: landing(provider, 'righ'),
+          operationId,
+          plan: judged,
+          decode: createInlineImportDecoder(),
+        }),
+      ),
+    ).toBe('corrupt');
   });
 
   it('should batch by entry count and decode one batch ahead of the write', async () => {
@@ -666,7 +922,7 @@ describe('stageImport', () => {
         const receipts = await staging.apply(entries);
         for (const entry of entries) {
           if (entry.op === 'write' && entry.path.includes('/tree/')) {
-            live -= entry.data instanceof Blob ? entry.data.size : entry.data.byteLength;
+            live -= inHandBytes(entry);
           }
         }
         return receipts;

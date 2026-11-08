@@ -95,6 +95,21 @@ export type RpcReaddirOptions = Readonly<{
 }>;
 
 /**
+ * One file of an index-backed listing ({@link RpcFileSystem.indexedFiles}):
+ * its project-relative path and head metadata, with content facts only where
+ * the index already knows them (charter D4, I3).
+ *
+ * @public
+ */
+export type RpcIndexedFile = Readonly<
+  {
+    path: string;
+    size: number;
+    modifiedAt?: string;
+  } & StatContentMetadata
+>;
+
+/**
  * Abstract filesystem for RPC handlers.
  * Implementations can wrap browser fileManager, `fromMemoryFS()` / `fromNodeFS()` (which yield a `RuntimeFileSystemHandle`), etc.
  *
@@ -127,6 +142,23 @@ export type RpcFileSystem = {
    * without an index offers none, and its reads refuse with `PENDING`.
    */
   pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
+  /**
+   * Every file below a directory, from the authority's Project Index in one
+   * call (charter D13): what `grep` and `glob_search` search instead of
+   * walking the tree. The index applies the project's ignore rules (a
+   * `node_modules` or cache directory is never indexed) and the view's mask.
+   * Resolves `undefined` when the index cannot answer for that directory — no
+   * index, or a directory it does not hold, such as an ignored one named
+   * explicitly — and the caller walks it instead. Optional: a host without an
+   * index offers none.
+   */
+  indexedFiles?(path: string): Promise<readonly RpcIndexedFile[] | undefined>;
+  /**
+   * The content kind of each file, from the index where it is known and
+   * otherwise from the file's head alone (charter D4): what lets a search skip
+   * a binary without reading it. A path the host cannot classify is left out.
+   */
+  contentKinds?(paths: readonly string[]): Promise<ReadonlyMap<string, 'text' | 'binary'>>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {

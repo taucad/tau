@@ -153,6 +153,13 @@ export type ProviderCapabilities = {
    * they belong instead on a provider whose rename copies (W7).
    */
   readonly movesInPlace?: boolean;
+  /**
+   * Whether a write may name a large object by its id (`LargeObjectWriteSource`)
+   * for the provider to clone or copy from the repository store its authority
+   * was given for this root (EQ13). Absent, such a write is refused before any
+   * I/O, and the caller writes the bytes.
+   */
+  readonly largeObjectSources?: boolean;
 };
 
 /**

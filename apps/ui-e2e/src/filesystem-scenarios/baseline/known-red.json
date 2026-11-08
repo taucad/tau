@@ -14,15 +14,7 @@
       "limit": 0,
       "atHead": {
         "chromium-full": 471859200,
-        "chromium-small": 23592960
-      }
-    },
-    {
-      "id": "S12.walks",
-      "limit": 0,
-      "atHead": {
-        "chromium-full": 2680,
-        "chromium-small": 320
+        "chromium-small": 296838
       }
     }
   ]

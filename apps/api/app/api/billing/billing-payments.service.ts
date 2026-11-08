@@ -69,6 +69,7 @@ import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js'
 import { collectionMatchesScope } from '#api/billing/billing-collection.js';
 import type { BillingCollection } from '#api/billing/billing-collection.js';
 import type { DatabaseService } from '#database/database.service.js';
+import { desktopAppOrigin } from '#utils/cors.utils.js';
 import {
   billingOwnerBinding,
   billingPeriod,
@@ -267,6 +268,9 @@ export class BillingPaymentsService {
 
   public assertMutationOrigin(origin: string | undefined): void {
     if (origin === undefined) throw new ForbiddenException('payment_origin_required');
+    // The desktop app's own renderer; a browser page can never send this origin. Its Checkout and portal still
+    // return to the web app, which the desktop hands the customer to.
+    if (origin === desktopAppOrigin) return;
     let actual: URL;
     let expected: URL;
     try {
@@ -980,6 +984,12 @@ export class BillingPaymentsService {
   public async recoverAction(userId: string, actionId: string): Promise<WirePaymentAction> {
     this.assertCollectionEnabled();
     const owner = await this.resolveOwner(userId);
+    const [setupConsent] = await this.databaseService.database
+      .select()
+      .from(billingReloadConsent)
+      .where(and(eq(billingReloadConsent.id, actionId), eq(billingReloadConsent.accountId, owner.accountId)))
+      .limit(1);
+    if (setupConsent !== undefined) return this.recoverReloadSetup(owner, setupConsent);
     // A hosted Checkout settles from its own session, so a payment whose webhook never arrived is not stranded.
     const [hosted] = await this.databaseService.database
       .select()
@@ -1381,7 +1391,9 @@ export class BillingPaymentsService {
     if (binding[0]?.stripeCustomerId === null || binding[0]?.stripeCustomerId === undefined)
       throw new ConflictException({ code: 'billing_portal_not_available' });
     const actionId = randomUUID();
-    const returnUrl = this.returnUrl(input.returnPath, actionId);
+    // A portal visit is not a payment: it returns with its own marker, so the app refreshes billing instead of
+    // reading the visit back as an unfinished Checkout.
+    const returnUrl = this.portalReturnUrl(input.returnPath);
     // The portal's cancellation flow follows its configuration, which Terraform pins to cancel at the period end.
     const cancelSubscriptionId = input.flow === 'subscription_cancel' ? active[0].stripeSubscriptionId : undefined;
     if (cancelSubscriptionId === null) throw new ConflictException({ code: 'billing_portal_not_available' });
@@ -1434,11 +1446,21 @@ export class BillingPaymentsService {
       if (replay[0] === undefined) throw new ConflictException({ code: 'portal_action_conflict' });
       return this.portalToWire(owner, replay[0], replay[0].redirectUrl ?? undefined);
     }
-    const result = await dispatchStripeLegOnce(this.stripe, {
-      kind: 'portal',
-      idempotencyKey: `tau:${actionId}`,
-      request,
-    });
+    let result: Awaited<ReturnType<typeof dispatchStripeLegOnce>>;
+    try {
+      result = await dispatchStripeLegOnce(this.stripe, {
+        kind: 'portal',
+        idempotencyKey: `tau:${actionId}`,
+        request,
+      });
+    } catch (error) {
+      // A portal session moves no money and is never resumed, so a failed create simply ends here; nothing sweeps it.
+      await this.databaseService.database
+        .update(billingProviderLeg)
+        .set({ state: 'no_charge', errorCode: 'portal_create_failed', nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(and(eq(billingProviderLeg.id, actionId), eq(billingProviderLeg.state, 'dispatched')));
+      throw error;
+    }
     if (result.kind !== 'portal') throw new Error('Unexpected Portal result');
     await this.databaseService.database
       .update(billingProviderLeg)
@@ -1480,7 +1502,15 @@ export class BillingPaymentsService {
         ),
       )
       .limit(1);
-    if (portal[0] !== undefined) return this.portalToWire(owner, portal[0], portal[0].redirectUrl ?? undefined);
+    // A portal session is short-lived and never resumed: read back later, the visit is simply over.
+    if (portal[0] !== undefined) return this.portalToWire(owner, portal[0]);
+    // A card setup for automatic reload returns from Checkout with its consent id as the action.
+    const consent = await this.databaseService.database
+      .select()
+      .from(billingReloadConsent)
+      .where(and(eq(billingReloadConsent.id, actionId), eq(billingReloadConsent.accountId, owner.accountId)))
+      .limit(1);
+    if (consent[0] !== undefined) return this.reloadConsentAction(owner, consent[0]);
     throw new NotFoundException('payment_action_not_found');
   }
 
@@ -1525,21 +1555,7 @@ export class BillingPaymentsService {
         .limit(20);
       actions.push(...(await Promise.all(rows.map(async (row) => this.subscriptionToWire(owner, row)))));
     }
-    if (purpose === undefined || purpose === 'billing_portal') {
-      const rows = await this.databaseService.database
-        .select()
-        .from(billingProviderLeg)
-        .where(
-          and(
-            eq(billingProviderLeg.accountId, owner.accountId),
-            eq(billingProviderLeg.kind, 'portal'),
-            ne(billingProviderLeg.state, 'no_charge'),
-          ),
-        )
-        .orderBy(desc(billingProviderLeg.createdAt))
-        .limit(20);
-      actions.push(...rows.map((row) => this.portalToWire(owner, row, row.redirectUrl ?? undefined)));
-    }
+    // Portal visits are never pending: they move no money and their sessions cannot be resumed.
     return actions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 20);
   }
 
@@ -2232,6 +2248,8 @@ export class BillingPaymentsService {
             // qualify their provider objects and would re-claim them forever as `provider_source_unknown`.
             ne(paymentLeg.kind, 'tax_calculation'),
             ne(paymentLeg.kind, 'tax_transaction'),
+            // A portal session moves no money and is never resumed, so there is nothing to recover from one.
+            ne(paymentLeg.kind, 'portal'),
             or(
               and(
                 eq(paymentLeg.state, 'prepared'),
@@ -4370,6 +4388,23 @@ export class BillingPaymentsService {
         onSessionSaveConsent: true,
       });
     }
+    if (leg.kind === 'checkout_subscription' && leg.subscriptionId !== null) {
+      const [owned] = await this.databaseService.database
+        .select()
+        .from(subscription)
+        .where(and(eq(subscription.id, leg.subscriptionId), eq(subscription.accountId, leg.accountId)))
+        .limit(1);
+      const priceId = owned === undefined ? null : paymentOfferSnapshotSchema.parse(owned.offerSnapshot).stripePriceId;
+      // Replaying the same idempotency key returns the Session the first request made, or creates it if it never
+      // reached Stripe, so a subscription Checkout whose create was lost is never stuck `creating`.
+      if (owned?.slotState === 'pending' && priceId !== null)
+        create = parseStripeCreateLeg({
+          kind: 'checkout',
+          idempotencyKey: leg.idempotencyKey,
+          request: leg.request,
+          checkoutContract: { kind: 'subscription', priceId },
+        });
+    }
     if (create === undefined) return undefined;
     // `rejected` is proven: a replay with the same key would have returned any object the first request
     // made. `expired` is not, so that purchase waits for an operator instead of being discarded.
@@ -4402,6 +4437,19 @@ export class BillingPaymentsService {
             .set({ state: 'attention', errorCode: 'provider_outcome_expired', nextAttemptAt: parked })
             .where(dispatchedLeg);
         }
+        // A subscription Checkout that was never created frees the plan slot, so the customer can subscribe again.
+        if (leg.subscriptionId !== null)
+          await tx
+            .update(subscription)
+            .set({ slotState: 'ended', status: 'incomplete_expired', updatedAt: new Date() })
+            .where(
+              and(
+                eq(subscription.id, leg.subscriptionId),
+                eq(subscription.accountId, leg.accountId),
+                isNull(subscription.stripeSubscriptionId),
+                eq(subscription.slotState, 'pending'),
+              ),
+            );
         if (leg.purchaseId !== null)
           await tx
             .update(billingPurchase)
@@ -4420,7 +4468,8 @@ export class BillingPaymentsService {
     const [window] = await this.databaseService.database.execute<{ open: boolean }>(
       sql`select ${leg.dispatchStartedAt.toISOString()}::timestamptz > clock_timestamp() - interval '23 hours' as open`,
     );
-    if (window?.open !== true) return leg.purchaseId === null ? undefined : close('expired');
+    if (window?.open !== true)
+      return leg.purchaseId === null && leg.subscriptionId === null ? undefined : close('expired');
     try {
       return await dispatchStripeLegOnce(this.stripe, create).catch(declinedPaymentIntent);
     } catch (error) {
@@ -4429,7 +4478,7 @@ export class BillingPaymentsService {
         error instanceof Error &&
         'type' in error &&
         error.type === 'StripeInvalidRequestError' &&
-        leg.kind === 'payment_intent'
+        (leg.kind === 'payment_intent' || leg.kind === 'checkout_subscription')
       )
         return close('rejected', error.type);
       throw error;
@@ -5194,9 +5243,40 @@ export class BillingPaymentsService {
     };
   }
 
+  /**
+   * A card-setup Checkout returns to the same URL whether the customer finished or left it. Its Session tells the two
+   * apart: a complete one is only waiting for the sweep to qualify its SetupIntent (which is nudged to run now), an
+   * open one was left unfinished, and an expired one can no longer be continued.
+   */
+  private async recoverReloadSetup(
+    owner: Owner,
+    consent: typeof billingReloadConsent.$inferSelect,
+  ): Promise<WirePaymentAction> {
+    const current = await this.reloadConsentAction(owner, consent);
+    if (consent.state !== 'pending_setup') return current;
+    const [leg] = await this.databaseService.database
+      .select()
+      .from(billingProviderLeg)
+      .where(and(eq(billingProviderLeg.reloadConsentId, consent.id), eq(billingProviderLeg.kind, 'checkout_setup')))
+      .orderBy(desc(billingProviderLeg.createdAt))
+      .limit(1);
+    if (leg?.providerObjectId === null || leg?.providerObjectId === undefined) return current;
+    const session = await this.sourceStripe.checkout.sessions.retrieve(leg.providerObjectId);
+    if (session.status === 'complete') {
+      if (leg.state === 'known' || leg.state === 'attention')
+        await this.databaseService.database
+          .update(billingProviderLeg)
+          .set({ nextAttemptAt: new Date() })
+          .where(and(eq(billingProviderLeg.id, leg.id), sql`${billingProviderLeg.nextAttemptAt} > clock_timestamp()`));
+      return this.reloadConsentAction(owner, consent, 'complete');
+    }
+    return this.reloadConsentAction(owner, consent, session.status === 'expired' ? 'expired' : undefined);
+  }
+
   private async reloadConsentAction(
     owner: Owner,
     consent: typeof billingReloadConsent.$inferSelect,
+    sessionStatus?: 'complete' | 'expired',
   ): Promise<WirePaymentAction> {
     const legs = await this.databaseService.database
       .select()
@@ -5210,9 +5290,13 @@ export class BillingPaymentsService {
         ? 'completed'
         : consent.state === 'revoked'
           ? 'canceled'
-          : leg?.redirectUrl && leg.state !== 'expired'
-            ? 'redirect_required'
-            : 'prepared';
+          : sessionStatus === 'complete'
+            ? 'processing'
+            : sessionStatus === 'expired'
+              ? 'canceled'
+              : leg?.redirectUrl && leg.state !== 'expired'
+                ? 'redirect_required'
+                : 'prepared';
     return wirePaymentActionSchema.parse({
       version: 'payment-action-v1',
       actionId: consent.id,
@@ -5381,7 +5465,7 @@ export class BillingPaymentsService {
               ? 'attention_required'
               : purchase.state === 'paid_unfulfilled' || purchase.state === 'paid'
                 ? 'funds_received'
-                : provider?.kind === 'checkout_payment' && provider.redirectUrl !== null
+                : provider?.kind === 'checkout_payment' && provider.redirectUrl !== null && provider.state !== 'expired'
                   ? 'redirect_required'
                   : purchase.state === 'creating'
                     ? 'creating'
@@ -5460,15 +5544,25 @@ export class BillingPaymentsService {
     const entitlementPeriod = periods[0];
     // An ended slot that never paid is an abandoned Checkout; its dead URL is never offered again.
     const abandoned = entitlementPeriod === undefined && row.slotState === 'ended';
-    const redirectUrl = entitlementPeriod === undefined && !abandoned ? (leg?.redirectUrl ?? null) : null;
+    // A Checkout that already produced a Stripe subscription was paid (or is being paid): its first invoice is still
+    // being reconciled, and its completed Checkout link must never be offered again.
+    const paidAwaitingInvoice =
+      entitlementPeriod === undefined &&
+      !abandoned &&
+      row.slotState !== 'attention' &&
+      row.stripeSubscriptionId !== null;
+    const redirectUrl =
+      entitlementPeriod === undefined && !abandoned && !paidAwaitingInvoice ? (leg?.redirectUrl ?? null) : null;
     const state: WirePaymentAction['state'] = abandoned
       ? 'canceled'
       : entitlementPeriod === undefined
         ? row.slotState === 'attention'
           ? 'attention_required'
-          : redirectUrl === null
-            ? 'creating'
-            : 'redirect_required'
+          : paidAwaitingInvoice
+            ? 'processing'
+            : redirectUrl === null
+              ? 'creating'
+              : 'redirect_required'
         : 'fulfilled';
     return wirePaymentActionSchema.parse({
       version: 'payment-action-v1',
@@ -5518,7 +5612,11 @@ export class BillingPaymentsService {
     leg: typeof billingProviderLeg.$inferSelect,
     redirectUrl?: string,
   ): WirePaymentAction {
-    const state: WirePaymentAction['state'] = redirectUrl === undefined ? 'attention_required' : 'redirect_required';
+    // Only the response that created the session carries its link; read back later, a visit is over (`completed`),
+    // never created (`failed`), or still unknown while its create is in flight.
+    const readBackState: WirePaymentAction['state'] =
+      leg.state === 'known' ? 'completed' : leg.state === 'no_charge' ? 'failed' : 'attention_required';
+    const state: WirePaymentAction['state'] = redirectUrl === undefined ? readBackState : 'redirect_required';
     return wirePaymentActionSchema.parse({
       version: 'payment-action-v1',
       actionId: leg.id,
@@ -5534,6 +5632,12 @@ export class BillingPaymentsService {
       receipt: null,
       updatedAt: (leg.dispatchStartedAt ?? leg.createdAt).toISOString(),
     });
+  }
+
+  private portalReturnUrl(returnPath: string): string {
+    const value = new URL(returnPath, this.config.uiOrigin);
+    value.searchParams.set('billing_return', 'portal');
+    return value.href;
   }
 
   private returnUrl(returnPath: string, actionId: string): string {

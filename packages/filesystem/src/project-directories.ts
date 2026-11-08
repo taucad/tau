@@ -78,14 +78,16 @@ import { isDurableScope, projectLocatorFor } from '#backend/scope.js';
 import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
 import {
-  importFactsPath,
   importStagingDirectory,
   isTauControlPath,
   ownsImportTarget,
+  placeStagedControl,
   readStagedImport,
   releaseStagedImport,
 } from '#importer/staging.js';
-import type { ImportFactsRecord, ImportStagingPort, StagedImport, StagedImportEntry } from '#importer/staging.js';
+import type { ImportStagingPort, StagedImport } from '#importer/staging.js';
+import { importFactsPath } from '#importer/facts.js';
+import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 
@@ -734,8 +736,27 @@ export class ProjectDirectories {
               throw new Error(`The staged import ${staging.operationId} is gone.`);
             }
             const written = new Set(files.map(([relativePath]) => relativePath));
-            const entries = await this._placeStagedImport({ provider, staged, target: path, written });
-            const record: ImportFactsRecord = { version: 1, operationId: staged.operationId, pin: staged.pin, entries };
+            const placed = await this._placeStagedImport({ provider, staged, target: path, written });
+            /* A linked import's `.git`, which the revisions authority fetched into the staging: moved, never written here (I6). */
+            await placeStagedControl(provider, staged.operationId, path);
+            /* Each file's mtime as placed: the index takes a fact only for a file still at exactly this (size, mtime). */
+            const observed = await mapConcurrent(placed, directoryConcurrency, async (entry) =>
+              provider.stat(`${path}/${entry.path}`).catch(() => undefined),
+            );
+            const entries: RecordedImportEntry[] = [];
+            for (const [index, entry] of placed.entries()) {
+              const stat = observed[index];
+              if (stat?.type === 'file' && stat.size === entry.size) {
+                entries.push({ ...entry, mtimeMs: stat.mtimeMs });
+              }
+            }
+            const record: ImportFactsRecord = {
+              version: 1,
+              operationId: staged.operationId,
+              pin: staged.pin,
+              at: Date.now(),
+              entries,
+            };
             importFacts = [
               {
                 op: 'write',

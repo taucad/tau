@@ -17,7 +17,12 @@
 
 import { randomUuid } from '@taucad/utils/id';
 import type { TelemetryOrigin, TelemetrySpanRecord } from '@taucad/runtime';
-import { subscribeViewerEvents, viewerGeometryDownloaded, viewerLongFrameBurst } from '#lib/viewer-events.js';
+import {
+  flushViewerLongFrames,
+  subscribeViewerEvents,
+  viewerGeometryDownloaded,
+  viewerLongFrameBurst,
+} from '#lib/viewer-events.js';
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 
 /**
@@ -140,7 +145,7 @@ export const observeLongAnimationFrames = (): (() => void) => {
   }
   const observer = new PerformanceObserver((list) => {
     const entries = list.getEntries() as LongAnimationFrameEntry[];
-    /* One viewer event per delivered batch (a burst), never per frame. */
+    /* Summed into at most one viewer event per window (FR-17: never per frame). */
     viewerLongFrameBurst(entries.reduce((total, entry) => total + entry.duration, 0));
     for (const entry of entries) {
       recordRendererSpan('renderer.long-animation-frame', {
@@ -164,6 +169,7 @@ export const observeLongAnimationFrames = (): (() => void) => {
   }
   return () => {
     observer.disconnect();
+    flushViewerLongFrames();
   };
 };
 

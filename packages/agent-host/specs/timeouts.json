@@ -16,7 +16,8 @@
     "apps/ui/app/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
-    "apps/ui/app/workers/agent-host-projects.ts"
+    "apps/ui/app/workers/agent-host-projects.ts",
+    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
   ],
   "rows": [
     {
@@ -1190,6 +1191,14 @@
       "token": "resumeTimers.delete(timer)",
       "class": "Debounce",
       "owner": "open first, model waits"
+    },
+    {
+      "id": "LSP-INDEX-MIRROR-RETRY",
+      "bound": "Language-worker index mirror feed retry after a failed index ask: 250 ms, doubling to at most 8 s (indexMirrorRetryBackoff, indexMirrorRetryCeiling); reset on a successful ask, replaced by an immediate ask on the next change set, cleared on dispose",
+      "site": "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
+      "token": "retry = setTimeout(() => {",
+      "class": "Backoff",
+      "owner": "filesystem capability W9 (D13)"
     }
   ]
 }

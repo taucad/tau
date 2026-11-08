@@ -320,6 +320,14 @@ describe('caller-side calls', () => {
     });
   });
 
+  it('refuses a large-object source before it crosses (W11.3)', async () => {
+    await expect(
+      prepareApplyCall([
+        { entries: [{ op: 'write', path: 'part.step', data: { largeObject: 'a'.repeat(64), size: 3 } }] },
+      ]),
+    ).rejects.toMatchObject({ code: 'EINVAL' });
+  });
+
   it('stands an entry error without a code back up as a plain Error', () => {
     const receipt = receiptFromWire({
       entries: [{ index: 0, outcome: 'failed', error: { name: 'TypeError', message: 'bad' } }],

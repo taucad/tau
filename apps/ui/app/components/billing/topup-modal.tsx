@@ -323,7 +323,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           <DialogDescription>
             {visibleAction
               ? `Payment status: ${stateLabel[visibleAction.state]}`
-              : 'Top up your credit balance. Prices in USD, plus applicable tax.'}
+              : 'Top up your credit balance. Prices in USD, plus applicable tax. Credits are added immediately and never expire. The unused balance of a top-up can be refunded within 14 days.'}
           </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col gap-4'>

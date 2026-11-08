@@ -74,8 +74,8 @@ import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
-import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
-import type { LfsPointer } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LargeObjectBasis, LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
@@ -132,6 +132,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  hasGeneratedBlock,
 } from '#workspace-config.js';
 
 /*
@@ -591,6 +592,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const paths = new Map<string, Readonly<{ oid: string; mode: string }>>();
     await walkTree(oid, '', paths);
     return paths;
+  };
+
+  /*
+   * The parents' entries, which unchanged content keeps the representation of
+   * (rule 13) — blob ids only, no blob is read. A browser host is
+   * case-sensitive, so its cut never folds case.
+   */
+  const largeObjectBasisFor = async (parents: readonly RevisionId[]): Promise<LargeObjectBasis | undefined> => {
+    const read = await Promise.all(parents.map(async (parent) => commitOf(parent)));
+    const commits = read.filter((commit): commit is DecodedCommit => commit !== undefined);
+    if (commits.length === 0) {
+      return undefined;
+    }
+    const listings = await Promise.all(commits.map(async (commit) => flatTree(commit.tree)));
+    return largeObjectBasisOf(
+      objectFormat,
+      ...listings.map((listing) => [...listing].map(([path, { oid }]) => ({ path, oid }))),
+    );
   };
 
   /**
@@ -1613,6 +1632,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     maximumTransferBytes?: number,
   ): RevisionHttpClient & Readonly<{ refused: (error: unknown, remote: string) => RevisionPortError }> => {
     let retryAfter: string | undefined;
+    let authenticate: string | undefined;
     let remaining = maximumTransferBytes;
     let limitExceeded = false;
     const exceeded = (): RevisionPortError => {
@@ -1624,6 +1644,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const response = await client.request(signal === undefined ? request : { ...request, signal });
         if (response.statusCode === 429) {
           retryAfter = response.headers['retry-after'];
+        }
+        if (response.statusCode === 401 || response.statusCode === 403) {
+          authenticate = response.headers['www-authenticate'];
         }
         const { 'content-length': declared } = response.headers;
         if (
@@ -1662,7 +1685,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       refused: (error, remote) =>
         limitExceeded
           ? exceeded()
-          : remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
+          : remoteTransportError(error, {
+              remote,
+              ...(retryAfter === undefined ? {} : { retryAfter }),
+              ...(authenticate === undefined ? {} : { authenticate }),
+            }),
     };
   };
 
@@ -1766,47 +1793,50 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * Also the open seam: `revision-effects.ensureStore` calls this once per
      * authority, before the first question is asked of the store, and
      * `isomorphic-git`'s own `init` returns early when the config is already
-     * there. So a project created by an older build reaches this with a stale
-     * generated block, and the merge below is its migration (G0-9) — written only
-     * when the merged bytes differ, so a current project's working copy is not
-     * touched on every open and a rewrite cannot repeat.
+     * there. The setup files are created, never merged into (D16), exactly as
+     * the disk leg does (`native-git-port.ts`): a file that exists is the
+     * person's, or already Tau's, and the cut regenerates Tau's own block in
+     * it from the tree (`lfs.ts`), so both legs record one tree (I4/I5).
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
+      const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
       if (input.createSetupFiles !== false) {
-        const ignorePath = generatedIgnorePath;
-        const existing = (await filesystem.exists(ignorePath))
-          ? await filesystem.readFile(ignorePath, 'utf8')
-          : undefined;
-        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-        if (ignore !== existing) {
-          await filesystem.writeFile(ignorePath, ignore);
+        const readText = async (path: string): Promise<string | undefined> =>
+          (await filesystem.exists(path)) ? filesystem.readFile(path, 'utf8') : undefined;
+        const [ignore, attributes] = await Promise.all([
+          readText(generatedIgnorePath),
+          readText(generatedGitattributesPath),
+        ]);
+        /* Both generated files are in the recorded tree, so a leg that wrote
+         * only one of them named a different tree for the same edits
+         * (W22 DEF-W22-1); a brand-new project gets both, versioned (D24). */
+        if (brandNew && ignore === undefined) {
+          await filesystem.writeFile(
+            generatedIgnorePath,
+            generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+          );
         }
-        /*
-         * Beside the ignore file and versioned like it (D24), exactly as the disk
-         * leg writes it (`native-git-port.ts`).
-         *
-         * Both generated files are in the recorded tree, so a leg that wrote only
-         * one of them named a different tree — and therefore a different revision
-         * — for the same edits, which is I4's whole claim (W22 DEF-W22-1). The
-         * bytes come from the one pure `#workspace-config.js` block both legs
-         * already share; only the writer is per-adapter, which is what that
-         * module's own contract says. And `lfs.ts` appends a tracked path to this
-         * file at cut time (P15), so a browser-created project had nowhere for
-         * that line to land and a stock clone of it had no attributes to resolve
-         * its pointers with (S49).
-         */
-        const attributesPath = generatedGitattributesPath;
-        const attributes = (await filesystem.exists(attributesPath))
-          ? await filesystem.readFile(attributesPath, 'utf8')
-          : undefined;
-        const merged = generatedGitattributesContent(attributes);
-        if (merged !== attributes) {
-          await filesystem.writeFile(attributesPath, merged);
+        /* A project an older build created carries Tau's ignore block and no
+         * attributes file (DEF-W22-1); the file it gets here is what keeps its
+         * large files pointers once the cut reads the rule from the tree. */
+        if (attributes === undefined && (brandNew || hasGeneratedBlock(ignore))) {
+          await filesystem.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
         }
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       await init({ fs, dir: '', gitdir, defaultBranch });
+      /* Tau's derived-content ignores, where stock Git reads them and no
+       * revision records them: the store's own file, never versioned. */
+      const excludePath = `${gitdir}/info/exclude`;
+      const existingExclude = (await gitFiles.exists(excludePath))
+        ? await gitFiles.readFile(excludePath, 'utf8')
+        : undefined;
+      const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+      if (exclude !== existingExclude) {
+        await gitFiles.mkdir(`${gitdir}/info`, { recursive: true });
+        await gitFiles.writeFile(excludePath, exclude);
+      }
       /* Every project an older build recorded has no index at all, so this open
        * heals it. An existing index is left alone: in a repository Tau adopted
        * it may hold the person's own staged work. */
@@ -1900,7 +1930,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const recorded =
         input.largeObjects === false
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
-          : cleanLargeObjects(input.tree);
+          : cleanLargeObjects(input.tree, { basis: await largeObjectBasisFor(input.parents) });
       await Promise.all(
         [...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content.byteLength, content)),
       );

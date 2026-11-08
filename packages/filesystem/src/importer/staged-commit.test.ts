@@ -9,16 +9,20 @@ import { tauPathPolicy } from '#path-registry.js';
 import { createWorkspaceFileService, decoder, encoder } from '#testing/workspace-service-harness.js';
 import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
-import { createInlineImportDecoder } from '#importer/decode.js';
+import { createInlineImportDecoder, createInlineImportMeasurer, subtleImportHash } from '#importer/decode.js';
 import { planImport, zipImportSource } from '#importer/sources.js';
 import {
-  importFactsPath,
+  discardStagedImport,
+  importControlDirectory,
   importOwnerPath,
   importStagingDirectory,
   readStagedImport,
   stageImport,
+  stagedControlDirectory,
 } from '#importer/staging.js';
-import type { ImportFactsRecord, ImportStagingPort } from '#importer/staging.js';
+import type { ImportStagingPort } from '#importer/staging.js';
+import { importFactsPath } from '#importer/facts.js';
+import type { ImportFactsRecord } from '#importer/facts.js';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 
 const projectId = 'proj_iiiiiiiiiiiiiiiiiiiii';
@@ -87,7 +91,11 @@ describe('commitPendingProjectDirectory from a staged import', () => {
   let provider: FileSystemProvider;
   let harness: Awaited<ReturnType<typeof createWorkspaceFileService>>;
 
-  const stage = async (target?: string, port?: ImportStagingPort): Promise<void> => {
+  const stage = async (
+    target?: string,
+    port?: ImportStagingPort,
+    measure = createInlineImportMeasurer(),
+  ): Promise<void> => {
     const zip = new JSZip();
     for (const [name, content] of Object.entries({
       ...files,
@@ -104,6 +112,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
       operationId,
       plan,
       decode: createInlineImportDecoder(),
+      measure,
       ...(target === undefined ? {} : { target }),
     });
   };
@@ -233,7 +242,31 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
   });
 
-  it('should keep the facts the decode measured beside the project, for its first revision', async () => {
+  it('should hash each file once, from its read-back, from source to committed project (EQ6, S6: one hash pass)', async () => {
+    const hashed = { sha1: 0, sha256: 0 };
+    const measured: string[] = [];
+    const inline = createInlineImportMeasurer(async (algorithm, bytes) => {
+      hashed[algorithm] += 1;
+      return subtleImportHash(algorithm, bytes);
+    });
+    const counting = async (bytes: Uint8Array<ArrayBuffer>, expected: number) => {
+      measured.push(decoder.decode(bytes));
+      return inline(bytes, expected);
+    };
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+
+    await stage(directory, undefined, counting);
+    const staged = digest.mock.calls.length;
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    /* 302 entries: one SHA-1 and one SHA-256 each, over the bytes read back, none in the decode or at commit. */
+    expect(hashed).toEqual({ sha1: 302, sha256: 302 });
+    expect(staged).toBe(604);
+    expect(digest.mock.calls.length).toBe(staged);
+    expect(measured).toContain('main');
+  });
+
+  it('should keep the facts measured from the read-back beside the project, with the mtime of each placed file', async () => {
     await stage(directory);
 
     await commit();
@@ -246,6 +279,9 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(record.entries).toHaveLength(302);
     expect(main?.facts.blobOid).toBe(gitBlobOid('main'));
     expect(main?.facts.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    /* Each entry carries the mtime its file had once placed, which the index matches exactly. */
+    const placed = await provider.stat(`${directory}/src/main.ts`);
+    expect(main?.mtimeMs).toBe(placed.mtimeMs);
     expect(tauPathPolicy.classify(importFactsPath).versioned).toBe(false);
   });
 
@@ -285,6 +321,131 @@ describe('commitPendingProjectDirectory from a staged import', () => {
       // oxlint-disable-next-line no-await-in-loop -- every file is checked after the resumed commit.
       expect(await provider.exists(`${directory}/src/part-${String(index)}.ts`)).toBe(true);
     }
+  });
+
+  /* What a linked import's fetch leaves in its staging: a few objects and refs, written there by the revisions authority. */
+  const stageControl = async (): Promise<void> => {
+    const control = importControlDirectory(operationId);
+    await provider.mkdir(`${control}/objects/ab`, { recursive: true });
+    await provider.mkdir(`${control}/refs/heads`, { recursive: true });
+    await provider.writeFile(`${control}/HEAD`, 'ref: refs/heads/main\n');
+    await provider.writeFile(`${control}/refs/heads/main`, `${'a'.repeat(40)}\n`);
+    await provider.writeFile(`${control}/objects/ab/${'c'.repeat(38)}`, 'object');
+  };
+
+  it("should move a linked import's control plane into the project as .git, by one rename and never the pipeline (I6)", async () => {
+    movingInPlace();
+    await stage();
+    await stageControl();
+    const counted = countBytes(provider);
+    const batches = vi.spyOn(provider, 'applyBatch');
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/objects/ab/${'c'.repeat(38)}`))).toBe('object');
+    expect(counted.content(`${directory}/.git/`)).toBe(0);
+    expect(counted.renames).toContain(`${directory}/.git`);
+    expect(batches.mock.calls.some(([entries]) => JSON.stringify(entries).includes(`${directory}/.git`))).toBe(false);
+    /* Written before the manifest, so a project is never seen without its history. */
+    expect(counted.last()).toBe(`${directory}/tau.json`);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should finish a control-plane move a commit stopped partway through', async () => {
+    movingInPlace();
+    await stage();
+    await stageControl();
+    /* A rename that walks the directory (as one over handles does) moved HEAD, then the tab closed. */
+    const rename = provider.rename.bind(provider);
+    const spy = vi.spyOn(provider, 'rename').mockImplementation(async (from, to) => {
+      if (to === `${directory}/.git`) {
+        await provider.mkdir(to, { recursive: true });
+        await rename(`${from}/HEAD`, `${to}/HEAD`);
+        throw new Error('tab closed');
+      }
+      await rename(from, to);
+    });
+    await expect(commit()).rejects.toThrow('tab closed');
+    expect(await provider.exists(`${directory}/tau.json`)).toBe(false);
+    spy.mockRestore();
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/refs/heads/main`))).toBe(`${'a'.repeat(40)}\n`);
+    expect(await provider.exists(`${directory}/.git/objects/ab/${'c'.repeat(38)}`)).toBe(true);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should move again a control file a copying rename tore, keeping none at another size than staged', async () => {
+    movingInPlace();
+    await stage();
+    await stageControl();
+    const object = `objects/ab/${'c'.repeat(38)}`;
+    /* A rename that copies file by file, then deletes (as one over handles does): HEAD whole, the object torn at 0 bytes. */
+    const rename = provider.rename.bind(provider);
+    const spy = vi.spyOn(provider, 'rename').mockImplementation(async (from, to) => {
+      if (to === `${directory}/.git`) {
+        await provider.mkdir(`${to}/objects/ab`, { recursive: true });
+        await provider.writeFile(`${to}/HEAD`, await provider.readFile(`${from}/HEAD`));
+        await provider.writeFile(`${to}/${object}`, new Uint8Array());
+        throw new Error('tab closed');
+      }
+      await rename(from, to);
+    });
+    await expect(commit()).rejects.toThrow('tab closed');
+    spy.mockRestore();
+    const torn = await provider.stat(`${directory}/.git/${object}`);
+    expect(torn.size).toBe(0);
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/${object}`))).toBe('object');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/refs/heads/main`))).toBe(`${'a'.repeat(40)}\n`);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should leave a .git fetched straight into an in-place folder where it is: no copy of a pack, and the manifest last', async () => {
+    await stage(directory);
+    const staged = await readStagedImport(provider, operationId);
+    expect(stagedControlDirectory(staged!)).toBe(`${directory}/.git`);
+    await provider.mkdir(`${directory}/.git/objects/ab`, { recursive: true });
+    await provider.writeFile(`${directory}/.git/HEAD`, 'ref: refs/heads/main\n');
+    await provider.writeFile(`${directory}/.git/objects/ab/${'c'.repeat(38)}`, 'object');
+    const counted = countBytes(provider);
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(decoder.decode(await provider.readFile(`${directory}/.git/HEAD`))).toBe('ref: refs/heads/main\n');
+    expect(counted.content(`${directory}/.git/`)).toBe(0);
+    expect(counted.renames.some((to) => to.includes('.git'))).toBe(false);
+    expect(counted.last()).toBe(`${directory}/tau.json`);
+  });
+
+  it("should take an in-place folder's .git with the import's other entries when its staging is discarded", async () => {
+    await stage(directory);
+    await provider.mkdir(`${directory}/.git/refs/heads`, { recursive: true });
+    await provider.writeFile(`${directory}/.git/HEAD`, 'ref: refs/heads/main\n');
+    await provider.writeFile(`${directory}/.git/refs/heads/main`, `${'a'.repeat(40)}\n`);
+
+    await discardStagedImport(
+      { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
+      operationId,
+    );
+
+    expect(await provider.exists(directory)).toBe(false);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should commit a staging without a control plane with no .git', async () => {
+    movingInPlace();
+    await stage();
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(await provider.exists(`${directory}/.git`)).toBe(false);
   });
 
   it('should refuse a commit whose in-place staging lost a file', async () => {

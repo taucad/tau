@@ -6,9 +6,10 @@
 #   - `picogk-browser-archive.yml` proves it with `ui-e2e:test:e2e:picogk` on every archive run.
 #   - `deploy-ui.yml` builds staging and production with it.
 #
-# The bundle depends only on the PicoVoxel builder and the files the key hashes, so a prepared bundle
+# The bundle depends only on the PicoVoxel builder and the inputs the key hashes, so a prepared bundle
 # is cached under that key and a deploy that changed none of them reuses it without rebuilding the
-# archives.
+# archives. A rebuild from the same inputs is byte-identical (`prepare-browser-host.mts` publishes
+# without source control metadata), so even a cache miss keeps the bundle's content address.
 name: PicoGK browser host
 on:
   workflow_call:
@@ -43,8 +44,18 @@ jobs:
       - name: Key the bundle by everything that builds it
         id: key
         env:
-          FILES: ${{ hashFiles('packages/plugins/picogk/dotnet/**', 'packages/plugins/picogk/scripts/**', 'packages/plugins/picogk/src/**', 'packages/plugins/picogk/project.json', 'pnpm-lock.yaml', '.github/workflows/picogk-browser-host.yml') }}
-        run: echo "key=picogk-browser-host-v1-$PICOVOXEL_REF-$PACKAGE_VERSION-$FILES" >> "$GITHUB_OUTPUT"
+          FILES: ${{ hashFiles('packages/plugins/picogk/dotnet/**', 'packages/plugins/picogk/scripts/**', 'packages/plugins/picogk/src/**', 'packages/plugins/picogk/project.json', '.github/workflows/picogk-browser-host.yml') }}
+        # The bundle's bytes come from the .NET publish, whose inputs are the builder ref and the files above.
+        # From node_modules the preparation loads only zod and @oxc-node/core, to validate and copy, so the key
+        # takes their lockfile entries and PicoGK's own importer, not the whole lockfile: an unrelated
+        # dependency change must not rebuild the archives (two did on 2026-11-07, tau#1523 and #1525).
+        run: |
+          set -euo pipefail
+          tooling=$( {
+            awk '/^  packages\/plugins\/picogk:$/ { inside = 1; print; next } inside && /^  [^ ]/ { inside = 0 } inside' pnpm-lock.yaml
+            grep -E "^  '?(zod|@oxc-node/[a-z0-9-]+)@" pnpm-lock.yaml
+          } | sha256sum | cut -d' ' -f1)
+          echo "key=picogk-browser-host-v2-$PICOVOXEL_REF-$PACKAGE_VERSION-$FILES-$tooling" >> "$GITHUB_OUTPUT"
       - name: Look for a bundle prepared from the same inputs
         id: lookup
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5

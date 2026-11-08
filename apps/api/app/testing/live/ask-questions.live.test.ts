@@ -18,15 +18,18 @@ import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import {
   createLiveSession,
   createLiveToolRegistry,
+  emptyProjectRead,
   hasLiveCredential,
   liveCadSystemPrompt,
   liveCredentialName,
+  liveRepeats,
   liveSessionModel,
+  lookingTools,
   runWithRateLimitRetry,
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
-import { expectCompleted, toolCalls } from '#testing/live/live-assertions.js';
+import { expectCompleted, runUsage, toolCalls, usageBeforeFirstCall } from '#testing/live/live-assertions.js';
 
 /**
  * Agent questions on a live Haiku turn (agent questions blueprint W5).
@@ -37,11 +40,13 @@ import { expectCompleted, toolCalls } from '#testing/live/live-assertions.js';
  * request whose form is an open choice must be settled with one question before
  * any file is written; a precise request must be built without asking.
  *
- * Every other tool answers with a fixed refusal so the turn ends after the
- * decision instead of modelling for real.
+ * Tools that only look answer that the project is empty; every other tool
+ * answers with a fixed refusal so the turn ends after the decision instead of
+ * modelling for real.
  */
 
-const modelId = 'anthropic-claude-haiku-5.5';
+/** The catalog row under test; `TAU_LIVE_MODEL` picks another, such as `anthropic-claude-opus-5.5`. */
+const modelId = process.env['TAU_LIVE_MODEL'] ?? 'anthropic-claude-haiku-5.5';
 
 const memoryRecord = (): QuestionRecordFileSystem & { readonly files: Map<string, string> } => {
   const files = new Map<string, string>();
@@ -87,8 +92,31 @@ const stopHere: HostToolResult = {
   isError: true,
 };
 
+/**
+ * Print one row's metric line: output tokens (reasoning included) of every step
+ * up to the one that made the first `ask_questions` call, the hard-fork latency
+ * finding P1 of the deploy-cut investigation measured, and the row's spend.
+ */
+const reportUsage = (row: string, snapshot: HostRunSnapshot): void => {
+  const beforeAsk = usageBeforeFirstCall(snapshot.messages, toolName.askQuestions);
+  const run = runUsage(snapshot);
+  console.log(
+    `[questions-live] metric ${JSON.stringify({
+      row,
+      modelId,
+      tokensBeforeFirstAsk: beforeAsk?.outputTokens ?? null,
+      stepsBeforeFirstAsk: beforeAsk?.steps ?? null,
+      runSteps: run.steps,
+      runOutputTokens: run.outputTokens,
+      runCostUsd: run.costUsd,
+      tools: toolCalls(snapshot.messages).map((call) => call.toolName),
+    })}`,
+  );
+};
+
 describe.skipIf(!hasLiveCredential(modelId))(
   `agent questions on ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
+  { repeats: liveRepeats },
   () => {
     let gateway: LiveGateway;
     let root: string;
@@ -109,7 +137,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
         const record = memoryRecord();
         const results = async (invocation: HostToolInvocation): Promise<HostToolResult> => {
           if (invocation.toolName !== toolName.askQuestions) {
-            return stopHere;
+            return lookingTools.has(invocation.toolName) ? emptyProjectRead : stopHere;
           }
           const parsed = askQuestionsInputSchema.parse(invocation.input);
           const person = setTimeout(() => {
@@ -149,6 +177,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
         'questions-open-form',
         'Design an interesting desk ornament I can 3D print on my printer. I have not decided what it should look like.',
       );
+      reportUsage('questions-open-form', snapshot);
 
       expectCompleted(snapshot);
       const asks = toolCalls(snapshot.messages, toolName.askQuestions);
@@ -180,6 +209,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
         'questions-precise',
         'Create a 20 mm cube with a 6 mm centered cylindrical hole through it, in main.ts.',
       );
+      reportUsage('questions-precise', snapshot);
 
       expectCompleted(snapshot);
       expect(toolCalls(snapshot.messages, toolName.askQuestions)).toEqual([]);

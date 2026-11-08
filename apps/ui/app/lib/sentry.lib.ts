@@ -1,3 +1,4 @@
+import { init as initElectronRenderer } from '@sentry/electron/renderer';
 import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
@@ -202,23 +203,26 @@ export const sentryIntegrations = (defaults: SentryIntegration[]): SentryIntegra
  * Errors, release health and, outside production, page-load and navigation traces (SB17,
  * `sentry-tracing.lib.ts`): no replay and no default PII. Unlike PostHog it writes nothing to
  * the visitor's device, which is why it does not wait for cookie consent: sessions live in memory (SB8). On the web, envelopes go through the
- * same-origin tunnel (`sentryTunnelPath`, SB5); desktop posts to the DSN directly. Every event gets the Tau
- * context (`applyTauEventContext`, SB1) before `beforeSend` scrubs it, and activity breadcrumbs reach the trail.
+ * same-origin tunnel (`sentryTunnelPath`, SB5). On desktop (SB11) the Electron renderer SDK sends every event to main
+ * over IPC, and main files it in `tau-desktop` with its own channel, release and session, merged with main's scope; the
+ * renderer sets neither, and traces nothing. Every event gets the Tau context (`applyTauEventContext`, SB1) before
+ * `beforeSend` scrubs it, and activity breadcrumbs reach the trail.
  */
 export const initSentry = (): void => {
   const dsn = ENV.SENTRY_DSN;
   if (!dsn) {
     return;
   }
+  const web = usesSentryTunnel();
   const environment = sentryEnvironment();
-  const sampleRate = tracesSampleRate(environment);
-  Sentry.init({
+  const sampleRate = web ? tracesSampleRate(environment) : undefined;
+  const options: Sentry.BrowserOptions = {
     dsn,
-    environment,
-    release: sentryRelease(readBuildId()),
+    ...(web ? { environment, release: sentryRelease(readBuildId()), tunnel: sentryTunnelPath } : {}),
     sendDefaultPii: false,
-    ...(usesSentryTunnel() ? { tunnel: sentryTunnelPath } : {}),
-    integrations: (defaults) => [...sentryIntegrations(defaults), ...tracingIntegrations(environment)],
+    // Desktop keeps the Electron renderer defaults, which leave sessions to main.
+    integrations: (defaults) =>
+      web ? [...sentryIntegrations(defaults), ...tracingIntegrations(environment)] : defaults,
     ...(sampleRate === undefined
       ? {}
       : {
@@ -228,7 +232,12 @@ export const initSentry = (): void => {
         }),
     beforeSend: createBeforeSend(classifyStaleBuildFailure),
     beforeBreadcrumb: scrubSentryBreadcrumb,
-  });
+  };
+  if (web) {
+    Sentry.init(options);
+  } else {
+    initElectronRenderer(options, Sentry.init);
+  }
   if (sampleRate !== undefined) {
     nameSpansByRoute();
   }

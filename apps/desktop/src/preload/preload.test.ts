@@ -23,6 +23,12 @@ const state = vi.hoisted(() => ({
   listeners: new Map<string, Array<(...args: unknown[]) => void>>(),
 }));
 
+const { sentryHookup } = vi.hoisted(() => ({ sentryHookup: vi.fn() }));
+/* The SDK's preload hooks its IPC up on import (SB11); node_modules is not inlined, so it would load real `electron`. */
+vi.mock('@sentry/electron/preload', () => {
+  sentryHookup();
+  return {};
+});
 vi.mock('electron', () => ({
   contextBridge: {
     exposeInMainWorld: vi.fn((name: string, value: unknown) => {
@@ -72,6 +78,12 @@ beforeEach(async () => {
   state.listeners.clear();
   vi.resetModules();
   await import('./preload.js');
+});
+
+describe('desktop preload error reporting', () => {
+  it('should hook the Sentry renderer IPC up on load', () => {
+    expect(sentryHookup).toHaveBeenCalled();
+  });
 });
 
 describe('desktop preload quit bridge', () => {

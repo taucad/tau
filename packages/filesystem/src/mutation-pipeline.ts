@@ -67,6 +67,7 @@ import type {
 import {
   changesetReceipt,
   inHandBytes,
+  isLargeObjectSource,
   isBoundedChangeset,
   maximumChangesetBytes,
   maximumChangesetEntries,
@@ -1594,6 +1595,14 @@ export class MutationPipeline {
       }
       admission.admit(occupancy);
       this._assertEntryAdmissible(prepared);
+      if (
+        prepared.batch.op === 'write' &&
+        isLargeObjectSource(prepared.batch.data) &&
+        prepared.resolution.provider.capabilities.largeObjectSources !== true
+      ) {
+        /* Only a provider whose authority holds the root's store resolves one (EQ13). */
+        throw errnoError('EINVAL', `'${prepared.path}' cannot be written from a large-object store here`);
+      }
       return prepared;
     });
   }
@@ -1712,6 +1721,7 @@ export class MutationPipeline {
         ...(result.error === undefined ? {} : { error: result.error }),
         ...(result.kind === undefined ? {} : { kind: result.kind }),
         ...(durability === undefined ? {} : { durability }),
+        ...(result.largeObject === undefined ? {} : { largeObject: result.largeObject }),
       };
     };
     const fenceRefusals = await this._checkAppendFences(prepared, indexes);
@@ -1981,12 +1991,16 @@ export class MutationPipeline {
         case 'write':
         case 'append': {
           if (current) {
+            const landed = batches[index]?.largeObject;
             if (batch.op === 'write' && entry.bytes !== undefined) {
               /* The write path is where content facts are recorded: the bytes are in hand (D4). */
               this._projectIndexes.addFile(path, {
                 size: entry.bytes.byteLength,
                 facts: getFileContentMetadata(entry.bytes),
               });
+            } else if (batch.op === 'write' && landed !== undefined) {
+              /* A store-cloned large object: its size from the receipt's verified read-back, its kind measured lazily (I3). */
+              this._projectIndexes.addFile(path, { size: landed.size });
             } else {
               this._projectIndexes.invalidate(path);
             }

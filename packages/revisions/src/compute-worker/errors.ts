@@ -19,7 +19,8 @@ export type ComputeMethod =
   | 'sha256Kept'
   | 'indexPack'
   | 'resolveDelta'
-  | 'decodeImportEntry';
+  | 'decodeImportEntry'
+  | 'measureImportBytes';
 
 /** Why a call to a compute worker failed without the work itself refusing. */
 export type ComputeWorkerFailure = 'crashed' | 'unavailable';

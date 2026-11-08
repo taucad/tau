@@ -133,6 +133,7 @@ const state = vi.hoisted(() => ({
 vi.mock('#main/error-reporting.js', () => ({
   initializeDesktopErrorReporting: state.initializeErrorReporting,
   reportDesktopSignal: vi.fn(),
+  rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
 vi.mock('#tau/native-preparation.js', () => ({

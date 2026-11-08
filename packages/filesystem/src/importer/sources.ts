@@ -26,7 +26,8 @@ import type { ImportDecodeRequest } from '#importer/decode.js';
  * @public
  */
 export type ImportSourcePin = Readonly<{
-  kind: 'zip' | 'files' | 'directory' | 'archive';
+  /** `linked`: a repository fetched as objects, whose worktree is the fetched revision's tree. */
+  kind: 'zip' | 'files' | 'directory' | 'archive' | 'linked';
   name: string;
   /** Total bytes the source holds (the archive, or the files' sum). */
   size: number;
@@ -38,6 +39,8 @@ export type ImportSourcePin = Readonly<{
   revision?: string;
   /** What the source's own bytes say it is, when it can say cheaply: a zip's central-directory identity. */
   identity?: string;
+  /** The folder inside the source that became the project root, when one was chosen. */
+  root?: string;
 }>;
 
 /**
@@ -381,7 +384,18 @@ export const spoolImportArchive = async (
  */
 export const planImport = async (
   source: ImportSource,
-  options: Readonly<{ policy: PathPolicy; limits?: ImportLimits; signal?: AbortSignal }>,
+  options: Readonly<{
+    policy: PathPolicy;
+    limits?: ImportLimits;
+    signal?: AbortSignal;
+    /**
+     * A folder inside the source, relative to its one shared top folder
+     * when it has one (a repository archive's `<repo>-<sha>/`): only what is
+     * under it is imported, and it becomes the project root. `.` or an empty
+     * root is the whole source.
+     */
+    root?: string;
+  }>,
 ): Promise<ImportPlan> => {
   const limits = options.limits ?? importLimits;
   const meter = new ImportMeter(limits);
@@ -425,12 +439,31 @@ export const planImport = async (
       break;
     }
   }
-  const admission = new ImportPathAdmission(options.policy, meter, { stripSegments: strip });
+  /* `.`, `./` and `` name the whole content root. */
+  const rootPath = options.root === undefined ? '' : normalizeImportPath(options.root);
+  const root = rootPath === '' ? [] : rootPath.split('/');
+  if (root.length > 0) {
+    /*
+     * A root is relative to the archive's one top folder (`<repo>-<sha>/`),
+     * never to however many folders happen to be shared: with `a/a/x` and
+     * `a/y` under the top folder, root `a` is `a/`, not `a/a/`.
+     */
+    strip = Math.min(strip, 1);
+  }
+  const underRoot = (path: string): boolean => {
+    const segments = path.split('/');
+    return segments.length > strip + root.length && root.every((segment, index) => segments[strip + index] === segment);
+  };
+  const admission = new ImportPathAdmission(options.policy, meter, { stripSegments: strip + root.length });
   const entries: PlannedImportEntry[] = [];
   let excluded = 0;
   let reserved = 0;
   let lastModified = 0;
   for (const entry of listed) {
+    /* What lies outside the root is not the project's: never admitted, never counted against it. */
+    if (!underRoot(entry.source)) {
+      continue;
+    }
     const verdict = admission.admit(entry.source);
     if (verdict.kind === 'skip') {
       if (verdict.why === 'excluded') {
@@ -466,6 +499,7 @@ export const planImport = async (
       ...(lastModified === 0 ? {} : { lastModified }),
       ...(source.revision === undefined ? {} : { revision: source.revision }),
       ...(identity === undefined ? {} : { identity }),
+      ...(root.length === 0 ? {} : { root: root.join('/') }),
     },
     entries,
     bytes: meter.declaredBytes,

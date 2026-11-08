@@ -56,7 +56,7 @@ import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
-import { createTreeIdMemo } from '#tree-id-memo.js';
+import { createTreeIdMemo, recordBlobOid } from '#tree-id-memo.js';
 import type { TreeIdMemo } from '#tree-id-memo.js';
 import {
   conflictLabels,
@@ -110,7 +110,8 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { publishMachine } from '#publish.machine.js';
@@ -1184,12 +1185,47 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * one captured from disk, and the I5 gate compares a cut against a recorded
    * head — so the cut runs the same host-neutral clean step the writer does.
    *
+   * The writer keeps the representation of every entry unchanged from the
+   * cut's first parent (rule 13), so the prediction reads the same parent's
+   * listing — blob ids only — and folds case exactly where the writer does.
+   *
    * @param tree - The captured tree.
+   * @param parent - The revision the cut would follow: the checkout's head.
    * @returns The tree as the store will hold it.
    */
-  const recordedTree = async (tree: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+  const recordedTree = async (
+    tree: ImmutableRevisionTree,
+    parent: string | undefined,
+  ): Promise<ImmutableRevisionTree> => {
     const descriptor = await describePort();
-    return descriptor.largeObjects ? cleanLargeObjects(tree).tree : tree;
+    if (!descriptor.largeObjects) {
+      return tree;
+    }
+    return cleanLargeObjects(tree, {
+      basis: parent === undefined ? undefined : await largeObjectBasisFor(parent),
+      ignoreCase: descriptor.ignoreCase === true,
+    }).tree;
+  };
+  /* ponytail: a handful of heads are live at once; one entry per head keeps the clean step's per-basis cache warm. */
+  const largeObjectBases = new Map<string, Promise<LargeObjectBasis | undefined>>();
+  const largeObjectBasisFor = async (head: string): Promise<LargeObjectBasis | undefined> => {
+    let held = largeObjectBases.get(head);
+    if (held === undefined) {
+      held = (async () => {
+        try {
+          const listing = await port.listTree?.(revisionId(head));
+          return listing === undefined ? undefined : largeObjectBasisOf(await formatOf(), listing);
+        } catch (error) {
+          largeObjectBases.delete(head);
+          throw error;
+        }
+      })();
+      largeObjectBases.set(head, held);
+      if (largeObjectBases.size > 8) {
+        largeObjectBases.delete(largeObjectBases.keys().next().value!);
+      }
+    }
+    return held;
   };
 
   /*
@@ -1385,6 +1421,37 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @param captureOptions - This checkout's memos, whether reuse is safe, and the paths written since `last`.
    * @returns The complete versioned tree.
    */
+  /*
+   * D12: the first revision after an import is built from the blob ids its
+   * record holds, measured once from the read-back of what it wrote (EQ6),
+   * so those files are not hashed a second time (I2). Only the record's own
+   * facts are taken (`recorded: 'import'`), asked for after the read, for
+   * bytes of the size the walk listed, and the index confirms each with a
+   * provider stat at exactly the recorded size and mtime: a change it has not
+   * observed yet is hashed. Every other file is hashed by the memo as before,
+   * never read again here.
+   */
+  const recordedBlobOids = async (
+    rooted: RevisionFileSystem,
+    read: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+    stats: readonly FileStatEntry[] | undefined,
+  ): Promise<void> => {
+    if (rooted.facts === undefined || stats === undefined || read.size === 0 || (await formatOf()) !== 'sha1') {
+      return;
+    }
+    const sizes = new Map(stats.map(({ path, size }) => [path, size] as const));
+    const paths = [...read.keys()].filter((path) => sizes.get(path) === read.get(path)?.byteLength);
+    const facts = await rooted
+      .facts(paths, { digests: ['blobOid'], measure: false, recorded: 'import' })
+      .catch(() => undefined);
+    for (const [path, { blobOid }] of facts ?? []) {
+      const content = read.get(path);
+      if (content !== undefined && blobOid !== undefined) {
+        recordBlobOid(content, 'sha1', blobOid);
+      }
+    }
+  };
+
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
     basisOf: () => Promise<ImmutableRevisionTree | undefined>,
@@ -1426,13 +1493,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         at === undefined || stats === undefined
           ? undefined
           : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
-      return captureRevisionTree(rooted, {
+      const read = new Map<string, Uint8Array<ArrayBuffer>>();
+      const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
         reuse: bypassMemo ? undefined : memoOptions.reuse,
-        onRead: memoOptions.onRead,
+        onRead: (path, content) => {
+          read.set(path, content);
+          memoOptions.onRead?.(path, content);
+        },
         ...(signal === undefined ? {} : { signal }),
       });
+      await recordedBlobOids(rooted, read, stats);
+      return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
      * whenever it has them; the index answers every other capture that has a `last` to start from. */
@@ -1593,7 +1666,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
-    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree), await formatOf());
+    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());
+  /* The head a cut of this checkout would follow — asked only of a store that pointerises. */
+  const recordingParentOf = async (checkoutId: string): Promise<string | undefined> => {
+    const descriptor = await describePort();
+    return descriptor.largeObjects ? headOf(await placeOf(checkoutId)) : undefined;
+  };
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
@@ -1688,6 +1766,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     capture: async (place) => capture(place),
     withCheckoutFence,
     materializeTree,
+    /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
+    landsFromStore: async (place) =>
+      useFileSystem(place, async (rooted) => rooted.capabilities.largeObjectSources === true),
     report: options.onLargeObjects,
   });
   /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
@@ -1949,8 +2030,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const head = await headOf(await readPlaceOf(checkoutId));
     return head === undefined ? undefined : readEntryClosure(port, revisionId(head));
   };
-  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
-    adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
+  /* A host whose checkouts keep the file beside the store (D9, desktop) never swaps it for its pointer. */
+  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> => {
+    const descriptor = await describePort();
+    return adoption === undefined || descriptor.keepsLargeObjectFiles === true
+      ? { adopted: [], left: [] }
+      : adoption.adopt(await readPlaceOf(checkoutId));
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -2172,7 +2258,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const currentTreeId = await treeIdOf(current);
       if (
-        currentTreeId === revisionTreeId(await recordedTree(tree), await formatOf()) &&
+        currentTreeId === revisionTreeId(await recordedTree(tree, current ?? remoteHead), await formatOf()) &&
         (remoteHead === undefined || current === remoteHead)
       ) {
         return [{ name: evidenceRefName, status: 'upToDate', head: current }];

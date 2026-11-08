@@ -362,6 +362,37 @@ describe('composeView provenance', () => {
     const facts = await view.facts(['main.ts']);
     expect(facts.get('main.ts')).toMatchObject({ contentKind: 'text', lineCount: 2 });
   });
+
+  /* A relaying provider always has `facts`; only asking says its far end keeps no index. */
+  it('measures facts itself when the provider below refuses them as unsupported', async () => {
+    const facts = vi.fn(async () => {
+      throw Object.assign(new Error('no index'), { code: 'ENOTSUP' });
+    });
+    const relayed = new Proxy(provider, {
+      get: (target, property, receiver): unknown =>
+        property === 'facts' ? facts : (Reflect.get(target, property, receiver) as unknown),
+    });
+    const view = composeView({ filesystem: relayed }, { consumer: 'agent', policy: tauPathPolicy });
+
+    const measured = await view.facts(['main.ts'], { lineCount: true });
+
+    expect(facts).toHaveBeenCalledTimes(1);
+    expect(measured.get('main.ts')).toMatchObject({ contentKind: 'text', lineCount: 2 });
+  });
+
+  it('passes on any other refusal of facts from the provider below', async () => {
+    const relayed = new Proxy(provider, {
+      get: (target, property, receiver): unknown =>
+        property === 'facts'
+          ? async () => {
+              throw Object.assign(new Error('closed'), { code: 'EIO' });
+            }
+          : (Reflect.get(target, property, receiver) as unknown),
+    });
+    const view = composeView({ filesystem: relayed }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(view.facts(['main.ts'])).rejects.toMatchObject({ code: 'EIO' });
+  });
 });
 
 describe('composeView agent mask', () => {

@@ -25,13 +25,23 @@ export {
 export type { RangeSource, ZipDirectory, ZipEntry } from '#importer/zip.js';
 export { crc32Update } from '#importer/crc32.js';
 export { crc32 } from '#importer/crc32.js';
-export { createInlineImportDecoder, decodeImportEntry, readImportEntry, subtleImportHash } from '#importer/decode.js';
+export {
+  createInlineImportDecoder,
+  createInlineImportMeasurer,
+  decodeImportEntry,
+  importMeasureMaximumBytes,
+  measureImportBytes,
+  readImportEntry,
+  subtleImportHash,
+} from '#importer/decode.js';
 export type {
   ImportDecodeOptions,
   ImportDecodeRequest,
   ImportDecodedEntry,
   ImportDecoder,
   ImportHash,
+  ImportMeasuredFacts,
+  ImportMeasurer,
 } from '#importer/decode.js';
 export {
   directoryHandleImportSource,
@@ -50,8 +60,19 @@ export type {
   PlannedImportEntry,
 } from '#importer/sources.js';
 export {
-  discardStagedImport,
+  importFactsFreshMilliseconds,
+  importFactsMaximumBytes,
   importFactsPath,
+  importFactsSkewMilliseconds,
+  isStagedImportEntry,
+  parseImportFacts,
+  verifiedImportFacts,
+} from '#importer/facts.js';
+export type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
+export {
+  discardStagedImport,
+  importControlDirectory,
+  stagedControlDirectory,
   importOwnerPath,
   importResidentBytes,
   importStagingDirectory,
@@ -61,16 +82,11 @@ export {
   importStagingStaleMilliseconds,
   importTargetAttempts,
   ownsImportTarget,
+  placeStagedControl,
   readStagedImport,
   releaseStagedImport,
   stageImport,
   sweepStagedImports,
   touchStagedImport,
 } from '#importer/staging.js';
-export type {
-  ImportFactsRecord,
-  ImportStagingPort,
-  ImportStagingProgress,
-  StagedImport,
-  StagedImportEntry,
-} from '#importer/staging.js';
+export type { ImportStagingPort, ImportStagingProgress, StagedImport } from '#importer/staging.js';

@@ -38,6 +38,8 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
+import { createIndexMirror, feedIndexMirror, indexMirrorCovers } from '@taucad/lsp-fs/sync';
+import type { TauIndexMirrorMessage } from '@taucad/lsp-fs/sync';
 import type { RpcFileSystem } from '@taucad/chat/rpc';
 import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { createApplyTreeEffects, sweepTemporarySiblings } from '@taucad/revisions/apply-tree';
@@ -315,6 +317,82 @@ const saveText = (size: number, salt: number): Uint8Array<ArrayBuffer> => {
     bytes.set(line.subarray(0, size - offset), offset);
   }
   return bytes;
+};
+
+/**
+ * The language worker's index mirror over one root, fed by lsp-fs's
+ * production feed exactly as the file manager feeds it on attach: the root's
+ * `changedSince` and `statTree`, and one recursive change-set watch.
+ *
+ * @param live - The project's rooted view.
+ * @returns The mirror once its whole index has arrived, and the feed's stop.
+ */
+const languageIndexMirror = async (
+  live: RootedFileSystem,
+): Promise<Readonly<{ mirror: ReturnType<typeof createIndexMirror>; stop: () => void }>> => {
+  if (live.changedSince === undefined || live.statTree === undefined || live.watchChangeSets === undefined) {
+    throw new Error('The rooted view keeps no index to mirror.');
+  }
+  const mirror = createIndexMirror();
+  const channel = new MessageChannel();
+  const arrived = new Promise<void>((resolve) => {
+    channel.port1.addEventListener('message', (event: MessageEvent<TauIndexMirrorMessage>) => {
+      mirror.receive(event.data);
+      if (mirror.ready()) {
+        resolve();
+      }
+    });
+  });
+  channel.port1.start();
+  const stopFeed = feedIndexMirror(channel.port2, {
+    changedSince: async (since, options) => live.changedSince!(since, options),
+    statTree: async (path) => live.statTree!(path),
+    watch: (onChange) => live.watchChangeSets!({ paths: [''], recursive: true }, onChange),
+  });
+  await arrived;
+  return {
+    mirror,
+    stop: () => {
+      stopFeed();
+      channel.port1.close();
+      channel.port2.close();
+    },
+  };
+};
+
+/**
+ * Resolve each specifier as a language service does — up to three candidates,
+ * `exists` then the version of a hit — against the mirror, sending only what
+ * the index never holds to the rooted view (the slot).
+ *
+ * @param live - The project's rooted view, standing in for the slot.
+ * @param mirror - The language worker's index mirror.
+ * @param specifiers - Extensionless module paths.
+ * @returns The probe, hit and slot-probe counts.
+ */
+const resolveAgainstMirror = async (
+  live: RootedFileSystem,
+  mirror: ReturnType<typeof createIndexMirror>,
+  specifiers: readonly string[],
+): Promise<Readonly<{ probes: number; hits: number; slotProbes: number }>> => {
+  let probes = 0;
+  let hits = 0;
+  let slotProbes = 0;
+  for (const specifier of specifiers) {
+    for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`]) {
+      probes += 1;
+      const covered = indexMirrorCovers(candidate);
+      slotProbes += covered ? 0 : 1;
+      // oxlint-disable-next-line no-await-in-loop -- resolution tries candidates in order; the mirror answers synchronously.
+      const exists = covered ? mirror.entry(candidate)?.kind === 'file' : await live.exists(candidate);
+      if (exists) {
+        hits += 1;
+        mirror.version(candidate);
+        break;
+      }
+    }
+  }
+  return { probes, hits, slotProbes };
 };
 
 /** What the agent's view served during one scenario, by kind. */
@@ -967,30 +1045,22 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     }
     case 'stat-probes': {
       /* S13: module resolution as a language service probes it — up to three
-       * candidates per specifier, `exists` then `stat` on a hit. */
+       * candidates per specifier, `exists` then the version of a hit — against
+       * the language worker's index mirror, fed by the production feed over a
+       * port as the file manager feeds it on attach (D13). A path the index
+       * never holds would go over the slot, here the rooted view. */
       const bases = entries
         .filter((entry) => entry.path.endsWith('.ts'))
         .map((entry) => entry.path.slice(0, -'.ts'.length));
       const specifiers = Array.from({ length: 1000 }, (_, index) =>
         index % 2 === 0 && bases.length > 0 ? (bases[index % bases.length] ?? 'missing') : `missing/m${String(index)}`,
       );
-      return measure(async () => {
-        let probes = 0;
-        let hits = 0;
-        for (const specifier of specifiers) {
-          for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`]) {
-            probes += 1;
-            // oxlint-disable-next-line no-await-in-loop -- resolution tries candidates in order.
-            if (await live.exists(candidate)) {
-              hits += 1;
-              // oxlint-disable-next-line no-await-in-loop -- the resolver stats the hit.
-              await live.stat(candidate);
-              break;
-            }
-          }
-        }
-        return { probes, hits };
-      });
+      const language = await languageIndexMirror(live);
+      try {
+        return await measure(async () => resolveAgainstMirror(live, language.mirror, specifiers));
+      } finally {
+        language.stop();
+      }
     }
   }
 };

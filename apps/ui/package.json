@@ -34,6 +34,7 @@
     "@lezer/highlight": "catalog:",
     "@react-router/express": "catalog:",
     "@react-router/node": "catalog:",
+    "@sentry/electron": "catalog:",
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@tanstack/react-pacer": "catalog:",

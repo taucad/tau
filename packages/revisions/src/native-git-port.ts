@@ -82,7 +82,8 @@ import type {
   UpdateRevisionRefResult,
   WriteRevisionInput,
 } from '#revision-port.js';
-import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LargeObjectBasis } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import {
@@ -808,8 +809,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* A sweep is housekeeping: one that fails never stops a store. */
     }
     const file = lfsObjectFile(oid);
-    const held = await access(file).then(
-      () => true,
+    /* A whole copy is kept; a file of another size at the object's name is not the object, and is replaced. */
+    const held = await stat(file).then(
+      (stats) => stats.isFile() && stats.size === content.byteLength,
       () => false,
     );
     if (held) {
@@ -963,6 +965,32 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param content - Bytes as the object store holds them.
    * @returns The real bytes, or the pointer.
    */
+  /**
+   * A pointer whose object this store holds whole, answered as the pointer
+   * (`largeObjects: 'stored'`, W11.3): the size is checked, so a writer that
+   * clones the stored object lands the bytes the pointer names.
+   *
+   * @param content - A blob's bytes.
+   * @returns The same bytes.
+   */
+  const storedPointer = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    const pointer = readLfsPointer(content);
+    if (pointer === undefined) {
+      return content;
+    }
+    const held = await stat(lfsObjectFile(pointer.oid)).catch((error: unknown) => {
+      throw new RevisionPortError(
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MISSING_LARGE_OBJECT' : 'ENGINE_FAILED',
+        'A large object this revision references could not be read on this machine.',
+        { cause: error },
+      );
+    });
+    if (held.size !== pointer.size) {
+      throw new RevisionPortError('ENGINE_FAILED', 'A stored large object does not have the size its pointer names.');
+    }
+    return content;
+  };
+
   const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
     try {
       return await smudged(content);
@@ -1371,14 +1399,23 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * the trees on its path to Git, never the project.
    *
    * @param tree - The tree to store.
-   * @param largeObjects - Whether the clean step runs; `false` stores it verbatim.
+   * @param largeObjects - Whether the clean step runs; `false` stores the tree verbatim.
+   * @param parents - The revision's parents, whose unchanged entries keep their representation (rule 13).
    * @returns The root tree's object id.
    */
-  const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
-    /* The pointer decision is Tau's, made by the host-neutral cut (`lfs.ts`) that the cut's `treeId` is
-     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs. */
+  const writeTreeObject = async (
+    tree: ImmutableRevisionTree,
+    largeObjects: boolean,
+    parents: readonly RevisionId[] = [],
+  ): Promise<string> => {
+    /* The pointer decision is the host-neutral cut's (`lfs.ts`), which the cut's `treeId` is computed from,
+     * so the id this engine records is the id the host predicted; Git's clean filter never runs. The tree's
+     * own attributes decide new and changed content, adopted or not (D16). */
     const recorded = largeObjects
-      ? cleanLargeObjects(tree)
+      ? cleanLargeObjects(tree, {
+          basis: parents.length === 0 ? undefined : await basisOf(parents),
+          ignoreCase: await ignoresCase(),
+        })
       : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
     /* Each asked of the disk, never of a memo: a pruned object is stored again. */
     await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
@@ -1466,6 +1503,48 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0], size: Number(header[3]) });
     }
     return paths;
+  };
+
+  /* The parents' blob ids, from their tree objects alone (rule 13); the last few are kept, as a save asks for the same parent twice. */
+  const bases = new Map<string, Promise<LargeObjectBasis>>();
+  const basisOf = async (parents: readonly RevisionId[]): Promise<LargeObjectBasis> => {
+    const key = parents.join(' ');
+    let held = bases.get(key);
+    if (held === undefined) {
+      /* `ls-tree` takes each commit itself: one process a parent, and no blob is read. A failed listing is forgotten. */
+      held = (async () => {
+        try {
+          const listings = await Promise.all(parents.map(async (parent) => listTree(parent)));
+          return largeObjectBasisOf(
+            await format(),
+            ...listings.map((listing) => [...listing].map(([path, { oid }]) => ({ path, oid }))),
+          );
+        } catch (error) {
+          bases.delete(key);
+          throw error;
+        }
+      })();
+      bases.set(key, held);
+      if (bases.size > 4) {
+        bases.delete(bases.keys().next().value!);
+      }
+    }
+    return held;
+  };
+
+  /* `core.ignoreCase`, read once the store exists: the repository's own answer for how its attributes match
+   * (git-config(1)). `init` forgets it, since `git init` is what probes the disk and writes it. */
+  let ignoreCase: Promise<boolean> | undefined;
+  const ignoresCase = async (): Promise<boolean> => {
+    ignoreCase ??= (async () => {
+      try {
+        const result = await run(['config', '--bool', 'core.ignoreCase']);
+        return result.exitCode === 0 && textDecoder.decode(result.stdout).trim() === 'true';
+      } catch {
+        return false;
+      }
+    })();
+    return ignoreCase;
   };
 
   /**
@@ -1835,27 +1914,38 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
-   * What was at the project path when this port first looked, asked once.
+   * What is at the project path, derived from disk alone.
    *
-   * `adopted` is a repository the person made: Tau writes its ignore block
-   * before `git init`, so a store it created always carries one. An adopted
-   * repository keeps its own ignore and attributes files, its entries keep the
-   * representation its own Git gave them, and its config is left alone
-   * (revisions policy rules 5 and 13).
+   * `adopted` is a repository the person made: Tau creates its setup files
+   * before `git init`, so a store it created carries one of its blocks. An
+   * adopted repository's files and config are left alone, and only its ignore
+   * rules (`ignoredPaths`) and the adoption refusals depend on it: which paths
+   * are pointers is the tree's own attributes on every repository (D16,
+   * revisions policy rules 5 and 13).
+   *
+   * Every session reaches the same answer for the same folder: before the
+   * store exists the answer is what `init` will leave behind (a folder whose
+   * own ignore and attributes files both exist, neither carrying Tau's block,
+   * stays the person's), and `init` forgets it once the store is made, so the
+   * next question reads the disk again.
    */
   let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
   const openState = async (): Promise<Readonly<{ owned: boolean; adopted: boolean }>> => {
     opened ??= (async () => {
-      const owned = await ownsStore();
-      if (!owned) {
-        return { owned, adopted: false };
+      try {
+        const owned = await ownsStore();
+        const [ignore, attributes] = await Promise.all(
+          [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
+            readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
+          ),
+        );
+        const theirs = !hasGeneratedBlock(ignore) && !hasGeneratedBlock(attributes);
+        return { owned, adopted: owned ? theirs : theirs && ignore !== undefined && attributes !== undefined };
+      } catch (error) {
+        /* A refusal is asked again, never remembered: the path may be mended. */
+        opened = undefined;
+        throw error;
       }
-      const [ignore, attributes] = await Promise.all(
-        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
-          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
-        ),
-      );
-      return { owned, adopted: !hasGeneratedBlock(ignore) && !hasGeneratedBlock(attributes) };
     })();
     return opened;
   };
@@ -1874,31 +1964,25 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * Every path in `HEAD` must be one the registry versions and a regular file,
    * or the first revision would drop it (rule 4) or record a link as a file
-   * (rule 5). Large-file pointers are refused because an adopted entry is stored
-   * as captured, and a working copy holds their content, not the pointer: the
-   * first revision would convert every one of them (rule 13).
+   * (rule 5). Large-file pointers are carried (D16): the tree's own attributes
+   * decide which paths are pointers, on every repository, so an unchanged
+   * entry keeps its representation (rule 13).
    */
   const assertAdoptable = async (): Promise<void> => {
     const refuse = (reason: string): never => {
       throw new RevisionPortError('INVALID_REPOSITORY', `Tau cannot record revisions in this repository: ${reason}`);
     };
-    const usesPointers = (attributes: string): boolean => /\bfilter=lfs\b/u.test(attributes);
-    const rootAttributes = await readFile(join(repositoryPath, generatedGitattributesPath), 'utf8').catch(() => '');
-    if (usesPointers(rootAttributes)) {
-      refuse('it stores large files outside Git, and recording them would convert them.');
-    }
     const head = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
     if (head.exitCode !== 0) {
       return;
     }
-    const attributeBlobs: string[] = [];
     const listing = await text(['ls-tree', '-r', '-z', '--full-tree', 'HEAD']);
     for (const record of listing.split('\0')) {
       const tab = record.indexOf('\t');
       if (tab === -1) {
         continue;
       }
-      const [mode = '', , oid = ''] = record.slice(0, tab).split(' ');
+      const [mode = ''] = record.slice(0, tab).split(' ');
       const path = record.slice(tab + 1);
       if (mode !== '100644' && mode !== '100755') {
         refuse(`${path} is a link or a nested repository, which a revision cannot hold.`);
@@ -1906,13 +1990,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (!tauRevisionPolicy.policy.classify(path).versioned) {
         refuse(`${path} is a path Tau reserves for its own records.`);
       }
-      if (path === generatedGitattributesPath || path.endsWith(`/${generatedGitattributesPath}`)) {
-        attributeBlobs.push(oid);
-      }
-    }
-    const blobs = await readObjects(attributeBlobs, 'blob');
-    if ([...blobs.values()].some((bytes) => usesPointers(new TextDecoder().decode(bytes)))) {
-      refuse('it stores large files outside Git, and recording them would convert them.');
     }
   };
 
@@ -1922,49 +1999,61 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * The ordering that matters is the ignore file before `git init`, not
      * before the question of what is already here. */
     const { owned, adopted } = await openState();
-    if (adopted) {
+    if (adopted && owned) {
       await assertAdoptable();
-      /* The person's ignore file stays theirs. Tau's block goes where stock
-       * Git reads it and no revision records it, so the records Tau keeps
-       * under `.tau/` stay out of their `git status`. */
-      const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
-      const existing = await readFile(excludePath, 'utf8').catch(() => undefined);
-      const exclude = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-      if (exclude !== existing) {
-        await mkdir(dirname(excludePath), { recursive: true });
-        await writeFile(excludePath, exclude);
+    }
+    if (!adopted && input.createSetupFiles !== false) {
+      const [ignore, attributes] = await Promise.all(
+        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
+          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
+        ),
+      );
+      /* Created, never merged into (D16): a file that exists is the person's,
+       * or already Tau's. A brand-new project gets both files, versioned (D24),
+       * so a stock clone reads it the way Tau wrote it. */
+      if (!owned && ignore === undefined) {
+        await writeFile(
+          join(repositoryPath, generatedIgnorePath),
+          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+        );
       }
-    } else if (input.createSetupFiles !== false) {
-      const ignorePath = join(repositoryPath, generatedIgnorePath);
-      const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
-      const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-      if (ignore !== existing) {
-        await writeFile(ignorePath, ignore);
-      }
-      /* Beside the ignore file and versioned like it (D24): the two together are
-       * what a stock clone needs to read this project the way Tau wrote it. */
-      const attributesPath = join(repositoryPath, generatedGitattributesPath);
-      const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
-      const merged = generatedGitattributesContent(attributes);
-      if (merged !== attributes) {
-        await writeFile(attributesPath, merged);
+      /* A project an older build created carries Tau's ignore block and no
+       * attributes file (DEF-W22-1); the file it gets here is what keeps its
+       * large files pointers once the cut reads the rule from the tree. */
+      if (attributes === undefined && (!owned || hasGeneratedBlock(ignore))) {
+        await writeFile(join(repositoryPath, generatedGitattributesPath), generatedGitattributesContent(undefined));
       }
     }
     // Only now: the repository is created after the file that decides what a
     // snapshot may ever contain already exists.
     if (!owned) {
       await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
-      /* The store is ours now: a later `init` must not run `git init` again. */
-      opened = Promise.resolve({ owned: true, adopted });
+      /* The store exists now: the next question reads the disk again, and reaches the answer a second session would. */
+      opened = undefined;
+      ignoreCase = undefined;
+    }
+    /* Tau's derived-content ignores go where stock Git reads them and no
+     * revision records them, in every store, so the records Tau keeps under
+     * `.tau/` stay out of `git status` without a line in the person's ignore
+     * file. Written once the store exists, and merged: the file is the store's, never versioned. */
+    const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
+    const existingExclude = await readFile(excludePath, 'utf8').catch(() => undefined);
+    const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+    if (exclude !== existingExclude) {
+      await mkdir(dirname(excludePath), { recursive: true });
+      await writeFile(excludePath, exclude);
     }
     /* Pointers are Tau's (they must be identical on every host), but a *stock*
      * checkout of this repository — `git worktree add` for a linked checkout,
      * or somebody's own `git clone` — needs git-lfs's filters configured to
      * resolve them. Best effort: a machine without the binary still records
      * and reads revisions through this port, and `resolveGitLfs` is what tells
-     * an operator the transport half is missing. An adopted repository
-     * records no pointers, and its config is the person's. */
-    if (!adopted) {
+     * an operator the transport half is missing. An adopted repository's
+     * config is the person's: the pointers its own attributes ask for are
+     * resolved by whatever filters they configured (D16). Asked on every
+     * open and idempotent, so a session after a crash between `git init` and
+     * here still configures them. */
+    if (!(await isAdopted())) {
       await run(['lfs', 'install', '--local']);
     }
     /* Every project an older build recorded has no index at all, so this open
@@ -1991,7 +2080,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         transports: true,
         nWayMerge: false,
         checkouts: checkouts !== undefined,
-        largeObjects: !(await isAdopted()),
+        largeObjects: true,
+        ...((await ignoresCase()) ? { ignoreCase: true } : {}),
+        keepsLargeObjectFiles: true,
       });
     },
 
@@ -2072,6 +2163,38 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * names it, and through `fetchLargeObjects` by its oid when it does not. */
     fetchLargeObjects: async (pointers, fetchOptions) => fetchLargeObjectsByOid(pointers, fetchOptions),
 
+    /* D9 on the native leg: the repository's own LFS store, read and written in place, never through a fetch.
+     * The size is checked first, so a partial another writer left is never answered as the object. Size only,
+     * never a hash, as the browser's store checks it: objects land renamed whole (I1), and a hash per read
+     * would cost every open a SHA-256 of every part (W11.2 review, kept as is). */
+    readLargeObject: async (pointer) => {
+      const file = lfsObjectFile(pointer.oid);
+      const stats = await stat(file).catch(() => undefined);
+      if (stats?.isFile() !== true || stats.size !== pointer.size) {
+        return undefined;
+      }
+      try {
+        const stored = await readFile(file);
+        return stored.byteLength === pointer.size
+          ? new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength)
+          : undefined;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    storeLargeObject: async (pointer, content) => {
+      if (content.byteLength !== pointer.size) {
+        throw new RevisionPortError(
+          'ENGINE_FAILED',
+          `Large object ${pointer.oid} is not ${String(pointer.size)} bytes.`,
+        );
+      }
+      await storeLfsObject(pointer.oid, content);
+    },
+
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
@@ -2089,20 +2212,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         return pointer === undefined ? [] : [pointer];
       });
       const local = readOptions?.largeObjects === 'local';
+      const stored = readOptions?.largeObjects === 'stored';
       if (!local && pointers.length > 0) {
         await fillLargeObjects(id, pointers, readOptions?.signal);
       }
       const entries = await Promise.all(
         paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
           const content = blobs.get(oid)!;
-          return [path, local ? await smudgedIfHere(content) : await smudged(content), mode];
+          const answer = local
+            ? await smudgedIfHere(content)
+            : stored
+              ? await storedPointer(content)
+              : await smudged(content);
+          return [path, answer, mode];
         }),
       );
       return new ImmutableRevisionTree(entries);
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false && !(await isAdopted()));
+      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false, input.parents);
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

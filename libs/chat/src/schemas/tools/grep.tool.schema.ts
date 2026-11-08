@@ -94,6 +94,12 @@ export const grepOutputSchema = z.object({
     .describe(
       'Files that were not searched because their large object is not on this device yet. They may hold matches; search them again once their content has arrived.',
     ),
+  oversizedFiles: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Files that were not searched because they are larger than 4 MiB. They may hold matches; grep one by passing it as the path.',
+    ),
   appliedHeadLimit: z.number().int().nonnegative().describe('The effective headLimit used to slice the matches list.'),
   appliedOffset: z.number().int().nonnegative().describe('The effective offset used to slice the matches list.'),
 });

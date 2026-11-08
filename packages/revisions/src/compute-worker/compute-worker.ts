@@ -4,7 +4,8 @@
  *
  * Inflate, deflate, delta resolution, hashing and pack indexing take bytes in
  * and hand bytes back; an import's entry decode reads the `Blob` it is handed
- * and hands the bytes back with their digests (W7; grep joins with W9). The
+ * and hands the bytes back CRC-checked, and the read-back of what the import
+ * wrote is measured here, its one hash (W7; grep joins with W9). The
  * authority does every write. A host gives the store a dedicated worker through
  * {@link createSupervisedComputeWorker} (`supervisor.ts`), which that worker
  * serves with {@link serveComputeWorker}; {@link createInlineCompute} runs the
@@ -27,8 +28,8 @@
 
 import { indexPack } from 'isomorphic-git';
 import { installBufferGlobal } from '#buffer-global.js';
-import { decodeImportEntry } from '@taucad/filesystem/importer';
-import type { ImportDecodeRequest, ImportDecodedEntry } from '@taucad/filesystem/importer';
+import { decodeImportEntry, measureImportBytes } from '@taucad/filesystem/importer';
+import type { ImportDecodeRequest, ImportDecodedEntry, ImportMeasuredFacts } from '@taucad/filesystem/importer';
 import { bytesToHex, digest } from '#object-hash.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -75,13 +76,19 @@ export type ComputeWorker = Readonly<{
   ) => Promise<Uint8Array<ArrayBuffer>>;
   /**
    * One import entry read from the `Blob` it was handed (by reference, never
-   * copied), inflated, CRC-checked against its zip entry and digested — blob
-   * id and SHA-256 — in the same pass (charter D12, I2). The bytes come back
-   * transferred, with their facts.
+   * copied), inflated and CRC-checked against its zip entry (charter D12).
+   * Nothing is hashed: the bytes come back transferred.
    *
    * @throws ImportRefusedError (revived by name) when the bytes do not decode to the declared size and CRC.
    */
   decodeImportEntry: (request: ImportDecodeRequest) => Promise<ImportDecodedEntry>;
+  /**
+   * The facts of one file an import wrote, from its read-back: blob id and
+   * SHA-256 by one-shot WebCrypto digests, and its content kind (EQ6, I2).
+   * The bytes are transferred to the worker, not cloned, and are unusable
+   * after; bytes of another length than `expectedSize` are refused, never measured.
+   */
+  measureImportBytes: (bytes: Uint8Array<ArrayBuffer>, expectedSize: number) => Promise<ImportMeasuredFacts>;
 }>;
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> => {
@@ -221,7 +228,8 @@ export const createInlineCompute = (): ComputeWorker => {
       }
       return new Uint8Array(written);
     },
-    decodeImportEntry: async (request) => decodeImportEntry(request, hashHex),
+    decodeImportEntry: async (request) => decodeImportEntry(request),
+    measureImportBytes: async (bytes, expectedSize) => measureImportBytes(bytes, expectedSize, hashHex),
     resolveDelta: async (compressed, declared, base) => {
       const delta = await inflate(compressed);
       if (delta.byteLength !== declared) {
@@ -246,7 +254,20 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'indexPack',
   'resolveDelta',
   'decodeImportEntry',
+  'measureImportBytes',
 ];
+
+/**
+ * Whether a call hands its first argument's buffer over to the worker
+ * (transferred, so the caller's copy is detached once it is sent), not a clone.
+ *
+ * @param method - The call.
+ * @param args - Its arguments.
+ * @returns Whether the bytes are transferred.
+ * @public
+ */
+export const transfersArguments = (method: ComputeMethod, args: readonly unknown[]): boolean =>
+  (method === 'sha256' && args[1] === true) || method === 'sha256Kept' || method === 'measureImportBytes';
 
 /** One request over the seam. */
 export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args: readonly unknown[] }>;
@@ -392,13 +413,11 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     /* Cloned, not transferred: the caller keeps its own bytes, whole and usable (a pack
      * writer reads an object again after deflating it, a loose writer hashes then deflates),
      * unless it hands them over as consumed. */
-    const [bytes, consumed] = args;
+    const [bytes] = args;
     try {
       port.postMessage(
         { id, method, args } satisfies ComputeRequest,
-        (method === 'sha256' && consumed === true) || method === 'sha256Kept'
-          ? [(bytes as Uint8Array<ArrayBuffer>).buffer]
-          : [],
+        transfersArguments(method, args) ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
       );
     } catch (error) {
       /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */

@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => {
   };
   return {
     init: vi.fn(),
+    electronRendererInit: vi.fn((options: unknown, originalInit: (options: unknown) => void) => {
+      originalInit(options);
+    }),
     addEventProcessor: vi.fn(),
     addBreadcrumb: vi.fn(),
     recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading'),
@@ -29,6 +32,7 @@ vi.mock('@sentry/react', async (importOriginal) => ({
   addEventProcessor: mocks.addEventProcessor,
   addBreadcrumb: mocks.addBreadcrumb,
 }));
+vi.mock('@sentry/electron/renderer', () => ({ init: mocks.electronRendererInit }));
 vi.mock('#environment.config.js', () => ({ ENV: mocks.env }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof StaleBuildRecovery>()),
@@ -82,17 +86,33 @@ describe('initSentry', () => {
     expect(options).not.toHaveProperty('beforeSendTransaction');
   });
 
-  it('should post to the DSN directly on desktop', () => {
+  it('should hand desktop events to main through the Electron renderer SDK, leaving channel, release and sessions to main (SB11)', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     mocks.init.mockClear();
+    mocks.electronRendererInit.mockClear();
     try {
       initSentry();
     } finally {
       vi.unstubAllEnvs();
     }
-    const [options] = mocks.init.mock.calls[0] as [Record<string, unknown>];
+    const [options, originalInit] = mocks.electronRendererInit.mock.calls[0] as [Record<string, unknown>, unknown];
 
-    expect(options).not.toHaveProperty('tunnel');
+    expect(originalInit).toBe(mocks.init);
+    expect(mocks.init).toHaveBeenCalledWith(options);
+    expect(options).toMatchObject({ sendDefaultPii: false });
+    for (const key of ['tunnel', 'environment', 'release', 'tracesSampleRate', 'tracePropagationTargets']) {
+      expect(options).not.toHaveProperty(key);
+    }
+    const defaults = [{ name: 'GlobalHandlers' }, { name: 'ScopeToMain' }];
+    expect((options['integrations'] as (d: unknown[]) => unknown[])(defaults)).toBe(defaults);
+    expect(options['beforeSend']).toBeTypeOf('function');
+  });
+
+  it('should start the web SDK without the Electron renderer', () => {
+    mocks.electronRendererInit.mockClear();
+    initSentry();
+
+    expect(mocks.electronRendererInit).not.toHaveBeenCalled();
   });
 
   it('should add the Tau context to error events only', () => {

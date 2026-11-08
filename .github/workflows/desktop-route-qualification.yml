@@ -95,9 +95,16 @@ jobs:
     needs: admission
     environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 120
+    # id-token lets stock Linux rows sign in to Google Cloud keylessly; tau-ci admits only this repository's main
+    # branch in the staging qualification environment (tau-cloud stacks/gcp).
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     strategy:
       fail-fast: false
-      max-parallel: 4
+      # Stock Linux rows each hold the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
+      max-parallel: ${{ inputs.scope == 'linux' && inputs.graphics == 'stock' && 1 || 4 }}
       matrix:
         include: ${{ fromJSON(needs.admission.outputs.matrix) }}
     runs-on: ${{ inputs.scope == 'linux' && 'ubuntu-24.04' || fromJSON(matrix.host) }}
@@ -123,10 +130,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
+      # Hosted runners have no GPU, so stock Linux graphics runs on a disposable Google Cloud T4 host instead of a
+      # nested QEMU guest. The token is short-lived and scoped to creating, reaching and deleting those hosts.
+      - name: Sign in to Google Cloud for a disposable GPU host
+        if: inputs.scope == 'linux' && inputs.graphics == 'stock'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/274078410041/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: ci-gpu-runner@tau-ci.iam.gserviceaccount.com
       - name: Run Linux staging inside a disposable full guest
         if: inputs.scope == 'linux'
         env:
           TAU_VM_MODE: qualification
+          TAU_VM_HOST: ${{ inputs.graphics == 'stock' && 'gcp' || 'qemu' }}
+          TAU_GCP_PROJECT: tau-ci
+          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f
           TAU_VM_DISTRO: ${{ matrix.distro || (startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian') }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Run installed shipping renderer, explicit update and latest-feed update

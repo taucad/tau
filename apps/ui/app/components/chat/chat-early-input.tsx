@@ -24,11 +24,12 @@ type EarlyTextarea = HTMLTextAreaElement & {
   tauEarlyDraft?: { edited: boolean; composing: boolean };
 };
 
-// This fixed script runs beside the server-rendered input, before the application
-// bundle. DOM-local state records type-then-delete and an IME still in progress. An
-// input marked for autofocus takes focus here, at first paint, unless something else
-// already holds it, so the first keystroke lands without waiting for any bundle (R11).
-const earlyInputScript = `(()=>{const input=document.currentScript.previousElementSibling;const state=input.tauEarlyDraft={edited:false,composing:false};input.addEventListener('input',()=>{state.edited=true});input.addEventListener('compositionstart',()=>{state.composing=true});input.addEventListener('compositionend',()=>{state.composing=false});const active=document.activeElement;if(input.hasAttribute('data-autofocus')&&(active===null||active===document.body)){input.focus({preventScroll:true})}})()`;
+// This fixed script runs right after the server-rendered composer, before the application
+// bundle. DOM-local state records type-then-delete and an IME still in progress. It sits
+// after the whole box rather than beside the input because a browser may paint the
+// half-parsed document when the parser reaches a script: here that cut can only fall
+// after the box and its bar, never between them.
+const earlyInputScript = `(()=>{const input=document.currentScript.previousElementSibling.querySelector('textarea');const state=input.tauEarlyDraft={edited:false,composing:false};input.addEventListener('input',()=>{state.edited=true});input.addEventListener('compositionstart',()=>{state.composing=true});input.addEventListener('compositionend',()=>{state.composing=false})})()`;
 
 /** What the bar under the native input is drawn from. */
 export type EarlyChatInputBarState = {
@@ -123,7 +124,10 @@ export function ChatEarlyInput({
             aria-label='Chat message'
             placeholder={chatComposerPlaceholder}
             rows={1}
-            data-autofocus={enableAutoFocus ? '' : undefined}
+            /* Served as `autofocus`: the browser focuses it at its first rendering update, so the first
+             * paint already shows focus and the first keystroke lands without any bundle (R11). It does
+             * not move focus that is already elsewhere, and hydration does not move it either. */
+            autoFocus={enableAutoFocus}
             className={cn(
               chatComposerEditorTextClassName,
               'block resize-none bg-transparent outline-none field-sizing-content placeholder:text-muted-foreground',
@@ -132,13 +136,13 @@ export function ChatEarlyInput({
               setIsEmpty(event.currentTarget.value.trim() === '');
             }}
           />
-          <script
-            // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; records native edits before hydration.
-            dangerouslySetInnerHTML={{ __html: earlyInputScript }}
-          />
         </div>
         {bar ? bar({ isEmpty }) : <div aria-hidden='true' className='h-7' />}
       </div>
+      <script
+        // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; records native edits before hydration.
+        dangerouslySetInnerHTML={{ __html: earlyInputScript }}
+      />
     </div>
   );
 }

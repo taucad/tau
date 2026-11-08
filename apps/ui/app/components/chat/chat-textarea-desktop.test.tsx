@@ -482,10 +482,52 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
     expect(box).toHaveClass('focus-outline');
-    await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveFocus();
+    /* Gate finding 2 (#1562): the handover outline leaves only once the editor holds focus, never a frame before. */
+    const focusWhenOutlineLeft: Element[] = [];
+    const observer = new MutationObserver(() => {
+      if (!box.classList.contains('focus-outline')) {
+        focusWhenOutlineLeft.push(document.activeElement ?? document.body);
+      }
     });
-    expect(box).not.toHaveClass('focus-outline');
+    observer.observe(box, { attributes: true, attributeFilter: ['class'] });
+    try {
+      await waitFor(() => {
+        expect(screen.getByRole('textbox')).toHaveFocus();
+        expect(box).not.toHaveClass('focus-outline');
+      });
+      expect(focusWhenOutlineLeft[0]).toBe(screen.getByRole('textbox'));
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it('should drop the handover outline when focus moves elsewhere first', async () => {
+    const other = document.createElement('button');
+    document.body.append(other);
+    try {
+      renderComposer('', codexSession, {
+        earlyInput: {
+          text: '',
+          edited: false,
+          focused: true,
+          focusUnclaimed: false,
+          start: 0,
+          end: 0,
+          direction: 'none',
+        },
+      });
+      const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+      expect(box).toHaveClass('focus-outline');
+      act(() => {
+        other.focus();
+      });
+      await waitFor(() => {
+        expect(box).not.toHaveClass('focus-outline');
+      });
+      expect(other).toHaveFocus();
+    } finally {
+      other.remove();
+    }
   });
 
   it('should not draw a focus outline when the native input was not focused', () => {

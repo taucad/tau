@@ -15,15 +15,12 @@ export * from '#billing-cash-stripe.js';
 // `billing-payments.service.ts` also names a `BillingCashQualification`; the barrel exports that one.
 export {
   BillingCashService,
-  maximumRefundReasonLength,
   qualifyStripeCashProjection,
   type CashDisputeSource,
   type CashProjectionResult,
   type CashRefundSource,
   type CashTaxCorrectionEvidence,
-  type ProtectedRefundCapability,
   type QualifiedCashSource,
-  type ReviewedRefundRequest,
 } from '#billing-cash.service.js';
 export * from '#billing-collection.js';
 export * from '#billing-estimates.service.js';

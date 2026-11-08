@@ -2164,11 +2164,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (paths === undefined) {
         return list([]);
       }
-      /* A command line holds so much: the paths go in batches. */
+      /* A command line holds so much: the paths go in batches. Each batch also names `.git`, which Git
+       * never lists, so its common prefix is always the root: a batch whose paths all sit two levels
+       * inside an ignored folder (`build/deep/o.js` under `build/`) otherwise stops Git with "directory
+       * entry not superset of prefix", where the root answers `build/`. */
       const listed = new Set<string>();
       for (let index = 0; index < paths.length; index += ignorePathspecBatch) {
         // oxlint-disable-next-line no-await-in-loop -- one Git at a time over one checkout.
-        for (const entry of await list(paths.slice(index, index + ignorePathspecBatch))) {
+        for (const entry of await list(['.git', ...paths.slice(index, index + ignorePathspecBatch)])) {
           listed.add(entry);
         }
       }

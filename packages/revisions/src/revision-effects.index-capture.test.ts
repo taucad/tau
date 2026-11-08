@@ -54,8 +54,9 @@ const fixture = async (
   options?: Readonly<{
     backend?: 'node' | 'memory';
     /* `port`: the checkout's own ignore rules, as the port reads them, rather than a listing the test sets;
-     * `bare`: a listing from a port that reports no ignore context, so it is listed whole at every capture. */
-    ignoreRules?: 'listing' | 'bare' | 'port';
+     * `bare`: a listing from a port that reports no ignore context, so it is listed whole at every capture;
+     * `failing`: the port's own rules, but a question about named paths fails. */
+    ignoreRules?: 'listing' | 'bare' | 'port' | 'failing';
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -142,22 +143,33 @@ const fixture = async (
     ...bare,
     ignoredPaths: async () => ignored,
   };
+  const failing: RevisionPort = {
+    ...base,
+    ignoredPaths: async (root, paths) => {
+      if (paths !== undefined) {
+        throw new Error('directory entry not superset of prefix');
+      }
+      return base.ignoredPaths?.(root);
+    },
+  };
   const port: RevisionPort =
     options?.ignoreRules === 'port'
       ? base
-      : options?.ignoreRules === 'bare'
-        ? listing
-        : {
-            ...listing,
-            /* The test's listing is the whole of its rules: named paths are answered from it. */
-            ignoredPaths: async (_root, paths) =>
-              paths === undefined
-                ? ignored
-                : ignored.filter((entry) =>
-                    paths.some((path) => path === entry || (entry.endsWith('/') && path.startsWith(entry))),
-                  ),
-            ignoreContext: async () => JSON.stringify(ignored),
-          };
+      : options?.ignoreRules === 'failing'
+        ? failing
+        : options?.ignoreRules === 'bare'
+          ? listing
+          : {
+              ...listing,
+              /* The test's listing is the whole of its rules: named paths are answered from it. */
+              ignoredPaths: async (_root, paths) =>
+                paths === undefined
+                  ? ignored
+                  : ignored.filter((entry) =>
+                      paths.some((path) => path === entry || (entry.endsWith('/') && path.startsWith(entry))),
+                    ),
+              ignoreContext: async () => JSON.stringify(ignored),
+            };
   /* Memory stamps its files now and cannot be told otherwise: the captures read a clock a minute on,
    * so only what a test writes after a capture is racy at the next. */
   const clock =
@@ -732,5 +744,48 @@ describe("a cut under the checkout's own Git ignore rules (S10)", () => {
     expect(at.walked()).toBe(false);
     expect(at.reads).toStrictEqual(['build/tracked.stl']);
     expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should walk, not fail, when the port cannot answer for the paths a cut reads', async () => {
+    const at = await fixture({ ...files(20), ...ignoring }, { ignoreRules: 'failing' });
+    await mint(at);
+    await at.rooted.writeFile('build/deep/o.js', 'rebuilt\n');
+    await at.rooted.writeFile('dir2/f7.txt', 'edited\n');
+
+    at.count();
+    const { treeId } = await cut(at.actors);
+
+    expect(at.walked()).toBe(true);
+    expect(treeId).toBe(await walkedTreeId(at.walking));
+  });
+
+  it('should take a file an outside commit starts or stops tracking, its bytes untouched, without walking', async () => {
+    const at = await fixture({ ...files(10), ...ignoring }, { ignoreRules: 'port' });
+    await mint(at);
+    const tracked = async () => {
+      const head = await at.port.readTree(revisionId((await at.port.readRef('main'))!));
+      return Promise.all(
+        (head?.entries() ?? []).map(async ({ path }) => [path, await readFile(outside(at, path), 'utf8')] as const),
+      );
+    };
+    const before = await tracked();
+    /* `git add -f kept.log` and a commit, elsewhere: the ignored file is tracked now. */
+    await moveHead(at, [...before, ['kept.log', 'ignored from the start\n']]);
+
+    at.count();
+    const adopted = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(at.reads).toStrictEqual(['kept.log']);
+    expect(adopted.treeId).toBe(await walkedTreeId(at.walking));
+
+    /* `git rm --cached kept.log` and a commit: untracked again, so ignored again. */
+    await moveHead(at, before);
+    at.count();
+    const dropped = await cut(at.actors);
+
+    expect(at.walked()).toBe(false);
+    expect(dropped.treeId).toBe(await walkedTreeId(at.walking));
+    expect(dropped.treeId).not.toBe(adopted.treeId);
   });
 });

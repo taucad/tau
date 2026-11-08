@@ -530,4 +530,34 @@ describe.runIf(gitToolchainOnPath)('both legs read a checkout’s ignore rules a
       expect(await browser.ignoreContext?.()).toBe(after);
     },
   );
+
+  it('answers paths two levels inside an ignored folder, alone and in one batch, as the whole listing does', async () => {
+    const files = {
+      '.gitignore': 'build/\n*.log\n',
+      'build/deep/o.js': '',
+      'build/deep/x/p.js': '',
+      'build/a.js': '',
+      'src/deep/q.log': '',
+      'src/deep/r.ts': '',
+    };
+    const root = await repository(files, ['.gitignore']);
+    const native = createNativeGitRevisionPort({ repositoryPath: root });
+    const browser = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(root) });
+    const expected = excludedBy(listedByGit(root), Object.keys(files));
+    const batches = [
+      ['build/deep/o.js'],
+      ['build/deep/o.js', 'build/deep/x/p.js'],
+      ['build/deep/x/p.js', 'build/a.js'],
+      ['src/deep/q.log', 'src/deep/r.ts'],
+    ];
+
+    for (const port of [native, browser]) {
+      for (const batch of batches) {
+        // oxlint-disable-next-line no-await-in-loop -- each port and batch in turn.
+        const answer = (await port.ignoredPaths?.(undefined, batch)) ?? [];
+        expect(excludedBy(answer, batch)).toStrictEqual(batch.filter((path) => expected.includes(path)));
+      }
+    }
+    expect(expected).toStrictEqual(['build/deep/o.js', 'build/deep/x/p.js', 'build/a.js', 'src/deep/q.log']);
+  });
 });

@@ -608,6 +608,20 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     expect(row.metrics['probes']).toBeGreaterThanOrEqual(1000);
   });
 
+  test('S14: export the project as a streaming zip', async () => {
+    const samples: Array<Record<string, number>> = [];
+    let spans: unknown;
+    for (let run = 0; run < runs; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential samples.
+      const measured = await runOn(authority, { runner: 'archive', project: imported });
+      samples.push(flatten(measured));
+      spans = measured.spans;
+    }
+    const row = record('S14', samples, spans);
+    expect(row.metrics['archivedFiles']).toBeGreaterThan(0);
+    expect(row.metrics['sourceBytes']).toBeGreaterThan(row.metrics['largestFile'] ?? 0);
+  });
+
   test('S19: grep while saving and reading', async () => {
     /* The agent host's topology: grep and glob run here, off the authority, over a
      * 'working-copy' bridge port, while the authority saves and serves the viewer. */

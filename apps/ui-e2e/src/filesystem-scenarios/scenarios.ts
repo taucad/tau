@@ -406,12 +406,18 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S14',
     title: 'Export 500 MB project zip',
-    model: 'content-ops archive of the whole project.',
-    times: [
-      { metric: 'duration', limit: Number.POSITIVE_INFINITY, description: 'streams, ≤ 1.2× largest file resident' },
+    model:
+      "content-ops' streaming archive (archiveStream) of the whole imported project over the user-masked composed view the file manager archives, each file read by readFileStream and deflated as it streams, gathered into a Blob a batch at a time as archive() gathers it. residentPeak is the gathered batch plus the input pulled since the archive last gave bytes back, at its most; residentCeiling is 1.2× the largest file the archive read. archivedFiles, sourceBytes and archiveBytes are recorded for information.",
+    times: [{ metric: 'duration', limit: Number.POSITIVE_INFINITY, description: 'streams; no time target' }],
+    gates: [
+      {
+        id: 'S14.resident',
+        metric: 'residentPeak',
+        comparison: 'at-most',
+        limit: 'residentCeiling',
+        description: 'streams, ≤ 1.2× largest file resident',
+      },
     ],
-    gates: [],
-    pending: 'Owned by W12 (editor/export); not in the W0.1 runner set. The fixture and worker already support it.',
   },
   {
     id: 'S15',

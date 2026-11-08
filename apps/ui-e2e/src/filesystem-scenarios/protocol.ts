@@ -55,6 +55,7 @@ export type RunnerName =
   | 'save'
   | 'agent-write'
   | 'grep-glob'
+  | 'archive'
   | 'save-with-reads'
   | 'stat-probes'
   | 'replace-seed'

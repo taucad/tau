@@ -474,7 +474,23 @@ export const ChatTextareaDesktop = memo(function ({
     };
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
+  /* Home's native input held focus, with this box's outline, until this replaced it. The outline holds until
+   * focus lands somewhere — the editor, whose own outline then takes over in the same style pass, or wherever the
+   * person moved it — so the swap never paints the box without it (gate finding 2, #1562). Clearing it on a
+   * timer instead left a gap: Tiptap's focus command itself waits a frame before focusing. */
   const [isFocusHandoverPending, setIsFocusHandoverPending] = useState(earlyInput?.focused === true);
+  useEffect(() => {
+    if (!isFocusHandoverPending) {
+      return undefined;
+    }
+    const endHandover = (): void => {
+      setIsFocusHandoverPending(false);
+    };
+    document.addEventListener('focusin', endHandover);
+    return () => {
+      document.removeEventListener('focusin', endHandover);
+    };
+  }, [isFocusHandoverPending]);
   useEffect(() => {
     if (
       !editor ||
@@ -487,9 +503,10 @@ export const ChatTextareaDesktop = memo(function ({
     // Rehydration installs the draft in a microtask. Focus after it so opening
     // a history message keeps its first line visible instead of scrolling to the end.
     const frame = requestAnimationFrame(() => {
-      setIsFocusHandoverPending(false);
       if (!editor.isDestroyed) {
         if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
+          // Focus is already elsewhere: there is nothing left to hand over.
+          setIsFocusHandoverPending(false);
           return;
         }
         if (earlyInput?.edited) {

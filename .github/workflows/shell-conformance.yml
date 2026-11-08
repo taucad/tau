@@ -15,68 +15,16 @@
 # Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
 name: Shell conformance
 
+# Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
+# head, on demand, and on a pull request only while it carries the `shell-conformance` label. They no
+# longer run on every `main` push or on every pull request that touches a shell path. The nightly watchdog
+# alerts the operator when a nightly is red or missing.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
   pull_request:
-    paths:
-      - 'packages/core/native-process/**'
-      - 'packages/host/src/shell/**'
-      - 'packages/host/src/agent-tools.ts'
-      - 'packages/agent-host/**'
-      - 'libs/agent-tools/src/registry/shell-tool.ts'
-      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
-      - 'packages/host/project.json'
-      - 'apps/desktop-e2e/**'
-      - 'apps/desktop/electron.vite.config.ts'
-      - 'apps/desktop/src/main/**'
-      - 'apps/desktop/package.json'
-      - 'apps/desktop/project.json'
-      - 'apps/ui/desktop/**'
-      - 'apps/desktop/src/tau/services-host-shell*.ts'
-      - 'apps/desktop/src/tau/services-host.ts'
-      - 'apps/ui/app/components/terminal/**'
-      - 'apps/ui/app/components/panes/**'
-      - 'apps/ui/app/workbench-records/**'
-      - 'packages/runtime/**'
-      - 'packages/plugins/openrscad/**'
-      - 'packages/geospec/**'
-      - 'apps/desktop/src/tau/services-host.terminal*.ts'
-      - 'apps/desktop/src/tau/services-host.impl.ts'
-      - 'libs/types/src/desktop-terminal.ts'
-      - 'apps/desktop/scripts/linux-apt-package.mts'
-      - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
-      - 'apps/desktop/src/shared/linux-installation.ts'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/shell-conformance.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'packages/core/native-process/**'
-      - 'packages/host/src/shell/**'
-      - 'packages/host/src/agent-tools.ts'
-      - 'packages/agent-host/**'
-      - 'libs/agent-tools/src/registry/shell-tool.ts'
-      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
-      - 'packages/host/project.json'
-      - 'apps/desktop-e2e/**'
-      - 'apps/desktop/electron.vite.config.ts'
-      - 'apps/desktop/src/main/**'
-      - 'apps/desktop/package.json'
-      - 'apps/desktop/project.json'
-      - 'apps/ui/desktop/**'
-      - 'apps/desktop/src/tau/services-host-shell*.ts'
-      - 'apps/desktop/src/tau/services-host.ts'
-      - 'apps/ui/app/components/terminal/**'
-      - 'apps/ui/app/components/panes/**'
-      - 'apps/ui/app/workbench-records/**'
-      - 'packages/runtime/**'
-      - 'packages/plugins/openrscad/**'
-      - 'packages/geospec/**'
-      - 'apps/desktop/src/tau/services-host.terminal*.ts'
-      - 'libs/types/src/desktop-terminal.ts'
-      - 'apps/desktop/scripts/linux-apt-package.mts'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/shell-conformance.yml'
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -87,13 +35,19 @@ env:
   pnpm_config_verify_deps_before_run: warn
 
 concurrency:
-  group: shell-conformance-${{ github.event.pull_request.number || github.ref }}
+  # Another label added to a pull request starts a run whose rows skip; its own group keeps it from
+  # cancelling the rows already running for the `shell-conformance` label.
+  group: shell-conformance-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'shell-conformance' && '-other-label' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
     name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -139,7 +93,11 @@ jobs:
 
   macos:
     name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:

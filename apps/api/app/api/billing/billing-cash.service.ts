@@ -15,7 +15,7 @@ import {
 import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { DatabaseService } from '#database/database.service.js';
-import { billingProviderLeg, billingRefundIntent, billingReversalCase, billingStripeSource } from '#database/schema.js';
+import { billingReversalCase, billingStripeSource } from '#database/schema.js';
 import {
   listStripeDisputePage,
   listStripeRefundPage,
@@ -618,26 +618,6 @@ export class BillingCashService {
     );
     if (disputes.some((value, index) => value.id !== disputePages.disputes[index]?.id))
       return stop({ status: 'attention', reason: 'dispute_source_changed' });
-    const intents = await this.databaseService.database
-      .select()
-      .from(billingRefundIntent)
-      .where(eq(billingRefundIntent.reversalCaseId, reversal.id));
-    const allocations: Record<string, { principalMinor: bigint; taxMinor: bigint }> = {};
-    for (const intent of intents) {
-      const matching = pages.refunds.filter((refund) => refund.metadata?.['tau_refund_intent_id'] === intent.id);
-      if (matching.length !== 1 || matching[0]?.metadata?.['tau_reversal_case_id'] !== reversal.id)
-        return stop({ status: 'attention', reason: 'refund_intent_binding' });
-      const [leg] = await this.databaseService.database
-        .select()
-        .from(billingProviderLeg)
-        .where(eq(billingProviderLeg.refundIntentId, intent.id));
-      if (leg?.providerObjectId !== matching[0].id || intent.requestedGrossMinor !== BigInt(matching[0].amount))
-        return stop({ status: 'attention', reason: 'refund_leg_binding' });
-      allocations[matching[0].id] = {
-        principalMinor: intent.requestedPrincipalMinor,
-        taxMinor: intent.requestedTaxMinor,
-      };
-    }
     const result = qualifyStripeCashProjection({
       stripeAccountId: reversal.stripeAccountId ?? '',
       livemode: reversal.livemode,
@@ -649,7 +629,7 @@ export class BillingCashService {
       originalTaxMinor: reversal.originalTaxMinor,
       refunds: pages.refunds,
       refundPagesComplete: pages.complete,
-      refundAllocations: allocations,
+      refundAllocations: {},
       disputes,
     });
     if (result.status !== 'qualified') return stop(result);

@@ -1807,7 +1807,6 @@ export const billingProviderLeg = billing.table(
     subscriptionId: text('subscription_id'),
     reloadConsentId: text('reload_consent_id'),
     subscriptionOfferId: text('subscription_offer_id'),
-    refundIntentId: text('refund_intent_id'),
     closureId: text('closure_id'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     expirationRequestedAt: timestamp('expiration_requested_at', { withTimezone: true }),
@@ -1868,10 +1867,6 @@ export const billingProviderLeg = billing.table(
       foreignColumns: [billingSubscriptionOffer.accountId, billingSubscriptionOffer.id],
     }).onDelete('restrict'),
     foreignKey({
-      columns: [table.accountId, table.refundIntentId],
-      foreignColumns: [billingRefundIntent.accountId, billingRefundIntent.id],
-    }).onDelete('restrict'),
-    foreignKey({
       columns: [table.accountId, table.closureId],
       foreignColumns: [billingAccountClosure.accountId, billingAccountClosure.id],
     }).onDelete('restrict'),
@@ -1881,7 +1876,7 @@ export const billingProviderLeg = billing.table(
     check('billing_provider_redirect_bound', sql`${table.redirectUrl} IS NULL OR length(${table.redirectUrl}) <= 4096`),
     check(
       'billing_provider_leg_kind',
-      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent','tax_transaction') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'refund' AND ${table.refundIntentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL)`,
+      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent','tax_transaction') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL)`,
     ),
     check(
       'billing_provider_no_charge',
@@ -2673,55 +2668,6 @@ export const billingAccountClosure = billing.table(
     check(
       'billing_account_closure_state',
       sql`${table.state} IN ('closing','cancellation_pending','ready_for_auth_deletion','closed','attention') AND (${table.state} <> 'closed' OR ${table.closedAt} IS NOT NULL)`,
-    ),
-  ],
-);
-
-/** Reviewed allocation and its own source hold; provider legs own external dispatch. */
-export const billingRefundIntent = billing.table(
-  'billing_refund_intent',
-  {
-    id: text('id').primaryKey(),
-    accountId: text('account_id').notNull(),
-    environment: text('environment').notNull(),
-    reversalCaseId: text('reversal_case_id').notNull(),
-    requestId: text('request_id').notNull(),
-    requestHash: text('request_hash').notNull(),
-    requestedPrincipalMinor: bigint('requested_principal_minor', { mode: 'bigint' }).notNull(),
-    requestedTaxMinor: bigint('requested_tax_minor', { mode: 'bigint' }).notNull(),
-    requestedGrossMinor: bigint('requested_gross_minor', { mode: 'bigint' }).notNull(),
-    approvedMaximumGrossMinor: bigint('approved_maximum_gross_minor', { mode: 'bigint' }).notNull(),
-    targetReversedAtoms: bigint('target_reversed_atoms', { mode: 'bigint' }).notNull(),
-    holdAtoms: bigint('hold_atoms', { mode: 'bigint' }).notNull(),
-    holdState: text('hold_state').notNull().default('held'),
-    reviewActorId: text('review_actor_id').notNull(),
-    reviewedAt: timestamp('reviewed_at', { withTimezone: true }).notNull(),
-    reason: text('reason').notNull(),
-    state: text('state').notNull().default('prepared'),
-    sourceDigest: text('source_digest').notNull(),
-    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
-    errorCode: text('error_code'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    unique('billing_refund_intent_owner').on(table.accountId, table.id),
-    unique('billing_refund_intent_request').on(table.reversalCaseId, table.requestId),
-    foreignKey({
-      columns: [table.accountId, table.reversalCaseId],
-      foreignColumns: [billingReversalCase.accountId, billingReversalCase.id],
-    }).onDelete('restrict'),
-    foreignKey({
-      columns: [table.environment, table.accountId],
-      foreignColumns: [creditAccount.environment, creditAccount.id],
-    }).onDelete('restrict'),
-    check(
-      'billing_refund_intent_amount',
-      sql`${table.requestedPrincipalMinor} >= 0 AND ${table.requestedTaxMinor} >= 0 AND ${table.requestedGrossMinor} > 0 AND ${table.requestedPrincipalMinor}::numeric + ${table.requestedTaxMinor} = ${table.requestedGrossMinor} AND ${table.requestedGrossMinor} <= ${table.approvedMaximumGrossMinor} AND ${table.targetReversedAtoms} >= 0 AND ${table.holdAtoms} BETWEEN 0 AND ${table.targetReversedAtoms}`,
-    ),
-    check(
-      'billing_refund_intent_state',
-      sql`${table.state} IN ('prepared','pending','attention','succeeded','failed','canceled') AND ${table.holdState} IN ('held','released','applied') AND (${table.state} NOT IN ('succeeded','failed','canceled') OR (${table.holdState} <> 'held' AND ${table.confirmedAt} IS NOT NULL))`,
     ),
   ],
 );

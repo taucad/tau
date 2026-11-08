@@ -8,14 +8,6 @@
         "chromium-full": 0,
         "chromium-small": 0
       }
-    },
-    {
-      "id": "S12.binary-bytes",
-      "limit": 0,
-      "atHead": {
-        "chromium-full": 471859200,
-        "chromium-small": 296838
-      }
     }
   ]
 }

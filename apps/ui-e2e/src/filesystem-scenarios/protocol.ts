@@ -36,7 +36,11 @@ export type WorkerCommand =
   | Readonly<{ type: 'open'; fixture: ScenarioFixture; projects: readonly ScenarioProject[] }>
   | Readonly<{ type: 'run'; runner: RunnerName; projectId: string; parameters?: Readonly<Record<string, number>> }>
   | Readonly<{ type: 'probe-start'; projectId: string; readInterval: number }>
-  | Readonly<{ type: 'probe-stop' }>;
+  | Readonly<{ type: 'probe-stop' }>
+  /* A rooted bridge port onto the project, served as the file-manager worker serves the agent host's ('working-copy'). */
+  | Readonly<{ type: 'connect'; projectId: string; port: MessagePort }>
+  /* The page's off-authority grep and glob have returned: `save-with-reads` closes its grep window. */
+  | Readonly<{ type: 'grep-done' }>;
 
 /** The runners a worker implements. */
 export type RunnerName =
@@ -51,7 +55,7 @@ export type RunnerName =
   | 'save'
   | 'agent-write'
   | 'grep-glob'
-  | 'grep-with-save-and-reads'
+  | 'save-with-reads'
   | 'stat-probes'
   | 'replace-seed'
   | 'replace-killable'

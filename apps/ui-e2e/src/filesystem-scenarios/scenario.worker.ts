@@ -487,9 +487,9 @@ const grepAndGlob = async (
  * What the listings' content facts may read (D4): each file's head, and a
  * file whose head reads as text, within the line-count cap, once more in full.
  * Every file of the project counts, the manifest the import added included; a
- * path the fixture does not name is taken as text. A fixture binary is seeded
- * noise, so its head is judged as production judges it: the import wrote
- * revision 0, whose first bytes do not depend on the size. Taken after the
+ * path the fixture does not name is taken as text. A fixture binary starts
+ * with its format's real header, which holds a NUL within the smallest planned
+ * size, so its head is judged as production judges it, at any size or revision. Taken after the
  * measured window: its `statTree` opens the root's index, which the scenario
  * itself never needs.
  */
@@ -515,6 +515,9 @@ const listingByteCeiling = async (live: RootedFileSystem): Promise<number> => {
 let probe:
   | { stop: () => void; done: Promise<void>; latencies: number[]; reads: number; invalidations: number; events: number }
   | undefined;
+
+/** Closes the open `save-with-reads` window, once the page's grep has returned. */
+let grepDone: (() => void) | undefined;
 
 /* S19's viewer: one read every 20 ms, and at least 40 reads a sample, so its p95 is never just the maximum. */
 const s19ReadInterval = 20;
@@ -938,15 +941,20 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       const measured = await measure(async () => grepAndGlob(live));
       return { ...measured, extra: { ...measured.extra, listingByteCeiling: await listingByteCeiling(live) } };
     }
-    case 'grep-with-save-and-reads': {
+    case 'save-with-reads': {
+      /* S19's authority side: the viewer's reads and the save, while the page runs
+       * grep and glob over a bridge port as the agent host does (never this thread);
+       * the window closes when the page says its grep returned (`grep-done`). */
+      const grepped = Promise.withResolvers<void>();
+      grepDone = grepped.resolve;
       return measure(async () => {
         startProbe(projectId, s19ReadInterval);
-        const grepping = grepAndGlob(live);
         await quiet(parameters['saveDelay'] ?? 20);
         const saveStart = performance.now();
         await live.writeFile('src/s19-save.ts', saveText(saveSize, 19));
         const saveLatency = performance.now() - saveStart;
-        const grep = await grepping;
+        await grepped.promise;
+        grepDone = undefined;
         /* Info only, never gated: how many reads the grep window itself held. */
         const readsDuringGrep = probeReads();
         /* A p95 over a dozen reads is the slowest one: the viewer keeps reading
@@ -957,8 +965,6 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         }
         const reads = await stopProbe();
         return {
-          grepDuration: grep.grepDuration,
-          authorityReads: grep.authorityReads,
           saveLatency,
           readP95: percentile(reads.latencies, 0.95),
           readMax: Math.max(0, ...reads.latencies),
@@ -1084,6 +1090,27 @@ const handle = async (command: WorkerCommand): Promise<unknown> => {
     }
     case 'probe-stop': {
       return stopProbe();
+    }
+    case 'connect': {
+      bridgeConnections.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            v: fileSystemBridgeProtocolVersion,
+            type: filesystemBridgeConnectMessageType,
+            port: command.port,
+            root: `/projects/${command.projectId}`,
+            consumer: 'working-copy',
+          },
+        }),
+      );
+      return true;
+    }
+    case 'grep-done': {
+      if (grepDone === undefined) {
+        throw new Error('No save-with-reads window is open.');
+      }
+      grepDone();
+      return true;
     }
   }
 };

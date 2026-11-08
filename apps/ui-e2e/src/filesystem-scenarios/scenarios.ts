@@ -474,23 +474,18 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S19',
     title: 'Grep while saving and reading',
     model:
-      'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax and readsDuringGrep (reads completed before grep and glob return) are recorded for information and never gated.',
+      "S12's grep and glob run off the authority, as the agent host runs them: on the page, over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of a 'working-copy' bridge port the authority serves, while a 1 MiB save (S7) lands on the authority and a viewer reads one file every 20 ms there; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax, readsDuringGrep (reads completed before grep and glob return), authorityCalls and authorityReads (what the port served) are recorded for information and never gated.",
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },
     ],
     gates: [
       {
-        id: 'S19.compute-worker',
-        metric: 'authorityReads',
+        id: 'S19.off-authority',
+        metric: 'authoritySearchCalls',
         comparison: 'equals',
         limit: 0,
-        description: 'grep runs on the compute worker (authority reads during grep = 0)',
-        qualifier: {
-          kind: 'model-bound',
-          reason:
-            "The runner calls the grep handler on the authority's own thread, so its reads are the authority's by construction; it becomes real when W9 moves grep to the compute worker and the runner drives that path.",
-        },
+        description: 'grep and glob run off the authority (grep/glob calls the authority serves = 0)',
       },
     ],
   },

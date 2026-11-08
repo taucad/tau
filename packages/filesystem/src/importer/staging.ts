@@ -434,6 +434,80 @@ const removeOwnedEntries = async (port: ImportStagingPort, target: string, opera
 };
 
 /**
+ * Where a linked import's control plane is written: the `.git` the revisions
+ * authority fetches a repository into, inside the import's own staging
+ * directory, so a discard or a sweep removes it with the staging and no
+ * discovery or index ever sees it (I6). The commit moves it into the project.
+ *
+ * @param operationId - The import operation.
+ * @returns `.tau-staging/import-<operationId>/control/.git`.
+ * @public
+ */
+export const importControlDirectory = (operationId: string): string =>
+  `${importStagingDirectory(operationId)}/control/.git`;
+
+/* Every file under a directory, relative to it, by listing alone. */
+const filesUnder = async (provider: FileSystemProvider, root: string, prefix = ''): Promise<string[]> => {
+  const files: string[] = [];
+  for (const name of await provider.readdir(prefix === '' ? root : `${root}/${prefix}`)) {
+    const relative = prefix === '' ? name : `${prefix}/${name}`;
+    // oxlint-disable-next-line no-await-in-loop -- a control plane's few directories are walked in turn.
+    const stat = await provider.stat(`${root}/${relative}`);
+    // oxlint-disable-next-line no-await-in-loop -- a control plane's few directories are walked in turn.
+    files.push(...(stat.type === 'dir' ? await filesUnder(provider, root, relative) : [relative]));
+  }
+  return files;
+};
+
+/**
+ * Move a linked import's control plane into its project directory as
+ * `.git`: one rename of the directory, so its bytes are never written again
+ * where a rename is a metadata operation, and never pass through the
+ * mutation pipeline (I6). A commit that stopped partway through the move is
+ * finished file by file: whatever `.git` already holds stays (every object is
+ * content-addressed and every ref was written once, by the same fetch), and
+ * what is left in the staging goes with it.
+ *
+ * @param provider - The storage root's provider.
+ * @param operationId - The import operation.
+ * @param target - The project directory.
+ * @returns Whether the staging held a control plane.
+ * @public
+ */
+export const placeStagedControl = async (
+  provider: FileSystemProvider,
+  operationId: string,
+  target: string,
+): Promise<boolean> => {
+  const source = importControlDirectory(operationId);
+  const destination = `${target}/.git`;
+  const held = await provider.stat(source).catch(() => undefined);
+  if (held?.type !== 'dir') {
+    return false;
+  }
+  if (!(await provider.exists(destination))) {
+    await provider.rename(source, destination);
+    return true;
+  }
+  const left = await filesUnder(provider, source);
+  const present = await Promise.all(
+    left.map(async (relative) => [relative, await provider.exists(`${destination}/${relative}`)] as const),
+  );
+  const missing = present.flatMap(([relative, there]) => (there ? [] : [relative]));
+  const folders = new Set(
+    missing.flatMap((relative) => {
+      const slash = relative.lastIndexOf('/');
+      return slash > 0 ? [`${destination}/${relative.slice(0, slash)}`] : [];
+    }),
+  );
+  await Promise.all([...folders].map(async (folder) => provider.mkdir(folder, { recursive: true })));
+  await Promise.all(
+    missing.map(async (relative) => provider.rename(`${source}/${relative}`, `${destination}/${relative}`)),
+  );
+  return true;
+};
+
+/**
  * Let go of an in-place import's project directory before its manifest is
  * written: the intent is rewritten without it and the owner marker removed,
  * so no staging left behind, by a crash or a removal that failed, ever names

@@ -81,6 +81,7 @@ import {
   importStagingDirectory,
   isTauControlPath,
   ownsImportTarget,
+  placeStagedControl,
   readStagedImport,
   releaseStagedImport,
 } from '#importer/staging.js';
@@ -736,6 +737,8 @@ export class ProjectDirectories {
             }
             const written = new Set(files.map(([relativePath]) => relativePath));
             const placed = await this._placeStagedImport({ provider, staged, target: path, written });
+            /* A linked import's `.git`, which the revisions authority fetched into the staging: moved, never written here (I6). */
+            await placeStagedControl(provider, staged.operationId, path);
             /* Each file's mtime as placed: the index takes a fact only for a file still at exactly this (size, mtime). */
             const observed = await mapConcurrent(placed, directoryConcurrency, async (entry) =>
               provider.stat(`${path}/${entry.path}`).catch(() => undefined),

@@ -73,7 +73,17 @@ export type ProjectIndexesOptions = Readonly<{
 }>;
 
 /** A lazy facts request: what to measure beyond the classification. @public */
-export type IndexFactsOptions = ContentFactsOptions & Readonly<{ digests?: ReadonlyArray<'sha256' | 'blobOid'> }>;
+export type IndexFactsOptions = ContentFactsOptions &
+  Readonly<{
+    digests?: ReadonlyArray<'sha256' | 'blobOid'>;
+    /**
+     * `false` answers only what the index already holds and trusts (a
+     * committed import's recorded facts among them), and never reads a file:
+     * for a caller that already holds the bytes and would only hash them
+     * again (D12: the first revision is built from recorded oids).
+     */
+    measure?: boolean;
+  }>;
 
 const textEncoder = new TextEncoder();
 
@@ -300,6 +310,9 @@ export class ProjectIndexes {
       const known = index.factsFor(path);
       if (answers(path, known)) {
         return { facts: known, recorded: false };
+      }
+      if (options?.measure === false) {
+        return { facts: undefined, recorded: false };
       }
       const entry = index.entry(path);
       if (entry?.kind === 'dir') {

@@ -87,7 +87,8 @@ try {
     join(bin, 'aws'),
     `#!/usr/bin/env node
 const fs = require('node:fs'); const path = require('node:path');
-const args = process.argv.slice(2); const op = args[3];
+const args = process.argv.slice(2); const op = args[args.indexOf('s3api') + 1];
+if (!args.includes('--cli-read-timeout') || process.env.AWS_RETRY_MODE !== 'standard') { throw Error('aws called without retry settings'); }
 const value = (key) => args[args.indexOf(key) + 1];
 const key = value('--key'); const target = path.join(process.env.TEST_S3_ROOT, key);
 fs.appendFileSync(process.env.TEST_S3_LOG, op + ' ' + key + '\\n');

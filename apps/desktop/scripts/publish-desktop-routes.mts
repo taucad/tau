@@ -37,6 +37,7 @@ import {
   prepareDesktopAptPublication,
 } from './desktop-apt-publication.mjs';
 import { renewDesktopApt } from './renew-desktop-apt.mjs';
+import { awsRetryEnvironment, awsRetryOptions } from './aws-retry.mjs';
 /* oxlint-enable no-restricted-imports */
 
 const required = (name: string): string => {
@@ -369,9 +370,10 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
   const bucket = required('DESKTOP_R2_BUCKET');
   const endpoint = required('DESKTOP_R2_ENDPOINT');
   const s3 = (args: string[]) =>
-    execFileSync('aws', ['--endpoint-url', endpoint, 's3api', ...args], {
+    execFileSync('aws', ['--endpoint-url', endpoint, ...awsRetryOptions, 's3api', ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: awsRetryEnvironment(),
     });
   const store: DesktopRouteStore = {
     read: async (key) => {

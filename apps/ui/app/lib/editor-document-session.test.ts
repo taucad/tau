@@ -179,6 +179,84 @@ describe('EditorDocumentSession', () => {
     session.dispose();
   });
 
+  it('records a refused edit and settles its answer when the file turned binary', async () => {
+    const { content } = service('one\n');
+    const refusal = new EditorSaveConflictError('main.ts', bytes('one\n'));
+    vi.mocked(content.saveEditor).mockRejectedValueOnce(refusal);
+    vi.mocked(content.peekOutcome).mockReturnValue({ kind: 'binary', size: 9, head: new Uint8Array([0]), revision: 2 });
+    const record = vi.fn(
+      async (): Promise<EditorConflictOutcome> => ({
+        status: 'recorded',
+        revisionId: 'r1',
+        line: 'main',
+        into: 'main',
+      }),
+    );
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-binary',
+      recordEditorConflict: record,
+    });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+
+    await session.save('main.ts');
+
+    expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one\n', mine: 'mine\n' });
+    await expect(session.conflictResolution(refusal)).resolves.toBeUndefined();
+    expect(session.get('main.ts')).toBeUndefined();
+    expect(isRecordingEditorConflict('p-binary')).toBe(false);
+    session.dispose();
+  });
+
+  it('settles a waiting rebase when its file then becomes too large', async () => {
+    const { content, outcomeChange } = service('one\n');
+    const refusal = new EditorSaveConflictError('main.ts', bytes('one\n'));
+    vi.mocked(content.saveEditor).mockRejectedValueOnce(refusal);
+    vi.mocked(content.peekOutcome).mockReturnValue({ kind: 'loading' });
+    const record = vi.fn(
+      async (): Promise<EditorConflictOutcome> => ({
+        status: 'recorded',
+        revisionId: 'r1',
+        line: 'main',
+        into: 'main',
+      }),
+    );
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-large',
+      recordEditorConflict: record,
+    });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+    const saved = session.save('main.ts');
+    await vi.waitFor(() => {
+      expect(session.conflictResolution(refusal)).toBeInstanceOf(Promise);
+    });
+    expect(record).not.toHaveBeenCalled();
+
+    outcomeChange({ path: 'main.ts', result: { kind: 'too-large', size: 99_000_000, limit: 10_000_000 } });
+
+    await saved;
+    await expect(session.conflictResolution(refusal)).resolves.toBeUndefined();
+    expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one\n', mine: 'mine\n' });
+    session.dispose();
+  });
+
+  it('fails a refused edit at once when its file turned binary and nothing can record it', async () => {
+    const { content } = service('one\n');
+    const refusal = new EditorSaveConflictError('main.ts', bytes('one\n'));
+    vi.mocked(content.saveEditor).mockRejectedValueOnce(refusal);
+    vi.mocked(content.peekOutcome).mockReturnValue({ kind: 'binary', size: 9, head: new Uint8Array([0]), revision: 2 });
+    const session = new EditorDocumentSession({ contentService: content, projectId: 'p-unrecorded' });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+
+    await expect(session.save('main.ts')).rejects.toThrow(/cannot record both versions/);
+    await expect(session.conflictResolution(refusal)).rejects.toThrow(/cannot record both versions/);
+    session.dispose();
+  });
+
   it('records refused text before a deleted file releases its document', async () => {
     const { content, contentChange } = service('original');
     const base = bytes('original');

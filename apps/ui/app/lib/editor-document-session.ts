@@ -594,7 +594,22 @@ export class EditorDocumentSession {
   #rebaseOnto(path: string, outcome: FileContentResult, changed: boolean): void {
     const pending = this.#rebases.get(path);
     const document = this.#documents.get(path);
-    if (!pending || pending.recording === true || !document || outcome.kind !== 'text') {
+    if (!pending || pending.recording === true || !document || outcome.kind === 'loading' || outcome.kind === 'error') {
+      return;
+    }
+    if (outcome.kind === 'binary' || outcome.kind === 'too-large') {
+      /* The file stopped being text: no merge can land on it, so the refused edit is
+       * recorded beside it, as a document whose file goes that way is, and the rebase
+       * settles with the record instead of waiting for text that never comes. A file
+       * gone or moved aside (orphaned) keeps waiting: a rollback can bring it back. */
+      this.#recordScheduled(path);
+      if (!this.#isRecording(pending)) {
+        this.#recordConflict(path, pending, document.text);
+      }
+      this.#remove(path);
+      return;
+    }
+    if (outcome.kind !== 'text') {
       return;
     }
     if (pending.base !== null && sameBytes(pending.base, outcome.content)) {
@@ -677,6 +692,11 @@ export class EditorDocumentSession {
         release();
       }
     })();
+  }
+
+  /** Read afresh: a record started by a call in between is not visible to narrowing. */
+  #isRecording(pending: PendingRebase): boolean {
+    return pending.recording === true;
   }
 
   #settleRebase(path: string, pending: PendingRebase, step: Promise<void>): void {

@@ -1554,16 +1554,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * Keep the held listing current for the paths this capture reads: each is
      * asked again (a head move can track a file inside a directory Git listed
      * whole, so a listed directory above it is asked again too), and a removed
-     * one is forgotten. A changed `.gitignore` changes what every path under it
-     * answers, so it walks instead: `false`.
+     * one is forgotten. A changed `.gitignore`, ignore context or bare listing
+     * changes what every path answers, so it walks instead: `false`.
      */
     const askAgain = async (paths: Iterable<string>, removed: ReadonlySet<string>): Promise<boolean> => {
       if (ignores === undefined) {
         return true;
       }
       if (held === undefined || contextKey === undefined) {
+        /* Another context (an `info/exclude` or `core.ignoreCase` change, which names no file), or a bare
+         * port's listing that moved, changes what paths no one named answer: only a walk takes them. */
         await listWhole();
-        return true;
+        return memos.ignore?.key === ignoreKey;
       }
       const named = [...paths];
       if (named.some((path) => /(?:^|\/)\.gitignore$/iu.test(path))) {

@@ -1550,19 +1550,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /* The store's own `core.ignoreCase`, never a device's (`--local`): what the browser leg reads too, so the
-   * ignore rules fold case alike on both legs. `init` forgets it with `ignoreCase`. */
-  let localIgnoreCase: Promise<boolean> | undefined;
-  const storeIgnoresCase = async (): Promise<boolean> => {
-    localIgnoreCase ??= (async () => {
-      try {
-        const result = await run(['config', '--local', '--bool', 'core.ignoreCase']);
-        return result.exitCode === 0 && textDecoder.decode(result.stdout).trim() === 'true';
-      } catch {
-        return false;
-      }
-    })();
-    return localIgnoreCase;
+   * ignore rules fold case alike on both legs. Read again by every `ignoreContext`, so a `git config` while
+   * the store is open moves the context, and the listing after it folds as that reading said. */
+  const readStoreIgnoreCase = async (): Promise<boolean> => {
+    try {
+      const result = await run(['config', '--local', '--bool', 'core.ignoreCase']);
+      return result.exitCode === 0 && textDecoder.decode(result.stdout).trim() === 'true';
+    } catch {
+      return false;
+    }
   };
+  let contextIgnoreCase: Promise<boolean> | undefined;
+  const storeIgnoresCase = async (): Promise<boolean> => contextIgnoreCase ?? readStoreIgnoreCase();
 
   /**
    * Every named blob, in one `cat-file --batch` (rule 20's `readTree` cost).
@@ -2049,7 +2048,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* The store exists now: the next question reads the disk again, and reaches the answer a second session would. */
       opened = undefined;
       ignoreCase = undefined;
-      localIgnoreCase = undefined;
     }
     /* Tau's derived-content ignores go where stock Git reads them and no
      * revision records them, in every store, so the records Tau keeps under
@@ -2182,7 +2180,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const exclude = await readFile(join(repositoryPath, gitDirectoryName, 'info', 'exclude'), 'utf8').catch(
         () => undefined,
       );
-      return JSON.stringify([exclude ?? null, await storeIgnoresCase()]);
+      contextIgnoreCase = readStoreIgnoreCase();
+      return JSON.stringify([exclude ?? null, await contextIgnoreCase]);
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {

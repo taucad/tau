@@ -528,6 +528,15 @@ describe.runIf(gitToolchainOnPath)('both legs read a checkout’s ignore rules a
       const after = await native.ignoreContext?.();
       expect(after).not.toBe(before);
       expect(await browser.ignoreContext?.()).toBe(after);
+
+      /* `git config` while both ports are open: each reads the store's setting again, and lists by it. */
+      git(root, ['config', 'core.ignoreCase', String(!ignoreCase)]);
+      const flipped = await native.ignoreContext?.();
+      expect(flipped).not.toBe(after);
+      expect(await browser.ignoreContext?.()).toBe(flipped);
+      const relisted = excludedBy(listedByGit(root), paths);
+      expect(excludedBy((await native.ignoredPaths?.()) ?? [], paths)).toStrictEqual(relisted);
+      expect(excludedBy((await browser.ignoredPaths?.()) ?? [], paths)).toStrictEqual(relisted);
     },
   );
 

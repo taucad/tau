@@ -585,6 +585,13 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       });
     });
 
+    it('takes an options argument passed as undefined as none, as a relayed provider passes it', async () => {
+      const { proxy } = await open(transport, 'agent', files);
+      const rows = await proxy.statTree('', undefined);
+      expect(rows.map(({ path }) => path)).toContain('lib/part.ts');
+      await expect(proxy.pendingPaths(['lib/part.ts'], undefined)).resolves.toEqual([]);
+    });
+
     it("masks what changed by the connection's view", async () => {
       const { proxy } = await open(transport, 'agent', { ...files, '.git/HEAD': 'ref: refs/heads/main\n' });
       const rows = await proxy.statTree('');

@@ -232,7 +232,12 @@ const splitLongCall = (method: string, args: readonly unknown[]): { args: unknow
   const slot = fileSystemLongCalls[method];
   const bag = slot === undefined ? undefined : args[slot];
   if (slot === undefined || bag === null || typeof bag !== 'object') {
-    return { args: [...args] };
+    /* An options argument passed as `undefined` is no argument: the wire schema counts it. */
+    const wireArgs = [...args];
+    if (slot !== undefined && wireArgs.length === slot + 1 && wireArgs[slot] === undefined) {
+      wireArgs.pop();
+    }
+    return { args: wireArgs };
   }
   /* Stripped even when absent: a call's options may be nothing but its
    * controls, and an empty bag is not a wire argument the schema admits. */

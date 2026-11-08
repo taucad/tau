@@ -35,7 +35,11 @@ import {
 import type { KernelLibraryTraceHandle, KernelLibraryTraceMode, KernelServices } from '@taucad/runtime/kernel';
 
 import { manifoldOptionsSchema, manifoldExportSchemas, manifoldRenderSchema } from '#manifold.schemas.js';
-import { createManifoldTessellationReport, resolveManifoldTessellation } from '#manifold-tessellation.js';
+import {
+  createManifoldTessellationReport,
+  manifoldCircularDefaults,
+  resolveManifoldTessellation,
+} from '#manifold-tessellation.js';
 import type { ManifoldCircularDetail } from '#manifold-tessellation.js';
 
 import { initManifoldWasm } from '#init-manifold.js';
@@ -654,7 +658,21 @@ type ManifoldProgram = {
   parameters: Record<string, unknown>;
   /** Bounding-box diagonal in millimetres at Manifold's default detail; presets scale with it. */
   diagonal: number;
+  /** Triangle and vertex counts of the evaluated mesh, for a render that reuses it (absent on older snapshots). */
+  triangles?: number;
+  vertices?: number;
 };
+
+/**
+ * Whether a resolved detail is the one the evaluation meshed at: Manifold's defaults, with no segment override.
+ *
+ * @param detail - The resolved circular detail.
+ * @returns `true` when the evaluated mesh already has this detail.
+ */
+const isEvaluatedDetail = (detail: ManifoldCircularDetail): boolean =>
+  detail.segments === undefined &&
+  detail.linearTolerance === manifoldCircularDefaults.linearTolerance &&
+  detail.angularTolerance === manifoldCircularDefaults.angularTolerance;
 
 /** The evaluated model at Manifold's default detail, and the program that re-meshes it at another one. */
 type ManifoldHandle = {
@@ -841,8 +859,11 @@ export const manifoldKernel = defineKernel({
       }
 
       try {
-        const { glb, diagonal } = await createGlbFromManifoldOutput(model);
-        const handle: ManifoldHandle = { glb, program: { code: bundleResult.code, parameters, diagonal } };
+        const { glb, diagonal, triangles, vertices } = await createGlbFromManifoldOutput(model);
+        const handle: ManifoldHandle = {
+          glb,
+          program: { code: bundleResult.code, parameters, diagonal, triangles, vertices },
+        };
         return { handle };
       } catch (error) {
         const stackFrames = parseStackTrace(error, {
@@ -876,8 +897,13 @@ export const manifoldKernel = defineKernel({
     }
     const started = performance.now();
     const requested = resolveManifoldTessellation(tessellation, program.diagonal);
-    // One evaluation at the requested detail: nothing coarsens a mesh (no triangle budget).
-    const result = await meshProgram({ program, detail: requested, services, context });
+    const { triangles, vertices } = program;
+    // The evaluated mesh already has the default detail; any other detail is one evaluation at the requested
+    // detail (nothing coarsens a mesh: no triangle budget).
+    const result =
+      isEvaluatedDetail(requested) && triangles !== undefined && vertices !== undefined
+        ? { glb: handle.glb, triangles, vertices }
+        : await meshProgram({ program, detail: requested, services, context });
     const report: TessellationReport = createManifoldTessellationReport({
       requested,
       triangles: result.triangles,
@@ -900,8 +926,10 @@ export const manifoldKernel = defineKernel({
         let source = handle.glb;
         if (handle.program) {
           const requested = resolveManifoldTessellation(options.tessellation, handle.program.diagonal);
-          const mesh = await meshProgram({ program: handle.program, detail: requested, services, context });
-          source = mesh.glb;
+          if (!isEvaluatedDetail(requested)) {
+            const mesh = await meshProgram({ program: handle.program, detail: requested, services, context });
+            source = mesh.glb;
+          }
         }
         const transformedGlb = await transformGltfExportBytes(source, {
           format: 'glb',

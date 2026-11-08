@@ -199,8 +199,7 @@ function createRethrowFunction(decoder: ExceptionDecoder | undefined): (error: u
 }
 
 /**
- * Create a wrapper that recursively proxies Emscripten objects so their method
- * calls are intercepted for exception conversion.
+ * Whether a value is an Emscripten-managed object.
  *
  * @param value - the value to check
  * @returns whether the value is an Emscripten-managed WASM object with a delete method
@@ -211,9 +210,11 @@ function isEmscriptenRecord(value: unknown): value is Record<string, unknown> & 
 
 /**
  * OCCT `gp` value types: points, vectors, directions, coordinates, axes and transforms. Hot paths
- * return them by the thousand, and their accessors (`X()`, `Coord()`, `Value()` and the like) do
- * not throw, so they are returned unproxied. Overloaded constructors (`gp_Pnt_3`) share the base
- * class's name.
+ * return them by the thousand, so the exception-only wrapper returns them unproxied. That trades
+ * two things for speed: a throwing value method (`gp_Vec.Normalized()` on a null vector) surfaces a
+ * raw `WebAssembly.Exception`, and a value method does not check for a superseding abort (the next
+ * proxied call does). The tracing wrappers are diagnostic, so they keep value types proxied.
+ * Overloaded constructors (`gp_Pnt_3`) share the base class's name.
  */
 const valueTypeNames: ReadonlySet<string> = new Set([
   'gp_Pnt',
@@ -245,11 +246,23 @@ function isValueType(value: Record<string, unknown>): boolean {
   return typeof name === 'string' && valueTypeNames.has(name.replace(/_\d+$/, ''));
 }
 
-function createEmscriptenWrapper(rethrowIfWasmException: (error: unknown) => never): (value: unknown) => unknown {
+/**
+ * Create a wrapper that recursively proxies Emscripten objects so their method calls are
+ * intercepted for abort checks and exception conversion.
+ *
+ * @param rethrowIfWasmException - Converts a `WebAssembly.Exception` into an `OcKernelError`.
+ * @param options - `skipValueTypes` returns `gp` value types unproxied (exception-only mode).
+ * @param options.skipValueTypes - Whether `gp` value types are returned unproxied.
+ * @returns The wrapper.
+ */
+function createEmscriptenWrapper(
+  rethrowIfWasmException: (error: unknown) => never,
+  options: { readonly skipValueTypes: boolean },
+): (value: unknown) => unknown {
   const wrappedObjects = new WeakSet<Record<string, unknown>>();
 
   function wrapEmscriptenResult(value: unknown): unknown {
-    if (!isEmscriptenRecord(value) || wrappedObjects.has(value) || isValueType(value)) {
+    if (!isEmscriptenRecord(value) || wrappedObjects.has(value) || (options.skipValueTypes && isValueType(value))) {
       return value;
     }
 
@@ -309,7 +322,7 @@ export function wrapOcForExceptions<T extends OcExceptionInstance>(oc: T): T {
   }
 
   const rethrowIfWasmException = createRethrowFunction(decoder);
-  const wrapEmscriptenResult = createEmscriptenWrapper(rethrowIfWasmException);
+  const wrapEmscriptenResult = createEmscriptenWrapper(rethrowIfWasmException, { skipValueTypes: true });
   const wrapIfNamespace = createNamespaceWrapper(rethrowIfWasmException);
 
   const cache = new Map<string, unknown>();
@@ -391,7 +404,8 @@ export function wrapOcWithTracing<T extends OcExceptionInstance>(
 
   const decoder = getExceptionDecoder(oc);
   const rethrowIfWasmException = createRethrowFunction(decoder);
-  const wrapEmscriptenResult = createEmscriptenWrapper(rethrowIfWasmException);
+  // Tracing is diagnostic: every value stays proxied, so value methods keep abort checks and named exceptions.
+  const wrapEmscriptenResult = createEmscriptenWrapper(rethrowIfWasmException, { skipValueTypes: false });
 
   function recordSummaryCall(className: string, durationMs: number): void {
     const existing = stats.get(className);

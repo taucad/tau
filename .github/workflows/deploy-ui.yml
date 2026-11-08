@@ -240,6 +240,25 @@ jobs:
           mode: record
           app: ui
 
+      # Commits and the deploy marker go to the release this build reports
+      # (`build/sentry-release`, written by the build beside its output).
+      - name: Read this build's Sentry release
+        if: steps.superseded.outputs.superseded != 'true'
+        continue-on-error: true
+        id: sentry-release
+        run: echo "release=$(cat apps/ui/build/sentry-release)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach this deploy's commits to its Sentry release
+        if: steps.superseded.outputs.superseded != 'true' && steps.sentry-release.outcome == 'success'
+        continue-on-error: true
+        uses: ./.github/actions/sentry-release-commits
+        with:
+          release: ${{ steps.sentry-release.outputs.release }}
+          project: tau-ui
+          environment: ${{ inputs.environment }}
+          auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          cli: scripts/node_modules/.bin/sentry-cli
+
       - name: Check the site answers
         if: steps.superseded.outputs.superseded != 'true'
         env:

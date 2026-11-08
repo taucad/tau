@@ -30,7 +30,11 @@ type Counted = Readonly<{
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
-const fixture = async (files: Readonly<Record<string, string>>, completeChanges: boolean): Promise<Counted> => {
+const fixture = async (
+  files: Readonly<Record<string, string>>,
+  completeChanges: boolean,
+  adapt: (port: RevisionPort) => RevisionPort = (port) => port,
+): Promise<Counted> => {
   const filesystem = await createMemoryProvider();
   for (const [path, content] of Object.entries(files)) {
     // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
@@ -57,7 +61,7 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   });
   const inner = createIsomorphicGitRevisionPort({ filesystem });
   const port: RevisionPort = {
-    ...inner,
+    ...adapt(inner),
     readTree: async (id, options) => {
       treeReads.push(String(id));
       treePaths.push(options?.paths);
@@ -333,5 +337,42 @@ describe('the restore plan (E5)', () => {
     expect(await counted.filesystem.readFile('dir0/f0.txt', 'utf8')).toBe('file 0\n');
     expect(await counted.filesystem.exists('added.txt')).toBe(false);
     expect(await counted.filesystem.readFile('dir9/f19.txt', 'utf8')).toBe('file 19\n');
+  });
+});
+
+/*
+ * A complete feed names the files that changed, and an ignore source that is
+ * not a file in the checkout (the store's `info/exclude`, its
+ * `core.ignoreCase`, or a bare port's listing) names none: a cut from the
+ * feed after one changed walks, so what it no longer ignores is taken.
+ */
+describe('a complete feed after an ignore source outside the checkout changed', () => {
+  it("should walk, and take a file the store's info/exclude no longer ignores", async () => {
+    const at = await fixture({ 'main.ts': 'export {};\n', 'secret.txt': 'kept out\n' }, true);
+    await at.filesystem.writeFile('.git/info/exclude', 'secret.txt\n');
+    const first = await cut(at.actors);
+    await mint(at);
+    await at.filesystem.writeFile('.git/info/exclude', '');
+
+    const taken = await cut(at.actors, []);
+
+    expect(taken.treeId).not.toBe(first.treeId);
+    expect(taken.treeId).toBe(await walkTreeId(at.actors));
+  });
+
+  it('should walk, and take a file a bare port no longer lists as ignored', async () => {
+    let ignored: readonly string[] = ['secret.txt'];
+    const at = await fixture({ 'main.ts': 'export {};\n', 'secret.txt': 'kept out\n' }, true, (port) => {
+      const { ignoreContext: _context, ...bare } = port;
+      return { ...bare, ignoredPaths: async () => ignored };
+    });
+    const first = await cut(at.actors);
+    await mint(at);
+    ignored = [];
+
+    const taken = await cut(at.actors, []);
+
+    expect(taken.treeId).not.toBe(first.treeId);
+    expect(taken.treeId).toBe(await walkTreeId(at.actors));
   });
 });

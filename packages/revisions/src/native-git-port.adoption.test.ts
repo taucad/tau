@@ -113,13 +113,17 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     expect(ignored?.toSorted()).toStrictEqual(['.env', 'dist/']);
   });
 
-  it('should answer no ignored paths for a store Tau created', async () => {
+  it("should answer a store Tau created with what its own ignore rules exclude, the person's lines included", async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-created-'));
     roots.push(root);
     const port = createNativeGitRevisionPort({ repositoryPath: root });
     await port.init({ author });
+    const ignore = await readFile(join(root, generatedIgnorePath), 'utf8');
+    await writeFile(join(root, generatedIgnorePath), `${ignore}*.secret\n`);
+    await writeFile(join(root, 'key.secret'), 'x\n');
+    await writeFile(join(root, 'notes.txt'), 'mine\n');
 
-    expect(await port.ignoredPaths?.()).toBeUndefined();
+    expect(await port.ignoredPaths?.()).toStrictEqual(['key.secret']);
     const descriptor = await port.describe();
     expect(descriptor.largeObjects).toBe(true);
     expect(descriptor).not.toHaveProperty('largeObjectRule');
@@ -407,7 +411,7 @@ describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no rep
     const second = await sessionOf(root);
 
     expect(first).toStrictEqual(second);
-    expect(first.ignored).toBeUndefined();
+    expect(first.ignored).toStrictEqual([]);
     expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
   });
 

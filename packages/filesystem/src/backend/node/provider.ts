@@ -99,6 +99,8 @@ type StagedWrite = {
   readonly permissions: number | undefined;
   data?: Uint8Array<ArrayBuffer>;
   streamed?: Readonly<{ size: number; sha256: string }>;
+  /** A clone of a stored large object, hashed through its own handle before the rename: the published entry is checked by identity alone. */
+  cloned?: boolean;
   retainedHandle?: FileHandle;
   written?: BigIntStats;
   /** Set once the rename is attempted: a rename that throws may still have published (rename-then-throw). */
@@ -1519,7 +1521,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           outcome: 'applied',
           kind: 'file',
           ...(write.entry.create === true ? { created: true } : {}),
-          /* Verified by the one hashed read-back of what landed (I2). */
+          /* Verified by the one hash of the sibling before its rename (I2). */
           ...(isLargeObjectSource(write.entry.data)
             ? { largeObject: { largeObject: write.entry.data.largeObject, size: write.entry.data.size } }
             : {}),
@@ -1631,9 +1633,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * Fill the temp sibling from the repository's large-object store (EQ13):
    * `copyFile` with `COPYFILE_FICLONE`, so the file shares the object's extents
    * where the file system can clone (APFS, btrfs, XFS) and is copied where it
-   * cannot, then the sibling's mode and one fsync. The store is the
-   * authority's, resolved here by the object's id: no `.git` path is ever
-   * named by the caller (I6). Verification hashes what landed (I2).
+   * cannot, then the sibling's mode, one fsync, and one hash through the
+   * sibling's own handle before anything is renamed (I2): a corrupt object
+   * fails the write as a refusal, its sibling removed and the target as it
+   * was. The store is the authority's, resolved here by the object's id: no
+   * `.git` path is ever named by the caller (I6).
    *
    * @param staged - The prepared write.
    * @param source - The object's id and size.
@@ -1655,23 +1659,49 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (!stored.isFile() || stored.size !== source.size) {
       throw this._errno('EINVAL', 'the stored large object is not the size its pointer names', staged.rootedPath);
     }
+    /* A copy takes the object's mode, which Git LFS stores read-only: the file
+     * takes its own, or the mode a new file gets under the process's umask,
+     * read from the sibling's own name created as `_fillTemporary` creates a
+     * file (Node offers no race-free way to read the umask itself). */
+    const permissions = staged.permissions ?? (await this._newFileMode(staged.temporaryPath));
     /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
     // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
     await fs.copyFile(object, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    /* Before it is opened for writing: a read-only copy could not be. */
+    await fs.chmod(staged.temporaryPath, permissions);
     const handle = await fs.open(staged.temporaryPath, 'r+');
     if (process.platform === 'win32') {
       staged.retainedHandle = handle;
     }
     try {
-      /* A copy takes the object's mode; the file takes its own, or a new file's default. */
-      await handle.chmod(staged.permissions ?? 0o644);
       await handle.sync();
+      if (!(await publishedDigestEquals(handle, { size: source.size, sha256: source.largeObject }))) {
+        throw this._errno('EINVAL', 'the stored large object does not hash to its id', staged.rootedPath);
+      }
     } finally {
       if (staged.retainedHandle === undefined) {
         await handle.close();
       }
     }
-    staged.streamed = { size: source.size, sha256: source.largeObject };
+    staged.cloned = true;
+  }
+
+  /**
+   * The permission bits a new file gets here: created exclusively at `name`
+   * with `0o666`, so the kernel applies the umask, read back, and removed.
+   *
+   * @param name - A name this write owns and nothing else uses yet.
+   * @returns The new file's permission bits.
+   */
+  private async _newFileMode(name: string): Promise<number> {
+    const probe = await fs.open(name, 'wx', 0o666);
+    try {
+      const { mode } = await probe.stat();
+      return mode % 0o1000;
+    } finally {
+      await probe.close();
+      await fs.unlink(name);
+    }
   }
 
   /**
@@ -1731,6 +1761,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    */
   private async _verifyPublished(staged: StagedWrite): Promise<void> {
     const { rootedPath, admittedTarget, data, streamed, written } = staged;
+    if (staged.cloned === true) {
+      /* Its bytes were hashed through the sibling's handle before the rename,
+       * and `written` is the sibling's lstat identity taken just before it: the
+       * rename keeps the inode, so the entry it published is that file, and a
+       * later writer's entry says nothing about this one. Nothing is read again. */
+      if (written === undefined) {
+        throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
+      }
+      return;
+    }
     const verification = await fs.open(admittedTarget, verificationReadFlags);
     try {
       const verified =

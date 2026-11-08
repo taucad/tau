@@ -3,7 +3,8 @@
  *
  * The provider resolves the id against the store its authority gave the root,
  * clones (or copies) the object into the write's temp sibling, syncs and
- * renames it, and answers the id it verified by one hashed read-back. A root
+ * hashes the sibling through its own handle before renaming it, and answers
+ * the id it verified. A root
  * with no store, an object the store lacks, or one of the wrong size is
  * refused before anything is written.
  */
@@ -103,17 +104,52 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     expect(await fs.readdir(root)).toStrictEqual([]);
   });
 
-  it('should fail verification when the stored bytes are not the object their name says', async () => {
+  it('should refuse a stored object that does not hash to its id before the rename, leaving the file as it was', async () => {
     const { root, store } = await arrange();
     await fs.writeFile(join(store, oid.slice(0, 2), oid.slice(2, 4), oid), new Uint8Array(content.byteLength));
+    await fs.writeFile(join(root, 'x.bin'), 'the pointer the checkout holds\n');
     const provider = new NodeFsProvider(root, { largeObjectStore: store });
 
     const [receipt] = await provider.applyBatch([
       { op: 'write', path: 'x.bin', data: { largeObject: oid, size: content.byteLength } },
     ]);
 
-    expect(receipt?.outcome).not.toBe('applied');
+    expect(receipt).toMatchObject({ outcome: 'failed', error: { code: 'EINVAL' } });
     expect(receipt?.largeObject).toBeUndefined();
+    expect(await fs.readFile(join(root, 'x.bin'), 'utf8')).toBe('the pointer the checkout holds\n');
+    expect(await fs.readdir(root)).toStrictEqual(['x.bin']);
+  });
+
+  it("should give a new file the umask's default mode, never the stored object's", async () => {
+    const { root, store } = await arrange();
+    await fs.chmod(join(store, oid.slice(0, 2), oid.slice(2, 4), oid), 0o444);
+    const provider = new NodeFsProvider(root, { largeObjectStore: store });
+    const previous = process.umask(0o077);
+    let receipts: Awaited<ReturnType<typeof provider.applyBatch>>;
+    try {
+      receipts = await provider.applyBatch([
+        { op: 'write', path: 'private.bin', data: { largeObject: oid, size: content.byteLength }, create: true },
+      ]);
+    } finally {
+      process.umask(previous);
+    }
+    const [defaulted] = await provider.applyBatch([
+      { op: 'write', path: 'shared.bin', data: { largeObject: oid, size: content.byteLength }, create: true },
+    ]);
+
+    expect(receipts[0]?.outcome).toBe('applied');
+    expect(defaulted?.outcome).toBe('applied');
+    const [privateStats, sharedStats, storedStats] = await Promise.all([
+      fs.stat(join(root, 'private.bin')),
+      fs.stat(join(root, 'shared.bin')),
+      fs.stat(join(store, oid.slice(0, 2), oid.slice(2, 4), oid)),
+    ]);
+    expect(privateStats.mode % 0o1000).toBe(0o600);
+    // oxlint-disable-next-line eslint/no-bitwise -- a mode is a bit set.
+    expect(sharedStats.mode % 0o1000).toBe(0o666 & ~previous);
+    expect(new Uint8Array(await fs.readFile(join(root, 'shared.bin')))).toStrictEqual(content);
+    /* Git LFS stores objects read-only; the store's copy is never made writable. */
+    expect(storedStats.mode % 0o1000).toBe(0o444);
   });
 
   it('should be refused before any I/O by a provider without the capability', async () => {

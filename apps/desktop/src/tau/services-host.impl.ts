@@ -432,6 +432,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
   const trustedRoots = new Set<string>();
   const candidateRoots = new Map<string, number>();
+  /**
+   * The large-object store each root lands objects from (W11.3): a project's
+   * live root its own repository's, and an admitted checkout the store its
+   * admission named, while admitted. Resolved here, by root, never from the
+   * wire: a write names an object, not a path (I6).
+   */
+  const largeObjectStores = new Map<string, string>();
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One `projectHost` actor per workspace root (W6 RH-S5), outliving every
@@ -582,7 +589,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ? undefined
       : /* The reserved layout every provider this host opens enforces, so a
          * symlink inside a checkout cannot resolve onto the control plane (G0-6). */
-        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy }).close;
+        serve(toNodeFsPort(internalPorts.port1), {
+          allowRoot: isInternalRoot,
+          authority,
+          policy: tauPathPolicy,
+          largeObjectStore: (root) => largeObjectStores.get(resolve(root)),
+        }).close;
   const internalChannel =
     internalPorts === undefined ? undefined : new NodeFsChannel(toNodeFsPort(internalPorts.port2));
 
@@ -593,7 +605,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         code: 'EACCES',
       });
     }
-    return new NodeFsProviderClient(internalChannel, canonicalRoot);
+    return new NodeFsProviderClient(internalChannel, canonicalRoot, {
+      largeObjectSources: largeObjectStores.has(canonicalRoot),
+    });
   };
 
   /**
@@ -933,10 +947,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    */
   const admitCheckout =
     (projectRoot: string) =>
-    (root: string): (() => void) => {
+    (root: string, admission?: Readonly<{ largeObjectStore?: string }>): (() => void) => {
       const key = resolve(root);
       const held = candidateRoots.get(key) ?? 0;
       candidateRoots.set(key, held + 1);
+      if (admission?.largeObjectStore !== undefined && key !== resolve(projectRoot)) {
+        largeObjectStores.set(key, admission.largeObjectStore);
+      }
       if (held === 0) {
         runtimeContext?.('register', root, projectRoot);
       }
@@ -952,6 +969,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           return;
         }
         candidateRoots.delete(key);
+        if (key !== resolve(projectRoot)) {
+          largeObjectStores.delete(key);
+        }
         runtimeContext?.('release', root, projectRoot);
         closeRuntimeClients(async () => runtimeClients.close(root));
       };
@@ -970,6 +990,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (config === undefined || internalChannel === undefined || authority === undefined) {
       throw new Error('The desktop agent host has no configuration or filesystem authority.');
     }
+    /* The live root lands objects from its own repository's store, which the native port fills (W11.3). */
+    largeObjectStores.set(resolve(workspaceRoot), join(workspaceRoot, '.git', 'lfs', 'objects'));
     return {
       workspaceRoot,
       /* The renderer's project id is the project's `tau.json` id: every slice
@@ -1159,6 +1181,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const retire = (): void => {
       if (projectHosts.get(workspaceRoot) === actor) {
         projectHosts.delete(workspaceRoot);
+        largeObjectStores.delete(resolve(workspaceRoot));
         shell?.release(workspaceRoot);
       }
       retiredProjectHosts.add(actor);

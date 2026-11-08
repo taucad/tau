@@ -12,6 +12,8 @@ import { applyChangesetToProvider, maximumChangesetEntries, splitChangeset, work
 import { walk } from '@taucad/filesystem/content-ops';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
+import { lfsPointerFor, readLfsPointer } from '#lfs.js';
+import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
 import { largeObjectPlaceholders } from '#large-object-fill.js';
 import { entryClosurePaths } from '#open/entry-closure.js';
@@ -93,6 +95,14 @@ type MaterializeTreeOptions<Result> = Readonly<{
   publish?: () => Promise<Result>;
   /** What the host's `onApplyingTree` bracket is told this write is; `apply` unless the caller says otherwise. */
   purpose?: ApplyingTreePurpose;
+  /**
+   * Paths whose target entry is a pointer to land as its stored object
+   * (W11.3): each is written as a large-object source, `{ largeObject, size }`,
+   * which a checkout that declares `largeObjectSources` materialises from its
+   * own store, and verified by the receipt's hashed read-back rather than by
+   * comparing bytes. A checkout without the capability refuses the write.
+   */
+  largeObjects?: ReadonlyMap<string, LfsPointer>;
 }>;
 
 /**
@@ -105,6 +115,50 @@ type MaterializeTreeOptions<Result> = Readonly<{
 export type MaterializeTarget =
   | ImmutableRevisionTree
   | ((before: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>);
+
+/**
+ * The sourced paths of one write, checked against the tree and the checkout.
+ *
+ * A path is sourced only where the target holds that object's pointer, so a
+ * stale map can never land an object over different content. A checkout that
+ * does not declare `largeObjectSources` cannot take one at all.
+ *
+ * @param live - The checkout's tree.
+ * @param targetFiles - The target's entries by path.
+ * @param objects - The caller's side map, if any.
+ * @returns The objects to land by path.
+ */
+const sourcedLargeObjects = (
+  live: RevisionFileSystem,
+  targetFiles: ReadonlyMap<string, RevisionTreeEntry>,
+  objects: ReadonlyMap<string, LfsPointer> | undefined,
+): ReadonlyMap<string, LfsPointer> => {
+  if (objects === undefined || objects.size === 0) {
+    return new Map();
+  }
+  if (live.capabilities.largeObjectSources !== true) {
+    throw new RevisionPortError('ENGINE_FAILED', 'This checkout cannot land a large object from its store.');
+  }
+  return new Map(
+    [...objects].filter(([path, object]) => {
+      const pointer = readLfsPointer(targetFiles.get(path)?.content ?? new Uint8Array());
+      return pointer?.oid === object.oid && pointer.size === object.size;
+    }),
+  );
+};
+
+/**
+ * Whether a checkout file already holds one object's bytes: its size first,
+ * so only a file of the right length is hashed.
+ *
+ * @param content - The file's bytes.
+ * @param object - The object it should hold.
+ * @returns Whether the file is that object.
+ */
+const holdsObject = (content: Uint8Array<ArrayBuffer>, object: LfsPointer): boolean =>
+  content.byteLength === object.size &&
+  readLfsPointer(content) === undefined &&
+  lfsPointerFor(content).pointer.oid === object.oid;
 
 /**
  * Build the apply/recover/materialize trio over one project's checkout seams.
@@ -370,6 +424,7 @@ export const createApplyTreeEffects = (
       purpose?: ApplyingTreePurpose;
       /* Where a failed write leaves its bracket's release, for the caller to tell once it knows the checkout's state. */
       held?: HeldRelease;
+      largeObjects?: ReadonlyMap<string, LfsPointer>;
     }>,
   ): Promise<readonly string[]> =>
     useFileSystem(place, async (live) => {
@@ -378,13 +433,38 @@ export const createApplyTreeEffects = (
       assertMaterializableRevisionTree(target, policy);
       const liveFiles = new Map(from.entries().map((entry) => [entry.path, entry]));
       const targetFiles = new Map(target.entries().map((entry) => [entry.path, entry]));
+      const sourced = sourcedLargeObjects(live, targetFiles, applyOptions.largeObjects);
       const removedPaths = [...liveFiles.keys()]
         .filter((path) => !targetFiles.has(path))
         .sort((left, right) => right.length - left.length || right.localeCompare(left));
       const changedFiles = [...targetFiles].filter(([path, entry]) => {
         const current = liveFiles.get(path);
+        const object = sourced.get(path);
+        if (object !== undefined) {
+          return current === undefined || current.mode !== entry.mode || !holdsObject(current.content, object);
+        }
         return current === undefined || !equalBytes(current.content, entry.content) || current.mode !== entry.mode;
       });
+      /* What each write carries: a sourced path its object by id, any other its bytes. */
+      const dataOf = (path: string, entry: RevisionTreeEntry): Extract<ChangesetEntry, { op: 'write' }>['data'] => {
+        const object = sourced.get(path);
+        return object === undefined ? entry.content : { largeObject: object.oid, size: object.size };
+      };
+      /* Sourced paths whose receipt names the object they were written from, after its hashed read-back. */
+      const landedObjects = new Set<string>();
+      const noteLanded = (receipts: readonly ChangesetEntryReceipt[], paths: readonly string[]): void => {
+        for (const [index, receipt] of receipts.entries()) {
+          const path = paths[index];
+          const object = path === undefined ? undefined : sourced.get(path);
+          if (
+            object !== undefined &&
+            receipt.outcome === 'applied' &&
+            receipt.largeObject?.largeObject === object.oid
+          ) {
+            landedObjects.add(path!);
+          }
+        }
+      };
       /*
        * D10: a write that holds the tree lands the entry closure first, and the
        * checkout's index knows every entry of the tree before any lands, each
@@ -411,7 +491,7 @@ export const createApplyTreeEffects = (
                 const pending = placeholders.get(path);
                 return {
                   path,
-                  size: content.byteLength,
+                  size: sourced.get(path)?.size ?? content.byteLength,
                   ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
                   arriving: arriving.has(path),
                 };
@@ -460,22 +540,27 @@ export const createApplyTreeEffects = (
            * the next open removes a file a killed apply left short, so the path
            * reads absent and is written again (I1). */
           const created = files.filter(([path]) => !liveFiles.has(path));
-          raiseRefusal(
-            await applyChangesets(
-              live,
-              splitChangeset(
-                created.map(
-                  ([path, entry]): ChangesetEntry => ({
-                    op: 'write',
-                    path,
-                    data: entry.content,
-                    mode: entry.mode,
-                    create: true,
-                  }),
-                ),
+          const createdReceipts = await applyChangesets(
+            live,
+            splitChangeset(
+              created.map(
+                ([path, entry]): ChangesetEntry => ({
+                  op: 'write',
+                  path,
+                  data: dataOf(path, entry),
+                  mode: entry.mode,
+                  create: true,
+                }),
               ),
-              signal,
             ),
+            signal,
+          );
+          noteLanded(
+            createdReceipts,
+            created.map(([path]) => path),
+          );
+          raiseRefusal(
+            createdReceipts,
             created.map(([path]) => path),
           );
 
@@ -499,16 +584,20 @@ export const createApplyTreeEffects = (
               live,
               splitChangeset(
                 replaced.map(
-                  ({ staged: stagedPath, entry }): ChangesetEntry => ({
+                  ({ path, staged: stagedPath, entry }): ChangesetEntry => ({
                     op: 'write',
                     path: stagedPath,
-                    data: entry.content,
+                    data: dataOf(path, entry),
                     mode: entry.mode,
                     create: true,
                   }),
                 ),
               ),
               signal,
+            );
+            noteLanded(
+              stagedReceipts,
+              replaced.map(({ path }) => path),
             );
             for (const [index, { staged: stagedPath }] of replaced.entries()) {
               if (stagedReceipts[index]?.outcome !== 'failed') {
@@ -596,6 +685,17 @@ export const createApplyTreeEffects = (
           ...writtenPaths.filter((path) => {
             const applied = verified.get(path);
             const wanted = targetFiles.get(path);
+            const object = sourced.get(path);
+            if (object !== undefined) {
+              /* The provider hashed what it landed; the re-read proves it is still there, at its size. */
+              return (
+                applied === undefined ||
+                wanted === undefined ||
+                !landedObjects.has(path) ||
+                applied.content.byteLength !== object.size ||
+                applied.mode !== wanted.mode
+              );
+            }
             return (
               applied === undefined ||
               wanted === undefined ||
@@ -685,6 +785,7 @@ export const createApplyTreeEffects = (
           from: before,
           ...(materialization.signal === undefined ? {} : { signal: materialization.signal }),
           ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
+          ...(materialization.largeObjects === undefined ? {} : { largeObjects: materialization.largeObjects }),
           held,
         });
         materialization.signal?.throwIfAborted();

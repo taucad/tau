@@ -9,7 +9,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { isAbsolute, relative } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 
 import { followChat, unsettledAttempts } from '@taucad/agent-host';
 import type { ChatLedger, OwnRowsRead, ToolRegistry, TurnAttemptKey, TurnPlacementPort } from '@taucad/agent-host';
@@ -68,8 +68,10 @@ export type ProjectFileSystem = Readonly<{
   /**
    * Admit a candidate or linked checkout's root until the returned release runs. Admissions of one root nest; the
    * caller releases whatever it keeps for the root (its runtime client, its runtime grant) when the last one ends.
+   * `largeObjectStore` is the repository store the root lands large objects from while admitted (W11.3); the
+   * authority resolves it by root, so no write names a path under `.git/` (I6).
    */
-  admit: (root: string) => () => void;
+  admit: (root: string, options?: Readonly<{ largeObjectStore?: string }>) => () => void;
   /** Run one checkout mutation under the authority's claim. */
   mutate: NonNullable<ProjectRevisionsOptions['checkoutMutation']>;
 }>;
@@ -415,7 +417,10 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       if (checkout.kind === 'live') {
         return operation(fileSystem.open(workspaceRoot));
       }
-      const release = fileSystem.admit(checkout.root);
+      /* A linked checkout shares the repository's store: the native port fills it, the checkout clones from it. */
+      const release = fileSystem.admit(checkout.root, {
+        largeObjectStore: join(workspaceRoot, '.git', 'lfs', 'objects'),
+      });
       try {
         return await operation(fileSystem.open(checkout.root));
       } finally {

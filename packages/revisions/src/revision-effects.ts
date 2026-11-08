@@ -1766,6 +1766,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     capture: async (place) => capture(place),
     withCheckoutFence,
     materializeTree,
+    /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
+    landsFromStore: async (place) =>
+      useFileSystem(place, async (rooted) => rooted.capabilities.largeObjectSources === true),
     report: options.onLargeObjects,
   });
   /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */

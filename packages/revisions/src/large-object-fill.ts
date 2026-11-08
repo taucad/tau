@@ -37,6 +37,12 @@ type Fill = {
   /** Arrived bytes, by oid: kept until the fill ends, so a placeholder copied or moved later is still filled. */
   readonly landed: Map<string, Uint8Array<ArrayBuffer>>;
   readonly arrived: Set<string>;
+  /**
+   * Whether this checkout lands an object from the host's store (W11.3): the
+   * head is read with `largeObjects: 'stored'`, an arrival is its oid alone,
+   * and a flush writes `{ largeObject, size }` for the checkout to clone.
+   */
+  fromStore: boolean;
   /** Objects an opened path names: fetched before the rest and written as soon as they land (D10). */
   readonly promoted: Set<string>;
   /** Woken on every arrival, flush, report and end, so a read or `materialize` waiting on this fill re-checks (D9). */
@@ -111,8 +117,14 @@ export const createLargeObjectFill = (
     materializeTree: (
       place: Checkout,
       target: ImmutableRevisionTree,
-      materialization: Readonly<{ before: ImmutableRevisionTree; purpose: 'fill' }>,
+      materialization: Readonly<{
+        before: ImmutableRevisionTree;
+        purpose: 'fill';
+        largeObjects?: ReadonlyMap<string, Readonly<{ oid: string; size: number }>>;
+      }>,
     ) => Promise<unknown>;
+    /** Whether a checkout lands large objects from the host's store (`largeObjectSources`, W11.3). */
+    landsFromStore?: (place: Checkout) => Promise<boolean>;
     report?: ((report: LargeObjectsReport) => void) | undefined;
     flushMilliseconds?: number;
     reportMilliseconds?: number;
@@ -134,7 +146,7 @@ export const createLargeObjectFill = (
   /** Move these paths to the front of the checkout's running fill (D10); nothing when none runs. */
   prioritize: (checkoutId: string, paths: readonly string[]) => void;
 }> => {
-  const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
+  const { port, capture, withCheckoutFence, materializeTree, report, landsFromStore } = dependencies;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
@@ -286,7 +298,8 @@ export const createLargeObjectFill = (
   const unflushedOf = (fill: Fill): number => {
     let total = 0;
     for (const oid of new Set([...fill.pending.values()].map((placeholder) => placeholder.oid))) {
-      total += fill.landed.get(oid)?.byteLength ?? 0;
+      total +=
+        fill.landed.get(oid)?.byteLength ?? (fill.fromStore && fill.arrived.has(oid) ? fill.wanted.get(oid)! : 0);
     }
     return total;
   };
@@ -297,6 +310,8 @@ export const createLargeObjectFill = (
     const gone: string[] = [];
     let written = 0;
     let more = false;
+    /* Paths a store-landing flush writes from the store, by the object they name. */
+    const sourced = new Map<string, Readonly<{ oid: string; size: number }>>();
     const entries: RevisionTreeInput[] = before.entries().map(({ path, content, mode }) => {
       const known = fill.pending.get(path);
       const placeholder = placeholderAt(fill, known, content);
@@ -307,19 +322,26 @@ export const createLargeObjectFill = (
         return [path, content, mode];
       }
       const bytes = fill.landed.get(placeholder.oid);
-      if (bytes === undefined) {
+      const fromStore = fill.fromStore && fill.arrived.has(placeholder.oid);
+      if (bytes === undefined && !fromStore) {
         fill.pending.set(path, placeholder);
         return [path, content, mode];
       }
+      const size = bytes?.byteLength ?? placeholder.size;
       /* A promoted object is never left for a later batch: someone has its file open. */
-      if (filled.length > 0 && written + bytes.byteLength > flushBytes && !fill.promoted.has(placeholder.oid)) {
+      if (filled.length > 0 && written + size > flushBytes && !fill.promoted.has(placeholder.oid)) {
         fill.pending.set(path, placeholder);
         more = true;
         return [path, content, mode];
       }
       filled.push(path);
-      written += bytes.byteLength;
-      return [path, bytes, mode];
+      written += size;
+      if (fromStore) {
+        /* The pointer stays the entry; the checkout clones the stored object in its place. */
+        sourced.set(path, { oid: placeholder.oid, size: placeholder.size });
+        return [path, placeholder.pointer, mode];
+      }
+      return [path, bytes!, mode];
     });
     for (const path of fill.pending.keys()) {
       if (!before.has(path)) {
@@ -327,7 +349,11 @@ export const createLargeObjectFill = (
       }
     }
     if (filled.length > 0) {
-      await materializeTree(fill.place, new ImmutableRevisionTree(entries), { before, purpose: 'fill' });
+      await materializeTree(fill.place, new ImmutableRevisionTree(entries), {
+        before,
+        purpose: 'fill',
+        ...(sourced.size === 0 ? {} : { largeObjects: sourced }),
+      });
     }
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
@@ -458,8 +484,30 @@ export const createLargeObjectFill = (
     wake(fill);
   };
 
+  /* An object the host's store now holds whole: arrived by its oid, its bytes never in hand (W11.3). */
+  const arriveStored = (fill: Fill, oid: string): void => {
+    const size = fill.wanted.get(oid);
+    if (size === undefined || fill.arrived.has(oid)) {
+      return;
+    }
+    fill.arrived.add(oid);
+    fill.bytes += size;
+    fill.unflushedBytes += size;
+    wake(fill);
+  };
+
   /* The head's objects this fill still wants, found by what they hash to: a path's content is never trusted to be its old pointer's object. */
   const arriveFromTree = (fill: Fill, tree: ImmutableRevisionTree | undefined): void => {
+    if (fill.fromStore) {
+      /* Read with `stored`: a pointer in the answer names an object the store holds whole, at its size. */
+      for (const { content } of tree?.entries() ?? []) {
+        const pointer = readLfsPointer(content);
+        const wantedSize = pointer === undefined ? undefined : fill.wanted.get(pointer.oid);
+        if (pointer !== undefined && wantedSize === pointer.size) {
+          arriveStored(fill, pointer.oid);
+        }
+      }
+    }
     const sizes = new Set([...fill.wanted].flatMap(([oid, size]) => (fill.arrived.has(oid) ? [] : [size])));
     for (const { content } of tree?.entries() ?? []) {
       if (sizes.has(content.byteLength) && readLfsPointer(content) === undefined) {
@@ -492,7 +540,8 @@ export const createLargeObjectFill = (
       },
     };
     try {
-      const full = await port.readTree(fill.head, transfer);
+      fill.fromStore = (await landsFromStore?.(fill.place)) === true;
+      const full = await port.readTree(fill.head, fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer);
       if (!isCurrent(fill)) {
         return;
       }
@@ -567,6 +616,7 @@ export const createLargeObjectFill = (
       wanted,
       landed: new Map(),
       arrived: new Set(),
+      fromStore: false,
       /* A refill keeps what open files asked for. */
       promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
       waiters: new Set(),

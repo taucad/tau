@@ -12,12 +12,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { processTable } from '#shell/process-tree.js';
 import {
   abandonStartBarrier,
+  createLaunchAnnouncement,
   createTerminalStartGate,
   openStartBarrier,
   stagedTerminalStartArguments,
   stagedStartArguments,
   startBarrierRefusedCode,
 } from '#shell/shell-start-barrier.js';
+import type { LaunchAnnouncement } from '#shell/shell-start-barrier.js';
 
 /*
  * ShellCustody SpawnBlocked/Start projection: a staged child exists (so its identity can be registered) but cannot
@@ -302,5 +304,139 @@ describe.runIf(posix && pty !== undefined)('terminal start barrier', () => {
     const table = await processTable();
     expect(table.some((row) => row.pid === staged && !row.zombie)).toBe(false);
     expect(existsSync(sentinel)).toBe(false);
+  });
+});
+
+/*
+ * The Linux launch announcement: the command inside the sandbox prints an unpredictable marker, then executes the
+ * workload. Only a stream that reaches end of file without the marker proves the workload never ran; workload output
+ * always follows the marker, so it can never make a launch look unstarted.
+ */
+const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+const concat = (chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(chunks.flatMap((chunk) => [...chunk]));
+
+/** Run a command as the in-sandbox shell would, and collect what it printed on each stream. */
+const runShell = async (
+  command: string,
+): Promise<Readonly<{ stdout: Uint8Array<ArrayBuffer>; stderr: Uint8Array<ArrayBuffer> }>> => {
+  const child = spawn('/bin/sh', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(child);
+  const stdout: Array<Uint8Array<ArrayBuffer>> = [];
+  const stderr: Array<Uint8Array<ArrayBuffer>> = [];
+  child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => stdout.push(new Uint8Array(chunk)));
+  child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(new Uint8Array(chunk)));
+  await once(child, 'close', { signal: AbortSignal.timeout(5000) });
+  return { stdout: concat(stdout), stderr: concat(stderr) };
+};
+
+/** The exact bytes an announcement's command prints. */
+const markerOf = async (announcement: LaunchAnnouncement): Promise<Uint8Array<ArrayBuffer>> => {
+  const { stdout, stderr } = await runShell(announcement.command);
+  return concat([stdout, stderr]);
+};
+
+const passAll = (announcement: LaunchAnnouncement, chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>): string => {
+  const decoder = new TextDecoder();
+  let passed = '';
+  for (const chunk of chunks) {
+    const out = announcement.pass(chunk);
+    if (out !== undefined) {
+      passed += decoder.decode(out, { stream: true });
+    }
+  }
+  return passed + decoder.decode();
+};
+
+describe.runIf(posix)('launch announcement', () => {
+  it('should strip setup output and the marker even when every byte arrives in its own chunk', async () => {
+    const announcement = createLaunchAnnouncement(2);
+    const marker = await markerOf(announcement);
+    const stream = new Uint8Array([...bytes('setup noise '), ...marker, ...bytes('workload')]);
+
+    const passed = passAll(
+      announcement,
+      [...stream].map((byte) => new Uint8Array([byte])),
+    );
+
+    expect(passed).toBe('workload');
+    await expect(announcement.answer).resolves.toBe('started');
+  });
+
+  it('should print its marker on the descriptor it names, from a command that never contains the marker', async () => {
+    const announcement = createLaunchAnnouncement(2);
+    const { stdout, stderr } = await runShell(`${announcement.command} && echo after`);
+
+    expect(announcement.command).not.toContain('\u001B');
+    expect(new TextDecoder().decode(stdout)).toBe('after\n');
+    expect(stderr.length).toBeGreaterThan(0);
+    expect(passAll(announcement, [stderr])).toBe('');
+    await expect(announcement.answer).resolves.toBe('started');
+  });
+
+  it('should answer not-started with what the sandbox printed when the stream ends before the marker', async () => {
+    const announcement = createLaunchAnnouncement(2);
+    const marker = await markerOf(announcement);
+    // Everything but the marker's last byte: a truncated marker is no marker.
+    const passed = passAll(announcement, [
+      bytes("bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory\n"),
+      marker.slice(0, -1),
+    ]);
+    announcement.end(true);
+
+    expect(passed).toBe('');
+    await expect(announcement.answer).resolves.toBe('not-started');
+    expect(announcement.preamble()).toContain(
+      "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory",
+    );
+  });
+
+  it('should keep only the last of a long setup preamble', async () => {
+    const announcement = createLaunchAnnouncement(2);
+    passAll(announcement, [bytes('x'.repeat(10_000)), bytes('the actual reason')]);
+    announcement.end(true);
+
+    await expect(announcement.answer).resolves.toBe('not-started');
+    expect(announcement.preamble().length).toBeLessThanOrEqual(2048);
+    expect(announcement.preamble().endsWith('the actual reason')).toBe(true);
+  });
+
+  it('should prove nothing from a stream the host destroyed or stopped waiting for', async () => {
+    const destroyed = createLaunchAnnouncement(2);
+    destroyed.end(false);
+    const abandoned = createLaunchAnnouncement(1);
+    abandoned.abandon();
+    abandoned.end(true);
+
+    await expect(destroyed.answer).resolves.toBe('unknown');
+    await expect(abandoned.answer).resolves.toBe('unknown');
+  });
+
+  it('should never let workload output, a forged marker or a bwrap error among it, unmake a start', async () => {
+    const announcement = createLaunchAnnouncement(2);
+    const marker = await markerOf(announcement);
+    const forged = await markerOf(createLaunchAnnouncement(2));
+    const workload = [
+      bytes("bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory\n"),
+      forged,
+      marker,
+    ];
+
+    const passed = passAll(announcement, [marker, ...workload]);
+    announcement.end(true);
+
+    expect(passed).toBe(new TextDecoder().decode(concat(workload)));
+    await expect(announcement.answer).resolves.toBe('started');
+  });
+
+  it('should use a fresh marker for every launch', async () => {
+    const earlier = await markerOf(createLaunchAnnouncement(1));
+    const announcement = createLaunchAnnouncement(1);
+    const passed = passAll(announcement, [earlier]);
+    announcement.end(true);
+
+    expect(passed).toBe('');
+    await expect(announcement.answer).resolves.toBe('not-started');
   });
 });

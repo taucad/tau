@@ -51,6 +51,7 @@
     "@taucad/api-observability": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@taucad/utils": "workspace:*",
     "ai": "catalog:",
     "better-auth": "catalog:",

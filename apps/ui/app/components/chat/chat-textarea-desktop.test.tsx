@@ -84,7 +84,10 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
+const catalogHealth = vi.hoisted(() => ({
+  status: 'ready' as 'registering' | 'ready' | 'error' | 'closed',
+  retry: vi.fn(),
+}));
 vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
@@ -479,10 +482,52 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
     expect(box).toHaveClass('focus-outline');
-    await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveFocus();
+    /* Gate finding 2 (#1562): the handover outline leaves only once the editor holds focus, never a frame before. */
+    const focusWhenOutlineLeft: Element[] = [];
+    const observer = new MutationObserver(() => {
+      if (!box.classList.contains('focus-outline')) {
+        focusWhenOutlineLeft.push(document.activeElement ?? document.body);
+      }
     });
-    expect(box).not.toHaveClass('focus-outline');
+    observer.observe(box, { attributes: true, attributeFilter: ['class'] });
+    try {
+      await waitFor(() => {
+        expect(screen.getByRole('textbox')).toHaveFocus();
+        expect(box).not.toHaveClass('focus-outline');
+      });
+      expect(focusWhenOutlineLeft[0]).toBe(screen.getByRole('textbox'));
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it('should drop the handover outline when focus moves elsewhere first', async () => {
+    const other = document.createElement('button');
+    document.body.append(other);
+    try {
+      renderComposer('', codexSession, {
+        earlyInput: {
+          text: '',
+          edited: false,
+          focused: true,
+          focusUnclaimed: false,
+          start: 0,
+          end: 0,
+          direction: 'none',
+        },
+      });
+      const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+      expect(box).toHaveClass('focus-outline');
+      act(() => {
+        other.focus();
+      });
+      await waitFor(() => {
+        expect(box).not.toHaveClass('focus-outline');
+      });
+      expect(other).toHaveFocus();
+    } finally {
+      other.remove();
+    }
   });
 
   it('should not draw a focus outline when the native input was not focused', () => {
@@ -630,13 +675,41 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
   });
 
-  it('should show skill recovery in the functional composer after catalog closure', async () => {
-    catalogHealth.status = 'closed';
-    renderComposer('Keep this draft', codexSession, { useTauSkills: true });
-    expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
-    expect(catalogHealth.retry).toHaveBeenCalledOnce();
-    expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+  it.each(['closed', 'error'] as const)(
+    'should offer skill recovery inside the bar after the catalog %s',
+    async (status) => {
+      catalogHealth.status = status;
+      renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+      expect(screen.getByRole('status')).toHaveTextContent('Skill updates unavailable');
+      const retry = screen.getByRole('button', { name: 'Retry skill updates' });
+      // A control in the bar, not a row of its own: the composer keeps its height.
+      expect(retry.closest('[data-slot=composer-bar]')).not.toBeNull();
+      await userEvent.click(retry);
+      expect(catalogHealth.retry).toHaveBeenCalledOnce();
+      expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+    },
+  );
+
+  it('should show no skill recovery while the catalog has not started', () => {
+    catalogHealth.status = 'registering';
+    renderComposer('', codexSession, { useTauSkills: true });
+    expect(screen.queryByText('Skill updates unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry skill updates' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the same bar and editor when the catalog becomes ready', async () => {
+    catalogHealth.status = 'registering';
+    const view = renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+    const bar = view.container.querySelector('[data-slot=composer-bar]');
+    const editor = screen.getByRole('textbox');
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('Keep this draft');
+    });
+    catalogHealth.status = 'ready';
+    view.rerenderWith(codexSession);
+    expect(view.container.querySelector('[data-slot=composer-bar]')).toBe(bar);
+    expect(screen.getByRole('textbox')).toBe(editor);
+    expect(editor).toHaveTextContent('Keep this draft');
   });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {

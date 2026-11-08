@@ -558,7 +558,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
      * standing destinations live: `navSecondary` — and with it the `Files` row
      * this used to read — moved into the user dropdown in `be3d0eb6e`, and
      * `Project Library` has never been a committed label. */
-    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
+    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'All projects');
     const community = navButtons.find((button) => button.textContent.trim() === 'Community');
     if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
@@ -607,7 +607,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     expect(Math.abs(edges[0]! - headerControlMetrics.horizontalEdges[0]![0]!)).toBeLessThanOrEqual(0.5);
     expect(Math.abs(edges[1]! - headerControlMetrics.horizontalEdges[0]![1]!)).toBeLessThanOrEqual(0.5);
   }
-  await target.expectVisible(selectors.getByRole('link', { name: 'Projects', exact: true }));
+  await target.expectVisible(selectors.getByRole('link', { name: 'All projects', exact: true }));
 
   const paneHeaderHeightDelta = await target.evaluate(() => {
     const chatHeader = document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"]');

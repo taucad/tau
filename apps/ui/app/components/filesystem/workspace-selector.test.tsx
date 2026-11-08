@@ -137,6 +137,29 @@ describe('WorkspaceSelector', () => {
     globalThis.localStorage.clear();
   });
 
+  it('settles when two selectors show different locations', () => {
+    globalThis.localStorage.clear();
+    /* A connect lands in one composer's state before another's; each chip remembers what it shows once. */
+    const workshop = readyState({
+      value: { kind: 'workspace', workspaceId: 'wsp_workshop' },
+      selectedOption: {
+        location: { kind: 'workspace', workspaceId: 'wsp_workshop' },
+        status: 'connected',
+        label: 'Workshop',
+        detail: 'on your disk',
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkspaceSelector state={readyState()} variant='toolbar' />
+        <WorkspaceSelector state={workshop} variant='toolbar' />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'Create in Home' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create in Workshop' })).toBeInTheDocument();
+    globalThis.localStorage.clear();
+  });
+
   it('matches the composer’s ghost pill and explains the storage choice', async () => {
     const user = userEvent.setup();
     renderPicker(readyState());

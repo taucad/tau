@@ -1029,6 +1029,7 @@ pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 patchedDependencies:
   '@agentclientprotocol/codex-acp@1.7.0': 81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
+  '@aurigax-ai/ghostty-web@0.3.6': ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   react-router@7.18.2: 273b1007189eee3007a17799b583101a4fb303786d75f617016b232876c63166
@@ -2392,6 +2393,9 @@ importers:
       '@taucad/billing':
         specifier: workspace:*
         version: link:../billing
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../../libs/telemetry
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -2704,6 +2708,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../../libs/chat
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../../libs/telemetry
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -3305,7 +3312,7 @@ importers:
     dependencies:
       '@aurigax-ai/ghostty-web':
         specifier: 'catalog:'
-        version: 0.3.6
+        version: 0.3.6(patch_hash=ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84)
       '@base-ui/react':
         specifier: 'catalog:'
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -27196,7 +27203,7 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
 
-  '@aurigax-ai/ghostty-web@0.3.6': {}
+  '@aurigax-ai/ghostty-web@0.3.6(patch_hash=ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84)': {}
 
   '@aws-sdk/checksums@3.1001.3':
     dependencies:

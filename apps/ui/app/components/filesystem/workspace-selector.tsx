@@ -147,19 +147,17 @@ export function WorkspaceSelector({
 }: WorkspaceSelectorProperties): React.JSX.Element | undefined {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const [remembered, setRemembered] = useRememberedProjectLocation();
+  const [, setRemembered] = useRememberedProjectLocation();
   /* What the chip reads once the locations are known, remembered for the next load's first paint. */
   const shownKind = state.phase === 'ready' && state.shouldShowPicker ? state.value.kind : undefined;
   const shownLabel = state.phase === 'ready' && state.shouldShowPicker ? state.selectedOption.label : undefined;
+  /* Written when this chip's own reading changes, never in answer to the stored value: two selectors that read
+   * different locations (a connect lands in one first) would otherwise overwrite each other without end. */
   useEffect(() => {
-    if (
-      shownKind !== undefined &&
-      shownLabel !== undefined &&
-      (shownKind !== remembered.kind || shownLabel !== remembered.label)
-    ) {
+    if (shownKind !== undefined && shownLabel !== undefined) {
       setRemembered({ kind: shownKind, label: shownLabel });
     }
-  }, [remembered.kind, remembered.label, setRemembered, shownKind, shownLabel]);
+  }, [setRemembered, shownKind, shownLabel]);
 
   if (!state.shouldShowPicker) {
     return undefined;

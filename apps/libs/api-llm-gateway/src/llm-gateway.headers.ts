@@ -3,10 +3,12 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { financialIdentitySchema } from '@taucad/billing';
+import { turnGaps, turnSteps } from '@taucad/telemetry';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { LlmGatewayError } from '#llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#llm-gateway.error.js';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
+import type { TurnTelemetry } from '#model-invocation.types.js';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
 const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);
@@ -143,6 +145,31 @@ export const readAttribution = (
     ...(projectHint === undefined ? {} : { projectHint }),
     ...(chatHint === undefined ? {} : { chatHint }),
     ...(activity === undefined ? {} : { activity }),
+  };
+};
+
+const assertableTurnStep = z.enum(turnSteps).exclude(['unknown']);
+const assertableTurnGap = z.enum(turnGaps).exclude(['unknown']);
+
+/**
+ * The turn-step telemetry labels the agent host asserts on a gateway step. Like the attribution
+ * hints these never refuse: a malformed value becomes `unknown`, and a request with neither header
+ * carries no turn labels at all. They feed metrics only (I4), never admission, price or digest.
+ *
+ * @param request - The incoming gateway request.
+ * @returns The asserted labels as a member ready to spread into a relay input.
+ */
+export const readTurnTelemetry = (request: FastifyRequest): { readonly turn?: TurnTelemetry } => {
+  const stepHeader = readSingleHeader(request, httpHeader.xTauTurnStep);
+  const gapHeader = readSingleHeader(request, httpHeader.xTauTurnGap);
+  if (stepHeader === undefined && gapHeader === undefined) {
+    return {};
+  }
+  return {
+    turn: {
+      step: readOptionalHeader(stepHeader, assertableTurnStep) ?? 'unknown',
+      gap: readOptionalHeader(gapHeader, assertableTurnGap) ?? 'unknown',
+    },
   };
 };
 

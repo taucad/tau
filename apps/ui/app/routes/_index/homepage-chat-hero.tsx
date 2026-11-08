@@ -6,7 +6,7 @@ import { buttonVariants } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 
 /**
- * The homepage chat hero: "What can I help you build?" over the real chat
+ * The homepage chat hero: "Design parts and assemblies in code" over the real chat
  * composer (kernel selector + textarea) with a "Build from code" escape hatch.
  * Shared by the legacy landing (flag off) and the signed-in home view (flag on),
  * both of which start new projects from the same persistent homepage draft.
@@ -17,7 +17,7 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
       <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
         <div className='mb-12 text-center'>
           <h1 className='mx-auto max-w-[16ch] text-3xl font-semibold tracking-tight text-balance md:max-w-[20ch] md:text-5xl'>
-            What can I help you build?
+            Design parts and assemblies in code
           </h1>
         </div>
 

@@ -1,14 +1,17 @@
 /**
- * The Terminal pane's colours from Tau's semantic tokens (blueprint Terminal pane: Geist Mono, existing tokens).
+ * The Terminal pane's colours: the editor's surface tokens and its syntax theme's ANSI palette.
  *
  * AurigaX parses hex and `rgb()` only, not the `oklch()` Tau's tokens are written in, so each token is resolved by
- * the browser: painted on a one-pixel canvas and read back as sRGB. Each ANSI colour names the token whose meaning it
- * carries (red is destructive, green success, and so on), so a theme or high-contrast change re-themes the shell.
+ * the browser: painted on a one-pixel canvas and read back as sRGB. The ANSI colours follow the editor's syntax theme
+ * in light and dark, so a theme change re-themes the shell with the editor.
  */
 
 import type { TerminalTheme } from '#components/terminal/aurigax-ghostty-web';
 
-/** The token behind each theme slot. Bright variants share their base token; contrast comes from the ratio below. */
+/**
+ * The token behind each theme slot. Surface colours are the editor's; the 16 ANSI colours are the editor theme's
+ * terminal palette (`--terminal-ansi-*` in `syntax-highlight.css`), each bright variant distinct from its base.
+ */
 const themeTokens = {
   background: '--background',
   foreground: '--foreground',
@@ -16,22 +19,22 @@ const themeTokens = {
   cursorAccent: '--background',
   selectionBackground: '--accent',
   selectionForeground: '--accent-foreground',
-  black: '--muted-foreground',
-  red: '--destructive',
-  green: '--success',
-  yellow: '--warning',
-  blue: '--information',
-  magenta: '--feature',
-  cyan: '--stable',
-  white: '--foreground',
-  brightBlack: '--muted-foreground',
-  brightRed: '--destructive',
-  brightGreen: '--success',
-  brightYellow: '--warning',
-  brightBlue: '--information',
-  brightMagenta: '--feature',
-  brightCyan: '--stable',
-  brightWhite: '--foreground',
+  black: '--terminal-ansi-black',
+  red: '--terminal-ansi-red',
+  green: '--terminal-ansi-green',
+  yellow: '--terminal-ansi-yellow',
+  blue: '--terminal-ansi-blue',
+  magenta: '--terminal-ansi-magenta',
+  cyan: '--terminal-ansi-cyan',
+  white: '--terminal-ansi-white',
+  brightBlack: '--terminal-ansi-bright-black',
+  brightRed: '--terminal-ansi-bright-red',
+  brightGreen: '--terminal-ansi-bright-green',
+  brightYellow: '--terminal-ansi-bright-yellow',
+  brightBlue: '--terminal-ansi-bright-blue',
+  brightMagenta: '--terminal-ansi-bright-magenta',
+  brightCyan: '--terminal-ansi-bright-cyan',
+  brightWhite: '--terminal-ansi-bright-white',
 } as const satisfies Record<keyof TerminalTheme, `--${string}`>;
 
 /** Used where a token does not resolve (no canvas, or a token this build lacks): legible on either theme. */
@@ -83,6 +86,34 @@ export const readTerminalTheme = (element: HTMLElement): TerminalTheme => {
   return Object.fromEntries(
     (Object.keys(themeTokens) as Array<keyof TerminalTheme>).map((slot) => [slot, resolve(slot)]),
   ) as TerminalTheme;
+};
+
+/** How the WebGL renderer blends glyph coverage, from Tau's AurigaX patch (Ghostty's `alpha-blending`). */
+export type TerminalTextRendering = Readonly<{
+  textBlending: 'native' | 'linear' | 'linear-corrected';
+  textWeight: number;
+}>;
+
+/**
+ * Text blending that sets the Terminal's strokes at the editor's weight. AurigaX draws each glyph white on a
+ * transparent atlas and tints it, which reads heavier than the editor's DOM text: on a light background by about
+ * 9% of ink, on a dark one by about 3% (measured in Chromium at 2x against the editor's own styles). On light,
+ * linear blending thins dark strokes and a coverage exponent below 1 restores the rest; on dark, linear blending
+ * would thicken light strokes, so the corrected mode keeps sRGB weight without its fringes and the exponent thins.
+ * Both land within 2% of the editor's ink. Tuned again on macOS, whose font smoothing adds weight of its own.
+ *
+ * @param theme - The resolved theme the Terminal opens with.
+ * @returns The blending options for the renderer.
+ */
+export const terminalTextRendering = (theme: Pick<TerminalTheme, 'background'>): TerminalTextRendering => {
+  const channel = (offset: number): number => {
+    const value = Number.parseInt(theme.background.slice(offset, offset + 2), 16) / 255;
+    return value <= 4.045e-2 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  return luminance > 0.5
+    ? { textBlending: 'linear', textWeight: 0.65 }
+    : { textBlending: 'linear-corrected', textWeight: 1.15 };
 };
 
 /** WCAG AA for body text: the floor AurigaX holds every foreground to when the person asks for more contrast. */

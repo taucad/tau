@@ -93,6 +93,9 @@ export const GenAiTokenType = {
   INPUT: 'input',
   OUTPUT: 'output',
   CACHE_READ: 'cache_read',
+  CACHE_WRITE: 'cache_write',
+  /** The 1-hour cache write tier, kept apart because it is priced at twice the input rate. */
+  CACHE_WRITE_1H: 'cache_write_1h',
 } as const;
 
 /**

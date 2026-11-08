@@ -288,15 +288,21 @@ export function SidebarFailureRow({
 }
 
 /**
- * One loading row: a bar where the name will be.
+ * One loading row: the remembered name where the name will be, or a bar when no
+ * name is remembered. Either sits exactly where the real row's name starts.
  *
+ * @param props - The remembered name, if any.
  * @returns The row's content.
  * @public
  */
-export function SidebarRowSkeleton(): React.JSX.Element {
+export function SidebarRowSkeleton({ name }: { readonly name?: string } = {}): React.JSX.Element {
   return (
     <div className='flex h-7 items-center pr-2 pl-7.5'>
-      <Skeleton className='h-3.5 flex-1' />
+      {name === undefined ? (
+        <Skeleton className='h-3.5 flex-1' />
+      ) : (
+        <span className='fade-label min-w-0 flex-1 text-sm whitespace-nowrap text-muted-foreground'>{name}</span>
+      )}
     </div>
   );
 }

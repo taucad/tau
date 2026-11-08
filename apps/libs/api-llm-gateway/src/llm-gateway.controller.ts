@@ -6,6 +6,7 @@ import {
   assertNoQuery,
   invocationSignal,
   readAttribution,
+  readTurnTelemetry,
   readSingleHeader,
   validateAttemptId,
 } from '#llm-gateway.headers.js';
@@ -30,6 +31,7 @@ export class LlmGatewayController {
       reply,
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
+      ...readTurnTelemetry(request),
       anthropicVersion: readSingleHeader(request, 'anthropic-version'),
       anthropicBeta: readSingleHeader(request, 'anthropic-beta'),
     });
@@ -50,6 +52,7 @@ export class LlmGatewayController {
       reply,
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
+      ...readTurnTelemetry(request),
     });
   }
 
@@ -68,6 +71,7 @@ export class LlmGatewayController {
       reply,
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
+      ...readTurnTelemetry(request),
     });
   }
 }

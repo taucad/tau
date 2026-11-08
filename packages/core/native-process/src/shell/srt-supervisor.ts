@@ -17,7 +17,7 @@ import { createInterface } from 'node:readline';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
-import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import { terminateOwnedProcesses, terminationDeadline, trackDescendants } from '#shell/process-tree.js';
 import { startGuardProxy } from '#shell/srt-guard-proxy.js';
 import type { GuardProxy } from '#shell/srt-guard-proxy.js';
 
@@ -147,7 +147,7 @@ if (owned !== undefined && !released) {
     await terminateOwnedProcesses({
       root: owned,
       group: owned,
-      deadlineMilliseconds: 5000,
+      deadlineMilliseconds: terminationDeadline,
       ...(tracker === undefined ? {} : { table: tracker.table }),
     });
   } catch {

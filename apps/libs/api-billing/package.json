@@ -52,6 +52,7 @@
     "@taucad/api-llm-gateway": "workspace:*",
     "@taucad/api-observability": "workspace:*",
     "@taucad/billing": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@taucad/utils": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fastify": "catalog:",

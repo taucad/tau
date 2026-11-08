@@ -2,6 +2,9 @@
  * One syntax palette for every code surface: the editor, its tooltips, chat code blocks,
  * the code viewer and diffs. Token classes come from `tauHighlighter` in `@taucad/grammars`.
  * GitHub theme hues, expressed in OKLCH for the app colour policy.
+ *
+ * The Terminal's 16 ANSI colours are GitHub's terminal palette from the same theme, so shell output and the editor
+ * use one set of hues: red is the keyword red, green the type green, magenta the function purple.
  */
 @layer base {
   :root {
@@ -13,6 +16,23 @@
     --cm-comment: oklch(56.511% 0.0189 250.97);
     --cm-type: oklch(43.906% 0.1179 148.07);
     --cm-punctuation: oklch(55.419% 0.1169 75.01);
+
+    --terminal-ansi-black: oklch(27.85% 0.0132 253.04);
+    --terminal-ansi-red: oklch(55.17% 0.2051 24.53);
+    --terminal-ansi-green: oklch(43.91% 0.1179 148.07);
+    --terminal-ansi-yellow: oklch(32.98% 0.0722 68.31);
+    --terminal-ansi-blue: oklch(53.99% 0.1906 257.48);
+    --terminal-ansi-magenta: oklch(56.31% 0.2069 294.97);
+    --terminal-ansi-cyan: oklch(53.7% 0.0845 202.4);
+    --terminal-ansi-white: oklch(56.51% 0.0189 250.97);
+    --terminal-ansi-bright-black: oklch(48.49% 0.0196 251.02);
+    --terminal-ansi-bright-red: oklch(45.91% 0.1777 21.87);
+    --terminal-ansi-bright-green: oklch(52.44% 0.1401 148.04);
+    --terminal-ansi-bright-yellow: oklch(39.37% 0.0852 68.93);
+    --terminal-ansi-bright-blue: oklch(64.18% 0.1951 254.98);
+    --terminal-ansi-bright-magenta: oklch(66.9% 0.1902 297.44);
+    --terminal-ansi-bright-cyan: oklch(61.44% 0.0945 217.77);
+    --terminal-ansi-bright-white: oklch(66.58% 0.0181 250.92);
   }
 
   .dark {
@@ -24,6 +44,23 @@
     --cm-comment: oklch(66.247% 0.0181 250.92);
     --cm-type: oklch(84.16% 0.1641 145.75);
     --cm-punctuation: oklch(79.045% 0.1386 85.24);
+
+    --terminal-ansi-black: oklch(42.47% 0.0175 254.72);
+    --terminal-ansi-red: oklch(73.45% 0.1626 25.78);
+    --terminal-ansi-green: oklch(69.51% 0.1809 145.62);
+    --terminal-ansi-yellow: oklch(71.96% 0.1401 79.91);
+    --terminal-ansi-blue: oklch(71.53% 0.1518 253.31);
+    --terminal-ansi-magenta: oklch(73.23% 0.1668 301.69);
+    --terminal-ansi-cyan: oklch(75.55% 0.1155 202.14);
+    --terminal-ansi-white: oklch(78.49% 0.0174 250.88);
+    --terminal-ansi-bright-black: oklch(56.29% 0.0196 256.33);
+    --terminal-ansi-bright-red: oklch(80.14% 0.1134 25.81);
+    --terminal-ansi-bright-green: oklch(77.17% 0.188 145.48);
+    --terminal-ansi-bright-yellow: oklch(79.04% 0.1386 85.24);
+    --terminal-ansi-bright-blue: oklch(78.57% 0.1153 246.66);
+    --terminal-ansi-bright-magenta: oklch(80.05% 0.1275 305.86);
+    --terminal-ansi-bright-cyan: oklch(80.36% 0.1107 201.78);
+    --terminal-ansi-bright-white: oklch(100% 0 0);
   }
 
   .dark.high-contrast {

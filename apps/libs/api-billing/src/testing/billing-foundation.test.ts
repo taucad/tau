@@ -127,7 +127,7 @@ describe('billing database protections and real command', () => {
       const child = spawn(
         process.execPath,
         [
-          resolve(import.meta.dirname, '../../dist/billing-command.js'),
+          resolve(import.meta.dirname, '../../../../api/dist/billing-command.js'),
           worker,
           '--environment',
           'staging',

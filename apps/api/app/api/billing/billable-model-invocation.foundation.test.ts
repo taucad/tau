@@ -53,7 +53,7 @@ import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsService } from '@taucad/api-hosts';
 import { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';

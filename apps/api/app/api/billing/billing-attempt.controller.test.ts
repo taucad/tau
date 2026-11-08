@@ -14,7 +14,7 @@ import type { AttemptLookupAnswer } from '#api/billing/billing-attempt.controlle
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import { environmentSchemaBase } from '@taucad/api-core';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsService } from '@taucad/api-hosts';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';

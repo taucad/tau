@@ -3,8 +3,8 @@ import type { FastifyReply } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
-import { HostsController, pairingsPerIpPerWindow } from '#api/hosts/hosts.controller.js';
-import type { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsController, pairingsPerIpPerWindow } from '#hosts.controller.js';
+import type { HostsService } from '#hosts.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { RedisService } from '@taucad/api-redis';
 

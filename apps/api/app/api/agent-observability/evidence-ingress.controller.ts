@@ -5,8 +5,8 @@ import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { evidenceLimits } from '@taucad/agent-observability/contract';
 import { User } from '@taucad/api-auth';
-import { CloudHost, CloudHostEvidenceGuard } from '#api/hosts/cloud-host-evidence.guard.js';
-import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
+import { CloudHost, CloudHostEvidenceGuard } from '@taucad/api-hosts';
+import type { CloudHostReporter } from '@taucad/api-hosts';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 

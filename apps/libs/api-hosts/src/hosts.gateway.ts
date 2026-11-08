@@ -10,8 +10,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
 import { authInstanceKey } from '@taucad/api-auth';
-import { asBuffer, hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { asBuffer, hostFrameMaxPayload } from '#host-frame-relay.js';
+import { HostsService } from '#hosts.service.js';
 import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';

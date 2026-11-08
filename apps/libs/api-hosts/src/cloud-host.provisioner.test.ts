@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { createDockerCloudHostProvisioner } from '#api/hosts/cloud-host.provisioner.js';
+import { createDockerCloudHostProvisioner } from '#cloud-host.provisioner.js';
 
 describe('createDockerCloudHostProvisioner', () => {
   it('should hand the container its project and both credentials in the env file, never on argv', async () => {

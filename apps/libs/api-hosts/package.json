@@ -25,10 +25,34 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./host-frame-relay": "./src/host-frame-relay.ts",
     "./package.json": "./package.json"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-lifecycle": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/api-redis": "workspace:*",
+    "better-auth": "catalog:",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "ioredis": "^5.11.1",
+    "nestjs-zod": "^5.4.0",
+    "ws": "catalog:",
+    "zod": "catalog:"
   }
 }

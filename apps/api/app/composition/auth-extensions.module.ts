@@ -6,8 +6,7 @@ import { BillingAccountClosureService } from '#api/billing/billing-account-closu
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingModule } from '#api/billing/billing.module.js';
 import { stripeWebhookRoute } from '#api/billing/billing-stripe-webhook.route.js';
-import { HostsModule } from '#api/hosts/hosts.module.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsModule, HostsService } from '@taucad/api-hosts';
 import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '@taucad/api-auth';
 import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
 

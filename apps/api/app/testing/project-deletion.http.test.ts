@@ -19,11 +19,7 @@ import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
 import { startStorageHop } from '#testing/storage-hop.js';
 import type { StorageHop } from '#testing/storage-hop.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
-import {
-  hashHostGitCredential,
-  mintHostGitCredential,
-  resolveHostGitCredential,
-} from '#api/hosts/host-git-credential.js';
+import { hashHostGitCredential, mintHostGitCredential, resolveHostGitCredential } from '@taucad/api-hosts';
 import { AuthGuard, authInstanceKey, staticAuthConfig } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';

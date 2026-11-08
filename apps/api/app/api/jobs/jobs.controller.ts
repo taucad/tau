@@ -17,7 +17,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard, PublicAuth, UseAuth, User } from '@taucad/api-auth';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsService } from '@taucad/api-hosts';
 import {
   CancelJobDto,
   FinishJobAttemptDto,

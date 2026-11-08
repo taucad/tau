@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
-import { HostsModule } from '#api/hosts/hosts.module.js';
+import { HostsModule } from '@taucad/api-hosts';
 import { ChatModule } from '#api/chat/chat.module.js';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
 import { GitModule } from '#api/git/git.module.js';

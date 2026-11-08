@@ -27,8 +27,8 @@ import {
   CreateHostSessionDto,
   ExchangeHostPairingDto,
   UpdateHostDeviceDto,
-} from '#api/hosts/hosts.dto.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+} from '#hosts.dto.js';
+import { HostsService } from '#hosts.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /**

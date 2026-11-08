@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { HostsModule } from '#api/hosts/hosts.module.js';
+import { HostsModule } from '@taucad/api-hosts';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { JobsController } from '#api/jobs/jobs.controller.js';
 import { JobsService } from '#api/jobs/jobs.service.js';

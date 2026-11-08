@@ -7,9 +7,9 @@ import type { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
-import { hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
-import { HostsGateway } from '#api/hosts/hosts.gateway.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { hostFrameMaxPayload } from '#host-frame-relay.js';
+import { HostsGateway } from '#hosts.gateway.js';
+import { HostsService } from '#hosts.service.js';
 import type { DevWebSocketService, WebSocketConnectionHandler } from '@taucad/api-lifecycle';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';

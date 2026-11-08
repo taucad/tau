@@ -27,7 +27,7 @@ import type { KernelId } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsService } from '@taucad/api-hosts';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';

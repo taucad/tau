@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '@taucad/api-database';
-import { HostsController } from '#api/hosts/hosts.controller.js';
-import { HostsGateway } from '#api/hosts/hosts.gateway.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsController } from '#hosts.controller.js';
+import { HostsGateway } from '#hosts.gateway.js';
+import { HostsService } from '#hosts.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import { cloudHostProvisionerToken, createConfiguredCloudHostProvisioner } from '#api/hosts/cloud-host.provisioner.js';
+import { cloudHostProvisionerToken, createConfiguredCloudHostProvisioner } from '#cloud-host.provisioner.js';
 
 @Module({
   imports: [DatabaseModule],

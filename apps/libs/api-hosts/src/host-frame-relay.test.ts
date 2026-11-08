@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Redis } from 'ioredis';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { relayHostFrames, relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
+import { relayHostFrames, relayHostFramesThroughRedis } from '#host-frame-relay.js';
 
 type SocketPair = { readonly client: WebSocket; readonly accepted: WebSocket; readonly server: WebSocketServer };
 const resources: Array<{ close(): void }> = [];

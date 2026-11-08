@@ -2,8 +2,8 @@
 import { Body, Controller, Get, NotFoundException, Put, Query, UseGuards } from '@nestjs/common';
 import type { AuthUser } from '@taucad/api-auth';
 import { UseAuth, User } from '@taucad/api-auth';
-import { CloudHost, CloudHostEvidenceGuard } from '#api/hosts/cloud-host-evidence.guard.js';
-import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
+import { CloudHost, CloudHostEvidenceGuard } from '@taucad/api-hosts';
+import type { CloudHostReporter } from '@taucad/api-hosts';
 import {
   TelemetryPurposesQueryDto,
   UpdateTelemetryPurposesDto,

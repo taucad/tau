@@ -24,7 +24,7 @@ import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import type { EvidenceSealKey } from '#api/agent-observability/evidence-seal.js';
-import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
+import type { CloudHostReporter } from '@taucad/api-hosts';
 
 /** Submissions one principal may have in flight in one process. */
 export const evidenceConcurrencyPerPrincipal = 4;

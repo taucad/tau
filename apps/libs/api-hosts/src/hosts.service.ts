@@ -20,18 +20,18 @@ import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
 import { agentRun, hostDevice, project, user } from '@taucad/api-database/schema';
 import { RedisService } from '@taucad/api-redis';
-import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
-import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';
+import { relayHostFramesThroughRedis } from '#host-frame-relay.js';
+import type { DistributedRelayHandle } from '#host-frame-relay.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import {
   cloudHostProvisionerToken,
   cloudHostRefusalReason,
   createConfiguredCloudHostProvisioner,
-} from '#api/hosts/cloud-host.provisioner.js';
-import type { CloudHostProvisioner } from '#api/hosts/cloud-host.provisioner.js';
-import { hashHostGitCredential, mintHostGitCredential } from '#api/hosts/host-git-credential.js';
-import { hostCapabilitiesSchema, hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
-import type { HostCapabilities, HostControlMessage } from '#api/hosts/hosts.dto.js';
+} from '#cloud-host.provisioner.js';
+import type { CloudHostProvisioner } from '#cloud-host.provisioner.js';
+import { hashHostGitCredential, mintHostGitCredential } from '#host-git-credential.js';
+import { hostCapabilitiesSchema, hostControlMessageSchema } from '#hosts.dto.js';
+import type { HostCapabilities, HostControlMessage } from '#hosts.dto.js';
 
 const pairingLifetimeSeconds = 600;
 /**

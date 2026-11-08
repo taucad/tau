@@ -6,7 +6,7 @@ import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
-import { HostsService } from '#api/hosts/hosts.service.js';
+import { HostsService } from '@taucad/api-hosts';
 import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { readSingleHeader } from '#api/llm/llm-gateway.headers.js';

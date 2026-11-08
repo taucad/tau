@@ -11,7 +11,7 @@ import { authInstanceKey, hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { GitBasicAuthMiddleware } from '#api/git/git-transport.js';
-import { mintHostGitCredential } from '#api/hosts/host-git-credential.js';
+import { mintHostGitCredential } from '@taucad/api-hosts';
 
 /*
  * The third credential kind end to end through the real middleware and the

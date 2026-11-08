@@ -58,6 +58,8 @@ jobs:
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
+      reused: ${{ steps.queue.outputs.run-id }}
+      api-tests: ${{ steps.api-tests.outputs.api-tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -67,8 +69,48 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # A push to `main` whose identical commit passed the merge queue reuses that
+      # verdict: the lanes below report the queue's result instead of running again.
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
+      # API tests and billing contracts gate the staging API deploy, so a push to `main`
+      # runs them unless the queue already did, or the API family is unchanged since
+      # the commit staging last deployed the API (that commit passed them).
+      - name: Find the API's last staging deploy
+        id: api-deployed
+        if: steps.queue.outputs.run-id != '' && steps.queue.outputs.api != 'success'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: base
+          apps: '["api"]'
+          github-token: ${{ github.token }}
+
+      - name: Decide whether this run tests the API
+        id: api-tests
+        env:
+          REUSED: ${{ steps.queue.outputs.run-id }}
+          QUEUE_API: ${{ steps.queue.outputs.api }}
+          API_BASE: ${{ fromJSON(steps.api-deployed.outputs.bases || '{}').api || '' }}
+        run: |
+          set -o pipefail
+          decision=run
+          if [ -n "$REUSED" ] && [ "$QUEUE_API" = success ]; then
+            decision=reused
+          elif [ -n "$REUSED" ] && [ -n "$API_BASE" ]; then
+            changed=$(pnpm nx show projects --affected --base="$API_BASE" --head=HEAD --projects tag:scope:api --json | tail -1)
+            if [ "$changed" = '[]' ]; then decision=unchanged; fi
+          fi
+          echo "API tests and billing contracts: $decision"
+          echo "api-tests=$decision" >> "$GITHUB_OUTPUT"
+
       - name: Compute affected lanes
         id: plan
+        env:
+          REUSED: ${{ steps.queue.outputs.run-id }}
         run: |
           # `pipefail` so a failing `nx show projects` fails the step instead of
           # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
@@ -85,6 +127,13 @@ jobs:
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
+          # The queue run already ran the formal, browser and GeoSpec lanes on this tree.
+          if [ -n "$REUSED" ]; then
+            formal='[]'
+            browser='[]'
+            geospec_examples='[]'
+            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip."
+          fi
           {
             echo "browser-projects=$browser"
             echo "apps<<EOF"
@@ -104,17 +153,30 @@ jobs:
   # project names and tags, tsgo runtime references, quickstart budget, license
   # partitions, formatting, dead code, license deps, workflows). A new validator
   # joins by adding the target — this job never changes.
+  # A push to `main` whose identical commit passed the merge queue passes on that
+  # verdict (`queue-verdict`); it still reports, so `staging.yml` reads it.
   workspace:
     name: Validate workspace
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
       - name: Setup Nx Environment
+        if: steps.queue.outputs.run-id == ''
         uses: ./.github/actions/setup-nx
 
       - name: Run workspace validators
+        if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
@@ -127,7 +189,8 @@ jobs:
     needs: [plan]
     # Not `always()`: that also ignores a cancel, so a superseded run kept this job
     # going for its full length and held the next run in the concurrency queue.
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    # A push whose commit passed the merge queue reuses that run's lanes (`plan.outputs.reused`).
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reused == '' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -395,8 +458,13 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          REUSED: ${{ needs.plan.outputs.reused }}
         run: |
           test "$PLAN_RESULT" = success
+          if [ -n "$REUSED" ]; then
+            echo "Merge-queue run $REUSED passed every affected lane on this commit."
+            exit 0
+          fi
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
@@ -776,25 +844,46 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     steps:
+      # A push to `main` reports the merge queue's verdict on this commit, or the
+      # API's last staging deploy when nothing of the API family changed since
+      # (`plan`: `Decide whether this run tests the API`).
+      - name: Report a reused verdict
+        if: needs.plan.outputs.api-tests != 'run'
+        env:
+          DECISION: ${{ needs.plan.outputs.api-tests }}
+          REUSED: ${{ needs.plan.outputs.reused }}
+        run: |
+          if [ "$DECISION" = reused ]; then
+            echo "::notice::Merge-queue run $REUSED ran these suites on this commit; not rerun."
+          else
+            echo "::notice::Nothing of the API family changed since staging last deployed the API, and merge-queue run $REUSED passed this commit; not rerun."
+          fi
+
       - name: Checkout
+        if: needs.plan.outputs.api-tests == 'run'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
+        if: needs.plan.outputs.api-tests == 'run'
         uses: ./.github/actions/setup-nx
 
       - name: Prepare API env file
+        if: needs.plan.outputs.api-tests == 'run'
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
+        if: needs.plan.outputs.api-tests == 'run'
         run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       - name: MinIO smoke (seed + RW)
+        if: needs.plan.outputs.api-tests == 'run'
         run: bash infra/docker-compose.test.sh
 
       # `api:db-migrate` is the release migration job: DDL, the billing protections and
       # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
       # `.env.example`, so these lanes get schema and protections only, as Fly does).
       - name: Apply the protected migration job
+        if: needs.plan.outputs.api-tests == 'run'
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
 
       # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
@@ -813,6 +902,7 @@ jobs:
       # itself refuses any bucket outside the scratch allowlist before a credential is
       # used, so this can never be pointed at a staging content bucket.
       - name: Run API suites (real PostgreSQL + MinIO)
+        if: needs.plan.outputs.api-tests == 'run'
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
           TAU_S3_CONFORMANCE_ENDPOINT: ${{ secrets.TAU_S3_CONFORMANCE_ENDPOINT }}
@@ -822,11 +912,13 @@ jobs:
         run: pnpm nx run-many -t test --projects tag:scope:api
 
       - name: Qualify API development and production servers
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:server-modes
 
       # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
       # deterministic edit qualification is the Tier-D edit bench.
       - name: Run deterministic file-edit qualification (edit bench)
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
       # Hermetic guards on the live provider harness, which the credentialed live
@@ -834,6 +926,7 @@ jobs:
       # and a prompt a model refuses as a jailbreak never reaches a provider
       # (docs/research/grok-4-7-live-suite-refusal-blueprint.md).
       - name: Run the live-harness guards
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:models -- app/testing/live/live-assertions.test.ts app/testing/live/live-gateway.harness.test.ts
 
       # Testing policy §13 for the durable migration the release command applies:
@@ -841,6 +934,7 @@ jobs:
       # no-op. Lives under `app/testing/**`, so it runs through the same target as
       # the edit bench and needs the PostgreSQL this lane starts.
       - name: Run the durable-migration failure injection
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
 
       # Charter S2, end to end: two real API processes over one MinIO and one
@@ -849,13 +943,14 @@ jobs:
       # boots either process.
       # Since DC1 the tier is two API processes and two tau-storage workers.
       - name: Run the git end-to-end tier (two API processes, two storage workers, one object store)
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:git
 
       # DC1 (review FR20): no API or storage log line of the tier may carry a grant,
       # a receipt signature or a presigned `X-Amz-Signature`/`X-Amz-Credential`.
       # The same checker runs over a captured staging sample.
       - name: Check the git tier's logs for signed tokens
-        if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
+        if: ${{ needs.plan.outputs.api-tests == 'run' && !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
   # Credential-free database and Stripe adapter contracts, including fork PRs.
@@ -869,14 +964,33 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     steps:
+      # A push to `main` reports the merge queue's verdict on this commit, or the
+      # API's last staging deploy when nothing of the API family changed since
+      # (`plan`: `Decide whether this run tests the API`).
+      - name: Report a reused verdict
+        if: needs.plan.outputs.api-tests != 'run'
+        env:
+          DECISION: ${{ needs.plan.outputs.api-tests }}
+          REUSED: ${{ needs.plan.outputs.reused }}
+        run: |
+          if [ "$DECISION" = reused ]; then
+            echo "::notice::Merge-queue run $REUSED ran these suites on this commit; not rerun."
+          else
+            echo "::notice::Nothing of the API family changed since staging last deployed the API, and merge-queue run $REUSED passed this commit; not rerun."
+          fi
+
       - name: Checkout
+        if: needs.plan.outputs.api-tests == 'run'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
+        if: needs.plan.outputs.api-tests == 'run'
         uses: ./.github/actions/setup-nx
 
       - name: Pull the billing foundation PostgreSQL image
+        if: needs.plan.outputs.api-tests == 'run'
         run: docker pull postgres:17-alpine
 
       - name: Run billing database and Stripe adapter contracts
+        if: needs.plan.outputs.api-tests == 'run'
         run: pnpm nx run-many -t test:billing-foundation

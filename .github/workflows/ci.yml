@@ -768,7 +768,8 @@ jobs:
   # Writes the dependency layers the PR-only `api-docker-smoke` job reads: the GHA cache
   # a branch writes is readable by pull requests into it, so one `main` writer replaces a
   # cold cache and a 4-minute export on every PR run. It rebuilds only when an input of
-  # the `deps` stages changed since the previous `main` commit, so most pushes skip it.
+  # the `deps` stages, or this workflow, changed since the previous `main` commit, so most
+  # pushes skip it.
   api-docker-cache:
     name: API Docker dependency cache
     runs-on: ubuntu-latest
@@ -789,7 +790,7 @@ jobs:
           set -euo pipefail
           base="$BEFORE"
           git cat-file -e "$base^{commit}" 2>/dev/null || base=HEAD~1
-          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml pnpm-workspace.yaml '*package.json' tools/pnpm apps/api/Dockerfile packages/host/Dockerfile; then
+          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml pnpm-workspace.yaml '*package.json' tools/pnpm apps/api/Dockerfile packages/host/Dockerfile .github/workflows/ci.yml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo 'Dependency inputs unchanged; the cache from an earlier main commit still applies.' >> "$GITHUB_STEP_SUMMARY"
           else

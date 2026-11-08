@@ -1381,10 +1381,18 @@ export class MutationPipeline {
   /**
    * The locks a mutation over `operations` holds (D3): for each path its
    * physical hierarchy up to its provider base path — the path exclusive,
-   * every ancestor shared — and its logical hierarchy up to its mount prefix,
-   * all shared (exclusive at the path only for a mount with no physical
-   * identity), plus the owning project's token: shared, or exclusive for a
-   * lifecycle changeset.
+   * every ancestor shared — plus the owning project's token: shared, or
+   * exclusive for a lifecycle changeset. A mount with no physical identity
+   * holds its logical hierarchy up to its mount prefix instead, exclusive at
+   * the path.
+   *
+   * A physical mount holds no logical token. Every logical token under a
+   * physical mount's prefix was only ever held shared — the physical token is
+   * what excludes every alias of the bytes, and a lifecycle fence is the
+   * project token — and a path under a nested mount with no physical identity
+   * routes to that mount, whose hierarchy stops at its own prefix. So those
+   * tokens fenced nothing and cost one Web Lock grant each, a task that waits
+   * behind whatever else the authority's event loop is serving (S19).
    *
    * @param operations - Every resolved path the mutation touches.
    * @param options - `lifecycle` takes the project token exclusively.
@@ -1398,13 +1406,13 @@ export class MutationPipeline {
     const claim = (token: string, shared: boolean): void => {
       claims.push(shared ? { token, shared } : { token });
     };
-    const addAuthorityHierarchy = (path: string, boundary: string, exactShared: boolean): void => {
+    const addAuthorityHierarchy = (path: string, boundary: string): void => {
       let current = resolveAuthorityPath(path);
       const root = resolveAuthorityPath(boundary);
       if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
-      let shared = exactShared;
+      let shared = false;
       while (current !== '/') {
         claim(current, shared);
         shared = true;
@@ -1434,15 +1442,9 @@ export class MutationPipeline {
 
     for (const { path, resolution } of operations) {
       const normalized = resolveAuthorityPath(path);
-      /* The physical token excludes every alias of the bytes, so the logical
-       * path itself needs no exclusive token of its own when there is one; its
-       * logical ancestors are still held shared, so a holder of a route lock
-       * (a project route held exclusively) still fences the write. */
-      addAuthorityHierarchy(
-        normalized,
-        resolution.entry?.prefix ?? normalized,
-        resolution.entry?.storageRootKey !== undefined,
-      );
+      if (resolution.entry?.storageRootKey === undefined) {
+        addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized);
+      }
       const projectId = this._projectLockOwner(normalized, resolution);
       if (projectId !== undefined) {
         claim(`project:${projectId}`, options?.lifecycle !== true);

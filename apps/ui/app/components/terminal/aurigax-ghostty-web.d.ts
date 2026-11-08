@@ -46,6 +46,10 @@ export type TerminalOptions = {
   readonly renderer: 'webgl' | 'canvas';
   readonly cursorBlink?: boolean;
   readonly minimumContrastRatio?: number;
+  /** Tau's patch (tools/pnpm/patches): how the WebGL renderer blends text, after Ghostty's `alpha-blending`. */
+  readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
+  /** Tau's patch: exponent on glyph coverage in the WebGL renderer; above 1 thins text. */
+  readonly textWeight?: number;
   readonly macOptionIsMeta?: boolean;
   readonly smoothScrollDuration?: number;
   readonly linkHandler?: { activate(event: MouseEvent, uri: string): void };

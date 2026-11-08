@@ -242,6 +242,8 @@ describe('TerminalPane', () => {
     expect(harness.open).toHaveBeenCalledOnce();
     expect(harness.options().fontFamily).toContain('Geist Mono');
     expect(harness.options().fontSize).toBe(14);
+    /* The jsdom environment resolves no tokens, so the theme falls back to black and gets the dark-background blending. */
+    expect(harness.options()).toMatchObject({ textBlending: 'linear-corrected', textWeight: 1.15 });
     expect(harness.view.focus).toHaveBeenCalled();
   });
 

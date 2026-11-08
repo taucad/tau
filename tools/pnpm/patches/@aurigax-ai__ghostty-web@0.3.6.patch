@@ -1,0 +1,249 @@
+diff --git a/lib/interfaces.ts b/lib/interfaces.ts
+index 547762a53e4eead02e82fe79f6e70a9ce468ebe1..75f5b487372f49de6214bb162b9e042df7eb7dea 100644
+--- a/lib/interfaces.ts
++++ b/lib/interfaces.ts
+@@ -20,6 +20,18 @@ export interface ITerminalOptions {
+   scrollSensitivity?: number; // Multiplies wheel scrolling. Default: 1
+   /** Foreground colors are adjusted to at least this contrast ratio with their background (1 to 21). Default: 1 */
+   minimumContrastRatio?: number;
++  /**
++   * How the WebGL renderer blends text into its background, read when it opens (Ghostty's `alpha-blending`).
++   * 'native' blends in sRGB as before; 'linear' blends in linear light, which thins dark text on light
++   * backgrounds and removes coloured fringes; 'linear-corrected' blends in linear light but keeps the
++   * weight 'native' gives. The canvas renderer ignores it. Default: 'native'
++   */
++  textBlending?: TextBlending;
++  /**
++   * Exponent on each glyph's coverage in the WebGL renderer, read when it opens: above 1 thins text,
++   * below 1 thickens it. The canvas renderer ignores it. Default: 1
++   */
++  textWeight?: number;
+   /** On macOS, Option acts as Meta instead of composing characters. Default: false */
+   macOptionIsMeta?: boolean;
+   /**
+@@ -51,6 +63,8 @@ export interface ITerminalOptions {
+ 
+ export type FontWeight = 'normal' | 'bold' | number;
+ 
++export type TextBlending = 'native' | 'linear' | 'linear-corrected';
++
+ /** Handles web links the way xterm.js's `linkHandler` option does. Ranges are 0-based buffer cells. */
+ export interface ILinkHandler {
+   activate(event: MouseEvent, text: string, range: IBufferRange): void;
+diff --git a/lib/renderer.ts b/lib/renderer.ts
+index 2f6c1affc504f99bc27deec5dcfc5c32dc7a8f7d..ce07e8569ef5cb43cd32c73e518771040ccfa59b 100644
+--- a/lib/renderer.ts
++++ b/lib/renderer.ts
+@@ -9,7 +9,7 @@
+  */
+ 
+ import { drawBoxGlyph, isBoxGlyph } from './box-glyphs';
+-import type { FontWeight, ITheme } from './interfaces';
++import type { FontWeight, ITheme, TextBlending } from './interfaces';
+ import type { SelectionManager } from './selection-manager';
+ import type { GhosttyCell } from './types';
+ import { CellFlags } from './types';
+@@ -64,6 +64,8 @@ export interface RendererOptions {
+   fontWeightBold?: FontWeight; // Default: 'bold'
+   lineHeight?: number; // Default: 1
+   minimumContrastRatio?: number; // Default: 1 (off)
++  textBlending?: TextBlending; // WebGL only. Default: 'native'
++  textWeight?: number; // WebGL only. Default: 1
+ }
+ 
+ export interface FontOptions {
+diff --git a/lib/terminal.ts b/lib/terminal.ts
+index 8ec71461583c369e617fb2417f642c0490f60b94..5d8f7dc35ca46650e7e9f9b3f2211a0381236c0f 100644
+--- a/lib/terminal.ts
++++ b/lib/terminal.ts
+@@ -217,6 +217,8 @@ export class Terminal implements ITerminalCore {
+       lineHeight: options.lineHeight ?? 1,
+       scrollSensitivity: options.scrollSensitivity ?? 1,
+       minimumContrastRatio: options.minimumContrastRatio ?? 1,
++      textBlending: options.textBlending ?? 'native',
++      textWeight: options.textWeight ?? 1,
+       macOptionIsMeta: options.macOptionIsMeta ?? false,
+     };
+ 
+@@ -625,6 +627,8 @@ export class Terminal implements ITerminalCore {
+     return {
+       ...this.fontOptions(),
+       minimumContrastRatio: this.options.minimumContrastRatio,
++      textBlending: this.options.textBlending,
++      textWeight: this.options.textWeight,
+       fontSize: this.options.fontSize,
+       fontFamily: this.options.fontFamily,
+       cursorStyle: this.options.cursorStyle,
+diff --git a/lib/webgl-instances.ts b/lib/webgl-instances.ts
+index 29c9158d34f22c3dd255cf833126a7fd1c0239a8..675547fe0b159fcb953ef1f51321714770debc90 100644
+--- a/lib/webgl-instances.ts
++++ b/lib/webgl-instances.ts
+@@ -6,7 +6,8 @@
+  */
+ 
+ export const RECT_WORDS = 5;
+-export const GLYPH_WORDS = 8;
++/** x, y, atlas x, y, w, h, foreground, colored, background behind the glyph. */
++export const GLYPH_WORDS = 9;
+ 
+ export interface InstanceArrays {
+   words: Float32Array;
+diff --git a/lib/webgl-renderer.ts b/lib/webgl-renderer.ts
+index a7e284732e2097d4a50737332be992cd81a42bfc..4a046850bb5e0b9849ffb4c9535e6f3f8c146034 100644
+--- a/lib/webgl-renderer.ts
++++ b/lib/webgl-renderer.ts
+@@ -12,7 +12,7 @@
+ 
+ import { drawBoxGlyph, isBoxGlyph } from './box-glyphs';
+ import { glyphInk } from './glyph-ink';
+-import type { ITheme } from './interfaces';
++import type { ITheme, TextBlending } from './interfaces';
+ import {
+   type FrameOverlay,
+   LINK_COLOR,
+@@ -64,11 +64,13 @@ layout(location = 1) in vec2 a_pos;
+ layout(location = 2) in vec4 a_tex;
+ layout(location = 3) in vec4 a_color;
+ layout(location = 4) in float a_colored;
++layout(location = 5) in vec4 a_back;
+ uniform vec2 u_resolution;
+ uniform vec2 u_atlas;
+ out vec2 v_uv;
+ out vec4 v_color;
+ out float v_colored;
++out vec4 v_back;
+ void main() {
+   vec2 p = a_pos + a_corner * a_tex.zw;
+   vec2 clip = p / u_resolution * 2.0 - 1.0;
+@@ -76,24 +78,63 @@ void main() {
+   v_uv = (a_tex.xy + a_corner * a_tex.zw) / u_atlas;
+   v_color = a_color;
+   v_colored = a_colored;
++  v_back = a_back;
+ }`;
+ 
++/*
++ * Text blending after Ghostty's renderer (its \`alpha-blending\` option). u_blend 0 blends in sRGB, as the
++ * framebuffer does. 1 and 2 compute the pixel in linear light against the cell's background (v_back) and
++ * write it premultiplied with the glyph's coverage, so over that background the result is exact; 2 first
++ * moves the coverage so the blend's luminance equals the sRGB blend's, keeping 'native' weight without its
++ * fringes. u_weight is an exponent on coverage, applied first in every mode.
++ */
+ const FRAGMENT_GLYPH = `#version 300 es
+-precision mediump float;
++precision highp float;
+ uniform sampler2D u_texture;
++uniform int u_blend;
++uniform float u_weight;
+ in vec2 v_uv;
+ in vec4 v_color;
+ in float v_colored;
++in vec4 v_back;
+ out vec4 outColor;
++vec3 toLinear(vec3 c) {
++  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
++}
++vec3 toSrgb(vec3 c) {
++  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
++}
++float luminance(vec3 linear) {
++  return dot(linear, vec3(0.2126, 0.7152, 0.0722));
++}
+ void main() {
+   vec4 texel = texture(u_texture, v_uv);
+   if (v_colored > 0.5) {
+     outColor = texel * v_color.a;
+-  } else {
+-    outColor = vec4(v_color.rgb, 1.0) * texel.a * v_color.a;
++    return;
++  }
++  float a = pow(texel.a, u_weight) * v_color.a;
++  if (u_blend == 0 || v_back.a < 1.0 || a <= 0.0) {
++    outColor = vec4(v_color.rgb, 1.0) * a;
++    return;
++  }
++  vec3 fg = toLinear(v_color.rgb);
++  vec3 bg = toLinear(v_back.rgb);
++  if (u_blend == 2) {
++    float fgL = luminance(fg);
++    float bgL = luminance(bg);
++    if (abs(fgL - bgL) > 0.001) {
++      vec3 srgbBlend = toLinear(mix(v_back.rgb, v_color.rgb, a));
++      a = clamp((luminance(srgbBlend) - bgL) / (fgL - bgL), 0.0, 1.0);
++    }
+   }
++  vec3 shown = toSrgb(mix(bg, fg, a));
++  /* Premultiplied so that shown = out + back * (1 - a) over this cell's background. */
++  outColor = vec4(shown - v_back.rgb * (1.0 - a), a);
+ }`;
+ 
++const BLEND_MODES: Record<TextBlending, number> = { native: 0, linear: 1, 'linear-corrected': 2 };
++
+ /** A glyph's ink in the atlas; `ox`, `oy` place it within the glyph's padded slot. */
+ interface AtlasEntry {
+   x: number;
+@@ -273,6 +314,10 @@ export class WebglRenderer extends TerminalRenderer {
+   private readonly glyphResolution: WebGLUniformLocation | null;
+   private readonly glyphAtlasSize: WebGLUniformLocation | null;
+   private readonly glyphTexture: WebGLUniformLocation | null;
++  private readonly glyphBlend: WebGLUniformLocation | null;
++  private readonly glyphWeight: WebGLUniformLocation | null;
++  private readonly textBlending: number;
++  private readonly textWeight: number;
+   private readonly atlas: GlyphAtlas;
+ 
+   private cols = 0;
+@@ -320,6 +365,9 @@ export class WebglRenderer extends TerminalRenderer {
+ 
+   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
+     super(canvas, options);
++    this.textBlending = BLEND_MODES[options.textBlending ?? 'native'] ?? 0;
++    const weight = options.textWeight ?? 1;
++    this.textWeight = Number.isFinite(weight) && weight > 0 ? weight : 1;
+     const glCanvas = document.createElement('canvas');
+     glCanvas.style.position = 'absolute';
+     glCanvas.style.pointerEvents = 'none';
+@@ -368,6 +416,8 @@ export class WebglRenderer extends TerminalRenderer {
+     this.glyphResolution = gl.getUniformLocation(this.glyphProgram, 'u_resolution');
+     this.glyphAtlasSize = gl.getUniformLocation(this.glyphProgram, 'u_atlas');
+     this.glyphTexture = gl.getUniformLocation(this.glyphProgram, 'u_texture');
++    this.glyphBlend = gl.getUniformLocation(this.glyphProgram, 'u_blend');
++    this.glyphWeight = gl.getUniformLocation(this.glyphProgram, 'u_weight');
+ 
+     this.measureCellPixels();
+     this.atlas = new GlyphAtlas(gl, this.slotHeight());
+@@ -607,6 +657,7 @@ export class WebglRenderer extends TerminalRenderer {
+           glyphs[glyph + 5] = entry.h;
+           glyphColors[glyph + 6] = fgWord;
+           glyphs[glyph + 7] = entry.colored ? 1 : 0;
++          glyphColors[glyph + 8] = bgWord !== 0 ? bgWord : theme.background;
+         }
+       }
+ 
+@@ -734,6 +785,7 @@ export class WebglRenderer extends TerminalRenderer {
+             g[5] = entry.h;
+             this.overlayGlyphColors[6] = theme.cursorAccent;
+             g[7] = entry.colored ? 1 : 0;
++            this.overlayGlyphColors[8] = theme.cursor;
+             key += `,${entry.x},${entry.y}`;
+           }
+         }
+@@ -810,6 +862,8 @@ export class WebglRenderer extends TerminalRenderer {
+     gl.useProgram(this.glyphProgram);
+     gl.uniform2f(this.glyphResolution, width, height);
+     gl.uniform2f(this.glyphAtlasSize, this.atlas.size, this.atlas.size);
++    gl.uniform1i(this.glyphBlend, this.textBlending);
++    gl.uniform1f(this.glyphWeight, this.textWeight);
+     gl.activeTexture(gl.TEXTURE0);
+     gl.bindTexture(gl.TEXTURE_2D, this.atlas.texture);
+     gl.uniform1i(this.glyphTexture, 0);
+@@ -883,6 +937,9 @@ export class WebglRenderer extends TerminalRenderer {
+     gl.enableVertexAttribArray(4);
+     gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 28);
+     gl.vertexAttribDivisor(4, 1);
++    gl.enableVertexAttribArray(5);
++    gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, stride, 32);
++    gl.vertexAttribDivisor(5, 1);
+     gl.bindVertexArray(null);
+     return vao;
+   }

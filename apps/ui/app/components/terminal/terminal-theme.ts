@@ -88,6 +88,34 @@ export const readTerminalTheme = (element: HTMLElement): TerminalTheme => {
   ) as TerminalTheme;
 };
 
+/** How the WebGL renderer blends glyph coverage, from Tau's AurigaX patch (Ghostty's `alpha-blending`). */
+export type TerminalTextRendering = Readonly<{
+  textBlending: 'native' | 'linear' | 'linear-corrected';
+  textWeight: number;
+}>;
+
+/**
+ * Text blending that sets the Terminal's strokes at the editor's weight. AurigaX draws each glyph white on a
+ * transparent atlas and tints it, which reads heavier than the editor's DOM text: on a light background by about
+ * 9% of ink, on a dark one by about 3% (measured in Chromium at 2x against the editor's own styles). On light,
+ * linear blending thins dark strokes and a coverage exponent below 1 restores the rest; on dark, linear blending
+ * would thicken light strokes, so the corrected mode keeps sRGB weight without its fringes and the exponent thins.
+ * Both land within 2% of the editor's ink. Tuned again on macOS, whose font smoothing adds weight of its own.
+ *
+ * @param theme - The resolved theme the Terminal opens with.
+ * @returns The blending options for the renderer.
+ */
+export const terminalTextRendering = (theme: Pick<TerminalTheme, 'background'>): TerminalTextRendering => {
+  const channel = (offset: number): number => {
+    const value = Number.parseInt(theme.background.slice(offset, offset + 2), 16) / 255;
+    return value <= 4.045e-2 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  return luminance > 0.5
+    ? { textBlending: 'linear', textWeight: 0.65 }
+    : { textBlending: 'linear-corrected', textWeight: 1.15 };
+};
+
 /** WCAG AA for body text: the floor AurigaX holds every foreground to when the person asks for more contrast. */
 export const highContrastRatio = 4.5;
 

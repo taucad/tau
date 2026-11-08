@@ -25,6 +25,10 @@ export type TerminalRendererOptions = {
   readonly screenReaderMode: boolean;
   /** Foreground contrast floor, 1 (off) to 21. */
   readonly minimumContrastRatio: number;
+  /** How the WebGL renderer blends text into its background (Tau's AurigaX patch). Default `native`. */
+  readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
+  /** Exponent on glyph coverage in the WebGL renderer: above 1 thins text. Default 1. */
+  readonly textWeight?: number;
   readonly reducedMotion: boolean;
   /** Receives an `http(s)` link the person Ctrl/Cmd+clicked; the caller applies Tau's navigation policy. */
   readonly onLinkActivate: (uri: string) => void;
@@ -274,6 +278,8 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     renderer: 'webgl',
     cursorBlink: !options.reducedMotion,
     minimumContrastRatio: options.minimumContrastRatio,
+    textBlending: options.textBlending,
+    textWeight: options.textWeight,
     smoothScrollDuration: options.reducedMotion ? 0 : 100,
     /* Always installed: without a handler AurigaX opens a window itself on Ctrl/Cmd+click. */
     linkHandler: {

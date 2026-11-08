@@ -42,6 +42,9 @@ import type {
 import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import type { llmAdmissionOutcomes } from '@taucad/telemetry';
+import { gatewayProviderLabel, inlineImageBytesOf, recordTurnStepCache } from '#api/billing/turn-step-telemetry.js';
+import type { TurnTelemetry } from '#api/llm/model-invocation.types.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 
@@ -55,9 +58,13 @@ const requestTooLarge = (): LlmGatewayError =>
  * Refuse a body the request digest will not walk: deeper than 64, more than
  * 100,000 objects, cyclic, or over the funded request contract's UTF-8 bytes.
  * The byte bound is the contract's own, so no body the contract admits is
- * refused here first.
+ * refused here first. The same walk counts the base64 image bytes the body
+ * carries inline, for `tau.llm.gateway.request_body.inline_image_bytes`.
+ *
+ * @returns The inline base64 image characters in the body.
  */
-const assertRequestBound = (value: unknown): void => {
+const assertRequestBound = (value: unknown): number => {
+  let inlineImageBytes = 0;
   const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   // oxlint-disable-next-line typescript/no-restricted-types -- WeakSet accepts arrays and records
   const seen = new WeakSet<object>();
@@ -71,6 +78,7 @@ const assertRequestBound = (value: unknown): void => {
       throw requestTooLarge();
     }
     seen.add(current.value);
+    inlineImageBytes += inlineImageBytesOf(current.value as Record<string, unknown>);
     for (const child of Object.values(current.value)) {
       pending.push({ value: child, depth: current.depth + 1 });
     }
@@ -78,6 +86,15 @@ const assertRequestBound = (value: unknown): void => {
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > maximumModelRequestBytes) {
     throw requestTooLarge();
   }
+  return inlineImageBytes;
+};
+
+type AdmissionOutcome = (typeof llmAdmissionOutcomes)[number];
+
+/** The turn labels and supplier first-token time one dispatched operation settles with. */
+type TurnStepObservation = {
+  readonly turn: TurnTelemetry | undefined;
+  timeToFirstTokenSeconds?: number;
 };
 /** A provider-account refusal in the body, with its provider narrowed to the gateway's own set. */
 const providerAccountRefusal = (
@@ -142,6 +159,12 @@ const genAiAttributes = (
 @Injectable()
 export class BillableModelInvocationService {
   private readonly logger = new Logger(BillableModelInvocationService.name);
+  /** Invocations whose admission duration is already recorded, so each records exactly one exit. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- WeakSet keys are per-invocation intents
+  private readonly admissionRecorded = new WeakSet<object>();
+  /** Turn labels and first-token time per dispatched operation, read once at settlement. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- WeakMap keys are operation rows
+  private readonly turnSteps = new WeakMap<object, TurnStepObservation>();
 
   public constructor(
     @Inject(CreditLedgerService) private readonly ledger: CreditLedgerService,
@@ -169,7 +192,7 @@ export class BillableModelInvocationService {
 
   private async invokeBound(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
     const startedAt = performance.now();
-    assertRequestBound(suppliedIntent.body);
+    const inlineImageBytes = assertRequestBound(suppliedIntent.body);
     const intent = {
       ...suppliedIntent,
       body: structuredClone(suppliedIntent.body),
@@ -196,9 +219,18 @@ export class BillableModelInvocationService {
       ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
       ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
     });
+    this.metrics?.llmGatewayInlineImageBytes.record(inlineImageBytes, {
+      'gen_ai.provider.name': gatewayProviderLabel(resolved.providerId),
+    });
     try {
       return await this.admitAndDispatch(intent, resolved, startedAt);
     } catch (error) {
+      this.recordAdmission(
+        intent,
+        resolved,
+        startedAt,
+        intent.signal.aborted ? 'cancelled' : error instanceof LlmGatewayError ? 'refused' : 'error',
+      );
       this.recordOperationDuration(
         resolved,
         startedAt,
@@ -345,6 +377,7 @@ export class BillableModelInvocationService {
       throw classified(this.denial(admission, intent, qualification.routeId), admission.reason);
     }
     if (admission.status === 'replay') {
+      this.recordAdmission(intent, qualification, startedAt, 'replayed');
       intent.onAdmitted?.(admission.operationId);
       return {
         state: admission.customerState === 'pending' ? 'pending' : 'terminal',
@@ -364,9 +397,11 @@ export class BillableModelInvocationService {
           requestDigest,
         });
       }
+      this.recordAdmission(intent, qualification, startedAt, 'cancelled');
       return { state: 'pending', operationId: row.id };
     }
     if (!(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
+      this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };
     }
     return this.dispatch(intent, qualification, row, admission.generation, startedAt, countSignal);
@@ -383,6 +418,7 @@ export class BillableModelInvocationService {
   ): Promise<BillableInvocationResult> {
     const remaining = await this.ledger.getDispatchTimeRemaining(row.id, generation);
     if (remaining <= 0) {
+      this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };
     }
     const deadline = AbortSignal.timeout(
@@ -404,6 +440,8 @@ export class BillableModelInvocationService {
     intent.signal.addEventListener('abort', recordCancellation, { once: true });
     let response: Response;
     const dispatchedAt = performance.now();
+    this.recordAdmission(intent, qualification, startedAt, 'dispatched');
+    this.turnSteps.set(row, { turn: intent.turn });
     try {
       response = await qualification.adapter.executeOnce({
         qualification,
@@ -604,11 +642,13 @@ export class BillableModelInvocationService {
         return false;
       }
       if (bytes === 0 && part.value.byteLength > 0 && streaming) {
-        this.metrics?.genAiTimeToFirstToken.record(
-          // From the supplier request, not invocation entry: admission is not model responsiveness.
-          (performance.now() - dispatchedAt) / 1000,
-          genAiAttributes(qualification),
-        );
+        // From the supplier request, not invocation entry: admission is not model responsiveness.
+        const timeToFirstToken = (performance.now() - dispatchedAt) / 1000;
+        this.metrics?.genAiTimeToFirstToken.record(timeToFirstToken, genAiAttributes(qualification));
+        const observation = this.turnSteps.get(row);
+        if (observation) {
+          observation.timeToFirstTokenSeconds = timeToFirstToken;
+        }
       }
       bytes += part.value.byteLength;
       if (bytes > qualification.maximumResponseBytes) {
@@ -754,10 +794,42 @@ export class BillableModelInvocationService {
       receipt,
       row.environment,
     );
+    const observation = this.turnSteps.get(row);
+    this.turnSteps.delete(row);
+    recordTurnStepCache(this.metrics, {
+      providerId: qualification.providerId,
+      turn: observation?.turn,
+      evidence,
+      timeToFirstTokenSeconds: observation?.timeToFirstTokenSeconds,
+    });
     this.evidenceRecorder?.recordSettlement({
       operation: row,
       receipt,
       normalization: evidence.normalizationEvidence?.version,
+    });
+  }
+
+  /**
+   * Records how long one funded call spent in admission, once, on whichever exit it took: the
+   * supplier request (`dispatched`) or the answer given instead. An idempotent repeat of an attempt
+   * the ledger already holds returns before qualification and is not admission work, so it is not
+   * recorded.
+   */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one admission exit
+  private recordAdmission(
+    intent: BillableInvocationIntent,
+    qualification: QualifiedBillableInvocation,
+    startedAt: number,
+    outcome: AdmissionOutcome,
+  ): void {
+    if (this.admissionRecorded.has(intent)) {
+      return;
+    }
+    this.admissionRecorded.add(intent);
+    this.metrics?.llmGatewayAdmissionDuration.record((performance.now() - startedAt) / 1000, {
+      'gen_ai.provider.name': gatewayProviderLabel(qualification.providerId),
+      'tau.surface': qualification.surface,
+      outcome,
     });
   }
 

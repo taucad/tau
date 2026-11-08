@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(192);
+    expect(metrics).toHaveLength(200);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -718,5 +718,21 @@ describe('TauMetrics', () => {
         expect(metric.buckets).toBeUndefined();
       }
     }
+  });
+
+  it('should bound the gateway latency and turn-step cache labels and see a cold re-prefill past 10 s', () => {
+    expect(TauMetrics.llmTurnStepCacheOutcomes.attributes.shape['tau.turn.gap'].options).toEqual([
+      'first_turn',
+      'lt_5m',
+      '5m_60m',
+      'gt_60m',
+      'unknown',
+    ]);
+    expect(
+      TauMetrics.llmTurnStepCacheOutcomes.attributes.shape['gen_ai.provider.name'].safeParse('proj_1').success,
+    ).toBe(false);
+    expect(TauMetrics.llmTurnStepCacheTokens.attributes.shape['gen_ai.token.type'].options).toContain('cache_write_1h');
+    expect(TauMetrics.genAiTimeToFirstToken.buckets.at(-1)).toBeGreaterThanOrEqual(60);
+    expect(TauMetrics.llmGatewayRequestSize.buckets.at(-1)).toBe(64 * 1024 * 1024);
   });
 });

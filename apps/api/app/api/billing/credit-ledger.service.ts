@@ -1,4 +1,5 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
+import { turnStepTokenType } from '#api/billing/turn-step-telemetry.js';
 import { spendBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
   paymentOfferSnapshotSchema,
@@ -370,12 +371,6 @@ const hasConstraint = (error: unknown, constraint: string): boolean => {
   return false;
 };
 
-const genAiTokenTypes = new Map([
-  ['uncached_input', 'input'],
-  ['cache_read', 'cache_read'],
-  ['cache_write', 'cache_write'],
-  ['output', 'output'],
-]);
 /** One credit atom is one micro-USD. */
 const creditAtomsPerUsd = 1_000_000;
 
@@ -407,7 +402,8 @@ export const recordSettledGenAiUsage = (
   const meterItems =
     evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
   for (const item of meterItems) {
-    const tokenType = genAiTokenTypes.get(item.dimension);
+    // Tier-aware: the `cache_write` dimension's `1h` tier is `cache_write_1h`, priced at twice the input rate.
+    const tokenType = turnStepTokenType(item);
     if (tokenType !== undefined) {
       metrics?.genAiTokenUsage.record(Number(item.quantity), { ...attributes, 'gen_ai.token.type': tokenType });
     }

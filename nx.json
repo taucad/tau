@@ -78,7 +78,7 @@
       },
       "inputs": [
         "default",
-        "^default",
+        "^production",
         "{workspaceRoot}/eslint.config.mjs",
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/libs/oxlint/src/**/*",

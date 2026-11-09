@@ -3,7 +3,7 @@ title: 'Lint Policy'
 description: 'Hybrid oxlint + ESLint architecture, performance principles, rule-specific decisions, and caching for the Tau monorepo.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-29'
+updated: '2026-11-09'
 related:
   - nx.json
   - .oxlintrc.json
@@ -119,6 +119,7 @@ The `.js` extension rule lives in `.oxlintrc.json`. Reassess redundant checks on
 ## Typed linting
 
 - Oxlint enables `options.typeAware: true`; ESLint configures `parserOptions.projectService` with a scoped default-project allowlist.
+- Each type-aware rule runs in one engine. Oxlint (tsgolint) owns every type-aware `typescript/*` rule; ESLint's only type-aware rule is `@typescript-eslint/naming-convention`, whose `types: ['boolean']` selector needs type information and has no oxlint equivalent. Do not enable a type-aware rule in both configs.
 - Before trusting a type-aware verdict, confirm the file belongs to its intended TypeScript project. Repair the owning tsconfig membership or source boundary; an excluded file is not evidence that its types are correct.
 - Keep tsconfig `include` patterns narrow. Broad globs like `**/*` cause TypeScript to pre-parse build artifacts.
 - If linting is memory-constrained, increase the semi-space: `NODE_OPTIONS=--max-semi-space-size=256`.
@@ -132,6 +133,7 @@ JSDoc rule fixtures passed to tsgolint need absolute workspace virtual paths, in
 ## Caching
 
 - The Nx lint target declares inputs for the ESLint/oxlint configs, custom rules, and tool versions in `nx.json`.
+- Dependency inputs are `^production`, as for `typecheck`: type-aware rules read a dependency's sources and declarations, never its tests, Vitest configs, Markdown or `specs/`, so a dependency's test edit does not invalidate its dependents' lint.
 - ESLint's file cache is a separate opt-in for direct profiling runs (`eslint --cache`). It is not enabled by the shared lint command.
 - If enabling that file cache, ignore its `.eslintcache` artifact and include configuration changes in invalidation checks.
 

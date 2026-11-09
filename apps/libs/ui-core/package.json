@@ -154,7 +154,6 @@
     "react-router": "catalog:",
     "three": "^0.184.0",
     "type-fest": "catalog:",
-    "vitest": "catalog:",
     "vscode-languageserver-protocol": "^3.18.0",
     "xstate": "catalog:"
   },
@@ -175,6 +174,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "replicad": "catalog:",
+    "vitest": "catalog:",
     "vitest-mock-extended": "catalog:",
     "zod": "catalog:"
   }

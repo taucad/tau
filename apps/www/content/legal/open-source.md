@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 898 packages, with the license each declares.
+The web and desktop apps include the following 903 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -370,6 +370,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [bowser](https://github.com/bowser-js/bowser) | 2.14.1 | MIT |
 | [brace-expansion](https://github.com/juliangruber/brace-expansion) | 5.0.12 | MIT |
 | [broker-factory](https://github.com/chrisguttandin/broker-factory) | 3.1.15 | MIT |
+| [bson](https://github.com/mongodb/js-bson) | 6.10.4 | Apache-2.0 |
 | [buffer](https://github.com/feross/buffer) | 6.0.3 | MIT |
 | [buffer-equal-constant-time](https://github.com/goinstant/buffer-equal-constant-time) | 1.0.1 | BSD-3-Clause |
 | [buffer-from](https://github.com/LinusU/buffer-from) | 1.1.2 | MIT |
@@ -414,6 +415,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [convert-source-map](https://github.com/thlorenz/convert-source-map) | 2.0.0 | MIT |
 | [convert-to-spaces](https://github.com/vadimdemedes/convert-to-spaces) | 2.0.1 | MIT |
 | [cookie](https://github.com/jshttp/cookie) | 0.7.2 | MIT |
+| [cookie](https://github.com/jshttp/cookie) | 1.1.1 | MIT |
 | [cookie-signature](https://github.com/visionmedia/node-cookie-signature) | 1.2.2 | MIT |
 | [core-util-is](https://github.com/isaacs/core-util-is) | 1.0.3 | MIT |
 | [cors](https://github.com/expressjs/cors) | 2.8.6 | MIT |
@@ -481,6 +483,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [end-of-stream](https://github.com/mafintosh/end-of-stream) | 1.4.5 | MIT |
 | [enquirer](https://github.com/enquirer/enquirer) | 2.3.6 | MIT |
 | [environment](https://github.com/sindresorhus/environment) | 1.1.0 | MIT |
+| [es-cookie](https://github.com/theodorejb/es-cookie) | 1.5.0 | MIT |
 | [es-define-property](https://github.com/ljharb/es-define-property) | 1.0.1 | MIT |
 | [es-errors](https://github.com/ljharb/es-errors) | 1.3.0 | MIT |
 | [es-module-lexer](https://github.com/guybedford/es-module-lexer) | 2.3.2 | MIT |
@@ -763,6 +766,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [react-remove-scroll](https://github.com/theKashey/react-remove-scroll) | 2.7.2 | MIT |
 | [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar) | 2.3.8 | MIT |
 | [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels) | 3.0.6 | MIT |
+| [react-router](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
 | [react-style-singleton](https://github.com/theKashey/react-style-singleton) | 2.2.3 | MIT |
 | [react-virtuoso](https://github.com/petyosi/react-virtuoso) | 4.18.16 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 2.3.8 | MIT |
@@ -801,6 +805,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
 | [send](https://github.com/pillarjs/send) | 1.2.1 | MIT |
 | [serve-static](https://github.com/expressjs/serve-static) | 2.2.1 | MIT |
+| [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 2.7.2 | MIT |
 | [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 3.1.3 | MIT |
 | [set-function-length](https://github.com/ljharb/set-function-length) | 1.2.2 | MIT |
 | [setimmediate](https://github.com/YuzuJS/setImmediate) | 1.0.5 | MIT |

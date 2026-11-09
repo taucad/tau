@@ -47,8 +47,11 @@ describe('selected project route verification', () => {
     const reads = vi.spyOn(provider, 'readFile');
     const writes = vi.spyOn(provider, 'writeFile');
     const scan = vi.spyOn(context.service, 'listProjectManifests');
+    const refresh = vi.spyOn(provider as { refresh: (prefixes?: readonly string[]) => Promise<void> }, 'refresh');
     const result = await context.service.verifyProjectRoute({ projectId });
     expect(result).toMatchObject({ status: 'verified', project: { projectId, manifest: { name: 'Selected' } } });
+    // Only the verified project's projections are refreshed; other projects on the root stay warm.
+    expect(refresh.mock.calls).toStrictEqual([[['selected']]]);
     expect(
       reads.mock.calls.every(([path]) => path === 'selected/tau.json' || path === `selected/${projectIdentityPath}`),
     ).toBe(true);

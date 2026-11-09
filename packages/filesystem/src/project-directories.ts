@@ -870,7 +870,7 @@ export class ProjectDirectories {
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async (): Promise<ProjectRouteVerification> => {
         try {
-          await input.provider.refresh?.();
+          await input.provider.refresh?.([directory]);
           const manifestBytes = await input.provider.readFile(joinRelativePath(directory, 'tau.json'));
           const manifest = parseProjectManifestBytes(manifestBytes);
           if (!manifest.success) {

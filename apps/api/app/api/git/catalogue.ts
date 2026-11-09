@@ -1,8 +1,8 @@
 import { fileLinkRepositoryMaximumBytes } from '@taucad/file-links';
-import { listingKeyFor } from '#api/git/store/listing-key.js';
-import { indexKeyFor } from '#api/git/store/manifest.js';
-import type { Manifest } from '#api/git/store/manifest.js';
-import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
+import { listingKeyFor } from '@taucad/api-git-core/store/listing-key';
+import { indexKeyFor } from '@taucad/api-git-core/store/manifest';
+import type { Manifest } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryLocator, RepositoryStore } from '@taucad/api-git-core/store/port';
 
 /**
  * The catalogue (charter D8, EQ3): everything a cold open reads before it

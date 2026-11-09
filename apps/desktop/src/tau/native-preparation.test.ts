@@ -57,7 +57,7 @@ const deploymentOf = (download?: { readonly bytes: Uint8Array<ArrayBuffer> }) =>
         engine: [
           {
             target: hostTarget(),
-            payloads: [
+            files: [
               {
                 name: 'worker.py',
                 integrity: integrity(Buffer.from(worker)),

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentChannelClient, AgentLogEvent, HostRunSnapshot } from '@taucad/agent-host';
 import type { CatchUpFrame, CommandAnswer, HostCommand, ReadRequest } from '@taucad/agent-host/wire';
 import { createAgentHostClient } from '#services/agent-host-client.js';
-import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 
 type FakeChannel = AgentChannelClient & {
   readonly commands: HostCommand[];

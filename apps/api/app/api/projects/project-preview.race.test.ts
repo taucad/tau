@@ -6,16 +6,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
-import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
+import { objectStoragePreviewWriter } from '@taucad/api-git-core/project-preview-store';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
-import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node Buffer fixture encodes the WebP envelope.
 const image = (): Buffer<ArrayBuffer> => {

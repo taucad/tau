@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {

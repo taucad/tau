@@ -16,7 +16,7 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
+import { Dropzone, DropzoneEmptyState } from '@taucad/ui-kit/components/dropzone';
 import { FormatsList } from '#routes/convert/formats-list.js';
 import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {

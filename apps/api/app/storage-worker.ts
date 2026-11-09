@@ -2,9 +2,9 @@ import '@taucad/api-observability/otel'; // oxlint-disable-line eslint-plugin-im
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators on the store and driver need metadata before they load
 import process from 'node:process';
 import { Logger } from '@nestjs/common';
-import { getStorageEnvironment } from '#config/storage-environment.config.js';
-import { JsonLineLogger } from '#api/git/worker/json-logger.js';
-import { startStorageApp } from '#api/git/worker/storage-app.js';
+import { getStorageEnvironment } from '@taucad/api-git-core/storage-environment.config';
+import { JsonLineLogger } from '@taucad/api-git-core/worker/json-logger';
+import { startStorageApp } from '@taucad/api-git-core/worker/storage-app';
 
 /**
  * `tau-storage`: the private git execution app (north star component 4, DC1).

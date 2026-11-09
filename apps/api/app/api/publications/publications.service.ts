@@ -38,11 +38,11 @@ import {
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
-import { decodeManifest } from '#api/git/store/manifest.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
-import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
+import { decodeManifest } from '@taucad/api-git-core/store/manifest';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import { resolveLfsObjectLocation } from '@taucad/api-git-core/lfs-keys';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { ReadLease } from '#api/git/git.service.js';
 import { DatabaseService } from '@taucad/api-database';
@@ -51,11 +51,11 @@ import { buildPublicationViewUrl, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
-import type { StorageTier } from '#storage/object-storage.service.js';
-import type { StorageNamespace } from '#storage/storage.constants.js';
-import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
-import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
+import { ObjectStorageService, isS3ObjectMissing } from '@taucad/api-object-storage';
+import type { StorageTier } from '@taucad/api-object-storage';
+import type { StorageNamespace } from '@taucad/api-object-storage/constants';
+import { concatUint8Arrays } from '@taucad/api-object-storage/concat-uint8-arrays';
+import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
 import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** The shared placeholder card image every publication starts with. */

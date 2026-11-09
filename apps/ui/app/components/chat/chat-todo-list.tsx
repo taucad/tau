@@ -1,4 +1,4 @@
-import { chatComposerTrayHeaderClassName } from '#components/chat/chat-input-styles.js';
+import { chatComposerTrayHeaderClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronRight, Circle, CircleCheck, ListChecks } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';

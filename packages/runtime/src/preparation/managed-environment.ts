@@ -14,12 +14,12 @@ const proxyVariables = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'
 // The managed family (D25) and the proxy and CA names Node reads at start-up, which the plugin manifests forward.
 const profileVariables = [
   'TAU_ACQUISITION',
-  'TAU_PAYLOAD_MIRROR',
-  'TAU_PAYLOAD_MIRROR_NO_FALLBACK',
-  'TAU_PAYLOAD_DIR',
+  'TAU_DEPENDENCY_MIRROR',
+  'TAU_DEPENDENCY_MIRROR_NO_FALLBACK',
+  'TAU_DEPENDENCY_DIR',
   'TAU_CONFIG_DIR',
-  'TAU_PAYLOAD_TARGET',
-  'TAU_PAYLOAD_EMULATION',
+  'TAU_DEPENDENCY_TARGET',
+  'TAU_DEPENDENCY_EMULATION',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'NO_PROXY',
@@ -33,39 +33,51 @@ const profileVariables = [
   'NODE_USE_ENV_PROXY',
 ] as const;
 
+// The managed variables' names before the dependency rename (blueprint D2a): set, they fail naming the successor
+// rather than being ignored.
+const renamedVariables = ['MIRROR', 'MIRROR_NO_FALLBACK', 'DIR', 'TARGET', 'EMULATION'].map(
+  (suffix) => [`TAU_PAYLOAD_${suffix}`, `TAU_DEPENDENCY_${suffix}`] as const,
+);
+
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === '' ? undefined : value.trim();
 
 /**
- * Read the managed profile every Node host entry honours: `TAU_ACQUISITION=open|locked`, `TAU_PAYLOAD_MIRROR`
- * (a digest-addressed `https://`, `http://` or `file://` base), `TAU_PAYLOAD_MIRROR_NO_FALLBACK=1`,
- * `TAU_PAYLOAD_DIR` (a seed directory), `TAU_PAYLOAD_TARGET` and `TAU_PAYLOAD_EMULATION=0`. `locked` implies the
- * no-fallback switch, and without a mirror it means the store and the seed only. `TAU_CONFIG_DIR` is read by
- * `defaultPayloadStore()`, not here.
+ * Read the managed profile every Node host entry honours: `TAU_ACQUISITION=open|locked`, `TAU_DEPENDENCY_MIRROR`
+ * (a digest-addressed `https://`, `http://` or `file://` base), `TAU_DEPENDENCY_MIRROR_NO_FALLBACK=1`,
+ * `TAU_DEPENDENCY_DIR` (a seed directory), `TAU_DEPENDENCY_TARGET` and `TAU_DEPENDENCY_EMULATION=0`. `locked`
+ * implies the no-fallback switch, and without a mirror it means the store and the seed only. `TAU_CONFIG_DIR` is read by
+ * `defaultDependencyStore()`, not here.
  * @param environment - Usually `process.env`.
  * @returns The interpreted profile.
- * @throws {TypeError} When a variable holds a value no host can honour, naming the variable and what it accepts.
+ * @throws {TypeError} When a variable holds a value no host can honour, naming the variable and what it accepts, or
+ * when a `TAU_PAYLOAD_*` variable is set, naming its `TAU_DEPENDENCY_*` successor.
  * @public
  */
 export const readManagedPreparation = (environment: Environment): ManagedPreparation => {
+  for (const [retired, successor] of renamedVariables) {
+    if (nonEmpty(environment[retired]) !== undefined) {
+      throw new TypeError(`${retired} was renamed to ${successor}; set ${successor} instead and unset ${retired}.`);
+    }
+  }
   const acquisition = nonEmpty(environment['TAU_ACQUISITION']) ?? 'open';
   if (acquisition !== 'open' && acquisition !== 'locked') {
     throw new TypeError(`TAU_ACQUISITION is "${acquisition}"; set it to "open" or "locked", or unset it.`);
   }
-  const mirrorUrl = nonEmpty(environment['TAU_PAYLOAD_MIRROR']);
+  const mirrorUrl = nonEmpty(environment['TAU_DEPENDENCY_MIRROR']);
   if (mirrorUrl !== undefined && (!URL.canParse(mirrorUrl) || !mirrorProtocols.has(new URL(mirrorUrl).protocol))) {
     throw new TypeError(
-      `TAU_PAYLOAD_MIRROR is "${mirrorUrl}"; set it to an https://, http:// or file:// base URL whose blobs/sha256/<hex> serves each payload.`,
+      `TAU_DEPENDENCY_MIRROR is "${mirrorUrl}"; set it to an https://, http:// or file:// base URL whose blobs/sha256/<hex> serves each dependency file.`,
     );
   }
-  const emulation = nonEmpty(environment['TAU_PAYLOAD_EMULATION']);
+  const emulation = nonEmpty(environment['TAU_DEPENDENCY_EMULATION']);
   if (emulation !== undefined && emulation !== '0' && emulation !== '1') {
-    throw new TypeError(`TAU_PAYLOAD_EMULATION is "${emulation}"; set it to "0" to disable the emulation fallback.`);
+    throw new TypeError(`TAU_DEPENDENCY_EMULATION is "${emulation}"; set it to "0" to disable the emulation fallback.`);
   }
   const locked = acquisition === 'locked';
-  const noFallback = locked || nonEmpty(environment['TAU_PAYLOAD_MIRROR_NO_FALLBACK']) === '1';
-  const seed = nonEmpty(environment['TAU_PAYLOAD_DIR']);
-  const target = nonEmpty(environment['TAU_PAYLOAD_TARGET']);
+  const noFallback = locked || nonEmpty(environment['TAU_DEPENDENCY_MIRROR_NO_FALLBACK']) === '1';
+  const seed = nonEmpty(environment['TAU_DEPENDENCY_DIR']);
+  const target = nonEmpty(environment['TAU_DEPENDENCY_TARGET']);
   return {
     profile: acquisition,
     ...(mirrorUrl === undefined ? {} : { mirror: { baseUrl: mirrorUrl, noFallback } }),

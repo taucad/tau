@@ -10,7 +10,7 @@
  * measured off a raster.
  *
  * The output is the UI's `jscad` icon, so it also lands in the sprite's raw
- * icon directory; run `pnpm nx run ui:generate-svg-sprite` afterwards.
+ * icon directory; run `pnpm nx run ui-kit:generate-svg-sprite` afterwards.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -474,7 +474,7 @@ const targets: ReadonlyArray<readonly [string, string]> = [
   // The UI sprite's raw icon: one source, so the mark cannot drift from the
   // part it is rendered from.
   [
-    join(here, '../../../../../../apps/ui/app/components/icons/raw/jscad.svg'),
+    join(here, '../../../../../../apps/libs/ui-kit/src/icons/raw/jscad.svg'),
     svg,
   ],
 ];

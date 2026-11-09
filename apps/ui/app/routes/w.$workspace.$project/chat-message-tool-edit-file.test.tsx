@@ -5,7 +5,7 @@ import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
 
-vi.mock('#components/chat/chat-tool-card.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
   ChatToolCard({
     children,
     status,
@@ -39,13 +39,13 @@ vi.mock('#components/chat/chat-tool-card.js', () => ({
   },
 }));
 
-vi.mock('#components/chat/chat-tool-text.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-text', () => ({
   ChatToolDescription({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <span data-testid='chat-tool-description'>{children}</span>;
   },
 }));
 
-vi.mock('#components/chat/chat-tool-label.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-label', () => ({
   ChatToolLabel({
     verb,
     children,

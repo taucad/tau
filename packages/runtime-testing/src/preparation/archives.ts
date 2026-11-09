@@ -1,5 +1,5 @@
 /* oxlint-disable no-bitwise -- tar modes and zip records are bit fields. */
-// In-test payload archives: the three shapes a native closure ships (a gzipped ustar tree, a stored zip and a wheel
+// In-test dependency file archives: the three shapes a native closure ships (a gzipped ustar tree, a stored zip and a wheel
 // whose RECORD lists every member), built in memory so a test pins bytes it made itself and never downloads one.
 import { createHash } from 'node:crypto';
 import { crc32, gzipSync } from 'node:zlib';

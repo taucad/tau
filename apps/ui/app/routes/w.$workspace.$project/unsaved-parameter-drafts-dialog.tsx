@@ -9,7 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
 import { pluralize, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { UnsavedParameterDraftsRefusal } from '#services/parameter-set-service.js';

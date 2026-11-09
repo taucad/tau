@@ -11,14 +11,14 @@ import {
   stampMessageCreatedAt,
 } from '#utils/chat.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
-import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
+import { clearLedger, recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { metaConfig } from '#constants/meta.constants.js';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { Chat } from '@ai-sdk/react';
 import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { openRunWatch } from '#chat-clients/_internal/run-watch.js';
-import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 
 const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   id: 'msg-1',

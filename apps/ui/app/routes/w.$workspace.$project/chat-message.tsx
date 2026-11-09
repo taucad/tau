@@ -1,4 +1,4 @@
-import { ChatMessageSurface } from '#components/chat/chat-message-surface.js';
+import { ChatMessageSurface } from '@taucad/chat-ui/components/chat-message-surface';
 import {
   BookOpen,
   Box,
@@ -20,21 +20,21 @@ import type { DynamicToolUIPart } from 'ai';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { serializeMessage } from '#utils/chat.utils.js';
-import { parseInlineReferences } from '#utils/at-reference.utils.js';
-import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
+import { parseInlineReferences } from '@taucad/chat-ui/utils/at-reference.utils';
+import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '@taucad/chat-ui/utils/assistant-message-activity';
 import {
   groupAssistantParts,
   findLastMeaningfulPartIndex,
   isActivityPartActive,
-} from '#utils/assistant-message-activity.js';
+} from '@taucad/chat-ui/utils/assistant-message-activity';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
-import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
-import { ContextChip } from '#components/chat/context-chip.js';
+import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
+import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
-import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
+import { ChatActivityGroup } from '@taucad/chat-ui/components/chat-activity-group';
+import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
@@ -46,9 +46,9 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { When } from '#components/ui/utils/when.js';
+import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
+import { chatInputTextClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';

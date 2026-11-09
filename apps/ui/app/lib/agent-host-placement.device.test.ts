@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentExecution } from '@taucad/chat';
-import { portableExecutionOf } from '#utils/chat-execution.js';
+import { portableExecutionOf } from '@taucad/chat-ui/utils/chat-execution';
 
 /**
  * The chat owns intent; the device owns placement (cross-device chat handoff, XD2).

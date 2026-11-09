@@ -5,7 +5,7 @@ import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/cha
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useModels } from '#hooks/use-models.js';

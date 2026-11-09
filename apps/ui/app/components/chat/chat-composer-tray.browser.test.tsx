@@ -3,9 +3,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { Ask } from '@taucad/chat';
-import { chatComposerTrayClassName } from '#components/chat/chat-input-styles.js';
-import type { ChatMessageQueueProps } from '#components/chat/chat-message-queue-view.js';
-import { ChatMessageQueueView } from '#components/chat/chat-message-queue-view.js';
+import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
+import type { ChatMessageQueueProps } from '@taucad/chat-ui/components/chat-message-queue-view';
+import { ChatMessageQueueView } from '@taucad/chat-ui/components/chat-message-queue-view';
 
 let hasTasks = true;
 let asks: Ask[] = [];

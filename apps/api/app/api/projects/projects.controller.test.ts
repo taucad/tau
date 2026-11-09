@@ -17,7 +17,7 @@ import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 import { projectDeletion } from '@taucad/api-database/schema';
 import type { project } from '@taucad/api-database/schema';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
+import { registeredProjectLimitPerOwner } from '@taucad/api-git-core/git.constants';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectsController } from '#api/projects/projects.controller.js';

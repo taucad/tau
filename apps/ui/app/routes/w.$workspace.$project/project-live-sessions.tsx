@@ -44,7 +44,7 @@ import {
   readBrowserRunStoppability,
   retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
-import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';

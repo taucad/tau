@@ -26,6 +26,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `ready_for_review` so a draft, which requests no macOS runner, gets its rows once it is ready.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches-ignore:
       - production
   schedule:
@@ -149,7 +151,8 @@ jobs:
   native-darwin:
     name: Native kernels on darwin-arm64
     needs: [plan]
-    if: needs.plan.outputs.projects != ''
+    # Not on a draft pull request: the row runs once it is marked ready for review.
+    if: needs.plan.outputs.projects != '' && !github.event.pull_request.draft
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -187,9 +190,9 @@ jobs:
             const manifest = JSON.parse(readFileSync("packages/plugins/build123d/tau-plugin.json", "utf8"));
             const pins = Object.values(manifest.dependencies).flat()
               .filter(({ target }) => target.os === "darwin" && target.arch === "arm64")
-              .flatMap(({ payloads }) => payloads.map(({ integrity }) => integrity))
+              .flatMap(({ files }) => files.map(({ integrity }) => integrity))
               .toSorted();
-            if (pins.length === 0) throw new Error("The manifest pins no darwin-arm64 payload.");
+            if (pins.length === 0) throw new Error("The manifest pins no darwin-arm64 dependency file.");
             console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
           ')
           macos=$(sw_vers -productVersion | cut -d. -f1)
@@ -202,7 +205,7 @@ jobs:
           path: out/cache/build123d-seed
           key: ${{ steps.seed-key.outputs.key }}
 
-      # Every `seed` target fills its payload seed for this host. On a hit this only re-verifies
+      # Every `seed` target fills its dependency seed for this host. On a hit this only re-verifies
       # each blob against its pin; on a miss it downloads the closure from its origins, every
       # blob checked before it is written.
       - name: Fill the seed from the pinned origins

@@ -15,7 +15,7 @@ import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
 // ---------------------------------------------------------------------------
 // Unified composer-context mock — `useChatTextareaLogic` is a single
@@ -130,7 +130,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
 
 const toastErrorMock = vi.fn();
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: toastErrorMock },
 }));
 

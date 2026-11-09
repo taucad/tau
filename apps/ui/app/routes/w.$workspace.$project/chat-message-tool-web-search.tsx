@@ -8,9 +8,9 @@ import {
   ChatToolCardIcon,
   ChatToolCardTitle,
   ChatToolCardContent,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { WebFavicon } from '#routes/w.$workspace.$project/web-favicon.js';
 import { WebSourceLink } from '#routes/w.$workspace.$project/web-source-link.js';

@@ -7,12 +7,12 @@ import {
   cadReferencesOfChips,
 } from '#components/chat/tiptap/use-chat-editor.js';
 import type { UseChatEditorOptions } from '#components/chat/tiptap/use-chat-editor.js';
-import { defaultCommands } from '#components/chat/tiptap/slash-command-suggestion.js';
-import type { PastedContentSegment } from '#utils/at-reference.utils.js';
-import { buildPastedContent } from '#utils/at-reference.utils.js';
+import { defaultCommands } from '@taucad/chat-ui/components/tiptap/slash-command-suggestion';
+import type { PastedContentSegment } from '@taucad/chat-ui/utils/at-reference.utils';
+import { buildPastedContent } from '@taucad/chat-ui/utils/at-reference.utils';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
+import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
 
 Object.defineProperty(document, 'elementFromPoint', {
   configurable: true,

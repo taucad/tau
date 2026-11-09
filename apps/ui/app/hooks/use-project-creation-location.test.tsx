@@ -107,7 +107,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => {
   return { useWorkspaceTelemetry: () => telemetry };
 });
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: mockToastError } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mockToastError } }));
 
 const { useProjectCreationLocation } = await import('#hooks/use-project-creation-location.js');
 

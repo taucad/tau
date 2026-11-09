@@ -4,11 +4,11 @@ import { CollaborationModule } from '#api/collaboration/collaboration.module.js'
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
-import { StorageModule } from '#storage/storage.module.js';
+import { StorageModule } from '@taucad/api-object-storage/module';
 import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import { GitModule } from '#api/git/git.module.js';
-import { previewWriterProvider } from '#api/git/forwarding/preview-writer.js';
+import { previewWriterProvider } from '@taucad/api-git-core/forwarding/preview-writer';
 
 /**
  * The project registry a client claims a project id in (P51).

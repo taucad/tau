@@ -119,9 +119,9 @@ const outputs = [
   [join(workspaceRoot, 'apps/ui/public/avatar-circle.png'), circleAvatarPng],
   [join(workspaceRoot, 'apps/ui/public/avatar-square.svg'), squareAvatarSvg],
   [join(workspaceRoot, 'apps/ui/public/avatar-square.png'), squareAvatarPng],
-  [join(workspaceRoot, 'apps/ui/app/components/icons/tau.tsx'), component],
+  [join(workspaceRoot, 'apps/libs/ui-kit/src/icons/tau.tsx'), component],
   // UI sprite icon: the bare brand mark, full-bleed to the view box.
-  [join(workspaceRoot, 'apps/ui/app/components/icons/raw/tau.svg'), svg],
+  [join(workspaceRoot, 'apps/libs/ui-kit/src/icons/raw/tau.svg'), svg],
 ] as const;
 
 if (process.argv.includes('--check')) {

@@ -10,9 +10,9 @@ import {
   ChatToolCardList,
   ChatToolCardListItem,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { todoStatusIcons, todoStatusLabels } from '#components/chat/chat-todo-list.js';
 

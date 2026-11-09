@@ -8,9 +8,9 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { ENV } from '#environment.config.js';
-import { cardOf } from '#utils/chat-error-card.js';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
   autoResumableProviderUnavailableCode,
   autoResumableRateLimitCode,

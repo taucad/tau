@@ -3,7 +3,7 @@ import { packageVersion } from '@taucad/runtime/metadata';
 /**
  * Kernel import extensions the publication runtime routes, pinned against the Tau CLI's
  * runtime (`@taucad/cli`'s `createCliRuntime`) by `publication-runtime.parity.test.ts`:
- * every CLI kernel except the native ones, which bind a local payload store.
+ * every CLI kernel except the native ones, which bind a local dependency store.
  * Never hand-edit an extension here — change the plugin.
  */
 export const publicationKernelExtensions = [

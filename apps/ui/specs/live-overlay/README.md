@@ -14,11 +14,11 @@ A durable tool result projects as its output, then `finish-step` and `start-step
 
 ## Correspondence to implementation
 
-| Model                               | Runtime seam                                                                                           |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `FoldOutput`                        | `foldLiveRow` → `projectAgentHostEvent` `tool-output` in `app/services/agent-host-event-projection.ts` |
-| `Boundary`, `GuardBoundary`         | `hasOpenStreamBlock`: an open text or reasoning block holds back the result's step boundary            |
-| `LiveStart`, `LiveDelta`, `LiveEnd` | `reduceChatProjection` `live` → `projectAgentHostLiveEvent` `thinking-*`                               |
-| `active`, `errored`, `shown`        | `openRunWatch` drain → the SDK's `processUIMessageStream`                                              |
+| Model                               | Runtime seam                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `FoldOutput`                        | `foldLiveRow` → `projectAgentHostEvent` `tool-output` in `apps/libs/chat-ui/src/services/agent-host-event-projection.ts` |
+| `Boundary`, `GuardBoundary`         | `hasOpenStreamBlock`: an open text or reasoning block holds back the result's step boundary                              |
+| `LiveStart`, `LiveDelta`, `LiveEnd` | `reduceChatProjection` `live` → `projectAgentHostLiveEvent` `thinking-*`                                                 |
+| `active`, `errored`, `shown`        | `openRunWatch` drain → the SDK's `processUIMessageStream`                                                                |
 
 The `paused` lifecycle row already keeps the same rule through `hasOpenBlock`. The regression tests are in `app/machines/chat-projection.logic.test.ts` under "durable tool results read after the next step went live".

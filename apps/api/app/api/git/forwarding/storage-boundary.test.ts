@@ -23,7 +23,7 @@ import { apiRoot, importChain, moduleGraph, moduleGraphExcept } from '#testing/m
  */
 
 /** The API's only route to the worker: the fallback while production has no tau-storage. */
-const inProcessFallback = 'app/api/git/forwarding/in-process-executor.ts';
+const inProcessFallback = '../libs/api-git-core/src/forwarding/in-process-executor.ts';
 
 const fullApiGraph = moduleGraph('app/main.ts');
 /** What main.ts reaches when it forwards: everything except the fallback. */
@@ -39,7 +39,7 @@ const code = (module: string): string =>
 /** The repository store port's write verbs (`store/port.ts`). */
 const repositoryWriteVerbs = /\.(?:commitManifest|putObject|deleteObjects)\(/u;
 
-/** The object-store driver's write verbs (`storage/object-storage.service.ts`), presigned writes included. */
+/** The object-store driver's write verbs (`@taucad/api-object-storage`), presigned writes included. */
 const objectWriteVerbs =
   /\.(?:putBlob|putBlobStream|deleteBlob|deleteBlobs|copyBlob|createMultipartUpload|uploadPart|completeMultipartUpload|presignPut|presignUploadPart|deleteEntirePrefixForPurgeJob)\(/u;
 
@@ -47,7 +47,10 @@ const objectWriteVerbs =
 const repositoryKey = /repos\/|projectPreviewKey\(|repositoryPrefix\(/u;
 
 /** The drivers that define the verbs; whoever calls them is what is checked. */
-const drivers = new Set(['app/storage/object-storage.service.ts', 'app/api/git/store/s3-repository-store.ts']);
+const drivers = new Set([
+  '../libs/api-object-storage/src/object-storage.service.ts',
+  '../libs/api-git-core/src/store/s3-repository-store.ts',
+]);
 
 const reached = (graph: ReturnType<typeof moduleGraph>, modules: readonly string[]): string[] =>
   modules.filter((module) => graph.modules.has(module)).map((module) => importChain(graph, module));
@@ -56,13 +59,13 @@ describe('tau-api writes nothing under repos/ on its forwarded path (DC1)', () =
   it('should reach no repository committer, sweeper, fence or tombstone writer from main.ts', () => {
     expect(
       reached(apiGraph, [
-        'app/api/git/store/commit.ts',
-        'app/api/git/store/compaction.ts',
-        'app/api/git/store/sweep.ts',
-        'app/api/git/store/fence.ts',
-        'app/api/git/store/tombstone-fence.ts',
-        'app/api/projects/project-preview-store.ts',
-        'app/api/git/maintenance/purge.ts',
+        '../libs/api-git-core/src/store/commit.ts',
+        '../libs/api-git-core/src/store/compaction.ts',
+        '../libs/api-git-core/src/store/sweep.ts',
+        '../libs/api-git-core/src/store/fence.ts',
+        '../libs/api-git-core/src/store/tombstone-fence.ts',
+        '../libs/api-git-core/src/project-preview-store.ts',
+        '../libs/api-git-mirror/src/maintenance/purge.ts',
       ]),
     ).toEqual([]);
   });
@@ -88,12 +91,12 @@ describe('tau-api writes nothing under repos/ on its forwarded path (DC1)', () =
   it('should hold no lease and spawn no repository git child from main.ts', () => {
     expect(
       reached(apiGraph, [
-        'app/api/git/store/lease.ts',
-        'app/api/git/lease-host.ts',
-        'app/api/git/advertisement-probe.ts',
-        'app/api/git/lfs-references.ts',
-        'app/api/git/worker/storage-git.service.ts',
-        'app/api/git/worker/storage-server.ts',
+        '../libs/api-git-core/src/store/lease.ts',
+        '../libs/api-git-core/src/lease-host.ts',
+        '../libs/api-git-core/src/advertisement-probe.ts',
+        '../libs/api-git-core/src/lfs-references.ts',
+        '../libs/api-git-core/src/worker/storage-git.service.ts',
+        '../libs/api-git-core/src/worker/storage-server.ts',
       ]),
     ).toEqual([]);
   });
@@ -110,15 +113,15 @@ describe('tau-api runs no git on its forwarded path (DC3)', () => {
 
   it('should still find the git children tau-storage spawns, so the pattern is not blind', () => {
     const spawners = [...storageGraph.modules].filter((module) => gitSpawn.test(code(module)));
-    expect(spawners).toContain('app/api/git/store/lease.ts');
+    expect(spawners).toContain('../libs/api-git-core/src/store/lease.ts');
   });
 });
 
 describe('the in-process fallback (DC1, until production has tau-storage)', () => {
   it('should be the only module through which main.ts reaches the storage worker', () => {
     expect(fullApiGraph.modules.has(inProcessFallback)).toBe(true);
-    expect(fullApiGraph.modules.has('app/api/git/worker/storage-git.service.ts')).toBe(true);
-    expect(apiGraph.modules.has('app/api/git/worker/storage-git.service.ts')).toBe(false);
+    expect(fullApiGraph.modules.has('../libs/api-git-core/src/worker/storage-git.service.ts')).toBe(true);
+    expect(apiGraph.modules.has('../libs/api-git-core/src/worker/storage-git.service.ts')).toBe(false);
   });
 });
 
@@ -134,6 +137,6 @@ describe('tau-storage holds no database, Redis or Nest application (DC1)', () =>
   });
 
   it('should still reach the committer, which is what it is for', () => {
-    expect(storageGraph.modules.has('app/api/git/store/commit.ts')).toBe(true);
+    expect(storageGraph.modules.has('../libs/api-git-core/src/store/commit.ts')).toBe(true);
   });
 });

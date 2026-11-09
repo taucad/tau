@@ -25,7 +25,7 @@ const settleEditorSaves = vi.fn(async () => {
 const toastError = vi.hoisted(() => vi.fn());
 
 vi.mock('xstate', () => ({ waitFor: waitForStore }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: toastError } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: toastError } }));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => {

@@ -47,29 +47,32 @@ describe('SMLibPy tau-plugin.json', () => {
     (key, variant) => {
       const wheels = lockedWheels(key);
       const pinned = interpreter.targets.find((target) => target.key === key)!.interpreter;
-      const payloads = variant.payloads.map((payload) => ({ payload, hex: integrityToHex(payload.integrity).hex }));
+      const dependencyFiles = variant.files.map((dependencyFile) => ({
+        dependencyFile,
+        hex: integrityToHex(dependencyFile.integrity).hex,
+      }));
 
-      const python = payloads.find(({ payload }) => payload.name === 'python')!;
-      expect(python.payload.origin).toEqual({
+      const python = dependencyFiles.find(({ dependencyFile }) => dependencyFile.name === 'python')!;
+      expect(python.dependencyFile.origin).toEqual({
         kind: 'url',
         urls: [
           `https://github.com/astral-sh/python-build-standalone/releases/download/${interpreter.release}/${encodeURIComponent(pinned.asset)}`,
         ],
       });
-      expect({ hex: python.hex, byteLength: python.payload.byteLength }).toEqual({
+      expect({ hex: python.hex, byteLength: python.dependencyFile.byteLength }).toEqual({
         hex: pinned.sha256,
         byteLength: pinned.byteLength,
       });
 
-      const wheelPayloads = payloads.filter(({ payload }) => payload.format === 'wheel');
-      expect(wheelPayloads).toHaveLength(wheels.size);
-      for (const { payload, hex } of wheelPayloads) {
-        const url = payload.origin.kind === 'url' ? payload.origin.urls[0] : undefined;
-        expect(wheels.get(url ?? ''), payload.name).toEqual({ size: payload.byteLength, sha256: hex });
+      const wheelFiles = dependencyFiles.filter(({ dependencyFile }) => dependencyFile.format === 'wheel');
+      expect(wheelFiles).toHaveLength(wheels.size);
+      for (const { dependencyFile, hex } of wheelFiles) {
+        const url = dependencyFile.origin.kind === 'url' ? dependencyFile.origin.urls[0] : undefined;
+        expect(wheels.get(url ?? ''), dependencyFile.name).toEqual({ size: dependencyFile.byteLength, sha256: hex });
       }
 
-      const workers = payloads.filter(({ payload }) => payload.origin.kind === 'packagePath');
-      expect(workers.map(({ payload }) => `${payload.destination}/${payload.name}`)).toEqual([
+      const workers = dependencyFiles.filter(({ dependencyFile }) => dependencyFile.origin.kind === 'packagePath');
+      expect(workers.map(({ dependencyFile }) => `${dependencyFile.destination}/${dependencyFile.name}`)).toEqual([
         'tau-worker/worker.py',
         'tau-worker/smlibpy_materials.py',
         'tau-worker/smlibpy_mechanisms.py',
@@ -78,12 +81,12 @@ describe('SMLibPy tau-plugin.json', () => {
         'tau-worker/tau_kernel/model.py',
         'tau-worker/tau_kernel/protocol.py',
       ]);
-      for (const { payload, hex } of workers) {
-        const origin = payload.origin.kind === 'packagePath' ? payload.origin.path : '';
+      for (const { dependencyFile, hex } of workers) {
+        const origin = dependencyFile.origin.kind === 'packagePath' ? dependencyFile.origin.path : '';
         const bytes = readFileSync(join(packageRoot, ...origin.split('/')));
-        expect(origin).toBe(`${payload.destination.replace(/^tau-worker/u, 'python')}/${payload.name}`);
-        expect(payload).toMatchObject({ format: 'raw', byteLength: bytes.byteLength });
-        expect(hex, payload.name).toBe(createHash('sha256').update(bytes).digest('hex'));
+        expect(origin).toBe(`${dependencyFile.destination.replace(/^tau-worker/u, 'python')}/${dependencyFile.name}`);
+        expect(dependencyFile).toMatchObject({ format: 'raw', byteLength: bytes.byteLength });
+        expect(hex, dependencyFile.name).toBe(createHash('sha256').update(bytes).digest('hex'));
       }
     },
   );
@@ -97,7 +100,7 @@ describe('SMLibPy tau-plugin.json', () => {
   it('should install only darwin-arm64 wheels its pylock pins', () => {
     const locked = new Set([...lockedWheels('darwin-arm64').values()].map(({ sha256 }) => sha256));
     const variant = variants.find(({ target }) => targetKey(target) === 'darwin-arm64')!;
-    const wheels = variant.payloads.filter(({ format }) => format === 'wheel');
+    const wheels = variant.files.filter(({ format }) => format === 'wheel');
 
     expect(wheels.length).toBeGreaterThan(0);
     for (const wheel of wheels) {

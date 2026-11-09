@@ -25,8 +25,8 @@ import type {
   AgentHostExternalAgent,
   AgentHostExternalContext,
 } from '#workers/agent-host.contract.js';
-import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/browser-agent-host-snapshot-context.js';
-import type { TurnTrigger } from '#chat-clients/turn-intent.js';
+import { buildBrowserAgentHostSnapshotContext } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-snapshot-context';
+import type { TurnTrigger } from '@taucad/chat-ui/chat-clients/turn-intent';
 
 /**
  * How one turn's wire body and host admission are composed.

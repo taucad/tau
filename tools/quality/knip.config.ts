@@ -175,8 +175,9 @@ const config: KnipConfig = {
         'app/testing/project-deletion-process.ts',
       ],
       ignoreDependencies: [
-        // Imported by the source-consumed `api-observability` and `api-email` libraries the server bundle
-        // inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        // Imported by the source-consumed `api-observability`, `api-email` and `api-object-storage` libraries
+        // the server bundle inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        '@aws-sdk/s3-request-presigner',
         '@pyroscope/nodejs',
         '@sentry/node',
         'react-email',
@@ -206,6 +207,10 @@ const config: KnipConfig = {
         'src/testing/billing-load/{run,driver,cluster}.ts',
         'src/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
       ],
+    },
+    'apps/libs/ui-kit': {
+      // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
+      entry: ['scripts/svg-sprite.d.ts'],
     },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
@@ -267,6 +272,10 @@ const config: KnipConfig = {
       // bundler-benchmark/bundler.d.ts declares its type.
       ignoreUnresolved: ['#benchmark-bundler'],
     },
+    'apps/cli-e2e': {
+      // The Build123d suites read its `tau-plugin.json` through `createRequire(...).resolve`.
+      ignoreDependencies: ['@taucad/build123d'],
+    },
     'apps/runtime-e2e': {
       entry: [
         // `runner.ts` spawns `run-arm.mts` behind the `hooks.mjs` loader, which registers `hook-impl.mjs`.
@@ -287,8 +296,6 @@ const config: KnipConfig = {
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
-        // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
-        'scripts/svg-sprite.d.ts',
         // `build*` targets run it as a runtime cache input.
         'geospec-mt-assets-cache-key.ts',
         // Script of calibration-preview.html, served by vite.calibration.config.ts.

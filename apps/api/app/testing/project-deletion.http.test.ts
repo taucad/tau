@@ -14,11 +14,11 @@ import type postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import { startStorageHop } from '#testing/storage-hop.js';
-import type { StorageHop } from '#testing/storage-hop.js';
-import { decodeManifest } from '#api/git/store/manifest.js';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import { startStorageHop } from '@taucad/api-git-core/testing/storage-hop';
+import type { StorageHop } from '@taucad/api-git-core/testing/storage-hop';
+import { decodeManifest } from '@taucad/api-git-core/store/manifest';
 import { hashHostGitCredential, mintHostGitCredential, resolveHostGitCredential } from '@taucad/api-hosts';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { staticAuthConfig } from '@taucad/api-auth/config/auth-static';
@@ -28,9 +28,9 @@ import { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 /** Real HTTP controller, session lookup, SQL transactions, S3 adapter and MinIO CAS. */
 describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {

@@ -4,7 +4,7 @@
  * The verb CI and scripts lack: `tau export` without the artifact. It loads the CLI runtime exactly as `export` does,
  * opens the document once and stops at `document.evaluation()`. Parameters come from the `described` event, because
  * an evaluation carries none. The project is rooted at the nearest `tau.json`, so a model that imports a sibling
- * module above its own folder resolves (S11 F2). Native kernels bind to their sealed closures in the payload store and
+ * module above its own folder resolves (S11 F2). Native kernels bind to their sealed closures in the dependency store and
  * nothing is downloaded (I5): an unprepared `.py` or `.cs` model is refused with `KERNEL_NOT_PREPARED` naming
  * `tau prepare <kernel>`.
  *

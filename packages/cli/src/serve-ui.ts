@@ -1,12 +1,12 @@
 // The Tau UI `tau serve` serves (charter W18, Q51, D29): a Tau-authored layer, the first one that is not a kernel. Its
 // archive is pinned by digest in `serve-ui-layer.json`, which ships inside the CLI, and the preparation host downloads,
-// verifies, unpacks and seals it into the shared payload store like any closure (D4, D8, I1, I2). The daemon serves the
+// verifies, unpacks and seals it into the shared dependency store like any closure (D4, D8, I1, I2). The daemon serves the
 // sealed `client/` directory read-only (I6): a run-time client environment is staged beside it, never written into it.
 // A pin that is still the fail-closed placeholder (ruling X20's precedent) makes no request at all.
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-import { defaultPayloadStore } from '@taucad/host';
+import { defaultDependencyStore } from '@taucad/host';
 import { failedPreparation } from '@taucad/host/telemetry';
 import type { PreparationReport } from '@taucad/host/telemetry';
 import { createPreparationHost, PreparationError, readManagedPreparation } from '@taucad/runtime/preparation/node';
@@ -88,7 +88,7 @@ export const readServeUiPin = (value: unknown): ServeUiLayerPin => {
 export const isPlaceholderPin = (pin: ServeUiLayerPin): boolean => pin.integrity === placeholderIntegrity;
 
 /* One archive serves every host: the layer is a browser build. It is declared once per native target the store
- * prepares on, and one closure is sealed whatever the target, because a closure is keyed by its payloads. */
+ * prepares on, and one closure is sealed whatever the target, because a closure is keyed by its dependency files. */
 const layerTargets: readonly DependencyTarget[] = [
   { runtime: 'native', os: 'darwin', arch: 'arm64' },
   { runtime: 'native', os: 'darwin', arch: 'x64' },
@@ -106,7 +106,7 @@ const layerTargets: readonly DependencyTarget[] = [
 export const serveUiDeployment = (pin: ServeUiLayerPin): PluginDeployment => {
   const [firstTarget, ...otherTargets] = layerTargets.map((target) => ({
     target,
-    payloads: [
+    files: [
       {
         name: clientDirectory,
         integrity: pin.integrity,
@@ -139,7 +139,7 @@ export type ServeUi =
 export type ServeUiProgress = { readonly completedBytes: number; readonly totalBytes: number };
 
 /**
- * Prepare the pinned serve UI layer into the payload store and say where its build is. A sealed layer answers at once
+ * Prepare the pinned serve UI layer into the dependency store and say where its build is. A sealed layer answers at once
  * with no request; otherwise its archive is downloaded once, verified against the pin while it is written, unpacked
  * and sealed. A missing UI is an answer, never a throw: the caller decides whether to serve agents without one.
  * @param options - Cancellation, progress, where the settled preparation is reported (runtime telemetry, T19), and the
@@ -170,7 +170,7 @@ export const prepareServeUi = async (options: {
   const plugin: PreparationPlugin = { package: serveUiSelection.package, deployment: serveUiDeployment(pin) };
   const host = createPreparationHost({
     plugins: [plugin],
-    store: options.store ?? defaultPayloadStore(),
+    store: options.store ?? defaultDependencyStore(),
     /* Absent, the host reads this machine's own indicators. */
     ...(options.indicators === undefined ? {} : { indicators: options.indicators }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),

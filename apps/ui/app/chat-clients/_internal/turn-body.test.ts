@@ -4,7 +4,7 @@ import type { CadAgentExecution } from '@taucad/chat';
 import { dialExecutionHost } from '#chat-clients/_internal/turn-body.js';
 import { AgentHostPlacementError, daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { createAgentHostClient } from '#services/agent-host-client.js';
-import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 
 const storage = vi.hoisted(() => ({
   getProjectFileSystemConfig: vi.fn(async (): Promise<{ backend: 'memory' }> => ({ backend: 'memory' })),

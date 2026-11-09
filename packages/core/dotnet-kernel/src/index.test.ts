@@ -42,9 +42,9 @@ describe('@taucad/dotnet-kernel-core', () => {
     ]);
     expect(Object.keys(layer).toSorted()).toEqual([
       'createDotnetLayer',
+      'dependencyBaseUrl',
+      'dependencyKey',
       'manifestText',
-      'payloadCdnBase',
-      'payloadKey',
       'runComposeTauPlugin',
     ]);
   });

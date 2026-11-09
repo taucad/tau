@@ -2,7 +2,7 @@ import { useAuth, useSignOut } from '@better-auth-ui/react';
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { setEntryPreference } from '#lib/entry-preference.js';

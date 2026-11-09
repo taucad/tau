@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { childPackage, childPayloadBytes, childPlugin } from '#preparation/preparation-child.fixture.js';
+import { childPackage, childFileBytes, childPlugin } from '#preparation/preparation-child.fixture.js';
 import { createPreparationHost } from '#preparation/preparation-host.js';
 import type { GarbageReport } from '#preparation/preparation-host.types.js';
 import { forbidGlobalFetch, linuxHost, temporaryDirectory } from '#preparation/preparation.fixture.js';
@@ -58,9 +58,7 @@ afterEach(async () => {
 // A digest-addressed mirror that sends 64 KiB every 15 ms, so downloads overlap and phases last long enough.
 const startMirror = async (): Promise<Mirror> => {
   const blobs = new Map(
-    Object.values(childPayloadBytes()).map(
-      (bytes) => [createHash('sha256').update(bytes).digest('hex'), bytes] as const,
-    ),
+    Object.values(childFileBytes()).map((bytes) => [createHash('sha256').update(bytes).digest('hex'), bytes] as const),
   );
   const requests = new Map<string, number>();
   const server: Server = createServer((request, response) => {
@@ -277,7 +275,7 @@ describe('preparation across processes', () => {
       expect(await listing(join(store, 'closures', 'sha256'))).toHaveLength(1);
       const blobs = await expectVerifiedBlobs(store);
       expect(blobs.toSorted()).toEqual(
-        Object.values(childPayloadBytes())
+        Object.values(childFileBytes())
           .map((bytes) => createHash('sha256').update(bytes).digest('hex'))
           .toSorted(),
       );

@@ -8,8 +8,8 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import {
   formatReceiptTotal,
   sumReceiptCredits,

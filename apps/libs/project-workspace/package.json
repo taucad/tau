@@ -1,0 +1,75 @@
+{
+  "name": "@taucad/project-workspace",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app project workspace: route-private components, hooks and project-open logic",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/project-workspace"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/project-workspace#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "project",
+    "workspace"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./components/archived-chats-view": "./src/components/archived-chats-view.tsx",
+    "./components/chat-editor-binary-warning": "./src/components/chat-editor-binary-warning.tsx",
+    "./components/chat-editor-error-placeholder": "./src/components/chat-editor-error-placeholder.tsx",
+    "./components/chat-editor-too-large-warning": "./src/components/chat-editor-too-large-warning.tsx",
+    "./components/chat-history-empty": "./src/components/chat-history-empty.tsx",
+    "./components/chat-pane-skeleton": "./src/components/chat-pane-skeleton.tsx",
+    "./components/chat-revision-summary": "./src/components/chat-revision-summary.tsx",
+    "./components/scroll-down-button": "./src/components/scroll-down-button.tsx",
+    "./hooks/use-row-window": "./src/hooks/use-row-window.ts",
+    "./utils/chat-kernel-types": "./src/utils/chat-kernel-types.ts",
+    "./utils/chat-tool-file-metadata": "./src/utils/chat-tool-file-metadata.ts",
+    "./utils/file-tree-drop-ingestion": "./src/utils/file-tree-drop-ingestion.ts",
+    "./utils/file-tree-operation-results": "./src/utils/file-tree-operation-results.ts",
+    "./utils/file-tree-targets": "./src/utils/file-tree-targets.ts",
+    "./utils/native-image-format": "./src/utils/native-image-format.ts",
+    "./utils/project-manifest-equivalence": "./src/utils/project-manifest-equivalence.ts",
+    "./utils/project-open-timer": "./src/utils/project-open-timer.ts",
+    "./utils/revision-reveal": "./src/utils/revision-reveal.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#components/*.js": "./src/components/*.tsx",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "dependencies": {
+    "@taucad/chat": "workspace:*",
+    "@taucad/events": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "lucide-react": "catalog:"
+  }
+}

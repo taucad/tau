@@ -140,12 +140,6 @@ const namingConventionBase = [
   },
   { selector: 'typeLike', format: ['StrictPascalCase'] },
   {
-    selector: 'variable',
-    types: ['boolean'],
-    format: ['StrictPascalCase'],
-    prefix: ['is', 'has', 'can', 'should', 'will', 'did'],
-  },
-  {
     selector: 'interface',
     filter: '^(?!I)[A-Z]',
     format: ['StrictPascalCase'],
@@ -243,10 +237,11 @@ const memberOrdering = [
  * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
  * instead names the API libraries it may depend on (the "May depend on" column of
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
- * project. Every edge points down `billing -> llm-gateway -> hosts -> auth ->
- * {database, email, redis} -> lifecycle -> observability -> core`; no library may
- * depend on the `api` app (its `type:app` tag is outside every `type:app-lib`
- * allowlist). Entries marked "measured" are downward edges the moved code already
+ * project. Every edge points down `git-mirror -> git-core -> object-storage -> billing ->
+ * llm-gateway -> hosts -> auth -> {database, email, redis} -> lifecycle -> observability ->
+ * core`, with `testing` beside `database`; no library but `api` imports `git-mirror`, and no
+ * library may depend on the `api` app (its `type:app` tag is
+ * outside every `type:app-lib` allowlist). Entries marked "measured" are downward edges the moved code already
  * had that the blueprint's column did not list.
  */
 const apiLibraryDependencies = {
@@ -265,6 +260,17 @@ const apiLibraryDependencies = {
   'llm-gateway': ['hosts', 'auth', 'core', 'observability', 'lifecycle'],
   // measured: `createBillingTestApp` boots `RedisModule`.
   billing: ['llm-gateway', 'hosts', 'auth', 'database', 'email', 'core', 'observability', 'lifecycle', 'redis'],
+  // Shared test fixtures (ci-decomposition-blueprint P1-a): only the database and core, so a library's tests
+  // that import them gain no feature library in their dependency closure.
+  testing: ['database', 'core'],
+  // The object store, signed file links and storage accounting (P1-b). Git imports it, so it may not name
+  // git; accounting reads the subscription tier from billing and keeps its snapshots in Redis.
+  'object-storage': ['billing', 'database', 'redis', 'core', 'observability'],
+  // The repository store, the storage worker, routing, admission and forwarding (P1-c). Projects and
+  // publications sit above it; the API binds their hooks (`project-deletion`, the preview writer).
+  'git-core': ['object-storage', 'database', 'redis', 'lifecycle', 'core', 'observability'],
+  // The off-site mirror and the maintenance jobs (P1-c). Only the `api` app's command entries import it.
+  'git-mirror': ['git-core', 'object-storage', 'database', 'core'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({
@@ -639,27 +645,11 @@ const config = [
     ],
   },
 
-  {
-    ...tseslint.configs.base,
-    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-    languageOptions: {
-      ...tseslint.configs.base.languageOptions,
-      // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-      parserOptions: {
-        ...tseslint.configs.base.languageOptions?.parserOptions,
-        projectService: {
-          allowDefaultProject: [
-            'eslint.config.mjs',
-            'examples/electron/electron.vite.config.ts',
-            'apps/api/vitest.config.ts',
-            'packages/runtime/src/nextjs/package-assets-loader.mjs',
-            'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
-          ],
-        },
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
+  /*
+   * Parser only, no type information: every type-aware rule runs once, in oxlint (tsgolint). No ESLint rule
+   * here reads parser services, so a `projectService` program would only repeat that type-check.
+   */
+  tseslint.configs.base,
 
   {
     plugins: { '@nx': nxEslintPlugin },

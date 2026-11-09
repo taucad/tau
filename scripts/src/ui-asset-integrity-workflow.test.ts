@@ -68,7 +68,7 @@ describe('the UI asset integrity workflow', () => {
 
   it('should cancel an outdated run on pull requests only, keyed on the head branch', () => {
     expect(workflow.concurrency?.group).toBe(
-      `ui-asset-integrity-${expression("github.event_name == 'pull_request' && github.head_ref || github.run_id")}`,
+      `ui-asset-integrity-${expression("github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id")}`,
     );
     expect(workflow.concurrency?.['cancel-in-progress']).toBe(expression("github.event_name == 'pull_request'"));
   });

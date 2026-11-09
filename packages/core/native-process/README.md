@@ -114,7 +114,7 @@ export const rustcadKernel = withNativeDeployment(
 ```
 
 `bindNativeKernel` (`./store`) uses an explicit `options.closure` when given; otherwise it asks the
-closure resolver a host installed with `installNativeClosureResolver`, or reads the default payload
+closure resolver a host installed with `installNativeClosureResolver`, or reads the default dependency
 store's launch index itself. An unprepared kernel throws `UnpreparedKernelError`, whose
 `KERNEL_NOT_PREPARED` (or `KERNEL_CAPABILITY_MISSING`) issue the runtime forwards and retries on the
 next operation.
@@ -128,7 +128,7 @@ next operation.
 | `storeClosureResolver`, `installNativeClosureResolver` | The default store reader, and the slot a host installs its own resolver in.               |
 | `inspectNativeKernels`, `inspectionResolver`           | Closure states read by a process that can read the store, answered to one that cannot.    |
 | `reportNativeDeployments`, `loadReportedDeployments`   | The package-neutral report a runtime thread or child sends its parent, and its re-import. |
-| `verifyStoreClosure`, `defaultPayloadStore`            | The closure re-verifier for store launches, and the shared store root.                    |
+| `verifyStoreClosure`, `defaultDependencyStore`         | The closure re-verifier for store launches, and the shared store root.                    |
 
 ## Sandbox
 

@@ -8,7 +8,7 @@ import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { agentJob, createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
-import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
+import { agentApprovalToolName } from '@taucad/chat-ui/services/agent-host-event-projection';
 
 const respondToToolApproval = vi.fn(async () => undefined);
 let messages: readonly MyUIMessage[] = [];

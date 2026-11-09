@@ -1,12 +1,13 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- Nest decorators and runtime DI metadata. */
 import { createHash } from 'node:crypto';
 import { BadRequestException, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { projectPreviewKey, projectPreviewMaximumBytes } from '#api/projects/project-preview-key.js';
-import type { PreviewWriter } from '#api/projects/project-preview-store.js';
-
-/** Injection token for the preview writer: tau-storage's in tau-api (DC1). */
-export const previewWriterKey = Symbol('PreviewWriter');
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import {
+  previewWriterKey,
+  projectPreviewKey,
+  projectPreviewMaximumBytes,
+} from '@taucad/api-git-core/project-preview-key';
+import type { PreviewWriter } from '@taucad/api-git-core/project-preview-store';
 
 /* oxlint-disable no-bitwise -- WebP header fields are packed bit ranges. */
 /** Small, non-animated WebP; no SVG/script, full model, or unbounded decoder allocation. */

@@ -14,7 +14,7 @@ describe('readManagedPreparation', () => {
 
   it('should make locked imply no-fallback through the mirror', () => {
     expect(
-      readManagedPreparation({ TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/tau/' }),
+      readManagedPreparation({ TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: 'https://mirror.corp.example/tau/' }),
     ).toEqual({
       profile: 'locked',
       mirror: { baseUrl: 'https://mirror.corp.example/tau/', noFallback: true },
@@ -24,7 +24,7 @@ describe('readManagedPreparation', () => {
   });
 
   it('should make locked without a mirror use the store and seed only', () => {
-    expect(readManagedPreparation({ TAU_ACQUISITION: 'locked', TAU_PAYLOAD_DIR: '/opt/tau-seed' })).toEqual({
+    expect(readManagedPreparation({ TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_DIR: '/opt/tau-seed' })).toEqual({
       profile: 'locked',
       seed: '/opt/tau-seed',
       selection: {},
@@ -35,10 +35,10 @@ describe('readManagedPreparation', () => {
   it('should read the target override and the emulation switch', () => {
     expect(
       readManagedPreparation({
-        TAU_PAYLOAD_TARGET: 'darwin-x64',
-        TAU_PAYLOAD_EMULATION: '0',
-        TAU_PAYLOAD_MIRROR: 'file:///srv/mirror/',
-        TAU_PAYLOAD_MIRROR_NO_FALLBACK: '1',
+        TAU_DEPENDENCY_TARGET: 'darwin-x64',
+        TAU_DEPENDENCY_EMULATION: '0',
+        TAU_DEPENDENCY_MIRROR: 'file:///srv/mirror/',
+        TAU_DEPENDENCY_MIRROR_NO_FALLBACK: '1',
       }),
     ).toEqual({
       profile: 'open',
@@ -51,15 +51,27 @@ describe('readManagedPreparation', () => {
   it.each([
     [{ TAU_ACQUISITION: 'closed' }, 'TAU_ACQUISITION is "closed"; set it to "open" or "locked", or unset it.'],
     [
-      { TAU_PAYLOAD_MIRROR: 'ftp://mirror.example/' },
-      'TAU_PAYLOAD_MIRROR is "ftp://mirror.example/"; set it to an https://, http:// or file:// base URL whose blobs/sha256/<hex> serves each payload.',
+      { TAU_DEPENDENCY_MIRROR: 'ftp://mirror.example/' },
+      'TAU_DEPENDENCY_MIRROR is "ftp://mirror.example/"; set it to an https://, http:// or file:// base URL whose blobs/sha256/<hex> serves each dependency file.',
     ],
     [
-      { TAU_PAYLOAD_EMULATION: 'off' },
-      'TAU_PAYLOAD_EMULATION is "off"; set it to "0" to disable the emulation fallback.',
+      { TAU_DEPENDENCY_EMULATION: 'off' },
+      'TAU_DEPENDENCY_EMULATION is "off"; set it to "0" to disable the emulation fallback.',
     ],
   ])('should refuse %j with an actionable TypeError', (environment, message) => {
     expect(() => readManagedPreparation(environment)).toThrow(new TypeError(message));
+  });
+
+  it.each([
+    ['TAU_PAYLOAD_MIRROR', 'TAU_DEPENDENCY_MIRROR'],
+    ['TAU_PAYLOAD_MIRROR_NO_FALLBACK', 'TAU_DEPENDENCY_MIRROR_NO_FALLBACK'],
+    ['TAU_PAYLOAD_DIR', 'TAU_DEPENDENCY_DIR'],
+    ['TAU_PAYLOAD_TARGET', 'TAU_DEPENDENCY_TARGET'],
+    ['TAU_PAYLOAD_EMULATION', 'TAU_DEPENDENCY_EMULATION'],
+  ])('should refuse the renamed %s, naming %s', (retired, successor) => {
+    expect(() => readManagedPreparation({ [retired]: '1' })).toThrow(
+      new TypeError(`${retired} was renamed to ${successor}; set ${successor} instead and unset ${retired}.`),
+    );
   });
 });
 
@@ -73,7 +85,7 @@ describe('describeEffectiveProfile', () => {
     const managed = readManagedPreparation({});
     const withoutFlag = await describeEffectiveProfile({
       host,
-      store: '/data/tau/payloads',
+      store: '/data/tau/dependencies',
       indicators: linuxHost,
       managed,
       environment: { HTTPS_PROXY: 'http://proxy.corp.example:3128' },
@@ -81,7 +93,7 @@ describe('describeEffectiveProfile', () => {
     });
     const withFlag = await describeEffectiveProfile({
       host,
-      store: '/data/tau/payloads',
+      store: '/data/tau/dependencies',
       indicators: linuxHost,
       managed,
       environment: { HTTPS_PROXY: 'http://proxy.corp.example:3128', NODE_OPTIONS: '--use-env-proxy' },
@@ -95,18 +107,18 @@ describe('describeEffectiveProfile', () => {
   it('should assemble the profile an auditor reads', async () => {
     const profile = await describeEffectiveProfile({
       host,
-      store: '/data/tau/payloads',
+      store: '/data/tau/dependencies',
       indicators: linuxHost,
       managed: readManagedPreparation({
         TAU_ACQUISITION: 'locked',
-        TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/',
+        TAU_DEPENDENCY_MIRROR: 'https://mirror.corp.example/',
       }),
       environment: {
         NODE_EXTRA_CA_CERTS: '/etc/corp-ca.pem',
         HTTPS_PROXY: 'http://user:secret@proxy.corp.example:3128',
         TAU_ACQUISITION: 'locked',
-        TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/',
-        TAU_PAYLOAD_DIR: ' ',
+        TAU_DEPENDENCY_MIRROR: 'https://mirror.corp.example/',
+        TAU_DEPENDENCY_DIR: ' ',
         UNRELATED: 'value',
       },
       execArgv: ['--use-system-ca'],
@@ -114,14 +126,14 @@ describe('describeEffectiveProfile', () => {
 
     expect(profile).toEqual({
       profile: 'locked',
-      store: '/data/tau/payloads',
+      store: '/data/tau/dependencies',
       host: linuxHost,
       mirror: 'https://mirror.corp.example/',
       noFallback: true,
       emulation: true,
       proxy: 'none',
       ca: 'system',
-      variables: ['TAU_ACQUISITION', 'TAU_PAYLOAD_MIRROR', 'HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS'],
+      variables: ['TAU_ACQUISITION', 'TAU_DEPENDENCY_MIRROR', 'HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS'],
       closures,
     });
     expect(JSON.stringify(profile)).not.toContain('secret');

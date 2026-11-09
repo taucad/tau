@@ -34,7 +34,7 @@ pnpm nx check-logo tau-examples
 pnpm nx check-thumbnails tau-examples
 ```
 
-Regenerating the badge changes `apps/ui/app/components/icons/raw/tau.svg`, so follow it with `pnpm nx run ui:generate-svg-sprite`.
+Regenerating the badge changes `apps/libs/ui-kit/src/icons/raw/tau.svg`, so follow it with `pnpm nx run ui-kit:generate-svg-sprite`.
 
 GeoSpec currently accepts mesh and BRep evidence, not 2D SVG drawings; the generated-asset check and runtime thumbnail drift gate cover this example instead.
 

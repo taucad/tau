@@ -79,19 +79,19 @@ The same prompt works in `codex` after the Codex install. The agent writes `main
 
 ## Tools
 
-| Tool                        | What it does                                                                                  | Writes                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `evaluate_model`            | Builds one model file; returns its status, kernel issues, views and exports                   | Nothing                                       |
-| `test_model`                | Runs the project's GeoSpec tests (`*.geospec.ts`), one file or one test                       | A report over 128 KiB, in the session folder  |
-| `screenshot`                | Renders views of a model and returns the images in the result                                 | The images, in the session folder             |
-| `export_model`              | Exports STEP, STL, 3MF, glTF or another format the model offers                               | `.tau/artifacts/` in the project              |
-| `arrange_workbench`         | Opens views and panes for a person who has the project open in the Tau app                    | `.tau/workbench/` in the project              |
-| `get_parameters`            | Reads a model's parameters: their schema, defaults and the values in effect                   | Nothing                                       |
-| `apply_parameter_operation` | Edits a model's parameters through a checked write; Tau shows the same values                 | `.tau/parameters/` in the project             |
-| `show_model`                | Shows a model in the Tau viewer; a CAD source or STEP/STL/3MF/OBJ becomes GLB first           | Nothing: a rendered source stays in memory    |
-| `view_state`                | Reports the viewer's model, selected, added and hidden parts, camera; `capture` adds an image | Nothing                                       |
-| `pose_model`                | Plays, pauses, seeks or resets an animation, or sets joints, of the shown model's mechanism   | The GLB, when it shows a source first         |
-| `prepare_kernel`            | Downloads the native runtime a `.py` or `.cs` model needs, once per computer                  | The shared payload store, outside the project |
+| Tool                        | What it does                                                                                  | Writes                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `evaluate_model`            | Builds one model file; returns its status, kernel issues, views and exports                   | Nothing                                          |
+| `test_model`                | Runs the project's GeoSpec tests (`*.geospec.ts`), one file or one test                       | A report over 128 KiB, in the session folder     |
+| `screenshot`                | Renders views of a model and returns the images in the result                                 | The images, in the session folder                |
+| `export_model`              | Exports STEP, STL, 3MF, glTF or another format the model offers                               | `.tau/artifacts/` in the project                 |
+| `arrange_workbench`         | Opens views and panes for a person who has the project open in the Tau app                    | `.tau/workbench/` in the project                 |
+| `get_parameters`            | Reads a model's parameters: their schema, defaults and the values in effect                   | Nothing                                          |
+| `apply_parameter_operation` | Edits a model's parameters through a checked write; Tau shows the same values                 | `.tau/parameters/` in the project                |
+| `show_model`                | Shows a model in the Tau viewer; a CAD source or STEP/STL/3MF/OBJ becomes GLB first           | Nothing: a rendered source stays in memory       |
+| `view_state`                | Reports the viewer's model, selected, added and hidden parts, camera; `capture` adds an image | Nothing                                          |
+| `pose_model`                | Plays, pauses, seeks or resets an animation, or sets joints, of the shown model's mechanism   | The GLB, when it shows a source first            |
+| `prepare_kernel`            | Downloads the native runtime a `.py` or `.cs` model needs, once per computer                  | The shared dependency store, outside the project |
 
 The tools load with the session in both hosts rather than waiting behind tool search. `test_model` is listed only when the server can resolve the GeoSpec engine, which `@taucad/cli` installs with itself; a server without it does not register the tool, so a client calling it anyway gets the MCP unknown-tool error.
 
@@ -101,9 +101,9 @@ With `TAU_HOST_MACHINES=true` in the server's environment (the Codex manifest pa
 
 ### Native kernels
 
-`.py` (Build123d, or SMLibPy when the file imports `smlibpy`) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }`, `{ "kernel": "smlibpy" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
+`.py` (Build123d, or SMLibPy when the file imports `smlibpy`) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a dependency store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }`, `{ "kernel": "smlibpy" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
 
-The server does not pass its environment on: the threads that run models get the platform's own variables, the proxy and CA variables, and Tau's `TAU_*` acquisition profile (`TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_CONFIG_DIR`, `TAU_ACQUISITION`, `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION`), and nothing else. The Codex manifest forwards those names to the server, and with a proxy set the launcher sets `NODE_USE_ENV_PROXY=1` so downloads use it.
+The server does not pass its environment on: the threads that run models get the platform's own variables, the proxy and CA variables, and Tau's `TAU_*` acquisition profile (`TAU_DEPENDENCY_MIRROR`, `TAU_DEPENDENCY_MIRROR_NO_FALLBACK`, `TAU_DEPENDENCY_DIR`, `TAU_CONFIG_DIR`, `TAU_ACQUISITION`, `TAU_DEPENDENCY_TARGET`, `TAU_DEPENDENCY_EMULATION`), and nothing else. The Codex manifest forwards those names to the server, and with a proxy set the launcher sets `NODE_USE_ENV_PROXY=1` so downloads use it.
 
 ## Viewer
 

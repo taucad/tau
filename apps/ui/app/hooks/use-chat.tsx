@@ -51,7 +51,7 @@ import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provid
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
-import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
+import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -61,7 +61,7 @@ import type {
   DraftAttachmentSource,
   draftMachine,
 } from '#hooks/draft.machine.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;

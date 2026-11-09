@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { join } from 'node:path';
 
-import type { ClosureReceipt, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureReceipt, InstalledFile } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
 import { dotnetLaunchSet, dotnetOptionsFromClosure } from '#dotnet-closure.js';
@@ -23,14 +23,14 @@ const optionsFromClosure = dotnetOptionsFromClosure(layout);
 
 const root = '/store/closures/sha256/0123';
 const digest = (seed: string): string => seed.repeat(64).slice(0, 64);
-const file = (path: string, seed = 'a', extra: Partial<ReceiptFile> = {}): ReceiptFile => ({
+const file = (path: string, seed = 'a', extra: Partial<InstalledFile> = {}): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digest(seed),
   mode: 0o644,
   ...extra,
 });
-const closureFiles: readonly ReceiptFile[] = [
+const closureFiles: readonly InstalledFile[] = [
   file('dotnet/dotnet', 'b', { mode: 0o755 }),
   file('dotnet/LICENSE.txt'),
   file('dotnet/host/fxr/10.0.11/libhostfxr.dylib', 'c'),
@@ -48,7 +48,7 @@ const closureFiles: readonly ReceiptFile[] = [
   file('tau-worker/Microsoft.CodeAnalysis.dll', '9'),
   file('tau-worker/link.dylib', '0', { symlinkTarget: 'picogk.26.2.dylib' }),
 ];
-const receipt = (files: readonly ReceiptFile[] = closureFiles): ClosureReceipt => ({
+const receipt = (files: readonly InstalledFile[] = closureFiles): ClosureReceipt => ({
   package: '@taucad/picogk',
   dependency: 'runtime',
   target: { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
@@ -61,7 +61,7 @@ const receipt = (files: readonly ReceiptFile[] = closureFiles): ClosureReceipt =
   closureIntegrity: `sha256-${'A'.repeat(43)}=`,
   treeIntegrity: `sha256-${'B'.repeat(43)}=`,
   files,
-  payloads: [],
+  dependencyFiles: [],
   preparedAt: '2026-10-15T00:00:00.000Z',
   tauVersion: '0.0.0',
 });

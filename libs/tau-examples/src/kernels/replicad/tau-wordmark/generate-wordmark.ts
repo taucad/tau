@@ -63,7 +63,7 @@ const outputs = [
   [join(workspaceRoot, 'apps/ui/public/wordmark.svg'), svg],
   [join(workspaceRoot, 'apps/ui/public/wordmark.png'), png],
   [
-    join(workspaceRoot, 'apps/ui/app/components/icons/tau-wordmark.tsx'),
+    join(workspaceRoot, 'apps/libs/ui-kit/src/icons/tau-wordmark.tsx'),
     component,
   ],
   [join(workspaceRoot, 'apps/docs/app/components/tau-wordmark.tsx'), component],

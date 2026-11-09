@@ -65,7 +65,7 @@ describe('generated example artifacts', () => {
     ]);
   });
 
-  it('evaluates a native kernel only once the payload store holds its closure sealed', () => {
+  it('evaluates a native kernel only once the dependency store holds its closure sealed', () => {
     const listed = new Set<string>(exampleRuntime.kernels.map(({ id }) => id));
     expect([...exampleKernelIds].every((id) => listed.has(id))).toBe(true);
     expect([...listed].filter((id) => !exampleKernelIds.has(id)).every((id) => id === 'picogk')).toBe(true);

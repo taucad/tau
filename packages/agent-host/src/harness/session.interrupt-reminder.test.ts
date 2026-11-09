@@ -108,7 +108,7 @@ describe('interrupt reminder on a new prompt after Stop (R3)', () => {
     const { transport, events } = await promptAfter(stoppedRun);
 
     const sent = transport.requests[0]?.messages ?? [];
-    const reminderIndex = sent.findIndex(isReminder);
+    const reminderIndex = sent.findIndex((message) => isReminder(message));
     const promptIndex = sent.findIndex((message) => message.id === 'user-2');
     expect(reminderIndex).toBeGreaterThan(sent.findIndex((message) => message.id === 'output-edit'));
     expect(reminderIndex).toBeLessThan(promptIndex);
@@ -127,18 +127,18 @@ describe('interrupt reminder on a new prompt after Stop (R3)', () => {
       },
     ]);
 
-    expect((transport.requests[0]?.messages ?? []).some(isReminder)).toBe(false);
+    expect((transport.requests[0]?.messages ?? []).some((message) => isReminder(message))).toBe(false);
   });
 
   it('should not add a second reminder when the stopped history already carries one', async () => {
     const first = await promptAfter(stoppedRun);
-    const reminder = first.transport.requests[0]?.messages.find(isReminder);
+    const reminder = first.transport.requests[0]?.messages.find((message) => isReminder(message));
     if (reminder === undefined) {
       throw new Error('expected a reminder');
     }
 
-    const { transport } = await promptAfter([...stoppedRun, reminder as ProviderMessage]);
+    const { transport } = await promptAfter([...stoppedRun, reminder]);
 
-    expect((transport.requests[0]?.messages ?? []).filter(isReminder)).toHaveLength(1);
+    expect((transport.requests[0]?.messages ?? []).filter((message) => isReminder(message))).toHaveLength(1);
   });
 });

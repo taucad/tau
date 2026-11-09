@@ -81,6 +81,7 @@ import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecor
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createEventLogRecentSkills } from '#harness/recent-skills.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
@@ -2217,7 +2218,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               snapshot: options.snapshot,
               contextMessages: options.contextMessages,
               clientContext: options.clientContext,
-              recentSkills: options.recentSkills,
+              /* R2: with no host store, the chat's own event log is the record of its `use_skill` activations. */
+              recentSkills: options.recentSkills ?? createEventLogRecentSkills(async () => record.events()),
               ...(await skillsCarriage()),
             }));
           if (!(await prepareStartOfTurn())) {

@@ -7,13 +7,11 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyRequest } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { hostDeviceOf } from '#auth/auth.guard.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
+import { authInstanceKey, hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
+import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { GitBasicAuthMiddleware } from '#api/git/git-transport.js';
-import { mintHostGitCredential } from '#api/hosts/host-git-credential.js';
+import { mintHostGitCredential } from '@taucad/api-hosts';
 
 /*
  * The third credential kind end to end through the real middleware and the

@@ -191,6 +191,12 @@ export function AutoReloadSettings({
           <p className='text-muted-foreground'>Automatic reload is off.</p>
         )}
         {action?.state === 'prepared' ? (
+          <p className='text-muted-foreground'>
+            By accepting, you authorize Tau to charge your saved card the reload amount plus tax whenever your balance
+            falls below the reload threshold, within the limits shown, until you turn automatic reload off.
+          </p>
+        ) : undefined}
+        {action?.state === 'prepared' ? (
           <Button
             disabled={busy}
             onClick={() =>

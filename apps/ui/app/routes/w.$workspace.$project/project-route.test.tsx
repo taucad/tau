@@ -788,6 +788,7 @@ describe('project route session identity', () => {
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
     const content = mock<FileContentService>();
+    content.addEditorSaveFlusher.mockReturnValue(() => undefined);
     const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
     content.resolve.mockResolvedValue({ kind: 'text', content: encode('one') });
     content.peekOutcome.mockReturnValue({ kind: 'text', content: encode('theirs') });

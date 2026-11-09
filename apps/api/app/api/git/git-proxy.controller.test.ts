@@ -8,10 +8,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ConfigService } from '@nestjs/config';
 import { PayloadTooLargeException } from '@nestjs/common';
 import type { StreamableFile } from '@nestjs/common';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { z } from 'zod';
 import { GitProxyController, sealRelayRecord } from '#api/git/git-proxy.controller.js';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 
 /* Hermetic DNS: every hostname answers one public address unless a test says otherwise. */
 const dns = vi.hoisted(() => ({ lookup: vi.fn() }));

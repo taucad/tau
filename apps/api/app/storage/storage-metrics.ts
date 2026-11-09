@@ -1,5 +1,5 @@
 import type { S3Client } from '@aws-sdk/client-s3';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 export type StorageMetricTier = 'public' | 'private' | 'account';
 

@@ -16,7 +16,7 @@ import { listingKeyFor } from '#api/git/store/listing-key.js';
 import { encodeManifest, indexKeyFor, succeedManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 /*

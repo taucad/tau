@@ -81,6 +81,8 @@ vi.mock('react-router', () => ({
   useLocation: () => ({ pathname: '/', search: '' }),
   useNavigate: () => vi.fn(),
   useNavigation: () => ({ location: undefined, state: 'idle' }),
+  // No home route loader here: the project list's remembered count is unknown.
+  useRouteLoaderData: () => undefined,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarGroup: ({ children }: { readonly children: ReactNode }) => <section>{children}</section>,

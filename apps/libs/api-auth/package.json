@@ -1,0 +1,63 @@
+{
+  "name": "@taucad/api-auth",
+  "version": "0.1.0-beta.0",
+  "description": "API authentication: Better Auth composition, guard and decorators",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-auth"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-auth#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./config/auth-static": "./src/config/auth-static.config.ts",
+    "./config/better-auth": "./src/config/better-auth.config.ts",
+    "./module": "./src/auth.module.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@better-auth/api-key": "catalog:",
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@nestjs/platform-fastify": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-email": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "better-auth": "catalog:",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "@taucad/api-observability": "workspace:*",
+    "dotenv": "catalog:",
+    "pino-http": "^10.5.0",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

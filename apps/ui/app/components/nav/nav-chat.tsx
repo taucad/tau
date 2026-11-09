@@ -10,7 +10,7 @@ import { cn } from '@taucad/ui/utils/cn';
 const newProjectState = { focusChatComposer: true } as const;
 
 /**
- * The sidebar's New Project button.
+ * The sidebar's New project button.
  *
  * @param props - `isCompact` tightens the desktop app's row; `isTouchSized` gives the phone sheet its 44px target
  * (canvas SB-02, I3), where the keyboard chip already stays hidden.
@@ -46,7 +46,7 @@ export function NavChat({
             tooltip={{
               children: (
                 <>
-                  New Project{` `}
+                  New project{` `}
                   <KeyShortcut variant='tooltip' className='ml-1'>
                     {formattedKeyCombination}
                   </KeyShortcut>
@@ -58,7 +58,7 @@ export function NavChat({
           >
             <span>
               {isPending ? <Loader /> : <PackagePlus className='size-4 shrink-0' />}
-              <span className='flex-1 whitespace-nowrap'>New Project</span>
+              <span className='flex-1 whitespace-nowrap'>New project</span>
               <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
             </span>
           </SidebarMenuButton>

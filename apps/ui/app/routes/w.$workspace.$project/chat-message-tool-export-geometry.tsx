@@ -35,6 +35,8 @@ import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
+/** Largest artifact one download reads, the RPC binary read's own bound. */
+const exportArtifactReadBytes = 256 * 1024 * 1024;
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
 
 function getBasename(path: string): string {
@@ -155,7 +157,11 @@ function ExportGeometryDownloadSplitButton({
 
     try {
       const artifacts = await Promise.all(
-        files.map(async (file) => ({ ...file, bytes: await fileManager.readFile(file.artifactPath) })),
+        /* An artifact is binary (STEP, GLB, STL, 3MF) and can pass the open-time limit: it is read raw (L3 D-3). */
+        files.map(async (file) => ({
+          ...file,
+          bytes: await fileManager.readRawBytes(file.artifactPath, { sizeLimit: exportArtifactReadBytes }),
+        })),
       );
       await downloadExportArtifactSet(artifacts, {
         singleFileName: files[0]!.name,

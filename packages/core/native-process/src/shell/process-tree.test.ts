@@ -9,6 +9,7 @@ import {
   ownedProcesses,
   processTable,
   terminateOwnedProcesses,
+  terminationDeadline,
   trackDescendants,
 } from '#shell/process-tree.js';
 
@@ -165,6 +166,36 @@ describe('terminateOwnedProcesses', () => {
       });
       const settled = expect(termination).resolves.toStrictEqual([]);
       await vi.advanceTimersByTimeAsync(16_000);
+      await settled;
+      await expect(running).resolves.toStrictEqual([]);
+    } finally {
+      kill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should confirm cleanup within the production deadline when every shared read takes most of its budget', async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      /* A loaded macOS runner (MAC-X S03): each `ps` takes 4500 ms and a caller queues behind a running one. */
+      const shared = coalesceReads(
+        async () =>
+          new Promise<readonly ProcessRow[]>((resolve) => {
+            setTimeout(() => {
+              resolve([]);
+            }, 4500);
+          }),
+      );
+      const running = shared();
+      const termination = terminateOwnedProcesses({
+        root: 100,
+        group: 100,
+        deadlineMilliseconds: terminationDeadline,
+        table: shared,
+      });
+      const settled = expect(termination).resolves.toStrictEqual([]);
+      await vi.advanceTimersByTimeAsync(terminationDeadline);
       await settled;
       await expect(running).resolves.toStrictEqual([]);
     } finally {

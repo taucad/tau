@@ -1,4 +1,4 @@
-import type { TierAssurance } from '#api/billing/subscription-tier.js';
+import type { TierAssurance } from '@taucad/api-billing';
 
 /** Injection token for the source of an account's established billing tier. */
 export const tierAssuranceKey = Symbol('tierAssurance');

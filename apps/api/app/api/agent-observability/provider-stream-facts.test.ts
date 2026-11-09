@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire fields use snake_case. */
 import { describe, expect, it } from 'vitest';
 import { ProviderStreamFacts } from '#api/agent-observability/provider-stream-facts.js';
-import type { ModelProviderWire } from '#api/llm/model-invocation.types.js';
+import type { ModelProviderWire } from '@taucad/api-llm-gateway';
 
 const secret = 'PRIVATE_OUTPUT_TEXT_91c2';
 const frames = (events: readonly unknown[]): string =>

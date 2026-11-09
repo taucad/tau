@@ -2,9 +2,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
-import { project, projectCollaborator, projectInvitation, user } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
+import { project, projectCollaborator, projectInvitation, user } from '@taucad/api-database/schema';
 
 /** What an account may do with a project. The owner is implicit and manages the rest (D27). */
 export type ProjectRole = 'owner' | 'write' | 'read';

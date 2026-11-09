@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import { ZooTokensController } from '#api/kernels/zoo-tokens.controller.js';
 

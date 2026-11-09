@@ -235,6 +235,45 @@ describe('wrapOcForExceptions', () => {
 });
 
 describe('wrapOcWithTracing', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- embind classes carry OCCT's names (`gp_Vec`). */
+  it.each(['summary', 'per-call'] as const)(
+    'should keep gp value types proxied in %s mode, so their methods stay abortable and name their exceptions',
+    (mode) => {
+      const tag = new WebAssembly.Tag({ parameters: ['i32'] });
+      class gp_Vec {
+        public normalized(): never {
+          // oxlint-disable-next-line typescript/only-throw-error -- OCCT throws a WebAssembly.Exception, not an Error.
+          throw new WebAssembly.Exception(tag, [0]);
+        }
+
+        public magnitude(): number {
+          return 0;
+        }
+
+        public delete(): void {
+          // Emscripten records carry delete(); nothing to release here.
+        }
+      }
+      const oc = createMockOc({
+        getExceptionMessage: vi.fn().mockReturnValue(['gp_VectorWithNullMagnitude', 'gp_Vec::Normalized()']),
+        gp_Vec,
+      });
+      const { tracedInstance } = wrapOcWithTracing(oc, createMockTracer(), { mode });
+      const traced = tracedInstance as unknown as { gp_Vec: new () => gp_Vec };
+
+      const { gp_Vec: Vector } = traced;
+      const vector = new Vector();
+      // Tracing is a diagnostic mode: value types keep the proxy the exception-only wrapper drops for speed.
+      expect(vector.magnitude).not.toBe(gp_Vec.prototype.magnitude);
+      abortNextCheck();
+      expect(() => vector.magnitude()).toThrow(RenderAbortedError);
+      expect(() => vector.normalized()).toThrow(
+        expect.objectContaining({ name: 'OcKernelError', typeName: 'gp_VectorWithNullMagnitude' }) as Error,
+      );
+    },
+  );
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the OCCT-named classes. */
+
   it('should proxy function calls and return results', () => {
     const oc = createMockOc();
     const tracer = createMockTracer();

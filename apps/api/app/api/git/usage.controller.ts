@@ -1,10 +1,10 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { Controller, Get, HttpException, HttpStatus, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /** Usage reads per caller per window (RV-W8 F8): a Sync region reads on connect and after a push. */
 export const usageReadsPerWindow = 30;

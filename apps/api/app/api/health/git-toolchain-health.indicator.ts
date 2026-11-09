@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { inProcessGitToolchain } from '#api/git/forwarding/in-process-executor.js';
 
 /**

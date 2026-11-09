@@ -11,7 +11,7 @@ import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-s
 import { pseudonymGrants, scoreObservations } from '#api/agent-observability/langfuse-scorecard.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
-import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
 import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');

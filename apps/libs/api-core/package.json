@@ -1,0 +1,59 @@
+{
+  "name": "@taucad/api-core",
+  "version": "0.1.0-beta.0",
+  "description": "API environment schema, constants and pure utilities",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-core"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-core#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants/app": "./src/constants/app.constant.ts",
+    "./constants/cors": "./src/constants/cors.constant.ts",
+    "./constants/http-body": "./src/constants/http-body.constant.ts",
+    "./constants/http-header": "./src/constants/http-header.constant.ts",
+    "./utils/base62": "./src/utils/base62.ts",
+    "./utils/cors": "./src/utils/cors.utils.ts",
+    "./utils/diff": "./src/utils/diff.utils.ts",
+    "./utils/string": "./src/utils/string.utils.ts",
+    "./utils/trust-proxy": "./src/utils/trust-proxy.utils.ts",
+    "./utils/xml": "./src/utils/xml.ts",
+    "./zod": "./src/zod.lib.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@taucad/file-links": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "minimatch": "^10.2.5"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "fastify": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "zod": "catalog:"
+  }
+}

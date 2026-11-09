@@ -166,6 +166,12 @@ export function createWorkbenchViewStore(
   }>();
   /** A write whose reply was lost: it may be on disk, so the next write reads first and keeps it for attribution. */
   let unresolved: { bytes: Uint8Array<ArrayBuffer>; patch: ViewRecordPatch | undefined } | undefined;
+  /**
+   * An applied write a newer read superseded before its bytes were published. A watch can start that read after the
+   * write's reply, when the write is no longer in flight, so it is kept for attribution until a read publishes it or
+   * finds other bytes.
+   */
+  let acknowledged: { bytes: Uint8Array<ArrayBuffer>; patch: ViewRecordPatch | undefined } | undefined;
   const health = createRecordHealth({
     onHealth: input.onHealth,
     readAgain: () => {
@@ -263,9 +269,12 @@ export function createWorkbenchViewStore(
         readError = false;
         const ownWrite =
           bytes &&
-          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : [])].find((written) =>
-            sameBytes(written.bytes, bytes),
+          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : []), ...(acknowledged ? [acknowledged] : [])].find(
+            (written) => sameBytes(written.bytes, bytes),
           );
+        if (!ownWrite || ownWrite === acknowledged) {
+          acknowledged = undefined;
+        }
         publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
         health.readSucceeded();
       }
@@ -451,11 +460,14 @@ export function createWorkbenchViewStore(
           } else {
             // A watch overlapped the write. Read the live bytes after acknowledgement:
             // that watch may have captured either the old base or a newer foreign edit.
+            // A later watch read can supersede this refresh, so it must still know these bytes are this write's.
+            acknowledged = { bytes: result.content, patch: attempted.patch };
             const refresh = ++generation;
             try {
               const latest = (await input.files.exists(path)) ? await input.files.readFile(path) : null;
               if (refresh === generation) {
                 const ownWrite = sameBytes(latest, result.content);
+                acknowledged = undefined;
                 publish(latest, ownWrite ? 'write' : 'read', false, ownWrite ? attempted.patch : undefined);
               }
             } catch (error) {

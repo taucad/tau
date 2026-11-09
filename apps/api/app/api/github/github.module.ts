@@ -3,7 +3,7 @@ import { GithubGistService } from '#api/github/github-gist.service.js';
 import { Module } from '@nestjs/common';
 import { GithubController } from '#api/github/github.controller.js';
 import { GithubService } from '#api/github/github.service.js';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 
 @Module({
   imports: [DatabaseModule],

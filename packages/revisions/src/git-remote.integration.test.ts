@@ -42,7 +42,11 @@ import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createGitRemoteTransport, isTauApiUrl } from '#remotes.js';
-import { largeObjectThresholdBytes } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  largeObjectThresholdBytes,
+} from '#workspace-config.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionPort } from '#revision-port.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
@@ -345,7 +349,12 @@ describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remo
   /* Over `largeObjectThresholdBytes`, so W9's clean step pointerises it and the
    * project genuinely "holds large objects". */
   const large = ((): string => 'x'.repeat(largeObjectThresholdBytes + 1024))();
-  const files = { 'models/housing.step': large, 'readme.md': 'small\n' };
+  /* Tau's block names the family, as every Tau-created tree carries it (D16). */
+  const files = {
+    [generatedGitattributesPath]: generatedGitattributesContent(undefined),
+    'models/housing.step': large,
+    'readme.md': 'small\n',
+  };
 
   /* Each row owns its backend (L2-F13): both rows assert what the trail holds, so
    * a shared one made the second fail on the first's traffic whenever the first

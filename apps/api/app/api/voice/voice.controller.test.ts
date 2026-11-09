@@ -7,8 +7,7 @@ import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schema
 import type { Auth } from 'better-auth';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { VoiceController } from '#api/voice/voice.controller.js';
 import { VoiceService } from '#api/voice/voice.service.js';

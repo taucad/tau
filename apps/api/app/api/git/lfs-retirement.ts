@@ -1,9 +1,9 @@
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import type { Database } from '#database/owner-lock.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
-import { project, projectGit, projectGitLfsObject, projectDeletion } from '#database/schema.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
+import { project, projectGit, projectGitLfsObject, projectDeletion } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

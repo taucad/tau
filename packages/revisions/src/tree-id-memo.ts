@@ -29,11 +29,32 @@ const frameObject = (type: 'blob' | 'tree', body: Uint8Array<ArrayBuffer>): Uint
  * holds any more has no id worth keeping.
  */
 const blobOids = new WeakMap<Uint8Array<ArrayBuffer>, Partial<Record<ObjectFormat, string>>>();
-const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string => {
+/** One blob's object id, memoised on the bytes a tree holds (E3). @internal */
+export const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string => {
   const held = blobOids.get(content) ?? {};
   held[format] ??= bytesToHex(digest(format, frameObject('blob', content)));
   blobOids.set(content, held);
   return held[format];
+};
+
+/**
+ * Take a blob id measured elsewhere for bytes a tree holds — a committed
+ * import's facts, measured from its read-back (charter D12, EQ6) — so neither
+ * the gate nor a store's writer hashes them again (I2). The caller vouches
+ * that the id is of exactly these bytes; an id of the wrong form is ignored.
+ *
+ * @param content - The tree's own bytes for one file.
+ * @param format - The object format the id is in.
+ * @param oid - The measured blob id.
+ * @internal
+ */
+export const recordBlobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat, oid: string): void => {
+  if (!(format === 'sha1' ? /^[0-9a-f]{40}$/u : /^[0-9a-f]{64}$/u).test(oid)) {
+    return;
+  }
+  const held = blobOids.get(content) ?? {};
+  held[format] ??= oid;
+  blobOids.set(content, held);
 };
 
 /* Whole trees: the gate, the claim and the port's write ask of one tree. */

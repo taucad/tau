@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { NestMiddleware } from '@nestjs/common';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { httpHeader } from '#constants/http-header.constant.js';
+import { httpHeader } from '@taucad/api-core/constants/http-header';
 
 /**
  * The shape an inbound `request-id` must have to be propagated. Covers the

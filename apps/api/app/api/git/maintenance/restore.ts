@@ -1,5 +1,5 @@
-import type { Database } from '#database/owner-lock.js';
-import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { repositoryLocator } from '#api/git/store/locator.js';

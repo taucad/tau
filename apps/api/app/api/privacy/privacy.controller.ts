@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch } from '@nestjs/common';
-import type { AuthUser } from '#auth/auth.type.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import type { AuthUser } from '@taucad/api-auth';
+import { UseAuth, User } from '@taucad/api-auth';
 import type { PrivacyPreferences } from '#api/privacy/privacy.schema.js';
 import { UpdatePrivacyPreferencesDto } from '#api/privacy/privacy.dto.js';
 import { PrivacyService } from '#api/privacy/privacy.service.js';

@@ -6,7 +6,12 @@ import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import { processTable, tableObservationTimeout, terminateOwnedProcesses } from '#shell/process-tree.js';
+import {
+  processTable,
+  tableObservationTimeout,
+  terminateOwnedProcesses,
+  terminationDeadline,
+} from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
 import type { PreparedShell, ShellExecution, ShellRecovery, ShellResource } from '#shell/shell-provider.js';
 
@@ -144,8 +149,8 @@ export type ShellCustody = Readonly<{
   close: () => Promise<void>;
 }>;
 
-/** How long armed recovery may spend terminating and confirming registered identities. Milliseconds. */
-const recoveryMilliseconds = 5000;
+/** How long armed recovery may spend terminating and confirming registered identities (see {@link terminationDeadline}). Milliseconds. */
+const recoveryMilliseconds = terminationDeadline;
 
 const missing = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
 const metadata = (record: CustodyRecord): ShellExecution => ({

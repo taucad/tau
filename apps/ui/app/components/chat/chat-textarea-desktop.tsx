@@ -1,9 +1,20 @@
-import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  chatComposerAddTriggerClassName,
+  chatComposerBarClassName,
+  chatComposerBarLeftClassName,
+  chatComposerBarRightClassName,
+  chatComposerCollapseTransitionClassName,
+  chatComposerCollapsibleControlsClassName,
+  chatComposerEditorAreaClassName,
+  chatComposerFrameClassName,
+  chatComposerMainEditorAreaClassName,
+  chatComposerShellClassName,
+} from '#components/chat/chat-input-styles.js';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
-import { AtSign, Paperclip, Plus } from 'lucide-react';
+import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
@@ -47,7 +58,11 @@ import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent, commandInvocation } from '#utils/at-reference.utils.js';
 import { skillMetadataToSlashCommand, useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
+import type { SkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
+
+/** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
+const noSkills: SkillsCatalogState['commands'] = [];
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
   image: 'Add files',
@@ -259,7 +274,14 @@ export const ChatTextareaDesktop = memo(function ({
   removeAttachment,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const catalog = useSkillsCatalogState();
-  const skillsCatalog = catalog.status === 'closed' || catalog.status === 'error' ? [] : catalog.commands;
+  /* `closed` is a real close: an absent or idle catalog reports `registering` (use-observation). */
+  const isCatalogUnavailable = catalog.status === 'closed' || catalog.status === 'error';
+  const skillsCatalog = isCatalogUnavailable ? noSkills : catalog.commands;
+  const { retry: retrySkills } = catalog;
+  const skillsRecovery = useMemo(
+    () => (acpAgentId === undefined && isCatalogUnavailable ? <ChatSkillsRecovery onRetry={retrySkills} /> : undefined),
+    [acpAgentId, isCatalogUnavailable, retrySkills],
+  );
 
   const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
@@ -463,6 +485,23 @@ export const ChatTextareaDesktop = memo(function ({
     };
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
+  /* Home's native input held focus, with this box's outline, until this replaced it. The outline holds until
+   * focus lands somewhere — the editor, whose own outline then takes over in the same style pass, or wherever the
+   * person moved it — so the swap never paints the box without it (gate finding 2, #1562). Clearing it on a
+   * timer instead left a gap: Tiptap's focus command itself waits a frame before focusing. */
+  const [isFocusHandoverPending, setIsFocusHandoverPending] = useState(earlyInput?.focused === true);
+  useEffect(() => {
+    if (!isFocusHandoverPending) {
+      return undefined;
+    }
+    const endHandover = (): void => {
+      setIsFocusHandoverPending(false);
+    };
+    document.addEventListener('focusin', endHandover);
+    return () => {
+      document.removeEventListener('focusin', endHandover);
+    };
+  }, [isFocusHandoverPending]);
   useEffect(() => {
     if (
       !editor ||
@@ -477,6 +516,8 @@ export const ChatTextareaDesktop = memo(function ({
     const frame = requestAnimationFrame(() => {
       if (!editor.isDestroyed) {
         if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
+          // Focus is already elsewhere: there is nothing left to hand over.
+          setIsFocusHandoverPending(false);
           return;
         }
         if (earlyInput?.edited) {
@@ -572,20 +613,18 @@ export const ChatTextareaDesktop = memo(function ({
     // and intentionally takes NO `className` passthrough — see
     // ChatTextareaBorderBeam's docs for why. All layout / styling
     // overrides live on the inner border container below.
-    <div className='@container/composer relative w-full' data-chat-composer={mode}>
+    <div className={chatComposerShellClassName} data-chat-composer={mode}>
       <ChatTextareaBorderBeam isActive={isSubmitting} className={radius} />
 
       <div
         ref={containerReference}
         className={cn(
-          'group/chat-textarea @container',
-          'relative flex w-full flex-col border border-border/60 bg-background',
-          chatComposerPaddingClassName,
+          chatComposerFrameClassName,
           radius,
           collapse.composer,
-          'cursor-text overflow-hidden',
-          'shadow-sm',
           'has-[.tiptap:focus-visible]:focus-outline',
+          /* Home's native input held focus until this replaced it: keep its outline until the editor takes focus. */
+          isFocusHandoverPending && 'focus-outline',
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
@@ -595,14 +634,6 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {acpAgentId === undefined && (catalog.status === 'closed' || catalog.status === 'error') ? (
-          <div role='status' className='flex items-center justify-between gap-2 px-3 pb-2 text-xs'>
-            <span>Skill updates unavailable</span>
-            <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
-              Retry
-            </Button>
-          </div>
-        ) : undefined}
         {/* Only a session's chat can hold a kernel this runtime cannot run. */}
         <ChatKernelFallbackNotice />
         {/* Attachments */}
@@ -618,8 +649,8 @@ export const ChatTextareaDesktop = memo(function ({
         {/* Editor */}
         <div
           className={cn(
-            'max-h-48 min-w-0 overflow-y-auto overscroll-contain',
-            mode === 'main' && 'max-h-[min(12rem,30cqh)]',
+            chatComposerEditorAreaClassName,
+            mode === 'main' && chatComposerMainEditorAreaClassName,
             collapse.editor,
           )}
           onClick={handleEditorAreaClick}
@@ -647,6 +678,7 @@ export const ChatTextareaDesktop = memo(function ({
         <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar
           dictationControl={dictationControl}
+          skillsRecovery={skillsRecovery}
           isDictating={dictationActive}
           composerMode={mode}
           containerReference={containerReference}
@@ -677,13 +709,6 @@ export const ChatTextareaDesktop = memo(function ({
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
 
-/* The collapsed composer (mobile-width surfaces): one row. The editor makes
- * room for + on the left and dictation and Send on the right; the bar rises
- * onto the editor's line, and every other control fades out in place, keeping
- * its width so the bar's measured collapse (D6) never re-runs. */
-const collapseTransition =
-  'transition-[padding,margin,border-radius,corner-shape,opacity,visibility] duration-200 ease-out motion-reduce:transition-none';
-
 /**
  * A collapsible composer's own classes: the box's corners, and the editor's
  * room for + on the left and for dictation (when offered) and Send on the right.
@@ -701,14 +726,14 @@ const collapsibleClassNames = (
   isCollapsible === true
     ? {
         composer: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           // Half the Send diameter + its inset + the border. A finite radius interpolates without pill clamping.
           '[corner-shape:superellipse(1.5)] @max-[768px]/composer:data-[collapsed]:rounded-[calc(var(--spacing)*5.5+1px)] @max-[768px]/composer:data-[collapsed]:[corner-shape:round] @max-[768px]/composer:data-[collapsed]:pt-2.5',
         ),
         editor: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           // Under a coarse pointer the row also clears the controls' 6px touch rings, so a tap at the
-          // editor's edge reaches the editor, not + or dictation (see `composerTouchTargetsClassName`).
+          // editor's edge reaches the editor, not + or dictation (see `chatComposerBarClassName`).
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-8.5',
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
@@ -717,34 +742,13 @@ const collapsibleClassNames = (
             : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-8.5',
         ),
         editorContent: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:[&_.tiptap]:overflow-hidden',
           // Match the collapsed editor's 24px box on fine pointers as well as touch devices.
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pb-0 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:leading-6',
         ),
       }
     : {};
-
-/** The bar, risen onto the editor's line; taps between its controls reach the editor. */
-const collapsedBarClassName = cn(
-  collapseTransition,
-  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-6.5 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:pointer-events-none',
-);
-
-/** Controls a collapsed composer hides: every one but +, dictation and Send. */
-const collapsibleControlsClassName = cn(
-  collapseTransition,
-  'flex min-w-0 flex-row items-center empty:hidden',
-  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible @max-[768px]/composer:group-data-[collapsed]/chat-textarea:opacity-0',
-);
-
-/**
- * Touch targets (I3). The bar keeps its 28px controls, so the composer keeps its
- * geometry, but under a coarse pointer each control's hit area reaches 40px and
- * the controls sit 12px apart, so neighbouring hit areas meet without overlapping.
- */
-const composerTouchTargetsClassName =
-  "pointer-coarse:gap-3 pointer-coarse:[&_button]:relative pointer-coarse:[&_button]:after:absolute pointer-coarse:[&_button]:after:-inset-1.5 pointer-coarse:[&_button]:after:content-['']";
 
 /** Keyboard hints are for keyboards (I7). */
 const keyboardHintClassName = 'pointer-coarse:hidden';
@@ -819,6 +823,7 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
  */
 export const ChatTextareaBar = memo(function ({
   dictationControl,
+  skillsRecovery,
   isDictating = false,
   composerMode,
   containerReference,
@@ -843,6 +848,8 @@ export const ChatTextareaBar = memo(function ({
   handleCancelClick,
 }: {
   readonly dictationControl?: React.ReactNode;
+  /** Recovery for a failed skills catalog; a control in the bar, so it never grows the composer. */
+  readonly skillsRecovery?: React.ReactNode;
   readonly isDictating?: boolean;
   readonly composerMode: 'main' | 'edit';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
@@ -898,19 +905,8 @@ export const ChatTextareaBar = memo(function ({
   );
 
   return (
-    <div
-      ref={barRef}
-      data-slot='composer-bar'
-      className={cn(
-        'group/bar flex items-center justify-between gap-2 px-2',
-        composerTouchTargetsClassName,
-        collapsedBarClassName,
-      )}
-    >
-      <div
-        data-slot='composer-left'
-        className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3'
-      >
+    <div ref={barRef} data-slot='composer-bar' className={chatComposerBarClassName}>
+      <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
         <ChatAddMenu
           enableContextActions={enableContextActions}
           isAttachmentSupported={attachmentInputSupported}
@@ -920,7 +916,7 @@ export const ChatTextareaBar = memo(function ({
         />
         <div
           data-slot='composer-collapsible'
-          className={cn(collapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
         >
           <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
           {creationLocationControl}
@@ -935,14 +931,12 @@ export const ChatTextareaBar = memo(function ({
           onChange={handleFileChange}
         />
       </div>
-      <div
-        data-slot='composer-right'
-        className='pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-3'
-      >
+      <div data-slot='composer-right' className={chatComposerBarRightClassName}>
         <div
           data-slot='composer-collapsible'
-          className={cn(collapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
         >
+          {skillsRecovery}
           <ChatContextIndicator />
           <ChatAgentSheet
             agentConfig={agentConfig}
@@ -967,6 +961,39 @@ export const ChatTextareaBar = memo(function ({
     </div>
   );
 });
+
+/**
+ * A failed skills catalog's recovery, in the bar beside the context meter. It appears only after a
+ * real failure (the catalog errored or closed; a catalog that has not started is `registering`) and
+ * never takes a row of its own, so the composer's height is the same with or without it.
+ */
+function ChatSkillsRecovery({ onRetry }: { readonly onRetry: () => void }): React.JSX.Element {
+  return (
+    <>
+      <span role='status' className='sr-only'>
+        Skill updates unavailable
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant='ghost'
+            size='sm'
+            data-slot='skills-recovery'
+            aria-label='Retry skill updates'
+            className={cn(ghostPillClass, 'gap-1.5')}
+            onClick={onRetry}
+          >
+            <TriangleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
+            <span className='text-xs'>Retry skills</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side='top' className='text-xs'>
+          Skill updates unavailable
+        </TooltipContent>
+      </Tooltip>
+    </>
+  );
+}
 
 /** The kernel, ghost and glyph first; its label is the first to leave when the bar needs the room. */
 function ChatTextareaKernelControl({ focusEditor }: { readonly focusEditor: () => void }): React.JSX.Element {
@@ -1032,7 +1059,7 @@ function ChatAddMenu({
               size='sm'
               data-chat-textarea-focustrap
               aria-label='Add'
-              className={cn(ghostPillClass, 'w-7 shrink-0 px-0')}
+              className={chatComposerAddTriggerClassName}
             >
               <Plus className='size-4' aria-hidden='true' />
             </Button>

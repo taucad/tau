@@ -1,7 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { OpenAiTranscriptionProvider } from '#api/voice/openai-transcription.provider.js';
 import { TranscriptionProviderError } from '#api/voice/voice.types.js';
 import type { TranscriptionEvent } from '#api/voice/voice.types.js';

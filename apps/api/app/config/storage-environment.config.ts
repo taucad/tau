@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { z } from 'zod';
-import { environmentSchemaBase } from '#config/environment.config.js';
+import { environmentSchemaBase } from '@taucad/api-core';
 import { developmentPublicKeysJson, developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 
 /**

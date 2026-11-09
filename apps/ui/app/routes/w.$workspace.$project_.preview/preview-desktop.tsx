@@ -7,6 +7,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@taucad/ui/components/avata
 import { Separator } from '@taucad/ui/components/separator';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { downloadBlob } from '@taucad/utils/file';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -40,9 +41,10 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
       return;
     }
 
+    const ceiling = zipDownloadCeiling();
     toast.promise(
       // The preview's file manager is rooted at this project; `''` is that root.
-      async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true, ...ceiling }),
       {
         loading: 'Creating ZIP archive…',
         success(blob) {
@@ -50,7 +52,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
           return 'ZIP downloaded successfully';
         },
         error(error: unknown) {
-          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error, ceiling)}`;
         },
       },
     );

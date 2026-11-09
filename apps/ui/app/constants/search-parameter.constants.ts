@@ -56,6 +56,8 @@ export const searchParameterName = {
   /* Returns from an external flow */
   // Consume-once billing action id returned from Checkout.
   paymentAction: 'payment_action',
+  // Consume-once marker that the customer came back from the Stripe billing portal.
+  billingReturn: 'billing_return',
   // Consume-once marker that the desktop app opened the import route.
   desktopOpen: 'desktop-open',
 

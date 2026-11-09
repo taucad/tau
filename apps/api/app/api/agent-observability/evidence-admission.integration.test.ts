@@ -8,11 +8,11 @@ import type { Evidence } from '@taucad/agent-observability/contract';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import type { EvidenceAdmissionInput } from '#api/agent-observability/evidence-admission.js';
 import { evidenceFixture, privateMarker } from '#api/agent-observability/evidence.test-fixture.js';
-import type { DatabaseType } from '#database/database.service.js';
-import * as schema from '#database/schema.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import type { DatabaseType } from '@taucad/api-database';
+import * as schema from '@taucad/api-database/schema';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 /** Real migrations, locks and transactions in a disposable database. */
 describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence admission', () => {

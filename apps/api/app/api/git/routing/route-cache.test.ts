@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { RouteCache } from '#api/git/routing/route-cache.js';
 import { defaultRoute, frozenRouteRecheckMilliseconds, routeCacheTtlMilliseconds } from '#api/git/routing/route.js';
 import type { RepositoryRoute } from '#api/git/routing/route.js';

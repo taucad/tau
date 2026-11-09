@@ -5,16 +5,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { and, asc, eq, gt, isNotNull, lte, sql } from 'drizzle-orm';
-import { withOwnerLock } from '#database/owner-lock.js';
-import type { Database } from '#database/owner-lock.js';
-import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import {
   projectDeletion,
   projectDeletionManifest,
   projectGit,
   projectGitLfsObject,
   publication,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 import { releaseDeletedProjectPublicationReferences } from '#api/publications/publication-deletion.js';
 import { gitLfsObjectKey, isProjectRepositoryId } from '#api/git/git.constants.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';

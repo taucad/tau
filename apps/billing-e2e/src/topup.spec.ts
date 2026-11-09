@@ -220,7 +220,7 @@ describe('top-up in the browser', () => {
       // Stripe's Back link is the session's cancel_url, which carries payment_action.
       await page.locator('a[href*="payment_action="]').first().click();
       await page.waitForURL((url) => url.origin === baseUrl);
-      const toast = await waitForToast(page, /Checkout is ready to continue/u);
+      const toast = await waitForToast(page, /Checkout was not finished/u);
       evidence.push(`toast "${toast}"`, await screenshot(page, 'tu-07-return'));
       const returned = await readAction(account, quote.actionId);
       // The dialog reopens on the pending action: "Resume Checkout" or "Cancel payment" (main's label for this state).

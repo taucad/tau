@@ -38,7 +38,12 @@ import { useTerminalAvailability } from '#components/terminal/terminal-availabil
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
-import { highContrastQuery, highContrastRatio, readTerminalTheme } from '#components/terminal/terminal-theme.js';
+import {
+  highContrastQuery,
+  highContrastRatio,
+  readTerminalTheme,
+  terminalTextRendering,
+} from '#components/terminal/terminal-theme.js';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
 export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
@@ -61,9 +66,10 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-/* The code editor's font (`--font-mono`, 14px), so the Terminal and the editor set code the same way. */
+/* The code editor's font (`--font-mono`, 14px, line-height 1.5), so the Terminal and the editor set code the same way. */
 const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
 const fontSize = 14;
+const lineHeight = fontSize * 1.5;
 /**
  * The editor's monospace family, read from the `--font-mono` token the code editor uses.
  *
@@ -345,13 +351,16 @@ export function TerminalPane({
     setFindTerm(undefined);
     setAccessRequest(undefined);
     setNotice(undefined);
+    const theme = readTerminalTheme(host);
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
         host,
         fontFamily: readEditorFontFamily(host),
         fontSize,
-        theme: readTerminalTheme(host),
+        lineHeight,
+        theme,
+        ...terminalTextRendering(theme),
         scrollback: scrollbackLines,
         screenReaderMode: screenReaderModeRef.current,
         minimumContrastRatio: globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1,

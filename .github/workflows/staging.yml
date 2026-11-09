@@ -13,14 +13,18 @@ name: Staging deploy
 #
 # A `push` trigger rather than `workflow_run`: `github.sha` stays the pushed commit,
 # which the reusable deploy workflows build, tag images with and record, and each
-# push keeps a run of its own for `staging-deploy-superseded` to compare.
+# push keeps a run of its own for `staging-deploy-superseded` to compare. The run
+# does not wait for `ci.yml`: `staging-gate.yml` reruns it when that run completes.
 on:
   push:
     branches: [main]
 
 env:
   pnpm_config_verify_deps_before_run: warn
-  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
+  # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
 # Like `ci.yml`'s push runs: one group per commit, never cancelled. Each deploy keeps
 # its own queue (`deploy-<app>-staging`) and skips a commit that a newer run has
@@ -86,33 +90,38 @@ jobs:
           echo "Staging deploys: $deploy_apps"
           echo "deploy-apps=$deploy_apps" >> "$GITHUB_OUTPUT"
 
-  # Waits for the `ci.yml` push run on this commit and reports the conclusion of each
-  # check a deploy is gated on. `Run affected tasks` covers every affected lane, and
-  # the browser lane when this commit needed it. The API's own suites left the
+  # Reports, without waiting, the conclusion of each check a deploy is gated on in the
+  # `ci.yml` push run on this commit. `Run affected tasks` covers every affected lane,
+  # and the browser lane when this commit needed it. The API's own suites left the
   # `affected` lane when the git storage substrate landed, so the API and the apps
-  # built from its code also need `API tests` and `Billing contracts`, which run on
-  # every push to `main`. A check that never ran reports `missing`, which no deploy
-  # accepts. This job passes whatever it reports: a red check belongs to `ci.yml`.
-  # The wait runs up to 340 minutes, inside GitHub's 360-minute job limit: on
-  # 2026-11-06 `ci.yml` push runs on `main` took up to 4 h 33 min under a backlog, so
-  # the earlier 170-minute wait gave up on every commit and staging served no API
-  # deploy from at least 2026-11-03.
+  # built from its code also need `API tests` and `Billing contracts`. Those two run
+  # only when that CI run's plan finds them affected: a `skipped` one reports
+  # `not-affected` only when the run's `ci-plan` artifact says the plan did not select
+  # it, and stays `skipped` otherwise. A check that never ran reports `missing`. Deploys
+  # accept `success`, and `not-affected` for those two lanes; anything else refuses.
+  # This job passes whatever it reports: a red check belongs to `ci.yml`.
+  # While the gating checks are still running it reports `pending`, every deploy
+  # skips, and the run ends. `staging-gate.yml` reruns this run once that `ci.yml` run
+  # completes; a rerun keeps the push event and commit, so the deploy record and
+  # `staging-deploy-superseded` see the same run. Until 2026-11-08 this job polled
+  # for up to 340 minutes and held runners for 118.5 h in the review window
+  # (Brain research/ci-throughput-review.md, R-D).
   ci:
-    name: Wait for CI checks
+    name: Check CI gating checks
     needs: plan
     if: needs.plan.result == 'success' && needs.plan.outputs.deploy-apps != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 10
     permissions:
       actions: read
     outputs:
-      workspace: ${{ steps.wait.outputs.workspace }}
-      affected: ${{ steps.wait.outputs.affected }}
-      api: ${{ steps.wait.outputs.api }}
-      billing-e2e: ${{ steps.wait.outputs.billing-e2e }}
+      workspace: ${{ steps.check.outputs.workspace }}
+      affected: ${{ steps.check.outputs.affected }}
+      api: ${{ steps.check.outputs.api }}
+      billing-e2e: ${{ steps.check.outputs.billing-e2e }}
     steps:
-      - name: Wait for the gating checks of this commit's CI run
-        id: wait
+      - name: Read the gating checks of this commit's CI run
+        id: check
         env:
           GH_TOKEN: ${{ github.token }}
           CHECKS: >-
@@ -120,41 +129,65 @@ jobs:
              "affected": "Run affected tasks",
              "api": "API tests (Postgres + MinIO)",
              "billing-e2e": "Billing contracts (no Stripe credentials)"}
+          # The lanes `ci.yml` selects by its plan; their keys match `lanes.json` in its `ci-plan` artifact.
+          PLANNED_LANES: '["api", "billing-e2e"]'
         run: |
           set -euo pipefail
-          deadline=$(( $(date +%s) + 340 * 60 ))
           jobs='[]'
-          while :; do
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=1" \
-              --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status)"')
-            if [ -n "$run" ]; then
-              read -r run_id status <<< "$run"
-              jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
-                --jq '.jobs[] | {name, status, conclusion}' | jq -s .)
-              waiting=$(jq -r --argjson checks "$CHECKS" '
-                [$checks[] as $name | first(.[] | select(.name == $name)) // null
-                  | select(. == null or .status != "completed")] | length' <<< "$jobs")
-              if [ "$waiting" = 0 ] || [ "$status" = completed ]; then
-                echo "CI run $run_id is $status; every gating check has settled or will not run."
-                break
-              fi
-              echo "Waiting for $waiting gating checks of CI run $run_id"
+          settled=false
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=1" \
+            --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status)"')
+          if [ -n "$run" ]; then
+            read -r run_id status <<< "$run"
+            jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+              --jq '.jobs[] | {name, status, conclusion}' | jq -s .)
+            waiting=$(jq -r --argjson checks "$CHECKS" '
+              [$checks[] as $name | first(.[] | select(.name == $name)) // null
+                | select(. == null or .status != "completed")] | length' <<< "$jobs")
+            if [ "$waiting" = 0 ] || [ "$status" = completed ]; then
+              echo "CI run $run_id is $status; every gating check has settled or will not run."
+              settled=true
             else
-              echo "Waiting for the ci.yml push run on $GITHUB_SHA to start"
+              echo "$waiting gating checks of CI run $run_id are still running."
             fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::warning::Gave up waiting for the ci.yml push run on $GITHUB_SHA; unsettled checks report missing."
-              break
+          else
+            echo "The ci.yml push run on $GITHUB_SHA has not started."
+          fi
+          echo "settled=$settled" >> "$GITHUB_OUTPUT"
+          # The plan job's lane selection, as that run uploaded it. Absent or unreadable, every
+          # planned lane counts as selected, so a skipped one stays `skipped` and refuses.
+          plan='{}'
+          if [ "$settled" = true ] && [ -n "${run_id:-}" ]; then
+            plan_dir=$(mktemp -d)
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name ci-plan --dir "$plan_dir" &&
+              jq -e 'type == "object"' "$plan_dir/lanes.json" > /dev/null; then
+              plan=$(cat "$plan_dir/lanes.json")
+            else
+              echo "::warning::CI run $run_id has no readable ci-plan artifact; a skipped planned lane refuses."
             fi
-            sleep 60
-          done
+          fi
           for key in $(jq -r 'keys[]' <<< "$CHECKS"); do
             name=$(jq -r --arg key "$key" '.[$key]' <<< "$CHECKS")
-            conclusion=$(jq -r --arg name "$name" \
-              'first(.[] | select(.name == $name and .status == "completed") | .conclusion) // "missing"' <<< "$jobs")
+            if [ "$settled" = true ]; then
+              conclusion=$(jq -r --arg name "$name" \
+                'first(.[] | select(.name == $name and .status == "completed") | .conclusion) // "missing"' <<< "$jobs")
+              if [ "$conclusion" = skipped ] &&
+                jq -e --arg key "$key" 'index($key) != null' <<< "$PLANNED_LANES" > /dev/null &&
+                [ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ]; then
+                conclusion=not-affected
+              fi
+            else
+              conclusion=pending
+            fi
             echo "$name: $conclusion"
             echo "$key=$conclusion" >> "$GITHUB_OUTPUT"
           done
+
+      # `staging-gate.yml` looks for this step by name: it ran, so the run needs a rerun
+      # once the CI run completes.
+      - name: Defer the deploys until CI completes
+        if: steps.check.outputs.settled != 'true'
+        run: echo "::notice::CI on $GITHUB_SHA has not finished; staging-gate.yml reruns this run when it does."
 
   # The API ships to Fly (`tau-api-staging`); the UI, docs and the marketing review
   # site publish to Netlify (`taucad` site, `taucad.dev`), which no longer builds
@@ -174,7 +207,8 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' && needs.ci.outputs.billing-e2e == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
+      (needs.ci.outputs.billing-e2e == 'success' || needs.ci.outputs.billing-e2e == 'not-affected') &&
       (needs.deploy-storage-staging.result == 'success' || needs.deploy-storage-staging.result == 'skipped')
     # `actions: read` lets the deploy see whether a newer run already deployed.
     permissions:
@@ -198,7 +232,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
     permissions:
       contents: read
@@ -221,7 +255,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success'
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected')
     permissions:
       contents: read
       actions: read
@@ -246,7 +280,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
-      needs.ci.outputs.api == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
     permissions:
       contents: read

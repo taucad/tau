@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
-import { DatabaseModule } from '#database/database.module.js';
-import { DatabaseService } from '#database/database.service.js';
-import { RedisService } from '#redis/redis.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import type { Environment } from '@taucad/api-core';
+import { DatabaseModule, DatabaseService } from '@taucad/api-database';
+import { RedisService } from '@taucad/api-redis';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { accountingTasks, r2SourceOf } from '#api/storage-accounting/accounting-tasks.js';
 import {
   StorageAccountingScheduler,

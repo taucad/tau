@@ -3,8 +3,8 @@ import { mock } from 'vitest-mock-extended';
 import type { FastifyReply } from 'fastify';
 import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
-import type { DatabaseService } from '#database/database.service.js';
-import { project, projectDeletion } from '#database/schema.js';
+import type { DatabaseService } from '@taucad/api-database';
+import { project, projectDeletion } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { ProjectAccessService, ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
@@ -16,7 +16,7 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { UsageController } from '#api/git/usage.controller.js';
-import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import type { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /**
  * Charter W8 (D16–D18): the free tier backs up to a 1 GiB account allowance

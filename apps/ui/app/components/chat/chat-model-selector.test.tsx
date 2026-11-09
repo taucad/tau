@@ -18,6 +18,7 @@ const stubModel: ResolvedModel = {
   family: 'gpt',
   provider: { id: 'openai', name: 'OpenAI' },
   isResolved: true,
+  isNamePending: false,
 };
 
 const chatModelState: { current: ResolvedModel } = { current: stubModel };
@@ -206,6 +207,7 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
       family: 'gpt',
       provider: { id: 'openai', name: 'OpenAI' },
       isResolved: true,
+      isNamePending: false,
     };
     chatModelState.current = chatLocal;
 

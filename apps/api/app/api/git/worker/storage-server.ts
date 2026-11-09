@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
 import { BadRequestException, HttpException, PayloadTooLargeException } from '@nestjs/common';
 import { z } from 'zod';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import {
   encodeReceiptPrefix,
   framingHeader,

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';

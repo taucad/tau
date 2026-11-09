@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { Controller, Header, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import type { ZooToken } from '#api/kernels/zoo-token.service.js';
 

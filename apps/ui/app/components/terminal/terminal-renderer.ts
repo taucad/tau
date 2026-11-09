@@ -19,12 +19,20 @@ export type TerminalRendererOptions = {
   readonly host: HTMLElement;
   readonly fontFamily: string;
   readonly fontSize: number;
+  /** Line pitch in CSS pixels; the cell width is the font's own advance, as the editor spaces it. */
+  readonly lineHeight: number;
   readonly theme: TerminalTheme;
   /** Lines of scrollback (AurigaX counts lines, as xterm does). */
   readonly scrollback: number;
   readonly screenReaderMode: boolean;
   /** Foreground contrast floor, 1 (off) to 21. */
   readonly minimumContrastRatio: number;
+  /** How the WebGL renderer blends text into its background (Tau's AurigaX patch). Default `native`. */
+  readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
+  /** Exponent on glyph coverage in the WebGL renderer: above 1 thins text. Default 1. */
+  readonly textWeight?: number;
+  /** The regular face's weight. Default 400. */
+  readonly fontWeight?: number;
   readonly reducedMotion: boolean;
   /** Receives an `http(s)` link the person Ctrl/Cmd+clicked; the caller applies Tau's navigation policy. */
   readonly onLinkActivate: (uri: string) => void;
@@ -269,11 +277,16 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     ghostty: await aurigax.Ghostty.load(wasmUrl),
     fontFamily: options.fontFamily,
     fontSize: options.fontSize,
+    fontWeight: options.fontWeight ?? 400,
     theme: options.theme,
     scrollback: options.scrollback,
     renderer: 'webgl',
     cursorBlink: !options.reducedMotion,
     minimumContrastRatio: options.minimumContrastRatio,
+    textBlending: options.textBlending,
+    textWeight: options.textWeight,
+    exactCellWidth: true,
+    cellHeight: options.lineHeight,
     smoothScrollDuration: options.reducedMotion ? 0 : 100,
     /* Always installed: without a handler AurigaX opens a window itself on Ctrl/Cmd+click. */
     linkHandler: {
@@ -408,7 +421,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   });
 
   /* (8) Screen-reader mode: the mirror inside the textbox plus the live region beside it. */
-  let accessibility: { push: (data: string) => void; dispose: () => void } | undefined;
+  let accessibility: { push: (data: string) => void; parsed: () => void; dispose: () => void } | undefined;
   const enableAccessibility = (): void => {
     if (accessibility) {
       return;
@@ -425,6 +438,9 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     mirror.schedule();
     accessibility = {
       push: announcer.push,
+      /* The mirror reads the buffer, not the canvas: a parsed write must refresh it even when no frame is drawn
+       * (a paused, throttled or rebuilding renderer fires no render event, and the mirror would keep stale rows). */
+      parsed: mirror.schedule,
       dispose() {
         for (const subscription of subscriptions) {
           subscription.dispose();
@@ -468,6 +484,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     const data = batch.length === 1 ? batch[0]!.data : batch.map((entry) => entry.data).join('');
     accessibility?.push(data);
     terminal.write(data, () => {
+      accessibility?.parsed();
       for (const entry of batch) {
         entry.painted?.();
       }

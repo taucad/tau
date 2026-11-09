@@ -3,14 +3,13 @@ import type { WatchRequest, WatchEvent } from '@taucad/filesystem';
 import type { ObservationWatch } from '#observation-service.js';
 import { BoundedFileCache, WorkspaceMutationError } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
-import { sha256Bytes } from '@taucad/utils/hash';
 import { Topic } from '@taucad/events';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import type { BulkMoveEdit, BulkMoveResult } from '#file-system-client.js';
-import type { ComposedViewClient } from '#composed-view-client.js';
+import type { ComposedViewClient, FileWithDigest } from '#composed-view-client.js';
 import type { FileWriteSource } from '#file-write-source.js';
 import { headSniffByteLength, seemsBinary } from '#seems-binary.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
@@ -160,8 +159,6 @@ const retainedBytesOf = (result: FileContentResult): number =>
   result.kind === 'text' ? result.content.byteLength : result.kind === 'binary' ? result.head.byteLength : 0;
 const defaultMaxTotalBytes = 128 * 1024 * 1024;
 const defaultOpenSizeBytes = 50 * 1024 * 1024;
-/* The mutation pipeline refuses a checked write whose bytes and expected bytes pass 8 MiB (RV-W5b2 N3). */
-const checkedEditorSaveBytes = 8 * 1024 * 1024;
 
 /**
  * An editor save the filesystem refused because the file is no longer the
@@ -206,15 +203,25 @@ const loadingOutcome: FileContentResult = { kind: 'loading' };
  */
 export type OrphanChangeEvent = { path: string; orphaned: boolean };
 
+/**
+ * What one editor write is checked against: the bytes its text was made from
+ * (`null` for no file), and the authority's digest of them when known (D17).
+ */
+type EditorSaveBase = Readonly<{
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  bytes: Uint8Array<ArrayBuffer> | null;
+  sha256?: string;
+}>;
+
 type EditorSaveState = {
   pending: Uint8Array<ArrayBuffer> | undefined;
   /** What the chain's first write is checked against (RV-W5b2 N3); each later write, against the one before. */
-  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-  base: Uint8Array<ArrayBuffer> | null;
+  base: EditorSaveBase;
   completion: Promise<void>;
 };
 
-type PreparedWrittenOutcome = { kind: 'text' | 'too-large' } | { kind: 'binary'; digest: string };
+/** A written file's classification; its digest comes from the authority, never from this thread (D17). */
+type PreparedWrittenOutcome = { kind: 'text' | 'too-large' | 'binary' };
 
 type EditorMutationBarrier = {
   readonly source: string;
@@ -290,6 +297,13 @@ export class FileContentService {
   private readonly pendingResolves = new Map<string, Promise<FileContentResult>>();
   private readonly outcomes = new Map<string, FileContentResult>();
   private readonly binaryDigests = new WeakMap<FileContentResult, string>();
+  /**
+   * The authority's SHA-256 of a byte array this service published as content,
+   * by identity (D17): a text outcome's bytes, a written copy, a conflict's
+   * actual. An editor that holds those bytes as its base saves against the
+   * digest without this thread hashing anything.
+   */
+  private readonly contentDigests = new WeakMap<Uint8Array<ArrayBuffer>, string>();
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
@@ -299,6 +313,8 @@ export class FileContentService {
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
   readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });
+  /** Work outside this service that holds editor text not yet handed to {@link saveEditor}: debounced saves. */
+  readonly #editorSaveFlush = new Topic<undefined>({ name: 'FileContentService.editorSaveFlush' });
 
   public constructor(init: FileContentServiceInit) {
     this.channel = init.channel;
@@ -468,7 +484,8 @@ export class FileContentService {
         );
       }
 
-      const cached = this.cache.get(key);
+      /* Incidental reads leave the editor cache's order alone (D17): a hit is served, never promoted. */
+      const cached = this.cache.peek(key);
       const data = cached ?? (await this.proxy.readFile(absolutePath));
       if (data.byteLength > limit) {
         throw new FileTooLargeError(
@@ -603,8 +620,7 @@ export class FileContentService {
     const key = this.paths.toWorkspaceRelativeKey('write', path);
     const localCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
-    const prepared: PreparedWrittenOutcome =
-      source === 'editor' ? { kind: 'text' } : await this.prepareWrittenOutcome(localCopy, source);
+    const prepared = this.prepareWrittenOutcome(localCopy, source);
     await this.proxy.writeFile(absolutePath, localCopy);
     this.recordWrite(key, localCopy, { source, prepared });
   }
@@ -644,14 +660,33 @@ export class FileContentService {
     }
 
     const outcome = this.outcomes.get(key);
+    const known = base ?? (outcome?.kind === 'text' ? outcome.content : undefined);
+    const sha256 = known === undefined ? undefined : this.contentDigests.get(known);
     const state: EditorSaveState = {
       pending: copy,
-      base: base === undefined ? (outcome?.kind === 'text' ? outcome.content : null) : new Uint8Array(base),
+      base: {
+        bytes: known === undefined ? null : base === undefined ? known : new Uint8Array(base),
+        ...(sha256 === undefined ? {} : { sha256 }),
+      },
       completion: Promise.resolve(),
     };
     this.editorSaves.set(key, state);
     state.completion = this._drainEditorSave(key, state);
     return state.completion;
+  }
+
+  /**
+   * Register work that holds editor text before it reaches {@link saveEditor}
+   * (a debounced save, D17). {@link settleEditorSaves} runs every flusher first,
+   * so a cut never misses text typed inside the debounce window.
+   *
+   * @param flush - Hands every held value to {@link saveEditor} synchronously.
+   * @returns Unregisters the flusher.
+   */
+  public addEditorSaveFlusher(flush: () => void): () => void {
+    return this.#editorSaveFlush.subscribe(() => {
+      flush();
+    });
   }
 
   /**
@@ -662,18 +697,64 @@ export class FileContentService {
    * mid-queue records the first keystroke alone (D80). An edit made during a
    * move, rename or delete waits on that mutation's barrier instead.
    *
+   * Each path settles on its latest save: a write refused as a conflict that
+   * its editor rebased and saved again settles on that save, not on the refusal.
+   * A refusal its editor answers another way (a conflict recorded beside the
+   * file) settles on the promise `resolution` hands back for it.
+   *
+   * @param options - `resolution` answers a refusal its caller owns with the
+   *   promise that settles it, or `undefined` when the caller does not own it.
    * @returns Promise settled once no editor write is outstanding.
-   * @throws The first write's failure once every write has settled, a refused
+   * @throws The latest failure of a path whose last write failed, a refused
    *   write included: that edit is not on disk, so a cut now would not hold it.
    */
-  public async settleEditorSaves(): Promise<void> {
-    const outcomes = await Promise.allSettled([
-      ...[...this.editorSaves.values()].map(async (state) => state.completion),
-      ...this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
-    ]);
-    const failed = outcomes.find((outcome) => outcome.status === 'rejected');
+  public async settleEditorSaves(
+    options?: Readonly<{ resolution?: (failure: unknown) => Promise<void> | undefined }>,
+  ): Promise<void> {
+    this.#editorSaveFlush.emit(undefined);
+    const barriers = await Promise.allSettled(
+      this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
+    );
+    const failures = new Map<string, unknown>();
+    const seen = new Set<EditorSaveState>();
+    let round = [...this.editorSaves.entries()];
+    while (round.length > 0) {
+      for (const [, state] of round) {
+        seen.add(state);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each round waits on the saves the previous one's failures started.
+      const outcomes = await Promise.allSettled(round.map(async ([, state]) => state.completion));
+      const answered: Array<Readonly<{ path: string; settled: Promise<void> }>> = [];
+      for (const [index, [path]] of round.entries()) {
+        const outcome = outcomes[index];
+        const settled = outcome?.status === 'rejected' ? options?.resolution?.(outcome.reason) : undefined;
+        if (outcome?.status === 'rejected' && settled === undefined) {
+          failures.set(path, outcome.reason);
+        } else {
+          failures.delete(path);
+        }
+        if (settled !== undefined) {
+          answered.push({ path, settled });
+        }
+      }
+      /* A failed path saved again since (its editor rebased onto the file) settles on that save. */
+      round = [...this.editorSaves.entries()].filter(([path, state]) => failures.has(path) && !seen.has(state));
+      /* A refusal its editor owns settles on that editor's answer: the record, or the rebased save. */
+      // oxlint-disable-next-line no-await-in-loop -- this round's answers settle before the next round runs.
+      const answers = await Promise.allSettled(answered.map(async ({ settled }) => settled));
+      for (const [index, { path }] of answered.entries()) {
+        const answer = answers[index];
+        if (answer?.status === 'rejected') {
+          failures.set(path, answer.reason);
+        }
+      }
+    }
+    const barrierFailure: unknown = barriers.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    )?.reason;
+    const failed: unknown = barrierFailure ?? [...failures.values()][0];
     if (failed !== undefined) {
-      throw failed.reason instanceof Error ? failed.reason : new Error(String(failed.reason));
+      throw failed instanceof Error ? failed : new Error('An editor save failed.', { cause: failed });
     }
   }
 
@@ -706,13 +787,11 @@ export class FileContentService {
       paths.push(key);
     }
 
-    const prepared = await Promise.all(
-      [...clones].map(async ([key, data]) => [key, data, await this.prepareWrittenOutcome(data, source)] as const),
-    );
+    const prepared = [...clones].map(([key, data]) => [key, data, this.prepareWrittenOutcome(data, source)] as const);
     await this.proxy.writeFiles(absoluteFiles);
 
     for (const [key, data, outcome] of prepared) {
-      this.publishWrittenOutcome(key, data, outcome);
+      this.publishWrittenOutcome(key, data, { source, prepared: outcome });
     }
     this.notifyGlobalSubscribers({ type: 'batchWritten', paths, source });
   }
@@ -1227,8 +1306,7 @@ export class FileContentService {
         state.pending = undefined;
         try {
           // oxlint-disable-next-line no-await-in-loop -- Saves for one path are intentionally serialized.
-          await this._writeEditor(path, data, base);
-          base = data;
+          base = await this._writeEditor(path, data, base);
           finalError = undefined;
         } catch (error) {
           finalError = error;
@@ -1251,43 +1329,51 @@ export class FileContentService {
   /**
    * One editor write, checked against the bytes its text was made from.
    *
+   * The check names the authority's digest of those bytes (D17), so the
+   * request carries the editor's text and 64 characters whatever the file's
+   * size. A base whose digest this service never learned is read once with its
+   * digest: equal bytes lend their digest, different bytes are the conflict.
+   *
    * @param key - Workspace-relative path.
    * @param data - The editor's text.
    * @param base - The bytes that text was made from; `null` for no file.
+   * @returns The base the next write of the chain is checked against.
    * @throws {EditorSaveConflictError} When the file is no longer `base`.
    */
   private async _writeEditor(
     key: string,
     data: Uint8Array<ArrayBuffer>,
-    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-    base: Uint8Array<ArrayBuffer> | null,
-  ): Promise<void> {
+    base: EditorSaveBase,
+  ): Promise<EditorSaveBase> {
     const absolutePath = this.paths.toAbsolutePath(key);
-    if ((base?.byteLength ?? 0) + data.byteLength > checkedEditorSaveBytes) {
-      /* ponytail: past the pipeline's checked-write ceiling (a file of about 4 MiB) the check is a
-       * read, then a write: a writer landing inside that one round trip is not caught. A
-       * digest precondition on `writeFileChecked` closes it. */
-      const actual = await this._readOrAbsent(absolutePath);
-      if (!sameBytesOrAbsent(actual, base)) {
-        throw this._refuseEditorSave(key, base, actual);
+    let { sha256 } = base;
+    if (base.bytes !== null && sha256 === undefined && this.proxy.readFileWithDigest !== undefined) {
+      const current = await this._readWithDigestOrAbsent(absolutePath);
+      if (current === null || !bytesEqual(current.data, base.bytes)) {
+        throw this._refuseEditorSave(key, base.bytes, { actual: current?.data ?? null, sha256: current?.sha256 });
       }
-      await this.write(key, data, 'editor');
-      return;
+      ({ sha256 } = current);
     }
     /* The bridge clones both payloads before the transfer; `data` is this service's own copy. */
     const result = await this.proxy.writeFileChecked({
       path: absolutePath,
       data,
-      preconditions: [{ path: absolutePath, expected: base }],
+      preconditions: [
+        sha256 === undefined
+          ? { path: absolutePath, expected: base.bytes }
+          : { path: absolutePath, expectedSha256: sha256 },
+      ],
     });
     if (result.status === 'conflict') {
-      throw this._refuseEditorSave(
-        key,
-        base,
-        result.conflicts.find((conflict) => conflict.path === absolutePath)?.actual ?? null,
-      );
+      const conflict = result.conflicts.find((candidate) => candidate.path === absolutePath);
+      throw this._refuseEditorSave(key, base.bytes, { actual: conflict?.actual ?? null, sha256: conflict?.sha256 });
     }
-    this.recordWrite(key, new Uint8Array(data), { source: 'editor', prepared: { kind: 'text' } });
+    const written = new Uint8Array(data);
+    if (result.sha256 !== undefined) {
+      this.contentDigests.set(written, result.sha256);
+    }
+    this.recordWrite(key, written, { source: 'editor', prepared: { kind: 'text' } });
+    return { bytes: data, ...(result.sha256 === undefined ? {} : { sha256: result.sha256 }) };
   }
 
   /**
@@ -1298,7 +1384,7 @@ export class FileContentService {
    *
    * @param key - Workspace-relative path.
    * @param base - The bytes the save was checked against.
-   * @param actual - What the check found.
+   * @param found - What the check found, with the authority's digest of it when it sent one.
    * @returns The error to throw.
    */
   private _refuseEditorSave(
@@ -1306,20 +1392,25 @@ export class FileContentService {
     // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
     base: Uint8Array<ArrayBuffer> | null,
     // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-    actual: Uint8Array<ArrayBuffer> | null,
+    found: { actual: Uint8Array<ArrayBuffer> | null; sha256?: string | undefined },
   ): EditorSaveConflictError {
+    const { actual, sha256: actualSha256 } = found;
     if (actual !== null) {
       this.refreshGuard.begin(key);
-      this.cache.set(key, new Uint8Array(actual));
-      this.publishOutcome(key, { kind: 'text', content: new Uint8Array(actual) });
+      const content = new Uint8Array(actual);
+      if (actualSha256 !== undefined) {
+        this.contentDigests.set(content, actualSha256);
+      }
+      this.cache.set(key, content);
+      this.publishOutcome(key, { kind: 'text', content });
     }
     return new EditorSaveConflictError(key, base);
   }
 
   // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-  private async _readOrAbsent(absolutePath: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  private async _readWithDigestOrAbsent(absolutePath: string): Promise<FileWithDigest | null> {
     try {
-      return new Uint8Array(await this.proxy.readFile(absolutePath));
+      return await this.proxy.readFileWithDigest!(absolutePath);
     } catch (error) {
       if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
@@ -1334,30 +1425,42 @@ export class FileContentService {
     localCopy: Uint8Array<ArrayBuffer>,
     write: { source: FileWriteSource; prepared: PreparedWrittenOutcome },
   ): void {
-    this.publishWrittenOutcome(key, localCopy, write.prepared);
+    this.publishWrittenOutcome(key, localCopy, write);
     this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source: write.source });
   }
 
-  private async prepareWrittenOutcome(
-    data: Uint8Array<ArrayBuffer>,
-    source: FileWriteSource,
-  ): Promise<PreparedWrittenOutcome> {
+  private prepareWrittenOutcome(data: Uint8Array<ArrayBuffer>, source: FileWriteSource): PreparedWrittenOutcome {
     if (source === 'editor') {
       return { kind: 'text' };
     }
     if (data.byteLength > this.openSizeBytes) {
       return { kind: 'too-large' };
     }
-    return seemsBinary(data) ? { kind: 'binary', digest: await sha256Bytes(data) } : { kind: 'text' };
+    return seemsBinary(data) ? { kind: 'binary' } : { kind: 'text' };
   }
 
-  private publishWrittenOutcome(key: string, data: Uint8Array<ArrayBuffer>, prepared: PreparedWrittenOutcome): void {
+  /**
+   * Publish what a write landed. An incidental write (D17) — any source but the
+   * editor, to a path nothing here holds, observes or subscribes to — is not
+   * retained: it only invalidates reads in flight and leaves the cache to the
+   * files someone is looking at.
+   */
+  private publishWrittenOutcome(
+    key: string,
+    data: Uint8Array<ArrayBuffer>,
+    write: { source: FileWriteSource; prepared: PreparedWrittenOutcome },
+  ): void {
+    const { source, prepared } = write;
     const generation = this.refreshGuard.begin(key);
+    if (source !== 'editor' && !this.shouldRefreshWorkerPath(key) && !this.hasAuthorityObservation(key)) {
+      this.setOrphaned(key, false);
+      return;
+    }
     const outcome: FileContentResult =
       prepared.kind === 'too-large'
         ? { kind: 'too-large', size: data.byteLength, limit: this.openSizeBytes }
         : prepared.kind === 'binary'
-          ? this.createBinaryOutcome(data, generation, prepared.digest)
+          ? this.createBinaryOutcome(data, generation, undefined)
           : { kind: 'text', content: data };
     if (outcome.kind === 'text' || outcome.kind === 'binary') {
       this.cache.set(key, data);
@@ -1731,9 +1834,13 @@ export class FileContentService {
   }
 
   private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
-    const data = await this.readBytes(path, generation);
-    if (data === undefined) {
+    const read = await this.readBytes(path, generation);
+    if (read === undefined) {
       return this.outcomes.get(path) ?? loadingOutcome;
+    }
+    const { data, sha256 } = read;
+    if (sha256 !== undefined) {
+      this.contentDigests.set(data, sha256);
     }
 
     const limit = options?.sizeLimit ?? this.openSizeBytes;
@@ -1748,7 +1855,7 @@ export class FileContentService {
     }
 
     if (!forceText && seemsBinary(data)) {
-      const outcome = await this.binaryOutcome(data, generation);
+      const outcome = this.createBinaryOutcome(data, generation, sha256);
       if (this.refreshGuard.isCurrent(path, generation)) {
         this.cache.set(path, data);
         return this.publishOutcome(path, outcome);
@@ -1766,25 +1873,50 @@ export class FileContentService {
     return outcome;
   }
 
-  private async binaryOutcome(data: Uint8Array<ArrayBuffer>, generation: number): Promise<FileContentResult> {
-    return this.createBinaryOutcome(data, generation, await sha256Bytes(data));
-  }
-
-  private createBinaryOutcome(data: Uint8Array<ArrayBuffer>, generation: number, digest: string): FileContentResult {
+  /**
+   * A binary outcome. Its digest is the authority's, from the read (D17); one
+   * this thread never learned leaves the outcome unequal to every other, so a
+   * republish costs a render and never a hash here.
+   */
+  private createBinaryOutcome(
+    data: Uint8Array<ArrayBuffer>,
+    generation: number,
+    digest: string | undefined,
+  ): FileContentResult {
     const outcome: FileContentResult = {
       kind: 'binary',
       size: data.byteLength,
       head: data.slice(0, headSniffByteLength),
       revision: generation,
     };
-    this.binaryDigests.set(outcome, digest);
+    if (digest !== undefined) {
+      this.binaryDigests.set(outcome, digest);
+    }
     return outcome;
   }
 
-  private async readBytes(path: string, generation: number): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  /** One read, with the authority's digest of its bytes where the client serves one (D17). */
+  private async readDigested(absolutePath: string): Promise<{ data: Uint8Array<ArrayBuffer>; sha256?: string }> {
+    if (this.proxy.readFileWithDigest !== undefined) {
+      try {
+        return await this.proxy.readFileWithDigest(absolutePath);
+      } catch (error) {
+        /* A view that serves no digested read (the dependency mount) still reads. */
+        if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOTSUP') {
+          throw error;
+        }
+      }
+    }
+    return { data: await this.proxy.readFile(absolutePath) };
+  }
+
+  private async readBytes(
+    path: string,
+    generation: number,
+  ): Promise<{ data: Uint8Array<ArrayBuffer>; sha256?: string } | undefined> {
     const absolutePath = this.paths.toAbsolutePath(path);
     try {
-      const data = await this.proxy.readFile(absolutePath);
+      const data = await this.readDigested(absolutePath);
       if (this.refreshGuard.isCurrent(path, generation)) {
         this.setOrphaned(path, false);
       }
@@ -1960,10 +2092,3 @@ function outcomesEqual(
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
-
-const sameBytesOrAbsent = (
-  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-  left: Uint8Array<ArrayBuffer> | null,
-  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
-  right: Uint8Array<ArrayBuffer> | null,
-): boolean => (left === null || right === null ? left === right : bytesEqual(left, right));

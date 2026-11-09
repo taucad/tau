@@ -321,6 +321,22 @@ const errorCode = (error: unknown): string | undefined =>
     ? error.code
     : undefined;
 
+/**
+ * Whether to retry a refused launch: only one whose sandbox proved nothing ran and a freshly prepared launch may
+ * succeed ({@link ShellLaunchOutcome}), only while this attempt may still retry (a host retries at most once, after
+ * the refused attempt's custody is finished), and never once the caller cancelled.
+ *
+ * @param outcome - The refusal.
+ * @param signal - The caller's cancellation.
+ * @param allowed - Whether this attempt may still retry.
+ * @returns Whether to launch once more.
+ */
+const retryable = (
+  outcome: Exclude<ShellLaunchOutcome, { status: 'started' }>,
+  signal: AbortSignal,
+  allowed: boolean,
+): boolean => allowed && !signal.aborted && outcome.status === 'sandbox-unavailable' && outcome.retryable === true;
+
 /** What a provider refusal means to a person: the E20 messages and their one recovery. */
 const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' }>): ShellUnavailable => {
   if (outcome.status === 'sandbox-unavailable') {
@@ -332,6 +348,7 @@ const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' 
         process.platform === 'linux'
           ? "Install your distribution's socat package, or reinstall Tau from its .deb or .rpm package to restore its sandbox."
           : 'Reinstall Tau to restore its sandbox components.',
+      ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
     };
   }
   switch (outcome.requirement) {
@@ -763,7 +780,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return { status: 'cancelled', stdout: emptyStream, stderr: emptyStream, durationMs: 0, approval };
     }
     try {
-      return await execute(request, {
+      return await executeRetrying(request, {
         checkout,
         root,
         cwd: cwd.path,
@@ -777,6 +794,24 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     } finally {
       release();
     }
+  };
+
+  /*
+   * A sandbox that failed to set up after the launch's profile was computed, proven before the command could start (a
+   * protected file the profile saw, such as a thumbnail the UI deletes, was removed before bubblewrap bound it), ran
+   * nothing. That attempt's custody is finished before `execute` answers; one fresh launch recomputes the profile, so
+   * the removed path gets a stand-in. Never a second retry, and never in a project whose cleanup was not confirmed.
+   */
+  const executeRetrying = async (
+    request: ShellRunRequest,
+    admitted: Parameters<typeof execute>[1],
+  ): Promise<ShellOutput> => {
+    const first = await execute(request, admitted, true);
+    if (first !== undefined) {
+      return first;
+    }
+    const second = isBlocked(admitted.root) ? undefined : await execute(request, admitted, false);
+    return second ?? notStarted('checkout-unavailable', inventoryFailure ?? uncertainMessage);
   };
 
   const execute = async (
@@ -793,7 +828,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       approval: ShellApprovalRecord | undefined;
       fingerprint: string;
     }>,
-  ): Promise<ShellOutput> => {
+    /** Answer `undefined`, once this attempt's custody is finished, for a provider refusal that may be retried. */
+    retry: boolean,
+  ): Promise<ShellOutput | undefined> => {
     const { approval } = admitted;
     /*
      * A cancellation from the caller outranks every reason the command did not get going: an abort that lands while
@@ -918,6 +955,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       }
       if (outcome.status !== 'started') {
         request.signal.removeEventListener('abort', onAbort);
+        if (retryable(outcome, request.signal, retry)) {
+          return undefined;
+        }
         const unavailable = unavailableOf(outcome);
         return didNotStart('shell-unavailable', `${unavailable.message} ${unavailable.recovery}`);
       }
@@ -983,7 +1023,14 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     }
   };
 
-  const openTerminal = async (request: TerminalSessionRequest): Promise<TerminalSessionOutcome> => {
+  /*
+   * Open one Terminal session. `retry`, when given, answers a refusal that proved nothing ran once this attempt's
+   * custody is finished; it re-admits from the start, so a project whose cleanup was not confirmed is refused.
+   */
+  const openTerminalOnce = async (
+    request: TerminalSessionRequest,
+    retry: (() => Promise<TerminalSessionOutcome>) | undefined,
+  ): Promise<TerminalSessionOutcome> => {
     await recovered;
     const refuse = (code: TerminalRefusalCode, message: string, recovery: string): TerminalSessionOutcome => ({
       status: 'refused',
@@ -1100,6 +1147,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     }
     if (outcome.status !== 'started') {
       await cleanup();
+      if (retryable(outcome, request.signal, retry !== undefined)) {
+        return retry!();
+      }
       const unavailable = unavailableOf(outcome);
       return refuse(unavailable.code, unavailable.message, unavailable.recovery);
     }
@@ -1139,6 +1189,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       },
     };
   };
+
+  /*
+   * As for an agent command: a sandbox that failed to set up after its profile was computed ran nothing, so the
+   * Terminal is opened once more from a fresh profile, and never a third time.
+   */
+  const openTerminal = async (request: TerminalSessionRequest): Promise<TerminalSessionOutcome> =>
+    openTerminalOnce(request, async () => openTerminalOnce(request, undefined));
 
   return {
     identity: options.identity,

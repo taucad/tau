@@ -39,6 +39,12 @@ export type PendingCreateProjectOperation = PendingProjectStorage & {
    * its files in. The journal holds this locator, never the imported bytes.
    */
   readonly staging?: { readonly operationId: string };
+  /**
+   * The authored `tau.json` bytes to commit, kept only while they declare
+   * `manifest` exactly: a linked repository's own (W7.3). Absent, the commit
+   * writes the canonical encoding of `manifest`.
+   */
+  readonly manifestBytes?: Uint8Array<ArrayBuffer>;
   /** Absent when the project is created without one (W18 DEF-2, review R5). */
   readonly chat?: Chat;
   /**

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/api",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -11,8 +11,18 @@
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@pyroscope/nodejs": "catalog:",
     "@sentry/node": "catalog:",
-    "@taucad/api-extractor": "workspace:*",
     "@taucad/agent-observability": "workspace:*",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-billing": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-email": "workspace:*",
+    "@taucad/api-extractor": "workspace:*",
+    "@taucad/api-hosts": "workspace:*",
+    "@taucad/api-lifecycle": "workspace:*",
+    "@taucad/api-llm-gateway": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/api-redis": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/events": "workspace:*",
@@ -38,8 +48,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
     "geospec": "catalog:",
-    "geospec-engine": "catalog:",
-    "pino-pretty": "catalog:"
+    "geospec-engine": "catalog:"
   },
   "imports": {
     "#*.js": "./app/*.ts",

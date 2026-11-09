@@ -1,0 +1,20 @@
+{
+  "name": "api-email",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-email",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:data-access", "api:email"],
+  "targets": {
+    "generate-email-palette": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Reproject packages/ui/src/styles/tokens.css into src/templates/email-palette.generated.ts. Pass --check to fail on drift."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/libs/api-email/scripts/generate-email-palette.mts"
+      }
+    }
+  }
+}

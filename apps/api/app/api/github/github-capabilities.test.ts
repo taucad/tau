@@ -2,10 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { RedisService } from '#redis/redis.service.js';
-import type { githubConnection, githubRepositoryWrite } from '#database/schema.js';
+import type { Environment } from '@taucad/api-core';
+import type { DatabaseService } from '@taucad/api-database';
+import type { RedisService } from '@taucad/api-redis';
+import type { githubConnection, githubRepositoryWrite } from '@taucad/api-database/schema';
 import { GithubService } from '#api/github/github.service.js';
 
 const repository = {

@@ -9,9 +9,9 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getEnvironment } from '#config/environment.config.js';
-import { storageTombstone, user } from '#database/schema.js';
-import * as schema from '#database/schema.js';
+import { getEnvironment } from '@taucad/api-core';
+import { storageTombstone, user } from '@taucad/api-database/schema';
+import * as schema from '@taucad/api-database/schema';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
@@ -24,7 +24,7 @@ import {
   purgeTombstonedTenants as streamTombstonedTenants,
 } from '#api/git/maintenance/purge.js';
 
-import { databaseReachable } from '#testing/database-reachable.js';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 const purgeTombstonedTenants = async (...args: Parameters<typeof streamTombstonedTenants>) =>
   Array.fromAsync(streamTombstonedTenants(...args));

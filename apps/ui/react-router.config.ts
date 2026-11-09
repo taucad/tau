@@ -35,9 +35,10 @@ export default {
    *
    * Lazy discovery only learns a route from a `<Link>` already in the DOM. On a phone the
    * sidebar is a sheet whose links mount on open, and its discovery request is debounced
-   * until the sheet stops mutating, so a tap on a sidebar row often went out first and the
-   * navigation fetched `/__manifest` for itself before it could start: 11 of 20 taps from
-   * the editor on main, 0 of 20 with this mode (Brain `phone-nav-discovery`, 2026-11-09).
+   * until the sheet stops mutating, so a tap on a sidebar row can race it: the navigation then
+   * fetches `/__manifest` for itself, or overlaps the sheet's request, before it can start.
+   * Measured from the editor on two hosts, main made a `/__manifest` request after the tap in
+   * 19 of 20 (cloud) and 16 of 20 (M2 Pro) samples, and this mode made none (Brain `phone-nav-discovery`, 2026-11-09).
    * The whole manifest ships as one hashed, immutable `manifest-<version>.js`
    * (~15 KB compressed) instead of a per-page slice inlined in each document, so documents
    * get ~4 KB smaller and a cold first visit transfers ~6 KB more.

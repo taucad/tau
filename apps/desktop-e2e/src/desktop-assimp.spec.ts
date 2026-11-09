@@ -135,7 +135,10 @@ const exportToProject = async (
   const selectedSource = await sourceSelector.textContent();
   if (!selectedSource?.includes(sourceEntry)) {
     await sourceSelector.click();
-    await page.getByRole('option', { name: sourceEntry, exact: true }).click();
+    /* A model file's option leads with its format badge, an image named by the extension (#1005). */
+    const escaped = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`);
+    const badge = sourceEntry.slice(sourceEntry.lastIndexOf('.') + 1);
+    await page.getByRole('option', { name: new RegExp(`^${escaped(badge)}\\s*${escaped(sourceEntry)}$`, 'u') }).click();
     await expect.poll(async () => sourceSelector.textContent()).toContain(sourceEntry);
   }
 

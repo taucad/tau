@@ -57,6 +57,7 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
+    "@taucad/runtime": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",
@@ -67,7 +68,6 @@
     "@taucad/chat": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/revisions": "workspace:*",
-    "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "lucide-react": "catalog:"

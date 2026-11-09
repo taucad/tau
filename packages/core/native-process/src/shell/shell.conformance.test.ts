@@ -710,8 +710,10 @@ describe.runIf(enabled)('shell conformance', () => {
         session.transcript += decoder.decode(chunk, { stream: true });
       }
     })();
-    const waitFor = async (marker: string): Promise<void> => {
-      for (const deadline = Date.now() + 15_000; !session.transcript.includes(marker); ) {
+    const waitFor = async (marker: string | RegExp): Promise<void> => {
+      const seen = (): boolean =>
+        typeof marker === 'string' ? session.transcript.includes(marker) : marker.test(session.transcript);
+      for (const deadline = Date.now() + 15_000; !seen(); ) {
         if (Date.now() > deadline) {
           throw new Error(`no ${marker} in ${JSON.stringify(session.transcript)}`);
         }
@@ -757,10 +759,11 @@ describe.runIf(enabled)('shell conformance', () => {
     if (other === undefined) {
       throw new Error(`no tty path in ${JSON.stringify(second.session.transcript)}`);
     }
-    first.type(`[ "$(tty)" = ${other} ] && echo SAME-PATH-$((6+1)) || echo OTHER-PATH-$((6+2))\n`);
-    await first.waitFor('-PATH-');
+    // Only the shell's own expansion prints PATHCHECK-7 or PATHCHECK-8; the tty echo of the command line cannot.
+    first.type(`echo PATHCHECK-$([ "$(tty)" = ${other} ] && echo $((3+4)) || echo $((4+4)))\n`);
+    await first.waitFor(/PATHCHECK-[78]/u);
     // A sandbox with its own pty namespace (Linux) can name the same path; it is then this shell's own tty.
-    const samePath = first.session.transcript.includes('SAME-PATH-7');
+    const samePath = first.session.transcript.includes('PATHCHECK-7');
     first.type(
       `printf 'INJECTED-%s' $((20+3)) > ${other} 2>/dev/null && echo WROTE-$((3+3)) || echo WRITE-DENIED-$((4+5))\n`,
     );

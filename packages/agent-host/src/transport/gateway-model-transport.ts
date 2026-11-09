@@ -24,7 +24,7 @@ import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMes
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
-import type { GatewayErrorCode } from '#wire/gateway.js';
+import type { GatewayErrorCode, GatewayTurnLabels } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
@@ -571,6 +571,67 @@ const guardedResponse = (options: {
   });
 };
 
+/** The prompt-cache lifetime pi-ai's codecs take: `short` is each provider's default. */
+type GatewayCacheRetention = 'short' | 'long';
+
+/** The Anthropic `cache_control.ttl` pi-ai writes for `long` retention. */
+const anthropicLongCacheTtl = '1h';
+
+/**
+ * The one owner of a request's prompt-cache lifetime.
+ *
+ * Anthropic is the only wire where Tau chooses the lifetime, and a turn there
+ * asks for one hour: the gaps it rescues are the person's think time between
+ * turns, which outlast five minutes. A compaction stays at five minutes, since
+ * the tail it writes is replaced by its summary and never read again. Every
+ * other provider keeps its own default: OpenAI's longer retention fields are
+ * refused or deprecated, and the Completions wire would put
+ * `prompt_cache_retention` and `prompt_cache_key` on a body the gateway refuses.
+ *
+ * @param request - The invocation being sent.
+ * @returns The retention every cache breakpoint of the request carries.
+ */
+const cacheRetentionFor = (request: ModelStreamRequest): GatewayCacheRetention =>
+  request.providerKind === 'anthropic' && request.invocationPurpose !== 'compaction' ? 'long' : 'short';
+
+/**
+ * The Responses `prompt_cache_key` for a chat: SHA-256 of its id, as 32 hex
+ * characters. It routes a conversation's steps to one supplier server so its
+ * prefix cache is found again, without handing a Tau identifier to the
+ * supplier (I4).
+ *
+ * @param chatId - The chat the invocation belongs to.
+ * @returns The hashed routing key.
+ */
+const promptCacheKeyFor = async (chatId: string): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(chatId));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+};
+
+/** Anthropic refuses a request with more `cache_control` breakpoints than this. */
+const anthropicMaxCacheBreakpoints = 4;
+
+/**
+ * Count the `cache_control` breakpoints in part of a request body.
+ *
+ * @param value - Any JSON value from the body.
+ * @returns How many objects within it carry `cache_control`.
+ */
+const cacheBreakpointCount = (value: unknown): number => {
+  if (Array.isArray(value)) {
+    return value.reduce<number>((total, item) => total + cacheBreakpointCount(item), 0);
+  }
+  if (!zodUtility.isObject(value)) {
+    return 0;
+  }
+  return Object.entries(value).reduce(
+    (total, [key, item]) => total + (key === 'cache_control' ? 1 : cacheBreakpointCount(item)),
+    0,
+  );
+};
+
 /**
  * Project provider-neutral prompt blocks onto Anthropic's `system` array.
  *
@@ -585,26 +646,50 @@ const guardedResponse = (options: {
  *   prompt;
  * - `cache_control.scope` (`Extra inputs are not permitted`) — Tau's neutral
  *   `PromptCacheControl` carries a scope that no Anthropic beta accepts.
+ *
+ * Every breakpoint carries the request's one lifetime, the same one pi-ai puts
+ * on the tool and history breakpoints: Anthropic refuses a one-hour breakpoint
+ * after a five-minute one, so a request is all one hour or all five minutes.
+ * Anthropic also refuses more than four breakpoints, so the system blocks take
+ * only those pi-ai's tool and history breakpoints leave, earliest first: the
+ * static prompt's is the one every chat shares.
+ *
+ * @param options - The neutral blocks, the request's retention and the breakpoints left for them.
+ * @returns The Anthropic `system` array.
  */
-const anthropicSystemBlocks = (blocks: readonly ModelSystemPromptBlock[]): readonly JsonObject[] =>
-  blocks.flatMap((block) => {
+const anthropicSystemBlocks = (options: {
+  readonly blocks: readonly ModelSystemPromptBlock[];
+  readonly cacheRetention: GatewayCacheRetention;
+  /** Breakpoints left once pi-ai's own tool and history breakpoints are counted. */
+  readonly breakpointBudget: number;
+}): readonly JsonObject[] => {
+  let budget = options.breakpointBudget;
+  return options.blocks.flatMap((block) => {
     const text = block.text.toWellFormed();
     if (text === '') {
       return [];
+    }
+    const cacheControl = budget > 0 ? block.cacheControl : undefined;
+    if (cacheControl) {
+      budget -= 1;
     }
     return [
       {
         type: 'text',
         text,
-        ...(block.cacheControl
+        ...(cacheControl
           ? {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
-              cache_control: { type: block.cacheControl.type },
+              cache_control: {
+                type: cacheControl.type,
+                ...(options.cacheRetention === 'long' ? { ttl: anthropicLongCacheTtl } : {}),
+              },
             }
           : {}),
       },
     ];
   });
+};
 
 const authenticatedFetch =
   (options: {
@@ -623,9 +708,13 @@ const authenticatedFetch =
      * billing wire does not define cannot be put on it.
      */
     readonly activity?: 'compaction' | undefined;
+    /** The step's turn labels, sent as headers only: never in the body, so the digest and prompt bytes ignore them. */
+    readonly turn?: GatewayTurnLabels | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
+    /** The request's one cache lifetime, from {@link cacheRetentionFor}. */
+    readonly cacheRetention: GatewayCacheRetention;
   }): typeof globalThis.fetch =>
   async (input, init) => {
     try {
@@ -657,6 +746,14 @@ const authenticatedFetch =
       if (options.activity !== undefined) {
         headers.set('x-tau-activity', options.activity);
       }
+      // Telemetry labels for the gateway's turn-step series: enumerated values only (I4), read by
+      // `readTurnTelemetry` in apps/api and listed in its CORS allow-list (`httpHeader.xTauTurnStep`).
+      if (options.turn !== undefined) {
+        headers.set('x-tau-turn-step', options.turn.step);
+        if (options.turn.gap !== undefined) {
+          headers.set('x-tau-turn-gap', options.turn.gap);
+        }
+      }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
       // per-system-block cache-control wire shape and uses pi's blanket retention.
@@ -665,7 +762,12 @@ const authenticatedFetch =
         if (!zodUtility.isObject(payload)) {
           throw new TypeError('pi-ai produced a non-object Anthropic request body.');
         }
-        const system = anthropicSystemBlocks(options.systemPromptBlocks);
+        const system = anthropicSystemBlocks({
+          blocks: options.systemPromptBlocks,
+          cacheRetention: options.cacheRetention,
+          breakpointBudget:
+            anthropicMaxCacheBreakpoints - cacheBreakpointCount([payload['tools'], payload['messages']]),
+        });
         // An all-empty block set leaves pi's own string prompt in place rather
         // than posting `system: []`.
         if (system.length > 0) {
@@ -1089,13 +1191,32 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const thoughtSignatures = new Map<string, string>();
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;
+    const cacheRetention = cacheRetentionFor(request);
+    // Set on the body rather than through pi's `sessionId`: pi would also stamp
+    // `session_id` and `x-client-request-id` headers, which the gateway's CORS
+    // allow-list refuses. Only the Responses wire admits the key, and a request
+    // with no chat has nothing to route by.
+    const promptCacheKey =
+      isOpenAiResponsesProviderKind(request.providerKind) && request.chatId !== undefined
+        ? await promptCacheKeyFor(request.chatId)
+        : undefined;
     // Every adapter shares one request-construction step: Vertex signature echo,
-    // then the document rewrite (D21, D25). A refusal here is the caller's
-    // request, so it surfaces as INVALID_REQUEST and nothing is fetched.
+    // then the document rewrite (D21, D25), then the Responses routing key. A
+    // refusal here is the caller's request, so it surfaces as INVALID_REQUEST
+    // and nothing is fetched.
     const onPayload = (payload: unknown): unknown => {
       try {
         const echoed = echo?.(payload);
-        return rewrite(echoed ?? payload) ?? echoed;
+        const rewritten = rewrite(echoed ?? payload) ?? echoed;
+        if (promptCacheKey === undefined) {
+          return rewritten;
+        }
+        const body = rewritten ?? payload;
+        if (!zodUtility.isObject(body)) {
+          throw new TypeError('pi-ai produced a non-object Responses request body.');
+        }
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI's wire uses snake_case.
+        return { ...body, prompt_cache_key: promptCacheKey };
       } catch (error) {
         state.failure = new GatewayModelTransportError({
           code: 'INVALID_REQUEST',
@@ -1121,18 +1242,20 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       // A generation is the gateway's default activity and says nothing; a
       // compaction is a kind of its own and says so.
       ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
+      ...(request.turn === undefined ? {} : { turn: request.turn }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }
         : {}),
       systemPromptBlocks: request.systemPromptBlocks,
+      cacheRetention,
     });
     // Asked once per invocation, before anything is built or fetched. A seam
     // that fails answers nothing and the request proceeds untelemetered.
     const telemetryParent = modelTelemetryParent(options.telemetry, modelTelemetrySubject(request));
     const commonOptions = {
       headers: piCookieAuthValidationHeaders,
-      cacheRetention: 'short',
+      cacheRetention,
       // Gemini's thought markers and tool-call thought signatures are rewritten
       // into the OpenAI-compatible shape before pi's codec reads a byte. Every
       // other provider keeps the gateway response untouched.

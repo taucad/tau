@@ -2,8 +2,11 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@taucad/api-database';
 import { PublicationsModule } from '#api/publications/publications.module.js';
-import { CollaboratorsController, InvitationsController } from '#api/collaboration/collaboration.controller.js';
-import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
+import {
+  CollaboratorsController,
+  InvitationsController,
+} from '@taucad/api-projects/collaboration/collaboration.controller';
+import { ProjectAccessModule } from '@taucad/api-projects/collaboration/project-access.module';
 
 /**
  * Collaboration on a project (D27).

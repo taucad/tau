@@ -153,6 +153,7 @@ export type {
   HostToolApprovalRecord,
   HostToolDefinition,
   HostToolInvocation,
+  HostToolResultBudget,
   HostToolResult,
   InterruptRequest,
   InterruptResolution,

@@ -6,7 +6,7 @@ import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { ColorPicker } from '#components/ui/color-picker.js';
+import { ColorPicker } from '@taucad/ui-kit/components/color-picker';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 

@@ -16,10 +16,10 @@ import {
   ChatToolCardIcon,
   ChatToolCardTitle,
   ChatToolCardContent,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { RequirementIndicator } from '#components/chat/requirement-indicator.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
+import { RequirementIndicator } from '@taucad/chat-ui/components/requirement-indicator';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';

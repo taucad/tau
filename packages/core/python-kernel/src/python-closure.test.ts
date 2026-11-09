@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/native-process-core';
-import type { ClosureReceipt, ReceiptFile, SealClosureInput } from '@taucad/runtime/preparation/node';
+import type { ClosureReceipt, InstalledFile, SealClosureInput } from '@taucad/runtime/preparation/node';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createPythonSeal, pythonLaunchSet, pythonOptionsFromClosure } from '#python-closure.js';
@@ -17,17 +17,17 @@ const worker: PythonKernelWorker = {
 };
 
 const hex = (digit: string): string => digit.repeat(64);
-const row = (path: string, digit: string, mode = 0o644): ReceiptFile => ({
+const row = (path: string, digit: string, mode = 0o644): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: hex(digit),
   mode,
-  payload: 'payload',
+  dependencyFile: 'wheel',
 });
 
 const target = { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' } as const;
 
-const receiptOf = (files: readonly ReceiptFile[]): ClosureReceipt => ({
+const receiptOf = (files: readonly InstalledFile[]): ClosureReceipt => ({
   package: '@taucad/example',
   dependency: 'engine',
   target,
@@ -40,7 +40,7 @@ const receiptOf = (files: readonly ReceiptFile[]): ClosureReceipt => ({
   closureIntegrity: 'sha256-AAAA',
   treeIntegrity: 'sha256-BBBB',
   files,
-  payloads: [],
+  dependencyFiles: [],
   preparedAt: '2026-10-15T00:00:00.000Z',
   tauVersion: '0.0.0',
 });
@@ -215,7 +215,7 @@ describe('createPythonSeal', () => {
     expect(existsSync(selfTest!.writablePath)).toBe(false);
   });
 
-  it('should pass no exclusion when no payload ships bytecode', async () => {
+  it('should pass no exclusion when no dependency file ships bytecode', async () => {
     const input = closure(['python/bin/python3']);
     const { commands, run } = runner([() => exited(0), () => exited(0)]);
 

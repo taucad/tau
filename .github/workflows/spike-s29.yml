@@ -1,5 +1,5 @@
-# Spike S29 (native-dependency-resolution charter, wave 2): a static directory is a complete payload mirror under
-# TAU_PAYLOAD_MIRROR + no-fallback, and an image with a baked store answers `ready` under --network none (D25, W19).
+# Spike S29 (native-dependency-resolution charter, wave 2): a static directory is a complete dependency mirror under
+# TAU_DEPENDENCY_MIRROR + no-fallback, and an image with a baked store answers `ready` under --network none (D25, W19).
 # Spike code under scripts/spikes/native-deps/linux/s29; the run's evidence is the uploaded artifact and the job
 # summary. Downloaded bytes are inspected as data and never executed.
 name: Spike S29 (static mirror and baked store)

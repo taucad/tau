@@ -47,7 +47,7 @@ import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   FloatingPanelContent,
   FloatingPanelContentBody,
@@ -89,7 +89,7 @@ import {
   sidebarRowClass,
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
-import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon, getIconIdForFilename } from '@taucad/ui-kit/icons/file-extension-icon';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
@@ -100,7 +100,7 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
-import { useRowWindow } from '#routes/w.$workspace.$project/use-row-window.js';
+import { useRowWindow } from '@taucad/project-workspace/hooks/use-row-window';
 
 import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
 import {
@@ -119,21 +119,21 @@ import {
   fileTreeRootId,
   joinFileTreePath,
   resolveFileTreeTargetDirectory,
-} from '#routes/w.$workspace.$project/file-tree-targets.js';
+} from '@taucad/project-workspace/utils/file-tree-targets';
 import {
   canReadForeignFileTreeDrop,
   collectDropDirectoryPaths,
   ingestFileTreeDataTransfer,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '@taucad/project-workspace/utils/file-tree-drop-ingestion';
 import type {
   DroppedDirectory,
   DroppedFile,
   DropIngestionResult,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '@taucad/project-workspace/utils/file-tree-drop-ingestion';
 import {
   copyTextToClipboard,
   summarizeFileTreeImport,
-} from '#routes/w.$workspace.$project/file-tree-operation-results.js';
+} from '@taucad/project-workspace/utils/file-tree-operation-results';
 import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,

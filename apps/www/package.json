@@ -45,6 +45,7 @@
     "#www/*.js": "./src/*.ts",
     "#tools/*.js": "./scripts/*.ts",
     "#www/site-link.js": "./src/site-link.tsx",
+    "#www/agent-prompt.js": "./src/agent-prompt.tsx",
     "#www/site.css": "./src/site.css",
     "#app/*.js": "./app/*.ts",
     "#app/root.js": "./app/root.tsx",

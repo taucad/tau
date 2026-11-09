@@ -72,7 +72,7 @@ const metadataSchema = z
   })
   .catchall(jsonValueSchema);
 /*
- * The attachment URL shape, restated here on purpose: `apps/ui/app/utils/attachment.utils.ts`
+ * The attachment URL shape, restated here on purpose: `apps/libs/chat-ui/src/utils/attachment.utils.ts`
  * owns it for the composer, and a published package cannot depend on an app.
  * Both spellings must stay in step — a row this rejects is a row the UI wrote
  * and no reader can resolve.

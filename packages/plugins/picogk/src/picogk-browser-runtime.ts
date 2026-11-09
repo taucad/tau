@@ -4,7 +4,10 @@ import { sha256Bytes } from '@taucad/runtime/kernel';
 
 /** One generated .NET resource bound by the prepared bundle manifest. @internal */
 export type PicogkBrowserRuntimeFile = {
+  /** The resource's identity: the URL the generated loader resolves and requests it by. */
   readonly url: string;
+  /** Where its bytes are fetched, when not at `url` (a digest mirror blob). Several files may share one. */
+  readonly source?: string;
   readonly sha256: string;
   readonly byteLength: number;
 };
@@ -27,7 +30,7 @@ export const preparePicogkBrowserRuntime = async (options: {
   readonly bootstrapUrl: string;
   readonly files: readonly PicogkBrowserRuntimeFile[];
 }): Promise<PicogkBrowserRuntimeLoader> => {
-  const files = new Map<string, PicogkBrowserRuntimeFile>();
+  const files = new Map<string, PicogkBrowserRuntimeFile & { readonly source: string }>();
   const modules = new Map<string, string>();
   let disposed = false;
   const dispose = (): void => {
@@ -37,13 +40,14 @@ export const preparePicogkBrowserRuntime = async (options: {
     }
     modules.clear();
   };
+  const unsafe = (url: URL): boolean =>
+    !['http:', 'https:'].includes(url.protocol) || Boolean(url.username || url.password || url.hash);
   for (const file of options.files) {
     const url = new URL(file.url);
+    const source = new URL(file.source ?? file.url);
     if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password ||
-      url.hash ||
+      unsafe(url) ||
+      unsafe(source) ||
       files.has(url.href) ||
       !/^[a-f\d]{64}$/iu.test(file.sha256) ||
       !Number.isSafeInteger(file.byteLength) ||
@@ -51,7 +55,7 @@ export const preparePicogkBrowserRuntime = async (options: {
     ) {
       throw new Error('Invalid PicoGK runtime resource inventory.');
     }
-    files.set(url.href, { ...file });
+    files.set(url.href, { ...file, source: source.href });
   }
   const bootstrap = new URL(options.bootstrapUrl).href;
   if (!files.has(bootstrap) || !new URL(bootstrap).pathname.endsWith('.js')) {
@@ -59,7 +63,7 @@ export const preparePicogkBrowserRuntime = async (options: {
   }
   const read = async (url: string): Promise<Uint8Array<ArrayBuffer>> => {
     const file = files.get(url)!;
-    const response = await fetch(url, { redirect: 'error' });
+    const response = await fetch(file.source, { redirect: 'error' });
     if (!response.ok) {
       throw new Error(`PicoGK runtime resource download failed: ${response.status}.`);
     }

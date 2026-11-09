@@ -8,9 +8,9 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { unknownIconId } from '#components/icons/svg-icon.js';
-import { resolveNewChatExecution } from '#utils/new-chat-execution.js';
-import type { ModelCatalog } from '#utils/new-chat-execution.js';
+import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
+import { resolveNewChatExecution } from '@taucad/chat-ui/utils/new-chat-execution';
+import type { ModelCatalog } from '@taucad/chat-ui/utils/new-chat-execution';
 import { catalogFreshness, modelsQueryKey, readModelCatalog } from '#lib/model-catalog.js';
 import type { Model as CatalogModel } from '#lib/model-catalog.js';
 

@@ -34,13 +34,13 @@ import type {
   FlatSpanRow,
   SpanNode,
   ViewMode,
-} from '#routes/w.$workspace.$project/chat-kernel-types.js';
+} from '@taucad/project-workspace/utils/chat-kernel-types';
 import {
   categoryDotColors,
   categoryLabels,
   categorySvgColors,
   timelineBarHeight,
-} from '#routes/w.$workspace.$project/chat-kernel-types.js';
+} from '@taucad/project-workspace/utils/chat-kernel-types';
 import {
   findSpanPath,
   flattenSpanRows,

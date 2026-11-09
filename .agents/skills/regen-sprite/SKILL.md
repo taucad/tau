@@ -8,13 +8,13 @@ description: Regenerates the checked-in UI SVG sprite and icon-id declaration fr
 From the Tau workspace root, run:
 
 ```bash
-pnpm nx run ui:generate-svg-sprite
+pnpm nx run ui-kit:generate-svg-sprite
 ```
 
-This reads `apps/ui/app/components/icons/raw/**/*.svg` and overwrites:
+This reads `apps/libs/ui-kit/src/icons/raw/**/*.svg` and overwrites:
 
-- `apps/ui/app/components/icons/generated/sprite.svg`
-- `apps/ui/app/components/icons/generated/svg-icons.d.ts`
+- `apps/libs/ui-kit/src/icons/generated/sprite.svg`
+- `apps/libs/ui-kit/src/icons/generated/svg-icons.d.ts`
 
 After the command succeeds, run `git diff --check` for those two outputs and report which changed.
 

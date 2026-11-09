@@ -197,7 +197,7 @@ export const routeGitOffline = async (target: GitFaultTarget, pattern: string = 
  * envelope cannot produce it and `routeGitRefusal` is the wrong shape. The
  * client recognises it by the fixed marker the hook opens with, which is why
  * the marker below must stay byte-identical to `ceilingRefusalMarker` in
- * `apps/api/app/api/git/git.constants.ts` and its copy in
+ * `apps/libs/api-git-core/src/git.constants.ts` and its copy in
  * `packages/revisions/src/remotes.ts`.
  *
  * @param target - The client to refuse.

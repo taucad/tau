@@ -5,7 +5,7 @@ import { defaultPanelState } from '#constants/editor.constants.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { sidebarDefaultOpen, sidebarPreferredWidth } from '#constants/sidebar.constants.js';
-import { ChatPaneSkeleton } from '#routes/w.$workspace.$project/chat-pane-skeleton.js';
+import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
 
 const { chatWidth, workbenchWidth } = defaultPanelState.desktopLayout;
 

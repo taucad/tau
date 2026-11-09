@@ -7,14 +7,20 @@
       "!dist/bambu.session.mjs",
       "!dist/bambu.archive.mjs",
       "!dist/bambu.plate.mjs",
-      "!dist/bambu.simulator-image.mjs"
+      "!dist/bambu.simulator-image.mjs",
+      "!dist/bambu.lan.mjs"
     ],
     "limit": "22 kB"
   },
   {
-    "name": "@taucad/bambu/plate (plate GLBs load on demand) \u2014 measured 620 B brotli on 2026-10-03",
+    "name": "@taucad/bambu/plate (plate GLBs load on demand) — measured 620 B brotli on 2026-10-03",
     "path": "dist/bambu.plate.mjs",
     "limit": "680 B"
+  },
+  {
+    "name": "@taucad/bambu/lan re-export module (the helpers it names are counted in the static graph and the lazy host chunk) — measured 135 B brotli on 2026-11-09",
+    "path": "dist/bambu.lan.mjs",
+    "limit": "200 B"
   },
   {
     "name": "Simulated camera JPEG, loaded only on capture — measured 3.83 kB brotli on 2026-10-12",

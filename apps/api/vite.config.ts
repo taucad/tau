@@ -83,6 +83,13 @@ export default defineConfig(({ command, mode }) => {
             // directly under the migrations folder).
             rename: { stripBase: 4 },
           },
+          {
+            // The default images the API seeds into the public bucket at boot
+            // (`app/storage/storage-seed.module.ts` reads them from `dist/seed/`).
+            src: '../../infra/seed/*',
+            dest: 'seed',
+            rename: { stripBase: 2 },
+          },
         ],
       }),
       ...apiDevPlugins,

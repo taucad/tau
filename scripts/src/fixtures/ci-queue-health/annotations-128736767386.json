@@ -1,0 +1,80 @@
+[
+  {
+    "path": ".github",
+    "annotation_level": "failure",
+    "title": "",
+    "message": "Process completed with exit code 1."
+  },
+  {
+    "path": "app/components/chat/chat-composer-static-bar.tsx",
+    "annotation_level": "failure",
+    "title": "typescript(no-unnecessary-boolean-literal-compare)",
+    "message": "app/components/chat/chat-composer-static-bar.tsx:52:32: This expression unnecessarily compares a boolean value to a boolean instead of using it directly."
+  },
+  {
+    "path": "src/components/menu-slider-item.tsx",
+    "annotation_level": "warning",
+    "title": "tau-lint(no-button-size-override)",
+    "message": "src/components/menu-slider-item.tsx:328:56: `h-7` overrides the Button `size` variant. Pick the `size` that fits, or add a variant (Page Composition Policy, Rule 9)."
+  },
+  {
+    "path": "src/components/menu-slider-item.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/menu-slider-item.tsx:234:39: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/menu-slider-item.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/menu-slider-item.tsx:225:40: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/menu-slider-item.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/menu-slider-item.tsx:123:32: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/pane-virtual-list.tsx",
+    "annotation_level": "warning",
+    "title": "eslint(complexity)",
+    "message": "src/components/pane-virtual-list.tsx:217:5: function has a complexity of 25. Maximum allowed is 20."
+  },
+  {
+    "path": "src/components/pane-virtual-list.tsx",
+    "annotation_level": "warning",
+    "title": "eslint(complexity)",
+    "message": "src/components/pane-virtual-list.tsx:65:35: function has a complexity of 21. Maximum allowed is 20."
+  },
+  {
+    "path": "src/components/dropdown-menu.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/dropdown-menu.tsx:103:3: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/dropdown-menu.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/dropdown-menu.tsx:90:26: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/menu-disclosure-item.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/menu-disclosure-item.tsx:144:36: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": "src/components/menu-disclosure-item.tsx",
+    "annotation_level": "warning",
+    "title": "jsdoc(require-param)",
+    "message": "src/components/menu-disclosure-item.tsx:103:4: Missing JSDoc `@param` declaration for function parameters."
+  },
+  {
+    "path": ".github",
+    "annotation_level": "notice",
+    "title": "",
+    "message": "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+  }
+]

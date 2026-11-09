@@ -1,11 +1,11 @@
 import { join } from 'node:path';
 
-import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, InstalledFile } from '@taucad/runtime/preparation/node';
 
 import { dotnetClosureSchema } from '#dotnet.schemas.js';
 import type { DotnetClosureOptions } from '#dotnet.schemas.js';
 
-/** Microsoft's `dotnet` muxer, unpacked from the runtime archive (a `dotnet` payload with destination `dotnet`). */
+/** Microsoft's `dotnet` muxer, unpacked from the runtime archive (a `dotnet` dependency file with destination `dotnet`). */
 const muxerPath = 'dotnet/dotnet';
 
 /**
@@ -63,7 +63,7 @@ const launchResources = (layout: DotnetClosureLayout): readonly DotnetLaunchReso
   ...layout.resources,
 ];
 
-const launchRows = (resources: readonly DotnetLaunchResource[], files: readonly ReceiptFile[]): ReceiptFile[] =>
+const launchRows = (resources: readonly DotnetLaunchResource[], files: readonly InstalledFile[]): InstalledFile[] =>
   files.filter((file) => file.symlinkTarget === undefined && resources.some(({ pattern }) => pattern.test(file.path)));
 
 /**
@@ -76,7 +76,7 @@ const launchRows = (resources: readonly DotnetLaunchResource[], files: readonly 
  */
 export const dotnetLaunchSet = (
   layout: DotnetClosureLayout,
-): ((files: readonly ReceiptFile[]) => readonly string[]) => {
+): ((files: readonly InstalledFile[]) => readonly string[]) => {
   const resources = launchResources(layout);
   return (files) => [muxerPath, ...launchRows(resources, files).map(({ path }) => path)].toSorted();
 };

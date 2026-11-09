@@ -76,7 +76,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     consumeDraft: mockConsumeDraft,
   }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
 
 const { NewProjectChatComposer } = await import('#components/chat/new-project-chat-composer.js');
 

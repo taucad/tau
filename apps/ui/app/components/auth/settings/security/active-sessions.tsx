@@ -4,7 +4,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ActiveSession } from '#components/auth/settings/security/active-session.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 
 export type ActiveSessionsProps = {

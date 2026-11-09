@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { FileUIPart } from 'ai';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
-import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 
 type ChatMessageFileAttachmentsProperties = {
   readonly parts: readonly FileUIPart[];

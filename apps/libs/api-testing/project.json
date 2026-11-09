@@ -1,0 +1,7 @@
+{
+  "name": "api-testing",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-testing",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:data-access", "api:testing"]
+}

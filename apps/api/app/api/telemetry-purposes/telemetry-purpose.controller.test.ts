@@ -10,9 +10,9 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { CloudHostEvidenceGuard, HostsService } from '@taucad/api-hosts';
-import { TelemetryPurposeController } from '#api/telemetry-purposes/telemetry-purpose.controller.js';
-import type { EffectiveTelemetryPurposes } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
-import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
+import { TelemetryPurposeController } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.controller';
+import type { EffectiveTelemetryPurposes } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.schema';
+import { TelemetryPurposeService } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.service';
 
 type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
 type Device = NonNullable<Awaited<ReturnType<HostsService['authenticateDevice']>>>;

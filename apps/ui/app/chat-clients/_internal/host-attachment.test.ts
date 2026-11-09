@@ -13,7 +13,7 @@ import type { AgentWireProtocol, CatchUpFrame, ReadAnswer } from '@taucad/agent-
 import { catchUpFrameSchema, agentWireVersion, agentWireProtocolSchemas } from '@taucad/agent-host/wire';
 import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import { createAgentHostClient } from '#services/agent-host-client.js';
-import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chunksOf, chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';

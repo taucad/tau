@@ -46,7 +46,7 @@ vi.mock('#components/nav/nav-user.js', () => ({
   NavUser: () => <button type='button'>Account</button>,
 }));
 
-vi.mock('#components/icons/tau-wordmark.js', () => ({
+vi.mock('@taucad/ui-kit/icons/tau-wordmark', () => ({
   TauWordmark: ({ className }: { readonly className?: string }) => <svg aria-hidden className={className} />,
 }));
 

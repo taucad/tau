@@ -1175,7 +1175,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
 
   morph: {
     'deepseek-v4.1-flash': {
-      enabled: true,
+      enabled: false, // Parked until the Morph account is funded and capped; set true to re-enable.
       id: 'morph-deepseek-v4.1-flash',
       providerKind: 'tau-hosted',
       name: 'DeepSeek V4.1 Flash',

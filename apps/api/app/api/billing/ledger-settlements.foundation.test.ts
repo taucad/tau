@@ -14,12 +14,12 @@ import {
 import type { QualifiedAdmissionInput } from '@taucad/api-billing';
 import { seedBillingFixturePolicy } from '@taucad/api-billing/testing/billing-policy.fixture';
 import { fulfillPaidFixture, seedPaidPurchase } from '@taucad/api-billing/testing/billing-payment.fixture';
-import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
-import { langfuseObservation, pseudonymKey } from '#api/agent-observability/langfuse-observation.js';
-import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
-import { reconcileLedger } from '#api/agent-observability/ledger-reconciliation.js';
-import { ledgerSettlements } from '#api/agent-observability/ledger-settlements.js';
-import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
+import type { OtlpSpan } from '@taucad/api-agent-observability/langfuse-observation';
+import { langfuseObservation, pseudonymKey } from '@taucad/api-agent-observability/langfuse-observation';
+import type { LangfuseObservationRow } from '@taucad/api-agent-observability/langfuse-scorecard';
+import { reconcileLedger } from '@taucad/api-agent-observability/ledger-reconciliation';
+import { ledgerSettlements } from '@taucad/api-agent-observability/ledger-settlements';
+import { settlementEvidence } from '@taucad/api-agent-observability/settlement-evidence';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {

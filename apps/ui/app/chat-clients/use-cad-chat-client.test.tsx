@@ -11,15 +11,15 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import type { ActiveChatSessionContextValue } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
+import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
@@ -175,7 +175,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
   });
   return { useFileManager: fileManager, useOptionalFileManager: fileManager };
 });
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+vi.mock('@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport', () => ({
   getBrowserAgentHostRun: () => browserHostHarness.run,
   isBrowserAgentHostPlaced: () => browserHostHarness.placed,
   resumableBrowserAgentHostRunId: () =>
@@ -188,7 +188,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   createBrowserAgentHostClient: browserHostHarness.createClient,
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind !== 'tau' && providerKind !== 'ollama',
 }));
-vi.mock('#services/daemon-agent-host-client.js', () => ({
+vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   // The real transport takes a dial function so it can re-dial a dead channel;
   // the mock keeps it so a test can prove the dial reaches the ladder.
   createDaemonAgentHostTransport: (dial: () => Promise<unknown>) => ({ dial }),

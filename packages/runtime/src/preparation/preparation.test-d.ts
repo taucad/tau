@@ -12,10 +12,10 @@ import type {
 } from '#preparation/preparation-host.types.js';
 import { selectVariant } from '#preparation/select-variant.js';
 import type {
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   Integrity,
-  PayloadOrigin,
+  DependencyFileOrigin,
   PluginDeployment,
   VariantAxis,
 } from '#preparation/preparation.types.js';
@@ -29,7 +29,7 @@ test('an integrity is an SRI string of a sha256, sha384 or sha512 digest', () =>
   expectTypeOf<'sha512-6WqK'>().toExtend<Integrity>();
   // @ts-expect-error — the hex `sha256:` spelling is not SRI.
   const hex: Integrity = 'sha256:1178515500000000000000000000000000000000000000000000000000000000';
-  // @ts-expect-error — npm's legacy sha1 is not accepted for native payloads.
+  // @ts-expect-error — npm's legacy sha1 is not accepted for native dependency files.
   const sha1: Integrity = 'sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=';
   expectTypeOf([hex, sha1]).toBeArray();
 });
@@ -53,9 +53,9 @@ test('a Linux target names its libc and has no CPU-feature axis', () => {
 
 test('an origin needs its canonical URL', () => {
   // @ts-expect-error — mirrors are further entries, never a replacement for the first URL.
-  const empty: PayloadOrigin = { kind: 'url', urls: [] };
-  expectTypeOf(empty).toExtend<PayloadOrigin>();
-  expectTypeOf<DependencyPayload['format']>().toEqualTypeOf<'raw' | 'tar.gz' | 'zip' | 'wheel'>();
+  const empty: DependencyFileOrigin = { kind: 'url', urls: [] };
+  expectTypeOf(empty).toExtend<DependencyFileOrigin>();
+  expectTypeOf<DependencyFile['format']>().toEqualTypeOf<'raw' | 'tar.gz' | 'zip' | 'wheel'>();
 });
 
 test('prepare requires a signal and settles as ready, blocked or cancelled, never failed', () => {

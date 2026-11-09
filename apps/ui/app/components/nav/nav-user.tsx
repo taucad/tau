@@ -15,7 +15,7 @@ import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { metaConfig } from '#constants/meta.constants.js';
 import { legalUrl } from '#lib/legal-url.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { setEntryPreference } from '#lib/entry-preference.js';
 import { pageOrigin, websiteOrigin } from '#lib/website-origin.js';

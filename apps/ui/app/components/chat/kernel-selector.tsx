@@ -3,7 +3,7 @@ import { availableKernelConfigurations } from '#constants/available-kernel-confi
 import { Button } from '@taucad/ui/components/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { Badge } from '@taucad/ui/components/badge';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 

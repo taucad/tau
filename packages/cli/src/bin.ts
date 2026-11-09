@@ -70,7 +70,7 @@ const subCommands: Record<string, CommandDef> = {
     const { installCommand } = await import('./commands/install.js');
     return installCommand as CommandDef;
   }),
-  prepare: lazyCommand('prepare', 'Prepare a native kernel’s runtime in the shared payload store', async () => {
+  prepare: lazyCommand('prepare', 'Prepare a native kernel’s runtime in the shared dependency store', async () => {
     const { prepareCommand } = await import('./commands/prepare.js');
     return prepareCommand as CommandDef;
   }),

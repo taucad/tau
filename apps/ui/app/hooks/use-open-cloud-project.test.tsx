@@ -53,7 +53,7 @@ vi.mock('#hooks/use-projects.js', () => ({
     return { projects: [held, trashed] };
   },
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { info: mockToastInfo } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { info: mockToastInfo } }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: mockCreateProject, getProjects: async () => [] }),
 }));

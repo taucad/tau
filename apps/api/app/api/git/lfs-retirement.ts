@@ -4,15 +4,15 @@ import type { Database } from '@taucad/api-database/owner-lock';
 import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { project, projectGit, projectGitLfsObject, projectDeletion } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { hydrateAdmittedLease } from '#api/git/admission/admitted-lease.js';
-import { LeaseAdmission } from '#api/git/admission/lease-admission.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { lfsObjectLocations } from '#api/git/lfs-keys.js';
-import { referencedLfsOids } from '#api/git/lfs-references.js';
+import { hydrateAdmittedLease } from '@taucad/api-git-core/admission/admitted-lease';
+import { LeaseAdmission } from '@taucad/api-git-core/admission/lease-admission';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { lfsObjectLocations } from '@taucad/api-git-core/lfs-keys';
+import { referencedLfsOids } from '@taucad/api-git-core/lfs-references';
 
 /**
  * How long an object stays after the last tree that reached it (charter D16,

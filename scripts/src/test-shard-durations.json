@@ -1,0 +1,20 @@
+{
+  "$comment": "Uncached `test` task seconds per Nx project for the CI test-shard dealer (scripts/src/test-shard-dealer.ts). Source: era-D successful runs on hosted ubuntu runners at --parallel=1, tau-brain research/ci-decomposition-blueprint.md Part 1 F1/F2 and Part 2 F5 (median uncached task seconds). A project not listed weighs defaultSeconds: the queue run 42571800530 test-2 lane spent about 300 s on some 26 unlisted projects, near 12 s each, rounded up. Refresh when a listed project's median moves by more than a quarter, when a project is split, or when this snapshot is older than 60 days.",
+  "measuredAt": "2026-11-09",
+  "runs": [
+    42553976937, 42554401756, 42557046236, 42557064444, 42559901402, 42560078587, 42560329307, 42563569538, 42563887258,
+    42566340858, 42570950818, 42574381883, 42571800530
+  ],
+  "defaultSeconds": 15,
+  "seconds": {
+    "build123d": 154,
+    "cli": 854,
+    "desktop": 47,
+    "host": 206,
+    "runtime": 113,
+    "ui": 804,
+    "ui-e2e": 185,
+    "viewer": 91,
+    "zoo": 139
+  }
+}

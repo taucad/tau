@@ -612,7 +612,8 @@ const manifestFacts: Readonly<Record<BambuModel, ManifestFacts>> = {
 
 /**
  * Implicit FTPS, where the printer takes uploads. Not a pinned service (`connection.services` lists only what binding
- * pins, and declaring it would add a probe at bind); uploads reuse the MQTT pin. @internal
+ * pins, and declaring it would add a probe at bind); uploads reuse the MQTT pin.
+ * @public
  */
 export const bambuFtpsPort = 990;
 
@@ -622,7 +623,7 @@ export const bambuFtpsPort = 990;
  * @param id - The service, by the `serviceTrust` name the host pins it under.
  * @returns Its port.
  * @throws BambuProtocolError when the manifest does not declare the service.
- * @internal
+ * @public
  */
 export const bambuServicePort = (
   manifest: Pick<MachineManifestDefinition, 'connection'>,

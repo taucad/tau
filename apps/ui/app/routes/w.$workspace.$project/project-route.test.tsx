@@ -104,7 +104,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   },
   readBrowserRunStoppability: async () => 'stoppable',
 }));
-vi.mock('#services/daemon-agent-host-client.js', () => ({
+vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
 vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({

@@ -167,3 +167,49 @@ describe('UI deploy serialization', () => {
     expect(workflow.jobs.deploy.concurrency?.['cancel-in-progress']).toBe(false);
   });
 });
+
+describe('UI deploy PicoGK browser host', () => {
+  const raw = readFileSync(join(root, '.github/workflows/deploy-ui.yml'), 'utf8');
+  const { jobs } = load(raw) as { jobs: Record<string, { needs?: unknown }> };
+  const site = workflow.jobs.deploy.steps.find((step) => step.id === 'site');
+
+  it('should neither build nor download the host, which the browser loads by digest from the mirror', () => {
+    // Charter picogk-interim-digest-consumer W3: a UI deploy never builds, uploads or embeds the host.
+    expect(Object.keys(jobs)).toEqual(['deploy']);
+    expect(jobs['deploy']?.needs).toBeUndefined();
+    expect(raw).not.toContain('picogk-browser-host.yml');
+    expect(raw).not.toContain('PICOGK_BROWSER_ASSETS_ROOT');
+    expect(raw).not.toMatch(/download-artifact/u);
+  });
+
+  it.each([
+    ['staging', 'https://dependencies.taucad.dev'],
+    ['production', 'https://dependencies.tau.new'],
+  ])('should build %s against its own dependency mirror', (environment, base) => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-dependency-mirror-'));
+    try {
+      const output = join(directory, 'output');
+      writeFileSync(output, '');
+      const result = spawnSync('bash', ['-c', site!.run!], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', process.env['PATH']],
+          ['ENVIRONMENT', environment],
+          ['NETLIFY_AUTH_TOKEN', 'fixture'],
+          ['GITHUB_OUTPUT', output],
+        ]),
+      });
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, 'utf8')).toContain(`dependencies_base=${base}\n`);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+    const build = workflow.jobs.deploy.steps.filter((step) => step.env?.['PICOGK_BROWSER_MIRROR_BASE'] !== undefined);
+    expect(build).toHaveLength(1);
+    expect(build[0]!.env!['PICOGK_BROWSER_MIRROR_BASE']).toMatch(
+      /^\$\{\{ steps\.site\.outputs\.dependencies_base \}\}$/u,
+    );
+    // The variable reaches the Netlify build, which runs `ui:build` with it.
+    expect(build[0]!.run).toMatch(/\/netlify" deploy \\\n/u);
+  });
+});

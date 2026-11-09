@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { CadAgentExecution } from '@taucad/chat';
-import type { ModelCatalog } from '#utils/new-chat-execution.js';
+import type { ModelCatalog } from '@taucad/chat-ui/utils/new-chat-execution';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
 const harness = vi.hoisted(() => {

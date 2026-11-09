@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the Tau host image with a baked payload store, so its native kernels are
+# Build the Tau host image with a baked dependency store, so its native kernels are
 # `ready` without network (charter D37, W19).
 #
 # Preparing runs the closure's own interpreter inside the native sandbox, which a

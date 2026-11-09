@@ -3,7 +3,7 @@ import { ChatActivityStatus } from '#components/chat/chat-activity-status.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
+import { selectChatActivityCue } from '@taucad/chat-ui/utils/chat-activity-cue';
 
 /** One live activity row outside the scrolling transcript, above the composer. */
 export function ChatMessagePlanning({ className }: { readonly className?: string }): React.JSX.Element | undefined {

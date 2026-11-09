@@ -324,7 +324,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     });
     expect(proof.outcomes['unsealed']).toEqual({
       started: false,
-      refusal: `Tau Host refused a native worker launch: ${unsealed} is not a closure sealed in the payload store.`,
+      refusal: `Tau Host refused a native worker launch: ${unsealed} is not a closure sealed in the dependency store.`,
     });
     expect(proof.outcomes['escapedExecutable']).toEqual({
       started: false,
@@ -477,11 +477,11 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(proof.outcomes['real']).toEqual(ran);
     expect(proof.outcomes['escaping']).toEqual({
       started: false,
-      refusal: `Tau Host refused a native worker launch: ${escaping} is not a closure sealed in the payload store.`,
+      refusal: `Tau Host refused a native worker launch: ${escaping} is not a closure sealed in the dependency store.`,
     });
     expect(proof.outcomes['alias']).toEqual({
       started: false,
-      refusal: `Tau Host refused a native worker launch: ${alias} is not a closure sealed in the payload store.`,
+      refusal: `Tau Host refused a native worker launch: ${alias} is not a closure sealed in the dependency store.`,
     });
     /* The worker starts from the path as the launch spelled it; the sandbox grants its real path beside it. */
     expect(start.mock.calls.map(([launch]) => launch.runtimePath)).toEqual([sealed, sealedReal]);

@@ -1,4 +1,4 @@
-import { chatComposerTrayClassName } from '#components/chat/chat-input-styles.js';
+import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
@@ -9,7 +9,7 @@ import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
+import { ScrollDownButton } from '@taucad/project-workspace/components/scroll-down-button';
 import {
   instantScrollBehavior,
   useFollowLatestOutput,
@@ -35,8 +35,8 @@ import {
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
-import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
+import { ChatHistoryEmpty } from '@taucad/project-workspace/components/chat-history-empty';
+import { AtReferenceProvider } from '@taucad/chat-ui/components/at-reference-context';
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';

@@ -1,0 +1,80 @@
+{
+  "name": "@taucad/api-projects",
+  "version": "0.1.0-beta.0",
+  "description": "API projects and publications: the project registry, previews, deletion, collaboration and project access, and publishing",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-projects"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-projects#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./collaboration/collaboration.controller": "./src/collaboration/collaboration.controller.ts",
+    "./collaboration/project-access.module": "./src/collaboration/project-access.module.ts",
+    "./collaboration/project-access.service": "./src/collaboration/project-access.service.ts",
+    "./entitlements/commercial-entitlements": "./src/entitlements/commercial-entitlements.ts",
+    "./projects/project-deletion.controller": "./src/projects/project-deletion.controller.ts",
+    "./projects/project-preview.controller": "./src/projects/project-preview.controller.ts",
+    "./projects/project-preview.service": "./src/projects/project-preview.service.ts",
+    "./projects/projects.controller": "./src/projects/projects.controller.ts",
+    "./publications/project-share.controller": "./src/publications/project-share.controller.ts",
+    "./publications/publication-deletion": "./src/publications/publication-deletion.ts",
+    "./publications/publication-materializer": "./src/publications/publication-materializer.ts",
+    "./publications/publications.controller": "./src/publications/publications.controller.ts",
+    "./publications/publications.dto": "./src/publications/publications.dto.ts",
+    "./publications/publications.service": "./src/publications/publications.service.ts",
+    "./publications/repository-leases": "./src/publications/repository-leases.ts",
+    "./publications/viewer-identity.interceptor": "./src/publications/viewer-identity.interceptor.ts",
+    "./publications/viewer-identity.service": "./src/publications/viewer-identity.service.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-email": "workspace:*",
+    "@taucad/api-git-core": "workspace:*",
+    "@taucad/api-object-storage": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/api-redis": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "nestjs-zod": "^5.4.0"
+  },
+  "devDependencies": {
+    "@nestjs/core": "catalog:",
+    "@nestjs/testing": "catalog:",
+    "@taucad/api-testing": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "dotenv": "catalog:",
+    "postgres": "^3.4.9",
+    "reflect-metadata": "^0.2.2",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

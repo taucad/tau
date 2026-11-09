@@ -1,5 +1,5 @@
 /**
- * The desktop's side of the native payload store (charter W6, D5, D21; desktop first-use download blueprint).
+ * The desktop's side of the native dependency store (charter W6, D5, D21; desktop first-use download blueprint).
  *
  * The app ships no kernel closure. At startup main reads which native kernels the store already holds sealed, posts
  * each one's closure to the kernel utilities, and collects the store's garbage. A kernel the store lacks is left out
@@ -96,7 +96,7 @@ export type NativeStoreReport = {
 };
 
 /**
- * Main's startup work on the payload store: post the native composition to the kernel utilities (always exactly
+ * Main's startup work on the dependency store: post the native composition to the kernel utilities (always exactly
  * once, with every kernel refused when the store cannot be opened, so no utility waits for ever), then collect the
  * store's garbage (D21). Never rejects.
  * @param input - The store root, this installation's path, the managed profile's environment, where to post the
@@ -137,7 +137,7 @@ export const startNativeStore = async (input: {
   } catch (error) {
     input.log('error', 'native.store', error);
     if (!posted) {
-      const message = `Tau could not open its payload store at ${input.store}: ${error instanceof Error ? error.message : String(error)}`;
+      const message = `Tau could not open its dependency store at ${input.store}: ${error instanceof Error ? error.message : String(error)}`;
       input.post({
         type: nativeKernelsFrameType,
         store: input.store,

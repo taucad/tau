@@ -7,17 +7,17 @@ import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep, mockReset } from 'vitest-mock-extended';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
-import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
-import { prepareSend } from '#api/agent-observability/evidence-delivery.js';
+import { admitEvidence } from '@taucad/api-agent-observability/evidence-admission';
+import { prepareSend } from '@taucad/api-agent-observability/evidence-delivery';
 import {
   admitEvidenceErasure,
   eraseAccountEvidence,
   readEvidenceErasure,
-} from '#api/agent-observability/evidence-erasure.js';
-import { erasureTiming, EvidenceErasureService } from '#api/agent-observability/evidence-erasure.service.js';
-import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
-import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.js';
-import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+} from '@taucad/api-agent-observability/evidence-erasure';
+import { erasureTiming, EvidenceErasureService } from '@taucad/api-agent-observability/evidence-erasure.service';
+import { sealEvidence } from '@taucad/api-agent-observability/evidence-seal';
+import { evidenceFixture } from '@taucad/api-agent-observability/testing/evidence.fixture';
+import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
 import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import * as schema from '@taucad/api-database/schema';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';

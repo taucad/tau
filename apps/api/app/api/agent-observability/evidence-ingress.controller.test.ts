@@ -12,9 +12,9 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import {
   EvidenceIngressController,
   evidenceContentType,
-} from '#api/agent-observability/evidence-ingress.controller.js';
-import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
-import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
+} from '@taucad/api-agent-observability/evidence-ingress.controller';
+import { EvidenceIngressService } from '@taucad/api-agent-observability/evidence-ingress.service';
+import type { EvidenceReceipt } from '@taucad/api-agent-observability/evidence-admission';
 import { CloudHostEvidenceGuard, HostsService } from '@taucad/api-hosts';
 
 type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;

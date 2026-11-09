@@ -1,7 +1,7 @@
 /**
  * What the kernel utility binds its native kernels through (charter W6, D8).
  *
- * Main reads each sealed closure's launch index from the payload store at startup, then posts one control frame naming
+ * Main reads each sealed closure's launch index from the dependency store at startup, then posts one control frame naming
  * the closure every prepared native kernel runs from. The broker replays the frame to every utility right after its
  * boot frame, and the desktop runtime awaits it before it composes. The runtime lists the native kernels' plugins like
  * any other; each kernel asks the closure resolver installed here for its closure when it initializes. A kernel the

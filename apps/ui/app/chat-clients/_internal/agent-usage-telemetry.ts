@@ -32,7 +32,7 @@ import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: 'agent.turn' }>['detail'];
 type AgentSessionDetail = Extract<ClientMetricEntry, { name: 'agent.session' }>['detail'];

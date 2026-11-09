@@ -5,14 +5,14 @@ import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { materializePublishedTags } from '#api/publications/publication-materializer.js';
-import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
+import { materializePublishedTags } from '@taucad/api-projects/publications/publication-materializer';
+import type { MaterializerDependencies } from '@taucad/api-projects/publications/publication-materializer';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
-import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
+import { createMemoryRepositoryStore, seedLease } from '@taucad/api-git-core/testing/publication-lease.fixture';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,7 +31,7 @@ import { dirname, join } from 'node:path';
  *
  * The publisher's half of the same fence — a blob a collection pass is removing
  * — lives in `blob-collector.test.ts`, because charter D21's singleton guard
- * allows no module outside `api/git/maintenance/` to import the collector.
+ * allows no module outside `api-git-mirror`'s `src/maintenance/` to import the collector.
  *
  * The object store here is a `Map`: what is under test is the interleaving of
  * two database transactions. The lease, the materializer and the publication

@@ -15,7 +15,7 @@ import { Button } from '@taucad/ui/components/button';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { PageHeader } from '#components/layout/page-header.js';
-import { DataTablePagination } from '#components/ui/data-table.js';
+import { DataTablePagination } from '@taucad/ui-kit/components/data-table';
 import { presentMachine } from '#components/machines/machine-presentation.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';

@@ -8,7 +8,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import type { Ask } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
 let dictationAvailable = false;
 let transcription: ReturnType<typeof Promise.withResolvers<string>> | undefined;
@@ -66,7 +66,7 @@ vi.doMock('#components/chat/chat-kernel-selector.js', () => ({
     readonly children: (props: { selectedKernel: (typeof kernelConfigurations)[number] }) => React.ReactNode;
   }): React.ReactNode => children({ selectedKernel: kernelConfigurations.find((kernel) => kernel.id === 'manifold')! }),
 }));
-vi.doMock('#components/icons/svg-icon.js', () => ({ SvgIcon: () => <span className='size-4' /> }));
+vi.doMock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span className='size-4' /> }));
 vi.doMock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
@@ -80,7 +80,7 @@ declare module 'vitest/internal/browser' {
 
 const { ChatTextareaDesktop } = await import('#components/chat/chat-textarea-desktop.js');
 const { QuestionCard } = await import('#components/chat/question-card.js');
-const { ChatTextareaSkeleton } = await import('#components/chat/chat-textarea-skeleton.js');
+const { ChatTextareaSkeleton } = await import('@taucad/chat-ui/components/chat-textarea-skeleton');
 type ComposerProps = ComponentProps<typeof ChatTextareaDesktop>;
 const noop = (): void => undefined;
 const asyncNoop = async (): Promise<void> => undefined;

@@ -1,6 +1,6 @@
 /**
- * Purpose: Shared helpers for the wave 2 payload-store spikes S4, S26, S28 and S30 (native dependency charter).
- * Why: Each spike drives the built `tau` CLI against a scratch payload store and reads the receipts it seals; the
+ * Purpose: Shared helpers for the wave 2 dependency-store spikes S4, S26, S28 and S30 (native dependency charter).
+ * Why: Each spike drives the built `tau` CLI against a scratch dependency store and reads the receipts it seals; the
  *   process, store and summary plumbing is the same for all four.
  * Environment: Node 24+; the built CLI at packages/cli/dist/bin/tau.mjs (`pnpm nx run cli:build`).
  * Usage: import { runTau, sealedReceipts, Summary } from './store-spike.mts';
@@ -33,9 +33,9 @@ export type TauRun = {
 
 /** Options of {@link runTau}. */
 export type TauRunOptions = {
-  /** `TAU_CONFIG_DIR`: the store is `<configDirectory>/payloads`. */
+  /** `TAU_CONFIG_DIR`: the store is `<configDirectory>/dependencies`. */
   readonly configDirectory: string;
-  /** `TAU_PAYLOAD_DIR`, or none. */
+  /** `TAU_DEPENDENCY_DIR`, or none. */
   readonly seed?: string;
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
@@ -57,10 +57,10 @@ export type TauRunOptions = {
 export const runTau = async (args: readonly string[], options: TauRunOptions): Promise<TauRun> => {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   env['TAU_CONFIG_DIR'] = options.configDirectory;
-  env['TAU_PAYLOAD_DIR'] = options.seed ?? '';
-  env['TAU_PAYLOAD_MIRROR'] = '';
-  env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '';
-  env['TAU_PAYLOAD_TARGET'] = '';
+  env['TAU_DEPENDENCY_DIR'] = options.seed ?? '';
+  env['TAU_DEPENDENCY_MIRROR'] = '';
+  env['TAU_DEPENDENCY_MIRROR_NO_FALLBACK'] = '';
+  env['TAU_DEPENDENCY_TARGET'] = '';
   env['NO_COLOR'] = '1';
   Object.assign(env, options.env);
   const started = performance.now();
@@ -117,9 +117,9 @@ export type SealedReceipt = {
     readonly sha256: string;
     readonly mode: number;
     readonly symlinkTarget?: string;
-    readonly payload?: string;
+    readonly dependencyFile?: string;
   }>;
-  readonly payloads: ReadonlyArray<{
+  readonly dependencyFiles: ReadonlyArray<{
     readonly name: string;
     readonly integrity: string;
     readonly sha256: string;
@@ -130,7 +130,7 @@ export type SealedReceipt = {
 /**
  * Every sealed closure of a store, read from `closures/sha256/<hex>/receipt.json`.
  *
- * @param store - The payload store root.
+ * @param store - The dependency store root.
  * @returns The receipts, with `root` set to where each closure is now.
  */
 export const sealedReceipts = (store: string): SealedReceipt[] => {
@@ -149,7 +149,7 @@ export const sealedReceipts = (store: string): SealedReceipt[] => {
 /**
  * The one sealed closure of a package's dependency.
  *
- * @param store - The payload store root.
+ * @param store - The dependency store root.
  * @param packageName - Such as `@taucad/build123d`.
  * @param dependency - Such as `engine` or `runtime`.
  * @returns The receipt.

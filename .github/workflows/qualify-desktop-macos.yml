@@ -4,7 +4,7 @@
 # bundling its Python and .NET runtimes, a clean macos-26 runner downloads the
 # signed archive a desktop release published (Tau-macos-arm64.zip, checked against the
 # release's SHA256SUMS.txt), and runs apps/desktop/scripts/qualify-first-use-download.sh
-# against it. The desktop does not prepare into the payload store yet (W6), so the script runs
+# against it. The desktop does not prepare into the dependency store yet (W6), so the script runs
 # this checkout's `tau prepare` and `tau export` inside the notarised Tau binary as Node
 # (ELECTRON_RUN_AS_NODE): the notarised binary downloads both closures into an empty store and
 # is the parent of both sandboxed workers. Each cell's verdict is a check annotation and a step
@@ -95,7 +95,7 @@ jobs:
           TAG: ${{ inputs.release-tag }}
         run: |
           OUT="$RUNNER_TEMP/w12"
-          rm -rf "$HOME/Library/Application Support/tau/payloads"
+          rm -rf "$HOME/Library/Application Support/tau/dependencies"
           status=0
           apps/desktop/scripts/qualify-first-use-download.sh "$RUNNER_TEMP/app/Tau.app" "$OUT" || status=$?
           {

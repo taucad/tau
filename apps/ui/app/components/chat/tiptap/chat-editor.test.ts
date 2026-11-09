@@ -5,8 +5,11 @@ import { Paragraph } from '@tiptap/extension-paragraph';
 import { Text } from '@tiptap/extension-text';
 import { HardBreak } from '@tiptap/extension-hard-break';
 import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
-import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
-import { SlashCommand, shouldAllowSlashCommandTrigger } from '#components/chat/tiptap/slash-command-suggestion.js';
+import { SubmitOnEnter } from '@taucad/chat-ui/components/tiptap/submit-on-enter';
+import {
+  SlashCommand,
+  shouldAllowSlashCommandTrigger,
+} from '@taucad/chat-ui/components/tiptap/slash-command-suggestion';
 import { extractContent } from '#components/chat/tiptap/use-chat-editor.js';
 
 import type { Extensions } from '@tiptap/core';

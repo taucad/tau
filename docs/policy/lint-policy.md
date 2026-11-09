@@ -3,7 +3,7 @@ title: 'Lint Policy'
 description: 'Hybrid oxlint + ESLint architecture, performance principles, rule-specific decisions, and caching for the Tau monorepo.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-29'
+updated: '2026-11-09'
 related:
   - nx.json
   - .oxlintrc.json
@@ -118,7 +118,7 @@ The `.js` extension rule lives in `.oxlintrc.json`. Reassess redundant checks on
 
 ## Typed linting
 
-- Oxlint enables `options.typeAware: true`; ESLint configures `parserOptions.projectService` with a scoped default-project allowlist.
+- Oxlint enables `options.typeAware: true` and owns every type-aware rule. ESLint parses without type information (no `parserOptions.projectService`): none of its rules read parser services, so a second program would only repeat oxlint's type-check. A rule that needs types belongs in oxlint; an ESLint option that needs types, such as a `naming-convention` `types` selector, would bring the program back for every linted file.
 - Before trusting a type-aware verdict, confirm the file belongs to its intended TypeScript project. Repair the owning tsconfig membership or source boundary; an excluded file is not evidence that its types are correct.
 - Keep tsconfig `include` patterns narrow. Broad globs like `**/*` cause TypeScript to pre-parse build artifacts.
 - If linting is memory-constrained, increase the semi-space: `NODE_OPTIONS=--max-semi-space-size=256`.
@@ -132,6 +132,7 @@ JSDoc rule fixtures passed to tsgolint need absolute workspace virtual paths, in
 ## Caching
 
 - The Nx lint target declares inputs for the ESLint/oxlint configs, custom rules, and tool versions in `nx.json`.
+- Dependency inputs are `^production`, as for `typecheck`: type-aware rules read a dependency's sources and declarations, never its tests, Vitest configs, Markdown or `specs/`, so a dependency's test edit does not invalidate its dependents' lint.
 - ESLint's file cache is a separate opt-in for direct profiling runs (`eslint --cache`). It is not enabled by the shared lint command.
 - If enabling that file cache, ignore its `.eslintcache` artifact and include configuration changes in invalidation checks.
 

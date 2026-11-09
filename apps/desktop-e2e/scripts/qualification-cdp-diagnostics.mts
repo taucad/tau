@@ -4,7 +4,7 @@
  * Playwright's `connectOverCDP` can reach `<ws connected>` and then wait until its timeout for every existing target
  * to answer its initialisation (run 42536450184 macos-zip-arm64 `c/reinstall-ui`). The call log cannot say which
  * target stopped answering or why. This records the debugging endpoint's own target list, whether each page target
- * answers one trivial command on its own socket, the app's process tree, the payload store's links and closures,
+ * answers one trivial command on its own socket, the app's process tree, the dependency store's links and closures,
  * and, on macOS, a stack sample of every process in the tree.
  * Everything is read-only, bounded, and only gathered after the attach has already failed.
  */
@@ -96,9 +96,9 @@ const processFamily = async (
   return rows.filter((row) => family.has(row.pid));
 };
 
-/** The payload store's links (host path and closure keys only), sealed closures and staging, by name. */
+/** The dependency store's links (host path and closure keys only), sealed closures and staging, by name. */
 const storeListing = async (profile: string): Promise<Record<string, unknown>> => {
-  const store = join(profile, 'config', 'payloads');
+  const store = join(profile, 'config', 'dependencies');
   const names = async (path: string): Promise<string[] | string> => {
     try {
       const entries = await readdir(path);

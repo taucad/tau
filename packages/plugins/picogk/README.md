@@ -64,8 +64,12 @@ See [browser host preparation](dotnet/Tau.PicoGK.Browser/README.md) for the expl
 configuration. Preparation stages its inputs from the `PicoVoxel.PicoGK` package restored from a
 local directory feed, and produces a serial and a threaded bundle from one payload. Both are
 qualified; [Browser qualification](#browser-qualification) lists the engines and the cases.
-Tau UI builds consume that bundle through `PICOGK_BROWSER_ASSETS_ROOT`, verify its bytes and
-preserve its resource directory layout. Default native imports and desktop preparation are unchanged.
+Tau UI deploys load the bundle pinned in `browser-host.pin.json` by digest from their
+environment's dependency mirror (`PICOGK_BROWSER_MIRROR_BASE`): the manifest and every file are
+`blobs/sha256/<hex>` there, and each is verified before use. Development and e2e builds instead
+serve a prepared bundle same-origin through `PICOGK_BROWSER_ASSETS_ROOT`, verifying its bytes and
+preserving its resource directory layout. A build names at most one of the two. Default native
+imports and desktop preparation are unchanged.
 
 Browser builds collect original `.stl` and `.vdb` files written under `Library.strLogFolder`
 or created/changed relative to the project root. These files are copied into run-owned receipts,
@@ -135,7 +139,7 @@ The kernel runs a sandboxed .NET worker that the package does not carry. `tau-pl
 closure for macOS 14+ on Apple silicon: Microsoft's .NET runtime archive, byte-for-byte from
 `builds.dotnet.microsoft.com`, and the Tau PicoGK layer (the ReadyToRun worker, patched `PicoGK.dll`,
 Roslyn, SkiaSharp and the Tau-built engine) from `cdn.tau.new` with its GitHub Release as fallback.
-`tau prepare picogk` downloads, verifies and seals both in the payload store. Every `picogkKernel`
+`tau prepare picogk` downloads, verifies and seals both in the dependency store. Every `picogkKernel`
 registration carries `picogkNative` (the `/native` deployment), so a host that lists `picogk()` in a runtime
 definition prepares it from the definition, and the kernel resolves the prepared closure itself when it
 initializes. To pin a closure instead, pass it explicitly:

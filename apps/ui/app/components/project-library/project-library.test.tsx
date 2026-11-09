@@ -825,6 +825,26 @@ describe('ProjectLibrary', () => {
     expect(screen.queryByText('Build from code')).not.toBeInTheDocument();
   });
 
+  it('shows the host empty content only while the library is known to have no projects', () => {
+    const renderLibrary = (): ReturnType<typeof render> =>
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary emptyContent={<div>community builds</div>} />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
+    const empty = renderLibrary();
+    expect(screen.getByText('community builds')).toBeInTheDocument();
+    empty.unmount();
+
+    mockUseProjectsResult = createUseProjectsResult();
+    renderLibrary();
+    expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+  });
+
   /* R5: a remembered empty list is known before the worker lists, so no skeleton stands in for it. */
   it('renders the empty state while loading when the last listing had no projects', () => {
     mockRememberedShape = { count: 0 };

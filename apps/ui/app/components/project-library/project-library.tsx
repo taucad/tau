@@ -207,7 +207,14 @@ function useRememberedLibraryCount(isShowingDeleted: boolean): number | undefine
   return isShowingDeleted ? undefined : rememberedShape?.count;
 }
 
-export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
+export function ProjectLibrary({
+  headingLevel = 1,
+  emptyContent,
+}: {
+  readonly headingLevel?: 1 | 2;
+  /** Host-owned content under the empty line, while the library is known to have no projects. */
+  readonly emptyContent?: ReactNode;
+}): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -714,6 +721,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
           controls={viewControls}
+          emptyContent={emptyContent}
           isShowingDeleted={showDeleted}
           onShowDeletedChange={handleToggleDeleted}
           isLoading={isLoading && projects.length === 0}
@@ -783,6 +791,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
   readonly controls: ReactNode;
+  readonly emptyContent?: ReactNode;
   /** Whether the list is the Trash; its toggle lives in the sort menu (R15). */
   readonly isShowingDeleted: boolean;
   readonly onShowDeletedChange: (isShowing: boolean) => void;
@@ -855,6 +864,7 @@ function UnifiedProjectList({
   onOpenCloudProject,
   isCatalogUnavailable,
   controls,
+  emptyContent,
   isShowingDeleted,
   onShowDeletedChange,
   isLoading,
@@ -946,9 +956,12 @@ function UnifiedProjectList({
 
       {isEmpty ? (
         isCatalogUnavailable ? null : (
-          <p className='text-sm text-muted-foreground'>
-            {isShowingDeleted ? 'Trash is empty.' : 'No projects yet. Your first project appears here.'}
-          </p>
+          <>
+            <p className='text-sm text-muted-foreground'>
+              {isShowingDeleted ? 'Trash is empty.' : 'No projects yet. Your first project appears here.'}
+            </p>
+            {isShowingDeleted ? null : emptyContent}
+          </>
         )
       ) : isAwaitingRows && viewMode === 'table' ? (
         <div role='status' aria-label='Loading projects' aria-busy='true'>

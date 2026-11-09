@@ -49,6 +49,12 @@ certificate trust, sockets, and device lifetime; importing this package does not
 | `bambuA1MiniManifest`         | manifest        | A1 mini hardware, FFF process, actions, jobs and qualification profiles       |
 | `bambuSettingsConfiguration`  | configuration   | sparse project preferences (plate, levelling, slots); also at `./settings`    |
 
+LAN endpoint helpers live at `@taucad/bambu/lan`, for a host that drives a printer outside the machine runtime (the
+supervised qualification does): `bambuServicePort(manifest, 'mqtt' | 'camera')` and `bambuFtpsPort` (the ports the
+provider connects to), `bambuCandidateAddress(candidate)` (a network candidate's address) and
+`parseBambuDiscoveryDatagram(input)` (one untrusted discovery advertisement to a candidate). The provider reads the same
+functions.
+
 The `default` preset retains the X1C registration (`machines.default`). Select the `a1Mini` preset to register `machines.a1Mini`, or compose both directly:
 
 ```typescript

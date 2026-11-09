@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./lan": "./src/bambu.lan.ts",
     "./plate": "./src/bambu.plate.ts",
     "./package.json": "./package.json",
     "./settings": "./src/bambu.settings.ts"
@@ -45,6 +46,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./lan": {
+        "types": "./dist/bambu.lan.d.mts",
+        "import": "./dist/bambu.lan.mjs",
+        "default": "./dist/bambu.lan.mjs"
       },
       "./plate": {
         "types": "./dist/bambu.plate.d.mts",

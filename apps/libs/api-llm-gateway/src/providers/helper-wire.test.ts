@@ -63,7 +63,7 @@ describe('helperModelRoute', () => {
     ['anthropic', 'claude-haiku-5.5', 'anthropic'],
     ['vertexai', 'gemini-3.8-flash', 'openai-completions'],
     ['together', 'kimi-k3', 'openai-completions'],
-    ['morph', 'minimax-m2.7', 'openai-completions'],
+    ['morph', 'kimi-k3.1-pro', 'openai-completions'],
   ] as const)('should route %s %s to its provider model on its wire', (providerId, slug, wire) => {
     const row = catalogRow(providerId, slug);
 
@@ -235,9 +235,9 @@ describe('helperRequestBody', () => {
   });
 
   it('should send Morph the ceiling but not the row reasoning effort it never received', () => {
-    const body = bodyFor(catalogRow('morph', 'minimax-m2.7'));
+    const body = bodyFor(catalogRow('morph', 'kimi-k3.1-pro'));
 
-    expect(body).toMatchObject({ model: 'morph-minimax27-230b', max_tokens: 64 });
+    expect(body).toMatchObject({ model: 'morph-kimik31', max_tokens: 64 });
     expect(body).not.toHaveProperty('reasoning_effort');
     expect(body).not.toHaveProperty('reasoning');
   });

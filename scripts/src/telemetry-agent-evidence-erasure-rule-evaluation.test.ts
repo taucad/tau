@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-/* The same offline oracle as `runtime-rule-evaluation.test.ts`; it documents the PromQL subset it implements. */
-const oracle = await import('../scripts/promql-oracle.mts');
+/* The same offline oracle as `telemetry-runtime-rule-evaluation.test.ts`; it documents the PromQL subset it implements. */
+const oracle = await import('./telemetry-promql-oracle.mts');
 type Oracle = typeof oracle;
 const { parseDuration, SeriesStore, simulateAlert } = oracle;
 type AlertRule = Parameters<Oracle['simulateAlert']>[1];
@@ -16,7 +16,7 @@ type Sample = Series['samples'][number];
  * `recheck`, so a confirmation loop that never reaches `absent` (a legacy-API 410 every five minutes) alerts instead
  * of looping silently.
  */
-const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
+const grafanaRoot = path.resolve(import.meta.dirname, '../../infra/grafana');
 
 type RuleJson = Readonly<{
   uid: string;

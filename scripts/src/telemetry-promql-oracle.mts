@@ -1,6 +1,6 @@
 /**
  * A test oracle for Tau's runtime alert rules and dashboard panels (package.md T13): a small PromQL evaluator and a
- * Grafana alert state machine, so `src/runtime-rule-evaluation.test.ts` can run the checked-in expressions against
+ * Grafana alert state machine, so `scripts/src/telemetry-runtime-rule-evaluation.test.ts` can run the checked-in expressions against
  * synthetic series and assert numbers and state transitions offline.
  *
  * No PromQL engine is in the dependency tree and `promtool` is not pinned by any repository mechanism, so this module

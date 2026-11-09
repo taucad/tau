@@ -171,13 +171,18 @@ if [[ "$host" == gcp ]]; then
   [[ -n "$instance_zone" ]] || { printf 'No zone had spot GPU capacity\n' >&2; exit 1; }
   # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
   # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
-  described="$(gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
-    --format='value(sourceInstanceTemplate,name,zone)')"
-  IFS=$'\t' read -r host_template host_instance host_zone <<< "$described"
-  if [[ "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
-    || "${host_zone##*/}" != "$instance_zone" ]]; then
-    printf 'Compute Engine reports another host than this job created\n' >&2
-    exit 1
+  # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps
+  # its proven path (run 42535930158) and records the template it asked for.
+  host_template="$template" host_instance="$instance" host_zone="$instance_zone"
+  if [[ "$mode" == clean-host ]]; then
+    described="$(gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
+      --format='value(sourceInstanceTemplate,name,zone)')"
+    IFS=$'\t' read -r host_template host_instance host_zone <<< "$described"
+    if [[ -z "$host_template" || "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
+      || "${host_zone##*/}" != "$instance_zone" ]]; then
+      printf 'Compute Engine reports another host than this job created\n' >&2
+      exit 1
+    fi
   fi
   printf 'gcp %s %s %s\n' "$host_template" "$instance_zone" "$host_instance" > "$output/image.txt"
   : > "$work/known_hosts"

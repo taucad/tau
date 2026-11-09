@@ -3544,6 +3544,12 @@ importers:
         specifier: 'catalog:'
         version: 7.18.2(patch_hash=273b1007189eee3007a17799b583101a4fb303786d75f617016b232876c63166)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
 
+  apps/r2-audit:
+    devDependencies:
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+
   apps/react-e2e/apps/electron:
     dependencies:
       '@taucad/esbuild':

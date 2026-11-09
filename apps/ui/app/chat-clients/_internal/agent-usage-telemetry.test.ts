@@ -456,6 +456,67 @@ describe('trackAgentTurn', () => {
     expect(detail.toolCalls).toEqual([{ kind: 'edit', status: 'completed', count: 1 }]);
   });
 
+  it('counts the attempt’s safeguard interventions and compaction decisions, not an earlier attempt’s (R9)', () => {
+    const nudge = (safeguardId: string) =>
+      logRow(0, {
+        type: 'safeguard.recorded',
+        safeguardId,
+        action: 'nudge',
+        reason: 'Stop repeating the call.',
+        message: { id: `tau:safeguard:${safeguardId}`, role: 'user', content: 'Stop repeating the call.' },
+      });
+    const trace = {
+      tokensBefore: 10,
+      tokensAfter: 5,
+      cleared: 1,
+      evicted: 0,
+      summarizerAttempts: 0,
+      summarizerUsage: null,
+    };
+    const attemptOne = [
+      lifecycleRow(0, 'admitted', 'run_loop'),
+      lifecycleRow(0, 'running', 'run_loop'),
+      nudge('read_file:abc:any-result'),
+      logRow(0, {
+        type: 'run.lifecycle',
+        state: 'failed',
+        attempt: 1,
+        detail: { message: 'stalled', code: 'MODEL_STREAM_STALLED', resumable: true },
+      }),
+    ];
+    const { publish, report } = harness('run_loop', { prior: attemptOne });
+    publish([logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 1300);
+    publish(
+      [
+        nudge('read_file:def:any-result'),
+        nudge('read_file:ghi:any-result'),
+        logRow(0, { type: 'safeguard.recorded', safeguardId: 'ping_pong:a:b', action: 'terminate', reason: 'Loop.' }),
+        logRow(0, {
+          type: 'history.compacted',
+          evictedMessageIds: ['m1'],
+          summary: { id: 'summary-1', role: 'user', content: 'Summary.' },
+          details: { ...trace, lane: 'overflow', tier: 'summarization', summary: 'generated' },
+        }),
+        logRow(0, { type: 'run.lifecycle', state: 'completed', attempt: 2 }),
+      ],
+      1800,
+    );
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail.safeguards).toEqual([
+      { pattern: 'identical_call', action: 'nudge', count: 2 },
+      { pattern: 'ping_pong', action: 'terminate', count: 1 },
+    ]);
+    expect(detail.compactions).toEqual([{ lane: 'overflow', tier: 'summarization', outcome: 'generated', count: 1 }]);
+  });
+
+  it('reports no safeguard or compaction field for a turn without either', () => {
+    const { publish, report } = harness('run_plain');
+    publish([lifecycleRow(0, 'admitted', 'run_plain'), lifecycleRow(0, 'completed', 'run_plain')], 1100);
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail).not.toHaveProperty('safeguards');
+    expect(detail).not.toHaveProperty('compactions');
+  });
+
   it('counts a cancelled run as cancelled', () => {
     const { publish, report } = harness('run_stop');
     publish([lifecycleRow(0, 'admitted', 'run_stop'), lifecycleRow(0, 'cancelled', 'run_stop')], 1100);

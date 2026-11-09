@@ -22,6 +22,8 @@ function createMockMetrics() {
     agentToolCalls: { add: vi.fn() },
     agentTokens: { add: vi.fn() },
     agentErrors: { add: vi.fn() },
+    agentSafeguardInterventions: { add: vi.fn() },
+    agentCompactions: { add: vi.fn() },
     agentCallsBeforeFirstWrite: { record: vi.fn() },
     agentTimeToFirstWrite: { record: vi.fn() },
     agentReferenceLookups: { add: vi.fn() },
@@ -346,6 +348,36 @@ describe('TelemetryController', () => {
         [50, { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_TOKEN_TYPE]: 'cache_read' }],
       ]);
       expect(mockMetrics.agentErrors.add).not.toHaveBeenCalled();
+    });
+
+    it('should count safeguard interventions and compaction decisions by their labels (R9)', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_TURN,
+            duration: 1000,
+            detail: {
+              agentId: 'tau',
+              placement: 'browser',
+              outcome: 'completed',
+              safeguards: [{ pattern: 'ping_pong', action: 'nudge', count: 2 }],
+              compactions: [{ lane: 'overflow', tier: 'summarization', outcome: 'placeholder', count: 1 }],
+            },
+          },
+        ],
+      });
+
+      expect(mockMetrics.agentSafeguardInterventions.add).toHaveBeenCalledWith(2, {
+        [AttributeKey.AGENT_ID]: 'tau',
+        [AttributeKey.AGENT_SAFEGUARD_PATTERN]: 'ping_pong',
+        [AttributeKey.AGENT_SAFEGUARD_ACTION]: 'nudge',
+      });
+      expect(mockMetrics.agentCompactions.add).toHaveBeenCalledWith(1, {
+        [AttributeKey.AGENT_ID]: 'tau',
+        [AttributeKey.AGENT_COMPACTION_LANE]: 'overflow',
+        [AttributeKey.AGENT_COMPACTION_TIER]: 'summarization',
+        [AttributeKey.AGENT_COMPACTION_OUTCOME]: 'placeholder',
+      });
     });
 
     it('should count a refused turn as an error once and record no tokens', () => {

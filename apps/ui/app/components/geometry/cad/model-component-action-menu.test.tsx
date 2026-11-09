@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   openPanel: vi.fn(),
 }));
 
-vi.mock('#components/chat/chat-context-insertion.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   geometryReferenceToToken: () => '@cad[src/main.ts#component:first]',
   useChatContextInsertion: () => ({
     addContextReferences: mocks.addContextReferences,

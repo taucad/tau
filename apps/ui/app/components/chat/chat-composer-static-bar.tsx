@@ -9,7 +9,7 @@ import {
   chatComposerBarRightClassName,
   chatComposerCollapsibleControlsClassName,
   chatComposerModelTriggerClassName,
-} from '#components/chat/chat-input-styles.js';
+} from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { WorkspaceSelectorPlaceholder } from '#components/filesystem/workspace-selector.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';

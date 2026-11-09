@@ -2,7 +2,7 @@ import type {
   ModelComponentActionTarget,
   ModelComponentHostActions,
 } from '@taucad/workbench-panes/component-menu/component-actions';
-import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
+import { geometryReferenceToToken, useChatContextInsertion } from '@taucad/chat-ui/components/chat-context-insertion';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 

@@ -16,12 +16,12 @@ import {
   latestAcpSessionData,
   parseAgentHostApproval,
   projectTurnSettlement,
-} from '#services/agent-host-event-projection.js';
-import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
-import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
-import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+} from '@taucad/chat-ui/services/agent-host-event-projection';
+import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
+import { selectChatActivityCue } from '@taucad/chat-ui/utils/chat-activity-cue';
+import { chatTooLongMessage, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
+import { userProviderMessageOf } from '@taucad/chat-ui/chat-clients/turn-intent';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 

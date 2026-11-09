@@ -10,6 +10,8 @@ const tokenStyles = readFileSync(join(stylesDirectory, 'tokens.css'), 'utf8');
 const appDirectory = join(import.meta.dirname, '../../../../apps/ui/app');
 /* App primitives cut from `apps/ui/app` into `@taucad/ui-kit` stay in the scan. */
 const uiKitDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-kit/src');
+/* Chat components cut into `@taucad/chat-ui` (UI wave B) stay in the scan too. */
+const chatUiDirectory = join(import.meta.dirname, '../../../../apps/libs/chat-ui/src');
 
 const sourcesIn = (directory: string, recursive = false) =>
   readdirSync(directory, { recursive })
@@ -18,7 +20,11 @@ const sourcesIn = (directory: string, recursive = false) =>
     .map((name) => [name, readFileSync(join(directory, name), 'utf8')] as const);
 
 const componentSources = sourcesIn(componentsDirectory);
-const appSources = [...sourcesIn(appDirectory, true), ...sourcesIn(uiKitDirectory, true)];
+const appSources = [
+  ...sourcesIn(appDirectory, true),
+  ...sourcesIn(uiKitDirectory, true),
+  ...sourcesIn(chatUiDirectory, true),
+];
 
 /**
  * Any focus-state utility that restates indicator geometry instead of composing `focus-outline`.

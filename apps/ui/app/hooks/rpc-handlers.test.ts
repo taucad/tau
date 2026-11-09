@@ -92,7 +92,7 @@ const ledgerMocks = vi.hoisted(() => ({
   recordRpcOutcome: vi.fn(),
 }));
 
-vi.mock('#services/rpc-ledger.js', () => ({
+vi.mock('@taucad/chat-ui/services/rpc-ledger', () => ({
   recordRpcOutcome: ledgerMocks.recordRpcOutcome,
 }));
 

@@ -4,7 +4,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { defaultMorphTiming, metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import '#styles/shiny-text.css';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
-import type { ChatActivityCue } from '#utils/chat-activity-cue.js';
+import type { ChatActivityCue } from '@taucad/chat-ui/utils/chat-activity-cue';
 
 type ChatActivityStatusProperties = {
   readonly cue: ChatActivityCue;

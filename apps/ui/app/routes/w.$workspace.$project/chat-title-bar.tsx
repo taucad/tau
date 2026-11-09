@@ -31,7 +31,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
-import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { projectChatUrl } from '#utils/project-url.utils.js';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { InlineTextEditor } from '#components/inline-text-editor.js';

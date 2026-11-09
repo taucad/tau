@@ -78,6 +78,8 @@
 \* keep their paths and guards; queue paths unchanged.
 \* The composer now takes its toast from the shared UI package instead of the app's own sonner
 \* wrapper (ui-kit extraction); only an import moved, and queue paths unchanged.
+\* The queue store and the queue view moved into the chat-ui library (UI wave B) with no change
+\* to their code beyond import specifiers; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

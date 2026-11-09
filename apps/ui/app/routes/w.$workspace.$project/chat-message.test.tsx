@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import type { MyUIMessage, SkillMetadata, ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
-import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
+import { AtReferenceProvider } from '@taucad/chat-ui/components/at-reference-context';
 
 const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage, textRenderCounts } =
   vi.hoisted(() => ({
@@ -206,11 +206,11 @@ vi.mock('#components/chat/at-reference-chip.js', () => ({
   AtReferenceChip: () => <span data-testid='at-reference-chip' />,
 }));
 
-vi.mock('#components/chat/context-chip.js', () => ({
+vi.mock('@taucad/chat-ui/components/context-chip', () => ({
   ContextChip: () => <span data-testid='context-chip' />,
 }));
 
-vi.mock('#components/chat/chat-activity-group.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-activity-group', () => ({
   ChatActivityGroup: ({
     children,
     summary,

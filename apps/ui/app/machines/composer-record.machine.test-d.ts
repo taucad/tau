@@ -1,7 +1,7 @@
 import { expectTypeOf } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
-import type { ComposerRecord, ComposerRecordPatch } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordPatch } from '@taucad/chat-ui/db/composer-record-store';
 import { composerRecordMachine } from './composer-record.machine.js';
 import type {
   ComposerRecordMachineContext,

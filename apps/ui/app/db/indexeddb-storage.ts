@@ -8,7 +8,7 @@ import type {
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import { announceCandidateConsent, withCandidateConsentLock } from '#lib/geospec-candidate-consent.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 
 /** Normalize only pre-release manifest-owned identity rows before replaying their existing resources. */
 const normalizePendingProjectOperation = (operation: PendingProjectOperation): PendingProjectOperation => {

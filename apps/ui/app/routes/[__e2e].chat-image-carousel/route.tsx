@@ -1,9 +1,9 @@
 /* oxlint-disable tau-lint/no-hardcoded-color -- Fixture colors are test-only visual sentinels for the image carousel e2e harness. */
 import * as React from 'react';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
-import { createAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import type { StoredAttachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
 import { getEnvironment } from '#environment.config.js';
 
 type FixtureImage = {

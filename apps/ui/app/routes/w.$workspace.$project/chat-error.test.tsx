@@ -9,7 +9,7 @@ import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { chatTurnNotStartedCode } from '#utils/error.utils.js';
+import { chatTurnNotStartedCode } from '@taucad/chat-ui/utils/error.utils';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';

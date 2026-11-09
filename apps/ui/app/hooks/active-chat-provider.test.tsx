@@ -148,7 +148,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   },
 }));
 
-vi.mock('#hooks/resize-image.actor.js', () => ({
+vi.mock('@taucad/chat-ui/hooks/resize-image.actor', () => ({
   resizeImageActor: fromSafeAsync<
     { type: 'imageResized'; resized: string },
     { image: string; preserveOriginal: boolean }

@@ -7,7 +7,7 @@ import {
   ChatToolCardHeader,
   ChatToolCardIcon,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
 import { useFeature } from '#flags/use-feature.js';
 import { sanitizeAgentPath, sanitizeAgentText } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 

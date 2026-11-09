@@ -13,14 +13,14 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { createAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import {
   attachmentFileName,
   attachmentReferenceOf,
   attachmentUrlPrefix,
   isSupportedAttachmentMediaType,
-} from '#utils/attachment.utils.js';
+} from '@taucad/chat-ui/utils/attachment.utils';
 
 /** What a consumer renders for one file part. */
 export type AttachmentSource =

@@ -154,7 +154,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
   });
   return { useFileManager: fileManager, useOptionalFileManager: fileManager };
 });
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+vi.mock('@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport', () => ({
   registerAgentHost: (_chatId: string, registration: typeof browserHostHarness.registration) => {
     browserHostHarness.registration = registration;
     return () => {
@@ -171,7 +171,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   createBrowserAgentHostClient: browserHostHarness.createClient,
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind !== 'tau' && providerKind !== 'ollama',
 }));
-vi.mock('#services/daemon-agent-host-client.js', () => ({
+vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   // The real transport takes a dial function so it can re-dial a dead channel;
   // the mock keeps it so a test can prove the dial reaches the ladder.
   createDaemonAgentHostTransport: (dial: () => Promise<unknown>) => ({ dial }),

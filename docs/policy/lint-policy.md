@@ -118,8 +118,7 @@ The `.js` extension rule lives in `.oxlintrc.json`. Reassess redundant checks on
 
 ## Typed linting
 
-- Oxlint enables `options.typeAware: true`; ESLint configures `parserOptions.projectService` with a scoped default-project allowlist.
-- Each type-aware rule runs in one engine. Oxlint (tsgolint) owns every type-aware `typescript/*` rule; ESLint's only type-aware rule is `@typescript-eslint/naming-convention`, whose `types: ['boolean']` selector needs type information and has no oxlint equivalent. Do not enable a type-aware rule in both configs.
+- Oxlint enables `options.typeAware: true` and owns every type-aware rule. ESLint parses without type information (no `parserOptions.projectService`): none of its rules read parser services, so a second program would only repeat oxlint's type-check. A rule that needs types belongs in oxlint; an ESLint option that needs types, such as a `naming-convention` `types` selector, would bring the program back for every linted file.
 - Before trusting a type-aware verdict, confirm the file belongs to its intended TypeScript project. Repair the owning tsconfig membership or source boundary; an excluded file is not evidence that its types are correct.
 - Keep tsconfig `include` patterns narrow. Broad globs like `**/*` cause TypeScript to pre-parse build artifacts.
 - If linting is memory-constrained, increase the semi-space: `NODE_OPTIONS=--max-semi-space-size=256`.

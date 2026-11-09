@@ -1,13 +1,13 @@
 /**
  * Prove that every URL a `tau-plugin.json` pins serves exactly the bytes its integrity and byte length declare.
  *
- * A published plugin manifest must never name a payload that is missing, moved or different (charter I13, go-live
- * DEL-20): `publish.yml` runs this through each native plugin's `check-payload-urls` target before the train. Every
- * URL is checked, not only the first, because hosts fall back through them in order. A payload pinned to the digest of
+ * A published plugin manifest must never name a dependency file that is missing, moved or different (charter I13, go-live
+ * DEL-20): `publish.yml` runs this through each native plugin's `check-dependency-urls` target before the train. Every
+ * URL is checked, not only the first, because hosts fall back through them in order. A dependency file pinned to the digest of
  * zero bytes is the fail-closed placeholder a plugin carries until its first layer is published (preparation refuses
  * it): its URLs are skipped with a notice naming the package, and every other pin of the manifest is still checked.
  *
- * Usage: node scripts/src/check-payload-urls.ts <tau-plugin.json>…
+ * Usage: node scripts/src/check-dependency-urls.ts <tau-plugin.json>…
  * Exit codes: 0 every URL verified; 1 a URL failed or a manifest is unreadable; 2 usage.
  */
 import { createHash } from 'node:crypto';
@@ -39,10 +39,10 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * Every `url` origin of every payload of every variant, in manifest order.
+ * Every `url` origin of every dependency file of every variant, in manifest order.
  * @param manifest - A parsed `tau-plugin.json`.
  * @returns The URLs with the pin each must satisfy.
- * @throws When the manifest is not schema v1 or a payload has no SRI integrity.
+ * @throws When the manifest is not schema v1 or a dependency file has no SRI integrity.
  */
 export const pinnedUrls = (manifest: unknown): PinnedUrl[] => {
   if (!isRecord(manifest) || manifest['schemaVersion'] !== 1 || !isRecord(manifest['dependencies'])) {
@@ -89,7 +89,7 @@ export const checkPinnedUrl = async (pin: PinnedUrl, transport: typeof fetch): P
   }
   const hash = createHash(algorithm!);
   let byteLength = 0;
-  // Leaving the loop early cancels the body, so an oversized payload is never read to its end.
+  // Leaving the loop early cancels the body, so an oversized file is never read to its end.
   for await (const chunk of response.body) {
     byteLength += chunk.byteLength;
     if (byteLength > pin.byteLength) {
@@ -120,14 +120,14 @@ const packageName = async (path: string): Promise<string> => {
  * Check every pinned URL of some manifests, skipping placeholder pins with a notice.
  * @param paths - `tau-plugin.json` paths.
  * @param transport - The `fetch` to use.
- * @param notice - Receives one line per skipped placeholder payload.
+ * @param notice - Receives one line per skipped placeholder dependency file.
  * @returns One line per URL that does not serve its pinned bytes.
  */
-export const checkPayloadUrls = async (
+export const checkDependencyUrls = async (
   paths: readonly string[],
   transport: typeof fetch,
   notice: (message: string) => void = (message) => {
-    console.log(`::notice title=Placeholder payload pin::${message}`);
+    console.log(`::notice title=Placeholder dependency file pin::${message}`);
   },
 ): Promise<string[]> => {
   const failures: string[] = [];
@@ -159,17 +159,17 @@ export const checkPayloadUrls = async (
 const main = async (): Promise<void> => {
   const paths = process.argv.slice(2).map((path) => resolve(path));
   if (paths.length === 0) {
-    console.error('Usage: node scripts/src/check-payload-urls.ts <tau-plugin.json>…');
+    console.error('Usage: node scripts/src/check-dependency-urls.ts <tau-plugin.json>…');
     process.exitCode = 2;
     return;
   }
-  const failures = await checkPayloadUrls(paths, fetch);
+  const failures = await checkDependencyUrls(paths, fetch);
   if (failures.length > 0) {
-    console.error(`Pinned payload URLs that do not serve their bytes:\n  ${failures.join('\n  ')}`);
+    console.error(`Pinned dependency file URLs that do not serve their bytes:\n  ${failures.join('\n  ')}`);
     process.exitCode = 1;
     return;
   }
-  console.log(`Every pinned payload URL serves its bytes (${paths.join(', ')}).`);
+  console.log(`Every pinned dependency file URL serves its bytes (${paths.join(', ')}).`);
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

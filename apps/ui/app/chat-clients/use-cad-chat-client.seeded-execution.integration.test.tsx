@@ -139,7 +139,10 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({ useModels: () => harness.models }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: () => undefined }));
-vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: () => undefined }));
+vi.mock('#hooks/use-context-payload.js', () => ({
+  useContextPayload: () => undefined,
+  awaitContextPayload: async () => undefined,
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts' }),
 }));

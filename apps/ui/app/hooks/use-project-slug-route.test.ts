@@ -35,6 +35,43 @@ describe('resolveProjectRoute', () => {
     expect(resolveProjectRoute(projects, 'wsp_disk', 'proj_home')).toBeUndefined();
   });
 
+  it('should reject colliding folded slugs regardless of listing order', () => {
+    const colliding: Parameters<typeof resolveProjectRoute>[0] = [
+      ...projects,
+      {
+        id: 'proj_other',
+        locator: { backend: 'opfs', storageRootKey: 'opfs', relativeDirectory: '/Gear' },
+        slugs: { workspaceSlug: 'HOME', projectSlug: 'Gear' },
+      },
+    ];
+
+    expect(resolveProjectRoute(colliding, 'home', 'gear')).toBeUndefined();
+    expect(resolveProjectRoute(colliding.toReversed(), 'home', 'gear')).toBeUndefined();
+    expect(resolveProjectRoute(colliding, 'home', 'proj_home')).toBe('proj_home');
+    expect(resolveProjectRoute(colliding, 'home', 'proj_other')).toBe('proj_other');
+  });
+
+  it('should distinguish identical project slugs by durable workspace identity', () => {
+    const colliding: Parameters<typeof resolveProjectRoute>[0] = [
+      ...projects,
+      {
+        id: 'proj_second_disk',
+        locator: {
+          backend: 'webaccess',
+          storageRootKey: 'webaccess:wsp_second_disk',
+          relativeDirectory: '/bracket',
+          workspaceId: 'wsp_second_disk',
+        },
+        slugs: { workspaceSlug: 'my-workspace', projectSlug: 'bracket' },
+      },
+    ];
+
+    expect(resolveProjectRoute(colliding, 'my-workspace', 'bracket')).toBeUndefined();
+    expect(resolveProjectRoute(colliding.toReversed(), 'my-workspace', 'bracket')).toBeUndefined();
+    expect(resolveProjectRoute(colliding, 'wsp_disk', 'bracket')).toBe('proj_disk');
+    expect(resolveProjectRoute(colliding, 'wsp_second_disk', 'bracket')).toBe('proj_second_disk');
+  });
+
   it.each(['opfs', 'OPFS', 'indexeddb', 'IndexedDB'])('rejects the %s tombstone', (slug) => {
     expect(resolveProjectRoute(projects, slug, 'proj_home')).toBeUndefined();
   });

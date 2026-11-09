@@ -107,6 +107,14 @@ export type EventLogAppender = {
    * device wrote, and an anomaly says so.
    */
   messages(): Promise<readonly ProviderMessage[]>;
+  /**
+   * The rows {@link EventLogAppender.messages} folds, in that fold's order: this device's rows merged with every other
+   * device's segment where the storage has them, or this device's rows alone where the merge does not fold (XD1). A
+   * chat's committed turn contexts and compaction summaries are read here, so a device that joins a chat sends the
+   * same request bytes as the device that ran its earlier turns. Optional for a wrapper over a log that has no other
+   * segments to read, where `read` is the whole history.
+   */
+  rows?(): Promise<readonly AgentLogEvent[]>;
   /** `false` when a history row was rejected at open: the chat reads, and the host refuses to run it. */
   historyIntact(): Promise<boolean>;
   /**
@@ -969,6 +977,11 @@ export const createEventLogAppender = async (
         return readEventLogBatch(events, opaqueRows, { cursor, limit, maxBytes, last });
       }),
     messages: async () => enqueue(async () => history().messages()),
+    rows: async () =>
+      enqueue(async () => {
+        assertOpen();
+        return history() === merged ? [...mergedRows] : [...events];
+      }),
     historyIntact: async () =>
       enqueue(async () => (historyUnknown() || history().historyIntact()) && parsed.quarantined.length === 0),
     anomalies: async () =>

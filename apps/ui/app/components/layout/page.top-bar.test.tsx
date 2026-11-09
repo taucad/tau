@@ -214,11 +214,11 @@ describe('Page phone top bar', () => {
     const links = screen.getAllByRole('link', { name: 'New project' });
     expect(links).toHaveLength(2);
     const barLink = within(header()).getByRole('link', { name: 'New project' });
-    expect(barLink).toHaveAttribute('href', '/projects/new');
+    expect(barLink).toHaveAttribute('href', '/');
     expect(barLink).toHaveClass('h-10');
     expect(barLink.closest('[data-slot=page-header-action]')).toHaveClass('md:hidden');
     const titleRowLink = links.find((link) => !header().contains(link));
-    expect(titleRowLink).toHaveAttribute('href', '/projects/new');
+    expect(titleRowLink).toHaveAttribute('href', '/');
     expect(titleRowLink).toHaveClass('max-md:hidden');
   });
 
@@ -269,7 +269,7 @@ describe('Page header on wide viewports', () => {
     expect(header()).toHaveClass('md:hidden');
     expect(header()).not.toHaveClass('border-b');
     const titleRowLink = screen.getAllByRole('link', { name: 'New project' }).find((link) => !header().contains(link));
-    expect(titleRowLink).toHaveAttribute('href', '/projects/new');
+    expect(titleRowLink).toHaveAttribute('href', '/');
     expect(titleRowLink).not.toHaveClass('md:hidden');
   });
 

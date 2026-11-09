@@ -264,7 +264,7 @@ export const plans: Array<{
       ['Public share links'],
       ['Back up to GitHub'],
     ],
-    cta: ['Start designing', '/projects/new'] as const,
+    cta: ['Start designing', '/'] as const,
   },
   {
     id: 'pro',

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { isResumableRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
+import { awaitContextPayload } from '#hooks/use-context-payload.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -98,6 +99,14 @@ export function ChatTurnHost(): ReactNode {
                 : { kind: 'regenerate' },
         );
         await admitExecution(execution);
+        /* The skills catalog is pinned into the chat's cached prompt on its first turn, so a turn waits for the
+         * catalog the way it waits for the host probe (a seeded first turn fires at chat load, ahead of both). */
+        const contextPayload =
+          execution.kind === 'tau'
+            ? ((await awaitContextPayload()) ?? turnAgent.contextPayload)
+            : turnAgent.contextPayload;
+        const admittedAgent =
+          contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
         /* The chat owns what it ran on from its first turn, so a later default
          * cannot move it — and that choice becomes the next new chat's. */
         if (execution === liveAgent.execution) {
@@ -142,7 +151,7 @@ export function ChatTurnHost(): ReactNode {
                 })()
               : messages;
         const browserHost = hostAdmission({
-          agent: turnAgent,
+          agent: admittedAgent,
           chatId: activeChatId,
           resolveModel: resolveModelRef.current,
           trigger: turnTriggerOf(intent),

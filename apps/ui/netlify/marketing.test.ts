@@ -42,6 +42,7 @@ describe('resolveMarketingUrl', () => {
   it('should keep the app homepage for app query parameters and allow campaign parameters', () => {
     expect(resolve('/?settings=billing')).toBeUndefined();
     expect(resolve('/?code=abc')).toBeUndefined();
+    expect(resolve('/?app')).toBeUndefined();
     expect(resolve('/?utm_source=x&ref=hn')).toBe(`${origin}/`);
   });
 

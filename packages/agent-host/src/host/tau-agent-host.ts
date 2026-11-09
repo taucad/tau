@@ -2573,7 +2573,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         contextMessages: config.contextMessages,
         clientContext,
         recentSkills: options.recentSkills,
-        previousContext: lastCommittedTurnContext(events),
+        previousContext: lastCommittedTurnContext(log.rows === undefined ? events : await log.rows()),
       });
       /* The chat's last run ended on answers no attempt was told (a denial, a Stop): this run is told first. */
       const lastRunId = events.findLast(

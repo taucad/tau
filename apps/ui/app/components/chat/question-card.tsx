@@ -20,7 +20,7 @@ import { Button } from '@taucad/ui/components/button';
 import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { ariaKeyShortcuts } from '@taucad/ui/utils/keys';
 import { cn } from '@taucad/ui/utils/cn';
-import { TypedQuestionField } from '#components/chat/typed-question-field.js';
+import { TypedQuestionField } from '@taucad/chat-ui/components/typed-question-field';
 import { QuestionTextAnswer } from '#components/chat/question-text-answer.js';
 
 /** @public */

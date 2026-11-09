@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 873 packages, with the license each declares.
+The web and desktop apps include the following 898 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -44,6 +44,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@ai-sdk/gateway](https://github.com/vercel/ai) | 3.0.212 | Apache-2.0 |
 | [@ai-sdk/provider](https://github.com/vercel/ai) | 3.0.18 | Apache-2.0 |
 | [@ai-sdk/provider-utils](https://github.com/vercel/ai) | 4.0.57 | Apache-2.0 |
+| [@ai-sdk/react](https://github.com/vercel/ai) | 3.0.307 | Apache-2.0 |
 | @alcalzone/ansi-tokenize | 0.2.5 | MIT |
 | [@anthropic-ai/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-typescript) | 0.3.232 | SEE LICENSE IN README.md |
 | @anthropic-ai/claude-agent-sdk-{platform} | 0.3.232 | SEE LICENSE IN LICENSE.md |
@@ -283,6 +284,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 2.2.4 | MIT |
+| [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
+| [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
+| [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
+| [@tiptap/pm](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
+| [@tiptap/react](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
+| [@tiptap/suggestion](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tscircuit/manifold-2d](https://github.com/tscircuit/manifold-2d) | 0.0.6 | Apache-2.0 |
 | [@tsconfig/node10](https://github.com/tsconfig/bases) | 1.0.13 | MIT |
 | [@tsconfig/node12](https://github.com/tsconfig/bases) | 1.0.11 | MIT |
@@ -496,6 +503,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [fast-check](https://github.com/dubzzz/fast-check) | 4.10.2 | MIT |
 | [fast-copy](https://github.com/planttheidea/fast-copy) | 4.1.2 | MIT |
 | [fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal) | 3.1.3 | MIT |
+| [fast-equals](https://github.com/planttheidea/fast-equals) | 5.4.4 | MIT |
 | [fast-equals](https://github.com/planttheidea/fast-equals) | 6.1.1 | MIT |
 | [fast-safe-stringify](https://github.com/davidmarkclements/fast-safe-stringify) | 2.1.1 | MIT |
 | [fast-sha256](https://github.com/dchest/fast-sha256-js) | 1.3.0 | Unlicense |
@@ -695,6 +703,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
 | [opentype.js](https://github.com/opentypejs/opentype.js) | 1.3.4 | MIT |
+| [orderedmap](https://github.com/marijnh/orderedmap) | 2.1.1 | MIT |
 | [p-retry](https://github.com/sindresorhus/p-retry) | 4.6.2 | MIT |
 | [pako](https://github.com/nodeca/pako) | 1.0.11 | (MIT AND Zlib) |
 | [parseurl](https://github.com/pillarjs/parseurl) | 1.3.3 | MIT |
@@ -721,6 +730,19 @@ Their copyright notices and full license texts ship inside each package and are 
 | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) | 4.1.2 | MIT |
 | [property-graph](https://github.com/donmccurdy/property-graph) | 4.1.0 | MIT |
 | [property-information](https://github.com/wooorm/property-information) | 7.2.0 | MIT |
+| [prosemirror-changeset](https://code.haverbeke.berlin/prosemirror/prosemirror-changeset) | 2.4.4 | MIT |
+| [prosemirror-commands](https://code.haverbeke.berlin/prosemirror/prosemirror-commands) | 1.7.2 | MIT |
+| [prosemirror-dropcursor](https://code.haverbeke.berlin/prosemirror/prosemirror-dropcursor) | 1.8.4 | MIT |
+| [prosemirror-gapcursor](https://github.com/prosemirror/prosemirror-gapcursor) | 1.4.1 | MIT |
+| [prosemirror-history](https://code.haverbeke.berlin/prosemirror/prosemirror-history) | 1.5.1 | MIT |
+| [prosemirror-inputrules](https://github.com/prosemirror/prosemirror-inputrules) | 1.5.1 | MIT |
+| [prosemirror-keymap](https://github.com/prosemirror/prosemirror-keymap) | 1.2.3 | MIT |
+| [prosemirror-model](https://code.haverbeke.berlin/prosemirror/prosemirror-model) | 1.25.12 | MIT |
+| [prosemirror-schema-list](https://github.com/prosemirror/prosemirror-schema-list) | 1.5.1 | MIT |
+| [prosemirror-state](https://github.com/prosemirror/prosemirror-state) | 1.4.4 | MIT |
+| [prosemirror-tables](https://github.com/ProseMirror/prosemirror-tables) | 1.8.5 | MIT |
+| [prosemirror-transform](https://code.haverbeke.berlin/prosemirror/prosemirror-transform) | 1.12.2 | MIT |
+| [prosemirror-view](https://code.haverbeke.berlin/prosemirror/prosemirror-view) | 1.42.6 | MIT |
 | [protobufjs](https://github.com/protobufjs/protobuf.js) | 7.6.6 | BSD-3-Clause |
 | [proxy-addr](https://github.com/jshttp/proxy-addr) | 2.0.8 | MIT |
 | [proxy-agent-negotiate](https://github.com/TooTallNate/proxy-agents) | 1.1.0 | MIT |
@@ -762,6 +784,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [retry](https://github.com/tim-kos/node-retry) | 0.12.0 | MIT |
 | [retry](https://github.com/tim-kos/node-retry) | 0.13.1 | MIT |
 | [rfdc](https://github.com/davidmarkclements/rfdc) | 1.4.1 | MIT |
+| [rope-sequence](https://github.com/marijnh/rope-sequence) | 1.3.4 | MIT |
 | [rou3](https://github.com/h3js/rou3) | 0.9.2 | MIT |
 | [router](https://github.com/pillarjs/router) | 2.2.0 | MIT |
 | [run-applescript](https://github.com/sindresorhus/run-applescript) | 7.1.0 | MIT |
@@ -821,6 +844,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [strnum](https://github.com/NaturalIntelligence/strnum) | 2.5.1 | MIT |
 | [style-mod](https://code.haverbeke.berlin/marijn/style-mod) | 4.1.4 | MIT |
 | [suspend-react](https://github.com/pmndrs/suspend-react) | 0.1.3 | MIT |
+| [swr](https://github.com/vercel/swr) | 2.5.1 | MIT |
 | [tagged-tag](https://github.com/sindresorhus/tagged-tag) | 1.0.0 | MIT |
 | [tailwind-merge](https://github.com/dcastil/tailwind-merge) | 3.7.0 | MIT |
 | [terminal-size](https://github.com/sindresorhus/terminal-size) | 4.0.1 | MIT |
@@ -828,6 +852,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.8.3 | MIT |
 | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.9.16 | MIT |
 | [three-stdlib](https://github.com/pmndrs/three-stdlib) | 2.36.1 | MIT |
+| [throttleit](https://github.com/sindresorhus/throttleit) | 2.1.0 | MIT |
 | [tiny-inflate](https://github.com/devongovett/tiny-inflate) | 1.0.3 | MIT |
 | [tiny-invariant](https://github.com/alexreardon/tiny-invariant) | 1.3.3 | MIT |
 | [tiny-typed-emitter](https://github.com/binier/tiny-typed-emitter) | 2.1.0 | MIT |

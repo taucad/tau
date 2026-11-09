@@ -68,9 +68,9 @@ import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/exter
 import type { ExternalAgentHostShell } from '#lib/external-agent.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { groupModels } from '#utils/model-groups.js';
-import { ModelPinButton } from '#components/chat/model-pin-button.js';
-import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
+import { groupModels } from '@taucad/chat-ui/utils/model-groups';
+import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
+import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
 
 /** How a level reads, everywhere a person sees one. @public */

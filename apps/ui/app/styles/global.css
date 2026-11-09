@@ -29,6 +29,7 @@
 @source '../../../../node_modules/@streamdown/math/dist';
 @source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../libs/ui-kit/src';
+@source '../../../libs/chat-ui/src';
 @source '../../../libs/project-workspace/src';
 @source '../../../../packages/ui/src';
 @source '../../../../packages/viewer/src';

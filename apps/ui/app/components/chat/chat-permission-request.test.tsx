@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
+import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { ChatPermissionRequest, permissionContent } from '#components/chat/chat-permission-request.js';
 
 let isDebug = false;

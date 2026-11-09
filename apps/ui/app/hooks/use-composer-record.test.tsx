@@ -9,8 +9,8 @@ import type { ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import type { ComposerRecordStore } from '#db/composer-record-store.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { useComposerRecord } from '#hooks/composer-record.js';
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });

@@ -32,7 +32,7 @@ import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',

@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
-import { isNotFound } from '#db/attachment-store.js';
+import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { useFileManager } from '#hooks/use-file-manager.js';
 
 type Thumbnail = { readonly bytes: Uint8Array<ArrayBuffer>; readonly url: string } | undefined;

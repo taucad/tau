@@ -10,6 +10,8 @@ const tokenStyles = readFileSync(join(stylesDirectory, 'tokens.css'), 'utf8');
 const appDirectory = join(import.meta.dirname, '../../../../apps/ui/app');
 /* App code cut from `apps/ui/app` into `@taucad/ui-kit` and `@taucad/project-workspace` stays in the scan. */
 const uiKitDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-kit/src');
+/* Chat components cut into `@taucad/chat-ui` (UI wave B) stay in the scan too. */
+const chatUiDirectory = join(import.meta.dirname, '../../../../apps/libs/chat-ui/src');
 const projectWorkspaceDirectory = join(import.meta.dirname, '../../../../apps/libs/project-workspace/src');
 
 const sourcesIn = (directory: string, recursive = false) =>
@@ -22,6 +24,7 @@ const componentSources = sourcesIn(componentsDirectory);
 const appSources = [
   ...sourcesIn(appDirectory, true),
   ...sourcesIn(uiKitDirectory, true),
+  ...sourcesIn(chatUiDirectory, true),
   ...sourcesIn(projectWorkspaceDirectory, true),
 ];
 

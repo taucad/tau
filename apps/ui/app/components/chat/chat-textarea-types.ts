@@ -13,21 +13,21 @@ import {
   attachmentKind,
   isSupportedAttachmentMediaType,
   supportedAttachmentMediaTypes,
-} from '#utils/attachment.utils.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+} from '@taucad/chat-ui/utils/attachment.utils';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
-import { useComposerExit } from '#components/chat/use-composer-exit.js';
+import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import {
   getClipboardImageFiles,
   handleClipboardImagePaste,
   readFileAsDataUrl,
-} from '#components/chat/chat-paste-handler.js';
-import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
+} from '@taucad/chat-ui/components/chat-paste-handler';
+import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.

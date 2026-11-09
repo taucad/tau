@@ -5,7 +5,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 
 type SelectorState = {
   status: 'submitted' | 'streaming' | 'ready' | 'error';

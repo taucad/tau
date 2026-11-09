@@ -13,6 +13,7 @@ const baseConfig: UserConfig = {
     'src/cache.utils.ts',
     'src/hash.utils.ts',
     'src/worktree-database.utils.ts',
+    'src/keyed-mutex.utils.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

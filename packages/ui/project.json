@@ -11,6 +11,7 @@
         "^production",
         "{workspaceRoot}/apps/ui/app/**/*.tsx",
         "{workspaceRoot}/apps/libs/ui-kit/src/**/*.tsx",
+        "{workspaceRoot}/apps/libs/chat-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/project-workspace/src/**/*.tsx"
       ]
     }

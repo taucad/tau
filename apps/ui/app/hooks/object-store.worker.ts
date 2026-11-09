@@ -16,7 +16,7 @@ import type {
 } from '#types/pending-project-operation.types.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
-import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { seedInitialWorkbenchFiles } from '#workbench-records/initial-files.js';
 
 /**

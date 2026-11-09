@@ -219,6 +219,7 @@ export const createCanvasConfig = (
     appRoot,
     // App code cut into `@taucad/ui-kit` and `@taucad/project-workspace` carries class strings the same way.
     resolve(repoRoot, 'apps/libs/ui-kit/src'),
+    resolve(repoRoot, 'apps/libs/chat-ui/src'),
     resolve(repoRoot, 'apps/libs/project-workspace/src'),
     ...Array.from(aliases.values(), dirname),
   ]);

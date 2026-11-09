@@ -21,7 +21,7 @@ import { parseProjectCreationLocation } from '#utils/project-creation-location.u
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 import { holdCloudOpen } from '#lib/cloud-open-lock.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';

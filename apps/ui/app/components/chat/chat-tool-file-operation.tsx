@@ -14,11 +14,11 @@ import {
   ChatToolCardIcon,
   ChatToolCardTitle,
   ChatToolCardContent,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
-import { ChangeIndicator } from '#components/chat/change-indicator.js';
+import { ChangeIndicator } from '@taucad/chat-ui/components/change-indicator';
 import { OpenRenderButton } from '#components/files/open-render-button.js';
 import { shouldShowOpenRenderButton } from '#components/files/open-render-button.ignore.js';
 import type { CodeLanguage } from '#lib/code-language-resolution.js';

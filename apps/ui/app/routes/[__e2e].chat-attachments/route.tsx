@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '@taucad/ui/components/loader';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { getEnvironment } from '#environment.config.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';

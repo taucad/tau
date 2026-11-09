@@ -19,7 +19,7 @@ import {
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { useProject } from '#hooks/use-project.js';
 import { useAttachmentSource } from '#hooks/use-attachment-source.js';
-import { attachmentUrlPrefix, isAttachmentUrl } from '#utils/attachment.utils.js';
+import { attachmentUrlPrefix, isAttachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 /** One piece of media: an `attachments/…` reference or a `data:` URL, and what its bytes are. */
 export type ChatMedia = {

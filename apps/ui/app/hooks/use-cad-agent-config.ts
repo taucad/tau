@@ -22,7 +22,7 @@ import {
   listAgentHostPlacements,
   onLoopbackAgentHostsChanged,
 } from '#lib/agent-host-placement.js';
-import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
+import { loopbackHostIdPrefix } from '@taucad/chat-ui/utils/chat-execution';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 

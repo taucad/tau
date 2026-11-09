@@ -33,7 +33,7 @@ import type { WireUsageSnapshot } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import type { UsageSnapshotQuery, UsageSnapshotResult } from '@taucad/billing/hooks/use-usage-snapshot';
 import { metaConfig } from '#constants/meta.constants.js';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 
 /** Bumped only when a stored shape changes; older records are then unreadable and dropped. */
 const schemaVersion = 1;

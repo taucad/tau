@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import type { CadAgentExecution } from '@taucad/chat';
 import { namesUnhandedLoopbackHost, onLoopbackAgentHostsChanged } from '#lib/agent-host-placement.js';
-import { withoutHostId } from '#utils/chat-execution.js';
+import { withoutHostId } from '@taucad/chat-ui/utils/chat-execution';
 
 /** The server never holds a loopback admission, and never starts a turn: it renders the execution as remembered. */
 const keepOnServer = (): boolean => false;

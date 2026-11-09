@@ -4,8 +4,8 @@ import type { Editor } from '@tiptap/core';
 import type { ReactNodeViewProps } from '@tiptap/react';
 import { ReactNodeViewRenderer, NodeViewWrapper, useEditorState } from '@tiptap/react';
 import { FileLink } from '#components/files/file-link.js';
-import { ContextChip } from '#components/chat/context-chip.js';
-import type { ChipType } from '#components/chat/context-chip.js';
+import { ContextChip } from '@taucad/chat-ui/components/context-chip';
+import type { ChipType } from '@taucad/chat-ui/components/context-chip';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 
 /** Whether a referenced file or folder is gone: asked once the tree is ready, and again whenever it changes. */

@@ -1467,7 +1467,6 @@
         "apps/ui/app/lib/skill-resolver.ts",
         "apps/ui/app/lib/system-skills-catalog.test.ts",
         "apps/ui/app/services/chat-session-store.ts",
-        "apps/ui/app/utils/at-reference.utils.ts",
         "apps/ui/app/utils/chat.utils.test.ts",
         "apps/ui/app/utils/chat.utils.ts"
       ],

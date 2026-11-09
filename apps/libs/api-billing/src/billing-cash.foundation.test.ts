@@ -15,7 +15,7 @@ import { BillingCashService } from '#billing-cash.service.js';
 import type { QualifiedCashSource } from '#billing-cash.service.js';
 import { BillingTaxService } from '#billing-tax.service.js';
 import {
-  assertNewCollectionCashScope,
+  assertCollectionNotSpendBlocked,
   BillingCashReconciliationService,
 } from '#billing-cash-reconciliation.service.js';
 import { createBillingStripeClient } from '#billing-stripe.js';
@@ -61,12 +61,28 @@ let invalidBalance = false;
 let settlementCurrency = 'usd';
 let failPaymentIntentRead = false;
 let lostPaymentIntentId = '';
-/** Payments on customers this database never bound, keyed by customer, with each customer's environment stamp. */
+/**
+ * Payments the fixture lists beside the purchase's own: a customer this database never bound (with its environment
+ * stamp), a deleted bound customer, or none at all, as a Stripe CLI `payment_intent.succeeded` trigger creates.
+ */
 let strangerPayments: ReadonlyArray<{
   readonly paymentIntentId: string;
-  readonly customerId: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Stripe represents a PaymentIntent without a Customer as null.
+  readonly customerId: string | null;
   readonly stamp?: string;
+  readonly deleted?: boolean;
+  readonly livemode?: boolean;
+  readonly shape?: Record<string, unknown>;
 }> = [];
+/** Refunds on charges no Tau purchase or binding names, served beside the purchase's own refund. */
+let foreignRefunds: ReadonlyArray<{ readonly refundId: string; readonly chargeId: string }> = [];
+/** Balance transactions served beside the purchase's own charge movement. */
+let extraBalances: ReadonlyArray<Record<string, unknown>> = [];
+/** Disputes the fixture answers by id, keyed by dispute, with the charge each withdrew from. */
+let foreignDisputes: ReadonlyMap<string, string> = new Map();
+let failDisputeRead = false;
+/** Customer reads per Customer id, so a test can prove a scan never asked Stripe about one. */
+const customerReads = new Map<string, number>();
 
 const cashClaimId = (chargeId: string): string =>
   createHash('sha256')
@@ -96,8 +112,25 @@ const server = createServer((request, response) => {
   };
   response.setHeader('Content-Type', 'application/json');
   if (request.method === 'GET' && url.pathname === '/v1/refunds') {
+    const foreign = foreignRefunds.map(({ refundId, chargeId }) => ({
+      id: refundId,
+      object: 'refund',
+      amount: 250,
+      balance_transaction: `txn_${refundId}`,
+      charge: chargeId,
+      currency: 'usd',
+      created: Math.floor(Date.now() / 1000),
+      metadata: {},
+      payment_intent: null,
+      status: 'succeeded',
+    }));
     response.end(
-      JSON.stringify({ object: 'list', data: serveRefund ? [refund] : [], has_more: false, url: '/v1/refunds' }),
+      JSON.stringify({
+        object: 'list',
+        data: [...(serveRefund ? [refund] : []), ...foreign],
+        has_more: false,
+        url: '/v1/refunds',
+      }),
     );
     return;
   }
@@ -126,15 +159,25 @@ const server = createServer((request, response) => {
     );
     return;
   }
-  const stranger = strangerPayments.find(({ customerId }) => url.pathname === `/v1/customers/${customerId}`);
+  if (request.method === 'GET' && url.pathname.startsWith('/v1/customers/')) {
+    const customerId = url.pathname.slice('/v1/customers/'.length);
+    customerReads.set(customerId, (customerReads.get(customerId) ?? 0) + 1);
+  }
+  const stranger = strangerPayments.find(
+    ({ customerId }) => customerId !== null && url.pathname === `/v1/customers/${customerId}`,
+  );
   if (request.method === 'GET' && stranger !== undefined) {
     response.end(
-      JSON.stringify({
-        id: stranger.customerId,
-        object: 'customer',
-        livemode: false,
-        metadata: stranger.stamp === undefined ? {} : { tau_environment: stranger.stamp },
-      }),
+      JSON.stringify(
+        stranger.deleted === true
+          ? { id: stranger.customerId, object: 'customer', deleted: true }
+          : {
+              id: stranger.customerId,
+              object: 'customer',
+              livemode: stranger.livemode ?? false,
+              metadata: stranger.stamp === undefined ? {} : { tau_environment: stranger.stamp },
+            },
+      ),
     );
     return;
   }
@@ -163,11 +206,13 @@ const server = createServer((request, response) => {
           ? [
               paymentIntent,
               ...(lostPaymentIntentId === '' ? [] : [lostPaymentIntent]),
-              ...strangerPayments.map(({ paymentIntentId, customerId }) => ({
+              ...strangerPayments.map(({ paymentIntentId, customerId, livemode, shape }) => ({
                 ...paymentIntent,
                 id: paymentIntentId,
                 customer: customerId,
                 latest_charge: `ch_${paymentIntentId}`,
+                livemode: livemode ?? false,
+                ...shape,
               })),
             ]
           : [],
@@ -242,7 +287,7 @@ const server = createServer((request, response) => {
     response.end(
       JSON.stringify({
         object: 'list',
-        data: listCashSources ? [balance, ...(lostPaymentIntentId === '' ? [] : canceling)] : [],
+        data: listCashSources ? [balance, ...(lostPaymentIntentId === '' ? [] : canceling), ...extraBalances] : [],
         has_more: false,
         url: '/v1/balance_transactions',
       }),
@@ -269,7 +314,26 @@ const server = createServer((request, response) => {
     );
     return;
   }
+  const foreignDispute = foreignDisputes.get(url.pathname.slice('/v1/disputes/'.length));
+  if (request.method === 'GET' && url.pathname.startsWith('/v1/disputes/') && foreignDispute !== undefined) {
+    response.end(
+      JSON.stringify({
+        id: url.pathname.slice('/v1/disputes/'.length),
+        object: 'dispute',
+        charge: foreignDispute,
+        currency: 'usd',
+        livemode: false,
+        status: 'under_review',
+        balance_transactions: [],
+      }),
+    );
+    return;
+  }
   if (request.method === 'GET' && url.pathname === `/v1/disputes/dp_${value.chargeId}`) {
+    if (failDisputeRead) {
+      response.writeHead(503).end();
+      return;
+    }
     const created = disputeCreated;
     response.end(
       JSON.stringify({
@@ -560,6 +624,74 @@ async function reversalCaseOf(
     throw new Error('Cash reversal case was not created');
   }
   return cashCase;
+}
+
+function reconciliationService(secretKey: string, livemode = false): BillingCashReconciliationService {
+  const stripe = createBillingStripeClient({ secretKey, fixtureUrl: stripeOrigin, requestTimeout: 2000 });
+  return new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
+    environment: 'development',
+    stripeAccountId: cashStripeAccountId,
+    livemode,
+  });
+}
+
+/** Runs one complete scan pass whose window ends `offsetMilliseconds` after now; distinct offsets are distinct scans. */
+async function scanPass(reconciliation: BillingCashReconciliationService, offsetMilliseconds = 0): Promise<void> {
+  const now = Date.now() + offsetMilliseconds;
+  const scanId = await reconciliation.createScan({
+    environment: 'development',
+    currency: 'usd',
+    lookbackStart: new Date(now - 60_000),
+    windowStart: new Date(now - 30_000),
+    windowEnd: new Date(now + 60_000),
+  });
+  await expect(reconciliation.runScan({ scanId, maximumPagesPerStream: 3 })).resolves.toEqual({ status: 'complete' });
+}
+
+async function casesFor(
+  kind: string,
+  sourceId: string,
+): Promise<Array<typeof schema.billingFinancialCase.$inferSelect>> {
+  return database
+    .select()
+    .from(schema.billingFinancialCase)
+    .where(and(eq(schema.billingFinancialCase.kind, kind), eq(schema.billingFinancialCase.sourceId, sourceId)));
+}
+
+/** Lists the purchase's own payment, charge and charge movement, with nothing refunded or disputed. */
+function serveOwnSources(purchase: Awaited<ReturnType<typeof seedPaidPurchase>>): void {
+  refundFixture = {
+    customerId: purchase.proof.paidEvidence.customerId,
+    paymentIntentId: purchase.proof.paymentIntentId,
+    chargeId: purchase.proof.chargeId,
+    refundId: `re_${randomUUID()}`,
+    intentId: randomUUID(),
+    reversalCaseId: randomUUID(),
+  };
+  serveRefund = false;
+  serveDispute = false;
+  listCashSources = true;
+  invalidBalance = false;
+}
+
+function resetServedSources(): void {
+  strangerPayments = [];
+  foreignRefunds = [];
+  foreignDisputes = new Map();
+  extraBalances = [];
+  failDisputeRead = false;
+  listCashSources = false;
+}
+
+async function freshAccount() {
+  const accountId = randomUUID();
+  await database.insert(schema.creditAccount).values({ id: accountId, environment: 'development' });
+  return accountId;
+}
+
+/** New collection for an account: the check every purchase, renewal and reload preparation makes before it writes. */
+async function expectCollectionAdmitted(accountId: string): Promise<void> {
+  await expect(assertCollectionNotSpendBlocked(runtimeDatabase, 'development', accountId)).resolves.toBeUndefined();
 }
 
 describe('cash disposition foundation', () => {
@@ -1051,21 +1183,27 @@ describe('cash disposition foundation', () => {
     serveRefund = false;
     listCashSources = true;
     invalidBalance = true;
-    const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_scan', fixtureUrl: stripeOrigin });
-    const reconciliation = new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
-      environment: 'development',
-      stripeAccountId: cashStripeAccountId,
-      livemode: false,
-    });
-    const now = new Date();
-    const scanId = await reconciliation.createScan({
-      environment: 'development',
-      currency: 'usd',
-      lookbackStart: new Date(now.getTime() - 60_000),
-      windowStart: new Date(now.getTime() - 30_000),
-      windowEnd: new Date(now.getTime() + 60_000),
-    });
-    await expect(reconciliation.runScan({ scanId, maximumPagesPerStream: 3 })).resolves.toEqual({ status: 'complete' });
+    // A movement with no charge source names no purchase or binding, so its mismatch is nobody's account.
+    const sourceless = `txn_sourceless_${randomUUID()}`;
+    extraBalances = [
+      {
+        id: sourceless,
+        object: 'balance_transaction',
+        type: 'adjustment',
+        source: null,
+        currency: 'usd',
+        amount: 500,
+        fee: 30,
+        net: 400,
+        status: 'available',
+        created: Math.floor(Date.now() / 1000),
+      },
+    ];
+    try {
+      await scanPass(reconciliationService('sk_test_cash_scan'));
+    } finally {
+      extraBalances = [];
+    }
     const cases = await database
       .select()
       .from(schema.billingFinancialCase)
@@ -1073,24 +1211,18 @@ describe('cash disposition foundation', () => {
     expect(cases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'paid_unfulfilled_recovery', accountId: value.accountId, state: 'open' }),
-        // The balance transaction's source charge names the purchase, so the case restricts only its owner.
+        // The balance transaction's source charge names the purchase, so the case names only its owner.
         expect.objectContaining({ kind: 'gross_fee_net_mismatch', accountId: value.accountId, state: 'open' }),
+        expect.objectContaining({
+          kind: 'gross_fee_net_mismatch',
+          sourceId: sourceless,
+          accountId: null,
+          state: 'open',
+        }),
       ]),
     );
-    const cash = new BillingCashService({ database: runtimeDatabase }, stripe, ledger, {
-      environment: 'development',
-      stripeAccountId: cashStripeAccountId,
-      livemode: false,
-    });
-    await expect(cash.assertNewCollectionScope(value.accountId)).rejects.toThrow('cash_scope_attention');
-    const independentAccountId = randomUUID();
-    await database.insert(schema.creditAccount).values({ id: independentAccountId, environment: 'development' });
-    const independentCash = new BillingCashService({ database: runtimeDatabase }, stripe, ledger, {
-      environment: 'development',
-      stripeAccountId: 'acct_cash_independent',
-      livemode: false,
-    });
-    await expect(independentCash.assertNewCollectionScope(independentAccountId)).resolves.toBeUndefined();
+    // Money Tau owes the owner and Tau's own fee accounting refuse no one's next purchase, the owner's included.
+    await expectCollectionAdmitted(value.accountId);
   });
 
   it('retrieves a paid receipt source omitted from created-time pages before declaring an orphan', async () => {
@@ -1333,7 +1465,7 @@ describe('cash disposition foundation', () => {
     ).toHaveLength(0);
   });
 
-  it('keeps a test-mode payment stamped by another environment out of the cash stop, and stops on an unstamped stranger', async () => {
+  it('should skip a test-mode payment stamped by another environment and keep an unstamped stranger as unattributed work', async () => {
     const value = await fixture();
     refundFixture = {
       customerId: value.purchase.proof.paidEvidence.customerId,
@@ -1397,29 +1529,218 @@ describe('cash disposition foundation', () => {
       );
     // Stamped by another environment sharing the test sandbox: its cash, not this one's.
     expect(cases.filter((row) => row.sourceId === staging.paymentIntentId)).toHaveLength(0);
-    // A stamp naming this environment on an unbound customer proves nothing: the stop still opens.
+    // A stamp naming this environment on an unbound customer proves nothing: the case still opens, for an operator.
     expect(cases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ sourceId: own.paymentIntentId, accountId: null, state: 'open' }),
         expect.objectContaining({ sourceId: stranger.paymentIntentId, accountId: null, state: 'open' }),
       ]),
     );
-    await expect(
-      assertNewCollectionCashScope(
-        { database: runtimeDatabase },
-        {
-          environment: 'development',
-          stripeAccountId: cashStripeAccountId,
-          livemode: false,
-        },
-        value.accountId,
-      ),
-    ).rejects.toThrow('cash_scope_attention');
-    // The two environment-wide stops would refuse every later collection in this file.
+    // Neither unattributed case refuses the owner's next purchase.
+    await expectCollectionAdmitted(value.accountId);
+    // Refuses nothing either way; resolving them keeps the open-case gauge this file leaves behind small.
     await database
       .update(schema.billingFinancialCase)
       .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { disposition: 'test_cleanup' } })
       .where(inArray(schema.billingFinancialCase.sourceId, [own.paymentIntentId, stranger.paymentIntentId]));
+  });
+
+  it('should open one unattributed missing_local_payment for a succeeded PaymentIntent with no customer and refuse nobody', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    // What `stripe trigger payment_intent.succeeded` creates in the shared test account: no Customer, no metadata.
+    const triggered = `pi_cli_${randomUUID()}`;
+    strangerPayments = [
+      {
+        paymentIntentId: triggered,
+        customerId: null,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe PaymentIntent field name.
+        shape: { payment_method: 'pm_card_visa', description: '(created by Stripe CLI)', metadata: {} },
+      },
+    ];
+    try {
+      await scanPass(reconciliationService('sk_test_cash_cli_trigger'));
+    } finally {
+      resetServedSources();
+    }
+    const cases = await casesFor('missing_local_payment', triggered);
+    expect(cases).toEqual([expect.objectContaining({ accountId: null, state: 'open', livemode: false })]);
+    expect(cases[0]?.evidence).toHaveProperty('customer', null);
+    await expectCollectionAdmitted(await freshAccount());
+  });
+
+  it('should treat a live-mode stranger payment as unattributed operator work', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    // A Dashboard payment or Payment Link: a Customer Tau never bound, and no Tau metadata.
+    const customerId = `cus_unknown_${randomUUID()}`;
+    const paymentIntentId = `pi_live_stranger_${randomUUID()}`;
+    strangerPayments = [{ paymentIntentId, customerId, livemode: true }];
+    try {
+      await scanPass(reconciliationService('sk_test_cash_live_stranger', true));
+    } finally {
+      resetServedSources();
+    }
+    expect(await casesFor('missing_local_payment', paymentIntentId)).toEqual([
+      expect.objectContaining({ accountId: null, state: 'open', livemode: true }),
+    ]);
+    // Live mode backs one environment, so an environment stamp proves nothing and the scan never reads the Customer.
+    expect(customerReads.get(customerId)).toBeUndefined();
+    await expectCollectionAdmitted(await freshAccount());
+  });
+
+  it('should open unattributed refund_unresolved and dispute_unresolved for a foreign payment and refuse nobody', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    const foreignCharge = `ch_foreign_${randomUUID()}`;
+    const refundId = `re_foreign_${randomUUID()}`;
+    const disputeId = `dp_foreign_${randomUUID()}`;
+    foreignRefunds = [{ refundId, chargeId: foreignCharge }];
+    foreignDisputes = new Map([[disputeId, foreignCharge]]);
+    extraBalances = [
+      {
+        id: `txn_${disputeId}`,
+        object: 'balance_transaction',
+        type: 'dispute',
+        source: disputeId,
+        currency: 'usd',
+        amount: -500,
+        fee: 0,
+        net: -500,
+        status: 'available',
+        created: Math.floor(Date.now() / 1000),
+      },
+    ];
+    try {
+      await scanPass(reconciliationService('sk_test_cash_foreign_reversal'));
+    } finally {
+      resetServedSources();
+    }
+    expect([
+      ...(await casesFor('refund_unresolved', refundId)),
+      ...(await casesFor('dispute_unresolved', disputeId)),
+    ]).toEqual([
+      expect.objectContaining({ kind: 'refund_unresolved', accountId: null, state: 'open' }),
+      expect.objectContaining({ kind: 'dispute_unresolved', accountId: null, state: 'open' }),
+    ]);
+    await expectCollectionAdmitted(value.accountId);
+    await expectCollectionAdmitted(await freshAccount());
+  });
+
+  it('should resolve the unattributed dispute row once the dispute read succeeds and attributes it', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    const disputeId = `dp_${value.purchase.proof.chargeId}`;
+    // One withdrawal movement, re-read unchanged by the second pass's overlapping window.
+    extraBalances = [
+      {
+        id: `txn_dispute_${value.purchase.proof.chargeId}`,
+        object: 'balance_transaction',
+        type: 'dispute',
+        source: disputeId,
+        currency: 'usd',
+        amount: -500,
+        fee: 0,
+        net: -500,
+        status: 'available',
+        created: Math.floor(Date.now() / 1000),
+      },
+    ];
+    const reconciliation = reconciliationService('sk_test_cash_dispute_retry');
+    try {
+      failDisputeRead = true;
+      await scanPass(reconciliation);
+      expect(await casesFor('dispute_unresolved', disputeId)).toEqual([
+        expect.objectContaining({ dedupeKey: `dispute_unresolved:${disputeId}`, accountId: null, state: 'open' }),
+      ]);
+      failDisputeRead = false;
+      await scanPass(reconciliation, 1000);
+    } finally {
+      resetServedSources();
+    }
+    const rows = await casesFor('dispute_unresolved', disputeId);
+    expect(rows.filter((row) => row.state === 'open')).toEqual([
+      expect.objectContaining({
+        dedupeKey: `dispute_unresolved:${disputeId}:${value.accountId}`,
+        accountId: value.accountId,
+      }),
+    ]);
+    expect(rows.find((row) => row.dedupeKey === `dispute_unresolved:${disputeId}`)).toMatchObject({
+      state: 'resolved',
+      resolutionEvidence: { disposition: 'attributed', sourceId: disputeId, successorAccountId: value.accountId },
+    });
+  });
+
+  it('should keep a deleted Tau customer attributed', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    const accountId = await freshAccount();
+    const customerId = `cus_deleted_${randomUUID()}`;
+    // Closure deletes the Stripe Customer but keeps the binding row.
+    await database.insert(schema.billingStripeCustomer).values({
+      id: `customer-${randomUUID()}`,
+      accountId,
+      environment: 'development',
+      stripeAccountId: cashStripeAccountId,
+      livemode: false,
+      stripeCustomerId: customerId,
+    });
+    const paymentIntentId = `pi_deleted_customer_${randomUUID()}`;
+    strangerPayments = [{ paymentIntentId, customerId, deleted: true }];
+    try {
+      await scanPass(reconciliationService('sk_test_cash_deleted_customer'));
+    } finally {
+      resetServedSources();
+    }
+    expect(await casesFor('missing_local_payment', paymentIntentId)).toEqual([
+      expect.objectContaining({ accountId, state: 'open' }),
+    ]);
+  });
+
+  it('should open an attributed missing_local_payment when the scan sees a Tau payment before the local write, and resolve it next pass', async () => {
+    const accountId = await freshAccount();
+    // A prepared purchase on a bound Customer: Stripe has the payment, the local paid write has not landed.
+    const purchase = await seedPaidPurchase({
+      database,
+      accountId,
+      environment: 'development',
+      atoms: 1000n,
+      prepared: true,
+      stripeAccountId: cashStripeAccountId,
+    });
+    serveOwnSources(purchase);
+    const reconciliation = reconciliationService('sk_test_cash_early_scan');
+    try {
+      await scanPass(reconciliation);
+      expect(await casesFor('missing_local_payment', purchase.proof.paymentIntentId)).toEqual([
+        expect.objectContaining({ accountId, state: 'open' }),
+      ]);
+      await expectCollectionAdmitted(await freshAccount());
+      await database
+        .update(schema.billingPurchase)
+        .set({ state: 'paid_unfulfilled', ...purchase.proof })
+        .where(eq(schema.billingPurchase.id, purchase.purchaseId));
+      const claimId = cashClaimId(purchase.proof.chargeId);
+      await database.insert(schema.billingStripeSource).values({
+        id: claimId,
+        environment: 'development',
+        stripeAccountId: cashStripeAccountId,
+        livemode: false,
+        sourceType: 'cash_charge',
+        sourceId: purchase.proof.chargeId,
+        state: 'processing',
+        generation: 1n,
+        leaseUntil: sql`transaction_timestamp() + interval '30 seconds'`,
+      });
+      const paid = { accountId, purchase, claimId };
+      await apply(paid, evidence(paid, '0'));
+      await scanPass(reconciliation, 1000);
+    } finally {
+      resetServedSources();
+    }
+    const resolved = await casesFor('missing_local_payment', purchase.proof.paymentIntentId);
+    expect(resolved).toEqual([expect.objectContaining({ accountId, state: 'resolved' })]);
+    expect(resolved[0]?.resolutionEvidence).toMatchObject({ disposition: 'source_qualified' });
   });
 
   it('reclaims an expired running scan owned by the configured provider account', async () => {

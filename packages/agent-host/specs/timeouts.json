@@ -273,6 +273,15 @@
       "fixedBy": "W6"
     },
     {
+      "id": "IMPORT-GRANT-WAIT",
+      "bound": "Desktop import grant not yet seen by the services utility (2 s): main mints it and sends it on another channel just before the renderer's request can arrive",
+      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "token": "setTimeout(wake, Math.max(0, deadline - Date.now()))",
+      "class": "Peer",
+      "owner": "W7.4",
+      "fixedBy": "outside this charter: desktop import grant delivery (a grant carried with the port request would remove the wait)"
+    },
+    {
       "id": "B18",
       "bound": "Geometry-runner port request to main (10 s)",
       "site": "apps/desktop/src/tau/services-host.ts",

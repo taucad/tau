@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
+import { cashBlockingFinancialCaseKinds } from '#billing-cash-reconciliation.service.js';
 import {
   deliverRecoveryNotices,
   recordOpenCases,
@@ -14,10 +15,14 @@ import type {
 
 const gaugeSource = (
   unpriced: Awaited<ReturnType<OperationsGaugeSource['unpricedOperations']>>,
+  openCases: Awaited<ReturnType<OperationsGaugeSource['openCases']>> = [],
 ): OperationsGaugeSource => ({
-  openCases: async () => [{ kind: 'dispute_unresolved', open: 2 }],
+  openCases: async () => openCases,
   unpricedOperations: async () => unpriced,
 });
+
+/** Every kind the hourly pass reports with a zero: the cash, purchase and journal kinds plus tax and supplier review. */
+const reportedKinds = [...cashBlockingFinancialCaseKinds, 'tax_registration_review', 'supplier_invoice_total_mismatch'];
 
 const hourlyJobs = (overrides: Partial<HourlyOperationsJobs> = {}) => {
   const events: string[] = [];
@@ -103,13 +108,62 @@ describe('billing operations worker', () => {
       });
     });
 
-    it('should keep recording every open case kind beside the supplier gauge', async () => {
+    it('should record open cases per kind and attribution and page unattributed ones on stderr', async () => {
       const metrics = mockDeep<OperationsGaugeMetrics>();
+      const alerts = vi.spyOn(console, 'error').mockImplementation(() => {
+        // Test-local stderr sink.
+      });
+
+      try {
+        await recordOpenCases({
+          source: gaugeSource(
+            [],
+            [
+              { kind: 'missing_local_payment', attributed: false, open: 1, oldestAgeSeconds: 90_000 },
+              { kind: 'dispute_unresolved', attributed: true, open: 2, oldestAgeSeconds: 600 },
+            ],
+          ),
+          metrics,
+          environment: 'staging',
+        });
+
+        expect(metrics.billingOpenFinancialCases.record).toHaveBeenCalledWith(1, {
+          kind: 'missing_local_payment',
+          attributed: 'false',
+        });
+        expect(metrics.billingOpenFinancialCases.record).toHaveBeenCalledWith(2, {
+          kind: 'dispute_unresolved',
+          attributed: 'true',
+        });
+        expect(metrics.billingOpenFinancialCaseAge.record).toHaveBeenCalledWith(90_000, {
+          kind: 'missing_local_payment',
+          attributed: 'false',
+        });
+        expect(metrics.billingOpenFinancialCaseAge.record).toHaveBeenCalledWith(600, {
+          kind: 'dispute_unresolved',
+          attributed: 'true',
+        });
+        expect(alerts.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown)).toStrictEqual([
+          { event: 'billing.alert', environment: 'staging', kind: 'unattributed_financial_case', open: 1 },
+        ]);
+      } finally {
+        alerts.mockRestore();
+      }
+    });
+
+    it('should record zero for every known kind and both attribution values when nothing is open', async () => {
+      const metrics = mockDeep<OperationsGaugeMetrics>();
+      const zeroes = reportedKinds.flatMap((kind) => [
+        [0, { kind, attributed: 'true' }],
+        [0, { kind, attributed: 'false' }],
+      ]);
 
       await recordOpenCases({ source: gaugeSource([]), metrics, environment: 'staging' });
 
-      expect(metrics.billingOpenFinancialCases.record).toHaveBeenCalledWith(2, { kind: 'dispute_unresolved' });
-      expect(metrics.billingOpenFinancialCases.record).toHaveBeenCalledWith(0, { kind: 'missing_local_payment' });
+      for (const gauge of [metrics.billingOpenFinancialCases, metrics.billingOpenFinancialCaseAge]) {
+        expect(gauge.record.mock.calls).toHaveLength(zeroes.length);
+        expect(gauge.record.mock.calls).toEqual(expect.arrayContaining(zeroes));
+      }
       expect(metrics.billingSupplierUnpricedOperations.record).not.toHaveBeenCalled();
     });
   });

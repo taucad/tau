@@ -226,6 +226,32 @@ describe('importDiskMachine', () => {
   });
 
   describe('reset', () => {
+    it('leaves a host plan still listing on reset, and never turns its late listing into the review', async () => {
+      const listed = Promise.withResolvers<ImportListing>();
+      let planSignal: AbortSignal | undefined;
+      const actor = createTestActor({
+        async plan(_source, signal) {
+          planSignal = signal;
+          return listed.promise;
+        },
+      });
+      actor.start();
+      actor.send({ type: 'processHost', grants: [{ grant: 'grant-1', name: 'folder', kind: 'directory' }] });
+      expect(actor.getSnapshot().value).toBe('readingHost');
+      expect(planSignal?.aborted).toBe(false);
+      actor.send({ type: 'reset' });
+      expect(actor.getSnapshot().value).toBe('idle');
+      /* The worker's plan is aborted with the actor, so it never becomes the session's plan. */
+      expect(planSignal?.aborted).toBe(true);
+      listed.resolve(listing);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(actor.getSnapshot().value).toBe('idle');
+      expect(actor.getSnapshot().context.listing.files).toHaveLength(0);
+      actor.stop();
+    });
+
     it('should reset on reset event from idle', () => {
       const actor = createTestActor();
       actor.start();

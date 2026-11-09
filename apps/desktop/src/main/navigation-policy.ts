@@ -117,6 +117,23 @@ export const isTrustedSender = (frame: SenderFrame | undefined, origins: readonl
   frame !== undefined && !frame.parent && isRendererUrl(frame.url, origins);
 
 /**
+ * Origins the renderer's PostHog client reaches from its API host: the host itself (captures, flags) and, on PostHog
+ * Cloud, the region's assets host, where `posthog-js` fetches the project's remote config (`/array/<key>/config`).
+ * A self-hosted or proxy host serves both from itself, as `posthog-js`'s request router does.
+ *
+ * @param apiHost - `POSTHOG_API_HOST`, e.g. `https://us.i.posthog.com`.
+ * @returns The origins to grant in `connect-src`, or none for an unusable host.
+ */
+export const postHogConnectOrigins = (apiHost: string | undefined): readonly string[] => {
+  const origin = apiHost === undefined ? undefined : originOf(apiHost);
+  if (origin === undefined) {
+    return [];
+  }
+  const region = /^https:\/\/(?<region>us|eu)\.i\.posthog\.com$/u.exec(origin)?.groups?.['region'];
+  return region === undefined ? [origin] : [origin, `https://${region}-assets.i.posthog.com`];
+};
+
+/**
  * Content-Security-Policy for every `app://` response.
  *
  * `'unsafe-inline'` in `script-src` is not a shortcut — it is measured. The

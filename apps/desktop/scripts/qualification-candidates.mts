@@ -26,7 +26,13 @@ export const assertQualificationConsumerScope = (options: {
     return;
   }
   const expected =
-    options.route === 'windows-nsis' ? 'windows' : options.route.startsWith('macos-') ? 'macos' : undefined;
+    options.route === 'windows-nsis'
+      ? 'windows'
+      : options.route.startsWith('macos-')
+        ? 'macos'
+        : options.route === 'linux-apt' || options.route === 'linux-appimage'
+          ? 'linux'
+          : undefined;
   if (!expected || options.scope !== expected || options.channel !== 'staging') {
     throw new Error('Consumer acceptance requires its staging platform scope');
   }

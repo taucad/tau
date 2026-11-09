@@ -384,8 +384,12 @@ const main = async (): Promise<void> => {
     }
     await page.screenshot({ path: `${output}.png`, fullPage: true });
     let softwareRenderer: string | undefined;
-    if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
-      softwareRenderer = await page
+    const softwareGraphics = process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software';
+    // Linux clean-host acceptance asks for the viewer's renderer too, to prove it drew on the host GPU.
+    const reportRenderer = process.env['TAU_QUALIFICATION_REPORT_GL_RENDERER'] === '1';
+    let glRenderer: string | undefined;
+    if (softwareGraphics || reportRenderer) {
+      const renderer = await page
         .getByTestId('cad-viewer-canvas-region')
         .locator('canvas')
         .evaluate((canvas) => {
@@ -403,8 +407,13 @@ const main = async (): Promise<void> => {
           }
           return renderer;
         });
-      if (!/SwiftShader/iu.test(softwareRenderer)) {
-        throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+      if (softwareGraphics) {
+        softwareRenderer = renderer;
+        if (!/SwiftShader/iu.test(softwareRenderer)) {
+          throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+        }
+      } else {
+        glRenderer = renderer;
       }
     }
     await writeFile(
@@ -420,6 +429,7 @@ const main = async (): Promise<void> => {
           logOffset,
           observedAt: new Date().toISOString(),
           ...(softwareRenderer ? { softwareRenderer } : {}),
+          ...(glRenderer ? { glRenderer } : {}),
         },
         undefined,
         2,

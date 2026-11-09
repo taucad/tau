@@ -70,7 +70,9 @@ Each violating configuration checks exactly one property. The four `today` confi
 
 ## Bridge
 
-`CameraAuthority/graph.json` and `suite.json` are generated from `export` with the phase `cam.input` and the step label `act`. The suite holds one shortest behaviour per (input state, action) class. G3 replays it on the live camera actor: `PoseObserved`, `InteractionEnded`, `SettleElapsed`, `Changed`, `AdoptApplied`, `AdoptDropped` and `EchoObserved` are camera events or its `after` transition, and the camera fields of each view are the expected snapshot. `RecordOwn`, `Landed` and `ForeignWrite` do not touch the camera; the G6 binding conformance test replays those. No `drift.json` exists yet, because the machines it would hash do not. G3 adds it with the camera machine and G6 extends it with the binding.
+`CameraAuthority/graph.json` and `suite.json` are generated from `export` with the phase `cam.input` and the step label `act`. The suite holds one shortest behaviour per (input state, action) class. G3 replays it on the live camera actor: `PoseObserved`, `InteractionEnded`, `SettleElapsed`, `Changed`, `AdoptApplied`, `AdoptDropped` and `EchoObserved` are camera events or its `after` transition, and the camera fields of each view are the expected snapshot. `RecordOwn`, `Landed` and `ForeignWrite` do not touch the camera; the G6 binding conformance test replays those. The nightly tier also simulates `export` from a fresh seed and keeps the behaviours that reach `Quiescent` (camera idle, nothing in flight) under `out/test-results/formal/packages/camera/simulated/`, for replay beyond the suite.
+
+No `drift.json` exists yet, because the machines it would hash do not. G3 adds it with the camera machine and G6 extends it with the binding.
 
 Regenerate after any edit to the module or to `export`:
 

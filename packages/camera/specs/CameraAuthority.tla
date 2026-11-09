@@ -341,4 +341,15 @@ NoEchoLoop == [][act' = "EchoObserved" => cam' = cam]_vars
 AppliedWriter == IF act' = "PendingApplied" THEN pending.writer ELSE file.writer
 NoSnapBack == [][(act' \in AdoptionApplies /\ AppliedWriter = "self") => cam'.pose = cam.pose]_vars
 
+\* Nothing is in flight: the gesture has settled, every edit has landed, every publication is handled
+\* and no controls update is pending. The nightly simulation keeps the behaviours that reach it.
+Quiescent ==
+  /\ act # "Init"
+  /\ cam.input = "idle"
+  /\ quiet
+  /\ intent = NoIntent
+  /\ pending = NoPending
+  /\ echo = 0
+  /\ seen = file.pose
+
 =============================================================================

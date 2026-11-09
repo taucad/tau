@@ -93,6 +93,36 @@ describe('request log URL redaction', () => {
     expect(lines.join('')).not.toContain('session-secret');
   });
 
+  it('should redact the client address headers from request logs', async () => {
+    const options = await requestLogOptions();
+    const lines: string[] = [];
+    const { logger } = pinoHttp({ redact: options.redact }, { write: (line: string) => lines.push(line) });
+
+    logger.info({
+      req: {
+        id: 'request-3',
+        method: 'POST',
+        url: '/v1/telemetry/runtime',
+        headers: {
+          'x-forwarded-for': '203.0.113.41, 192.0.2.9',
+          'fly-client-ip': '203.0.113.41',
+          'x-real-ip': '203.0.113.41',
+          forwarded: 'for=203.0.113.41',
+          'cf-connecting-ip': '203.0.113.41',
+          'true-client-ip': '203.0.113.41',
+          'x-nf-client-connection-ip': '203.0.113.41',
+          'user-agent': 'tau-test',
+        },
+      },
+    });
+
+    const output = lines.join('');
+    expect(output).not.toContain('203.0.113.41');
+    expect(output).not.toContain('192.0.2.9');
+    expect(output).toContain('request-3');
+    expect(output).toContain('tau-test');
+  });
+
   it('should keep the query of other requests in the serialized request', async () => {
     const options = await requestLogOptions();
     const request = { url: '/v1/github/repositories?page=2', query: { page: '2' } };

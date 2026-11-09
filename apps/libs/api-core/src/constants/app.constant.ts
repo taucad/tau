@@ -43,6 +43,15 @@ export const loggingRedactPaths = [
   'req.body.email',
   'req.body.password',
   'req.body.oldPassword',
+  // Client addresses: the edge and Fly's proxy forward the caller's IP in these headers. Request logs keep the
+  // request id for correlation; abuse limits read the address from the request itself, never from a log.
+  'req.headers["x-forwarded-for"]',
+  'req.headers["fly-client-ip"]',
+  'req.headers["x-real-ip"]',
+  'req.headers.forwarded',
+  'req.headers["cf-connecting-ip"]',
+  'req.headers["true-client-ip"]',
+  'req.headers["x-nf-client-connection-ip"]',
 ];
 export const redactionCensor = '**REDACTED**';
 

@@ -54,6 +54,12 @@ type RuleGroup = {
   }>;
 };
 
+/**
+ * Rule datasources that take LogQL, not PromQL: Fly's logs (`loki`) and Grafana's own alert state
+ * history (`alert-state-history`), whose streams carry the rule folder rather than an app.
+ */
+const lokiDatasources: ReadonlySet<string> = new Set(['loki', 'alert-state-history']);
+
 /** Where a PromQL string lives: dashboard panels and variables bind through `$app`-style variables, rules through regex placeholders. */
 type QueryKind = 'panel' | 'variable' | 'rule' | 'provisioned';
 type QuerySource = {
@@ -101,7 +107,9 @@ const promqlSources = (root = grafanaRoot): QuerySource[] => {
       'rule',
       strings(
         rules.flatMap((rule) =>
-          (rule.data ?? []).filter((query) => query.datasourceUid !== 'loki').map((query) => query.model?.expr),
+          (rule.data ?? [])
+            .filter((query) => !lokiDatasources.has(query.datasourceUid ?? ''))
+            .map((query) => query.model?.expr),
         ),
       ),
     );
@@ -776,7 +784,7 @@ const absenceProblems = (root: string): string[] =>
 type LokiSource = {
   readonly file: string;
   readonly query: string;
-  readonly where: 'dashboard' | 'alert';
+  readonly where: 'dashboard' | 'alert' | 'state-history';
 };
 
 const lokiSources = (root: string): LokiSource[] => [
@@ -800,16 +808,31 @@ const lokiSources = (root: string): LokiSource[] => [
       );
   }),
   ...rulesIn(root).flatMap(({ file, rule }) =>
-    strings((rule.data ?? []).filter((query) => query.datasourceUid === 'loki').map((query) => query.model?.expr)).map(
-      (query): LokiSource => ({ file, query, where: 'alert' }),
+    (rule.data ?? []).flatMap((query) =>
+      strings([query.model?.expr]).flatMap((expr): LokiSource[] => {
+        if (query.datasourceUid === 'loki') {
+          return [{ file, query: expr, where: 'alert' }];
+        }
+        return query.datasourceUid === 'alert-state-history' ? [{ file, query: expr, where: 'state-history' }] : [];
+      }),
     ),
   ),
 ];
+
+/** The exact selector body Tau Cloud rewrites and requires, per Loki source. */
+const lokiSelectors: Readonly<Record<LokiSource['where'], string>> = {
+  dashboard: 'service_name=~"$service"',
+  alert: 'service_name="tau-api"',
+  // Tau Cloud binds folderUID="tau-local" to the environment's folder, tau-<environment>.
+  'state-history': 'from="state-history", folderUID="tau-local"',
+};
 
 /**
  * T32 (FR-27, FR-28): Tau Cloud rewrites exactly `service_name=~"$service"` (dashboards) and
  * `service_name="tau-api"` (alerts) to the environment's `fly_app_name`, and refuses at plan an alert
  * selector without it, so every Loki selector is written exactly so and none names `fly_app_name`.
+ * Alert state-history selectors are bound by `folderUID="tau-local"` instead, which Tau Cloud rewrites
+ * to the environment's folder.
  * Every Prometheus rule selector carries the `service_name` of the app it binds (binding contract v2:
  * `app=~".*"` is `tau-api`, `app=~".*storage.*"` is `tau-storage`, `app=~".*mirror.*"` is `tau-mirror`), so
  * a second exporter in that app cannot match. Grafana's own `grafana_*` series and Fly's platform `fly_*`
@@ -823,7 +846,7 @@ const ruleServices: Readonly<Record<string, string>> = {
 
 const selectorSourceProblems = (root: string): string[] => [
   ...lokiSources(root).flatMap(({ file, query, where }) => {
-    const expected = where === 'dashboard' ? 'service_name=~"$service"' : 'service_name="tau-api"';
+    const expected = lokiSelectors[where];
     return [...query.matchAll(/\{(?<body>[^{}]*)\}/gu)]
       .filter(({ groups }) => groups?.['body']?.trim() !== expected)
       .map(({ groups }) => `${file}: Loki selector {${groups?.['body'] ?? ''}} must be exactly {${expected}}`);
@@ -930,6 +953,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     expect(selectorSourceProblems(seeded)).toEqual([
       'dashboards/runtime-product.json: Loki selector {fly_app_name="tau-api-staging"} must be exactly {service_name=~"$service"}',
       'alerts/runtime-unbound.json: Loki selector {service_name=~"$service"} must be exactly {service_name="tau-api"}',
+      'alerts/runtime-unbound.json: Loki selector {from="state-history"} must be exactly {from="state-history", folderUID="tau-local"}',
       "dashboards/runtime-product.json: names fly_app_name, which bypasses Tau Cloud's rewrite",
       'alerts/runtime-unbound.json: tau_telemetry_ingest_entries_total{app=~".*",disposition="recorded"} lacks service_name="tau-api"',
       'alerts/runtime-unbound.json: tau_mirror_copy_lag_seconds{app=~".*mirror.*",service_name="tau-api"} lacks service_name="tau-mirror"',

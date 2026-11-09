@@ -36,4 +36,10 @@ describe('schematic themes', () => {
     expect(dark.colorOverrides.schematic['background']).toBe('rgb(23, 25, 30)');
     expect(dark.css).toContain('.chip { fill: rgb(38, 42, 52)');
   });
+
+  it('outlines the sheet in the theme sheet colour at a constant screen width', () => {
+    const outline = 'stroke-width: 1.5px; vector-effect: non-scaling-stroke; }';
+    expect(schematicThemeOptions('light').css).toContain(`.boundary { stroke: rgb(178, 184, 194); ${outline}`);
+    expect(schematicThemeOptions('dark').css).toContain(`.boundary { stroke: rgb(74, 80, 92); ${outline}`);
+  });
 });

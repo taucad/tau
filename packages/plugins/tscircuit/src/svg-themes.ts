@@ -83,8 +83,12 @@ const darkSchematic: SchematicColors = {
 /**
  * The converter writes a few colours into its own `<style>` block (text, symbol strokes, chip
  * fill) rather than reading the colour map; this CSS restyles those classes to the theme.
+ *
+ * `.boundary` is the sheet's background rectangle. Its outline, in the theme's sheet colour and a
+ * constant width on screen, sets the sheet apart from the viewer's grid behind it.
  */
 const schematicCss = (colors: SchematicColors): string => `
+  .boundary { stroke: ${colors['sheet']}; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
   .component, .component-pin { stroke: ${colors['component_outline']}; }
   .chip { fill: ${colors['component_body']}; stroke: ${colors['component_outline']}; }
   .text { fill: ${colors['value']}; }

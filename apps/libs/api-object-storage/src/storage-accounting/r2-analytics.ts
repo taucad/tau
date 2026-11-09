@@ -76,6 +76,7 @@ export type R2AnalyticsResponse = {
       }>;
     };
   };
+  /* Cloudflare sends `"errors": null` on success, not an absent member: read it with `??`. */
   readonly errors?: ReadonlyArray<{ readonly message: string }>;
 };
 
@@ -332,9 +333,10 @@ export const readR2Analytics = async (
     throw new Error(`Cloudflare GraphQL Analytics answered HTTP ${String(response.status)}`);
   }
   const body = (await response.json()) as R2AnalyticsResponse;
-  if (body.errors !== undefined && body.errors.length > 0) {
+  const errors = body.errors ?? [];
+  if (errors.length > 0) {
     throw new Error(
-      `Cloudflare GraphQL Analytics refused the R2 query: ${body.errors.map((error) => error.message).join('; ')}`,
+      `Cloudflare GraphQL Analytics refused the R2 query: ${errors.map((error) => error.message).join('; ')}`,
     );
   }
   return mapR2Analytics(body, source.buckets);

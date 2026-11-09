@@ -13,6 +13,7 @@
 import wasmUrl from '@aurigax-ai/ghostty-web/ghostty-vt.wasm?url';
 import type { Terminal as AurigaxTerminal, TerminalTheme } from '#components/terminal/aurigax-ghostty-web';
 import { isOpenableTerminalLink, outputLines, outputSlices } from '#components/terminal/terminal-output-text.js';
+import type { TerminalTextRendering } from '#components/terminal/terminal-theme.js';
 
 /** @public */
 export type TerminalRendererOptions = {
@@ -56,6 +57,12 @@ export type TerminalRendererView = {
   search(term: string, newer: boolean): boolean;
   clearFind(): void;
   setScreenReaderMode(enabled: boolean): void;
+  /** Recolour the open terminal, screen and scrollback included, and set its text for the new background and contrast. */
+  setTheme(
+    theme: TerminalTheme,
+    text: Pick<TerminalTextRendering, 'textBlending' | 'textWeight'> &
+      Pick<TerminalRendererOptions, 'minimumContrastRatio'>,
+  ): void;
   dispose(): void;
 };
 
@@ -535,6 +542,13 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
       } else {
         disableAccessibility();
       }
+    },
+    setTheme(theme, text) {
+      /* The renderer repaints once it has the colours, so the text settings go first and no frame mixes the two. */
+      terminal.options.textBlending = text.textBlending;
+      terminal.options.textWeight = text.textWeight;
+      terminal.options.minimumContrastRatio = text.minimumContrastRatio;
+      terminal.options.theme = theme;
     },
     dispose() {
       disposed = true;

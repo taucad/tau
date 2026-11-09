@@ -21,7 +21,7 @@ import { readOwnerUsage, withOwnerLock } from '@taucad/api-database/owner-lock';
 import type { Database } from '@taucad/api-database/owner-lock';
 import * as schema from '@taucad/api-database/schema';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 /** Real migrations/transactions plus the existing conditional-write repository port fixture. */
 describe('project deletion against isolated PostgreSQL and repository CAS', () => {

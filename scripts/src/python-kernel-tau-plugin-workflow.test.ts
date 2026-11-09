@@ -105,7 +105,7 @@ describe('the Python kernel callers', () => {
       expect(on.pull_request?.paths).toContain(`.github/workflows/${shared}`);
       expect(on).toHaveProperty('workflow_dispatch');
       expect(concurrency?.group).toBe(
-        `${file.replace(/\.yml$/u, '')}-${expression("github.event_name == 'pull_request' && github.head_ref || github.run_id")}`,
+        `${file.replace(/\.yml$/u, '')}-${expression("github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id")}`,
       );
       expect(concurrency?.['cancel-in-progress']).toBe(expression("github.event_name == 'pull_request'"));
     },

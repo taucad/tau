@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import type { PutBlobArgs } from '#storage/object-storage.service.js';
+import type { PutBlobArgs } from '@taucad/api-object-storage';
 import {
   maintenancePassBudgetMilliseconds,
   maintenanceStaleAfterMilliseconds,

@@ -51,11 +51,11 @@ import { buildPublicationViewUrl, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
-import type { StorageTier } from '#storage/object-storage.service.js';
-import type { StorageNamespace } from '#storage/storage.constants.js';
-import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
-import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
+import { ObjectStorageService, isS3ObjectMissing } from '@taucad/api-object-storage';
+import type { StorageTier } from '@taucad/api-object-storage';
+import type { StorageNamespace } from '@taucad/api-object-storage/constants';
+import { concatUint8Arrays } from '@taucad/api-object-storage/concat-uint8-arrays';
+import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
 import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** The shared placeholder card image every publication starts with. */

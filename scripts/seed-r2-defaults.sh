@@ -3,7 +3,7 @@
 # Requires AWS CLI v2 configured with credentials that can write to the bucket.
 #
 # Namespace prefixes (blobs/, derivatives/, defaults/, __health/) are compile-time
-# constants in apps/api/app/storage/storage.constants.ts and mirrored verbatim here.
+# constants in apps/libs/api-object-storage/src/storage.constants.ts and mirrored verbatim here.
 #
 # Usage:
 #   export AWS_ACCESS_KEY_ID=<R2 access key id from HCP Terraform output>

@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
-import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
-import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
-import type { ObjectStorageService, StorageAccount } from '#storage/object-storage.service.js';
+import { concatUint8Arrays } from '@taucad/api-object-storage/concat-uint8-arrays';
+import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/testing/destructive-test-bucket-guard';
+import type { ObjectStorageService, StorageAccount } from '@taucad/api-object-storage';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import type { ObjectSource, RepositoryLocator } from '#api/git/store/port.js';
 

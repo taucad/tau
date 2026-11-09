@@ -1,7 +1,7 @@
 import { json } from 'node:stream/consumers';
 import { z } from 'zod';
-import { isS3ObjectMissing } from '#storage/object-storage.service.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import { isS3ObjectMissing } from '@taucad/api-object-storage';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 
 /**
  * The maintenance group's liveness (audit L6-F14, go-live OBS-11). The loop is

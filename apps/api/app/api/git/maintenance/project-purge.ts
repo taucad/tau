@@ -21,8 +21,8 @@ import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest, encodeManifest, isTombstoned, succeedManifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import type { StorageNamespace } from '#storage/storage.constants.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import type { StorageNamespace } from '@taucad/api-object-storage/constants';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 
 /** Objects above this bound require approval of this exact owner, project and inventory. */

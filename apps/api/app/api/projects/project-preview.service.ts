@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- Nest decorators and runtime DI metadata. */
 import { createHash } from 'node:crypto';
 import { BadRequestException, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { projectPreviewKey, projectPreviewMaximumBytes } from '#api/projects/project-preview-key.js';
 import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 

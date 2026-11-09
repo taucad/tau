@@ -15,8 +15,8 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
-import { FileLinksService } from '#storage/file-links.service.js';
-import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import { FileLinksService } from '@taucad/api-object-storage/file-links';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import {
   buildCatalogue,
   catalogueFamilies,

@@ -14,6 +14,12 @@ type UploadCardProperties = {
   readonly onDataTransfer: (items: DataTransferItemList) => void;
   /** Called when the user selects a directory via File System Access API. */
   readonly onDirectoryHandleSelected?: (handle: FileSystemDirectoryHandle) => void;
+  /**
+   * On desktop: pick a folder with the native picker, for the host to copy
+   * (W7.4). Given, it replaces the folder input, whose files would be read
+   * into the page.
+   */
+  readonly onPickHostFolder?: () => void;
   readonly isDisabled?: boolean;
   readonly className?: string;
 };
@@ -24,6 +30,7 @@ export function UploadCard({
   onZipSelected,
   onDataTransfer,
   onDirectoryHandleSelected,
+  onPickHostFolder,
   isDisabled = false,
   className,
 }: UploadCardProperties): React.JSX.Element {
@@ -195,7 +202,12 @@ export function UploadCard({
         </span>
       </div>
       <div className='flex flex-wrap gap-2'>
-        {webAccessDirectoryPicker() ? (
+        {onPickHostFolder ? (
+          <Button type='button' variant='outline' disabled={isDisabled} onClick={onPickHostFolder}>
+            <Folder />
+            Select folder
+          </Button>
+        ) : webAccessDirectoryPicker() ? (
           <Button type='button' variant='outline' disabled={isDisabled} onClick={handleDirectoryPick}>
             <FolderOpen />
             Open folder

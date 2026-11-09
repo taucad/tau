@@ -44,15 +44,22 @@ try {
 }
 
 const current = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg']) {
+for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg', 'linux-apt', 'linux-appimage']) {
+  const linux = route.startsWith('linux-');
   const input = {
     kind: 'vm',
     route,
-    scope: route === 'windows-nsis' ? 'windows' : 'macos',
+    scope: route === 'windows-nsis' ? 'windows' : linux ? 'linux' : 'macos',
     channel: 'staging',
   } as const;
   assertQualificationConsumerScope(input);
-  for (const change of [{ channel: 'production' }, { scope: 'all' }, { scope: undefined }, { route: 'linux-apt' }]) {
+  for (const change of [
+    { channel: 'production' },
+    { scope: 'all' },
+    { scope: undefined },
+    { scope: linux ? 'macos' : 'linux' },
+    { route: linux ? 'macos-zip' : 'linux-apt' },
+  ]) {
     assert.throws(() => {
       assertQualificationConsumerScope({ ...input, ...change });
     }, /staging platform scope/u);

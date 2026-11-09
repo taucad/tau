@@ -29,6 +29,7 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 import { redactUrlQuery } from '#logger/logger-factory.js';
 import { cardinalityViews } from '#cardinality-views.js';
+import { registerStartedOtelSdk } from '#otel-sdk.js';
 
 const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
 const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);
@@ -124,6 +125,7 @@ const sdk = new NodeSDK({
 });
 
 sdk.start();
+registerStartedOtelSdk(sdk);
 
 // Fly reports CPU and memory per Machine; these are the same signals per process, so the API and each
 // billing worker can be told apart and they also exist off Fly. OTel process semantic conventions.

@@ -69,7 +69,7 @@ export const agentToolKinds = [
 
 /**
  * Tau's own tool names, the keys of `tauToolKinds` in `@taucad/agent-host`. Copied rather than imported so this
- * dependency-light library never depends on the agent host; `vocabulary-contract.test.ts` pins the copy to the source.
+ * dependency-light library never depends on the agent host; `scripts/src/telemetry-vocabulary-contract.test.ts` pins the copy to the source.
  * @public
  */
 export const tauToolNames = [
@@ -150,6 +150,24 @@ export const lookupOutcomes = ['ok', 'zero_match', 'not_found', 'tool_error'] as
 
 /** How a model evaluation ended, classified on the device from issue type, code and message patterns. @public */
 export const evaluationClasses = ['ok', 'api_misuse', 'compile', 'runtime', 'timeout', 'kernel', 'other'] as const;
+
+/** The agent-loop safeguard that fired: a detector family, or the output-limit recovery (R9). @public */
+export const agentSafeguardPatterns = [
+  'identical_error',
+  'identical_call',
+  'per_target_edit',
+  'ping_pong',
+  'empty_result',
+  'same_error_different_args',
+  'output_limit',
+] as const;
+
+/** Where a compaction ran, how deep it went and what it produced (R9). @public */
+export const agentCompactionLanes = ['start_of_turn', 'between_turn', 'overflow'] as const;
+/** @public */
+export const agentCompactionTiers = ['tool_result_clearing', 'summarization'] as const;
+/** @public */
+export const agentCompactionOutcomes = ['cleared', 'generated', 'placeholder'] as const;
 
 /** A GeoSpec `test_model` run status. @public */
 export const geospecRunStatuses = ['passed', 'failed', 'inconclusive', 'unsupported', 'not-run'] as const;
@@ -269,6 +287,29 @@ const agentTurnEntrySchema = z.object({
         cacheRead: tokenCountSchema,
         cacheWrite: tokenCountSchema,
       })
+      .optional(),
+    /** Safeguard interventions the turn's rows recorded (R9). */
+    safeguards: z
+      .array(
+        z.object({
+          pattern: z.enum(agentSafeguardPatterns),
+          action: z.enum(['nudge', 'terminate']),
+          count: clampedInt(1000),
+        }),
+      )
+      .max(agentSafeguardPatterns.length * 2)
+      .optional(),
+    /** Compaction decisions the turn's rows recorded (R9). */
+    compactions: z
+      .array(
+        z.object({
+          lane: z.enum(agentCompactionLanes),
+          tier: z.enum(agentCompactionTiers),
+          outcome: z.enum(agentCompactionOutcomes),
+          count: clampedInt(1000),
+        }),
+      )
+      .max(agentCompactionLanes.length * agentCompactionTiers.length * agentCompactionOutcomes.length)
       .optional(),
     context: agentTurnContextSchema.optional(),
   }),

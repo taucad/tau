@@ -5,10 +5,13 @@ import { TelemetryModule } from '#telemetry.module.js';
 import { TracerService } from '#tracer.service.js';
 import { MetricsService } from '#metrics.js';
 
-const mockShutdown = vi.fn();
+const { mockShutdown, mockStartedOtelSdk } = vi.hoisted(() => ({
+  mockShutdown: vi.fn(),
+  mockStartedOtelSdk: vi.fn(),
+}));
 
-vi.mock('#otel.js', () => ({
-  sdk: { shutdown: mockShutdown },
+vi.mock('#otel-sdk.js', () => ({
+  startedOtelSdk: mockStartedOtelSdk,
 }));
 
 describe('TelemetryModule', () => {
@@ -18,6 +21,7 @@ describe('TelemetryModule', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockShutdown.mockResolvedValue(undefined);
+    mockStartedOtelSdk.mockReturnValue({ shutdown: mockShutdown });
 
     module = await Test.createTestingModule({
       imports: [TelemetryModule],
@@ -38,6 +42,12 @@ describe('TelemetryModule', () => {
     it('should call sdk.shutdown()', async () => {
       await telemetryModule.onApplicationShutdown();
       expect(mockShutdown).toHaveBeenCalledOnce();
+    });
+
+    it('should start nothing and stop nothing when this process never started the SDK', async () => {
+      mockStartedOtelSdk.mockReturnValue(undefined);
+      await expect(telemetryModule.onApplicationShutdown()).resolves.toBeUndefined();
+      expect(mockShutdown).not.toHaveBeenCalled();
     });
 
     it('should not throw when sdk.shutdown() resolves', async () => {

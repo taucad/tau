@@ -261,3 +261,24 @@ export function findMainFile(filePaths: string[]): string | undefined {
   // Fall back to first file if nothing matches
   return filePaths[0];
 }
+
+/**
+ * Hands the held host grants over to a new host pick (W7.4). Only an import the machine will start
+ * takes the hold: a pick it refuses, because another import is in review or being created, is let
+ * go itself, so the import in progress keeps the grants it is still reading from.
+ *
+ * @returns Whether the incoming grants are now the held ones.
+ */
+export function handOverHostGrants(options: {
+  readonly accepted: boolean;
+  readonly incoming: readonly string[];
+  readonly held: string[];
+  readonly release: (grants: readonly string[]) => void;
+}): boolean {
+  if (!options.accepted) {
+    options.release(options.incoming);
+    return false;
+  }
+  options.release(options.held.splice(0, options.held.length, ...options.incoming));
+  return true;
+}

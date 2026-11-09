@@ -1294,9 +1294,10 @@ main > .band:not(.band ~ .band)::before {
   font: 500 0.75rem var(--font-mono);
   white-space: nowrap;
 }
-.plan .button {
+/* Every plan's call to action sits on the same line at the foot of its card.
+ * `SiteLink` renders buttons through the UI `Button`, which drops the `.button` class. */
+.plan > [data-slot='button'] {
   margin-top: auto;
-  align-self: start;
 }
 .pricing-teaser .plan {
   padding-block: 2rem;

@@ -3,10 +3,10 @@ import { z } from 'zod';
 /**
  * The agent-observability processing purposes an account decides on
  * independently (blueprint T04, data lifecycle "Purpose decisions"). One is
- * never inferred from another, and none of them is derived from the existing
- * `allowsAiTraining` / `allowsUsageMetrics` booleans: those govern anonymous
- * metrics and supplier training preference, not recorded prompts, designs or
- * account-linked task histories.
+ * never inferred from another. `allowsUsageMetrics` governs anonymous metrics
+ * only; `allowsAiTraining` matters only as the Free plan's default, which
+ * grants the improvement purposes to an assured Free account until it decides
+ * them itself (see `resolvePurposeAuthority`).
  */
 export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;
 

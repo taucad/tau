@@ -141,6 +141,8 @@ type Session = {
   agentHostGatewayWalk?: GatewayScriptWalk;
   /** The GitHub-linked project's far side, while a spec has one (R15). */
   linkedGithub?: LinkedGithubFixture;
+  /** The stand-in API serving the model catalog on the API origin, while a spec has one. */
+  modelCatalogApi?: Server;
   /** What `uiSetTargetOffline` last said, so a routed fixture answers offline too. */
   offline?: boolean;
   secondary?: TargetPage;
@@ -284,6 +286,19 @@ const observePage = (session: Session, page: TargetPage): void => {
   });
 };
 
+/** Close an HTTP server and every connection it still holds. */
+const closeServer = async (server: Server): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+    server.closeAllConnections();
+  });
+
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
   for (const gate of session.agentHostGatewayGates.splice(0)) {
@@ -293,16 +308,16 @@ const disposeSession = async (session: Session): Promise<void> => {
     const server = session.agentHostGatewayServer;
     session.agentHostGatewayServer = undefined;
     try {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
-        server.closeAllConnections();
-      });
+      await closeServer(server);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (session.modelCatalogApi) {
+    const api = session.modelCatalogApi;
+    session.modelCatalogApi = undefined;
+    try {
+      await closeServer(api);
     } catch (error) {
       errors.push(error);
     }
@@ -710,6 +725,169 @@ const writeScriptedTurn = async (options: {
 };
 /* eslint-enable @typescript-eslint/naming-convention -- The Anthropic wire fixture ends here. */
 
+/**
+ * The API's own enabled catalog rows, as `/v1/models` answers them.
+ *
+ * @param contextWindow - Replaces the context window every row advertises, when given.
+ * @returns The catalog rows.
+ */
+const realModelCatalog = async (contextWindow?: number): Promise<unknown[]> => {
+  const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
+    await import('../../../libs/api-llm-gateway/src/models/model.constants.js');
+  return (
+    Object.values(modelList)
+      .flatMap((entries) => Object.values(entries))
+      .filter((entry) => isModelListEntryEnabled(entry))
+      // The window a row advertises is the compaction budget `agentHostConfig`
+      // hands the host, so overriding it is how a vertical crosses the compaction
+      // threshold on scripted usage instead of on real megabytes.
+      .map((entry) => {
+        const model = modelListEntryToModel(entry);
+        return contextWindow === undefined ? model : { ...model, details: { ...model.details, contextWindow } };
+      })
+  );
+};
+
+/**
+ * Answer the page's `/v1/models` with `catalog`, as the API would to this origin's credentialed fetch, after
+ * `latency` milliseconds.
+ */
+const routeModelCatalog = async (session: Session, catalog: readonly unknown[], latency = 0): Promise<void> => {
+  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
+    if (latency > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, latency);
+      });
+    }
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(catalog),
+    });
+  });
+};
+
+/**
+ * Serve the browser the API's real model catalog without an API, so a model label can resolve to its display name.
+ * Only the page's requests are answered: the UI server's own catalog prefetch still goes to `TAU_API_URL`.
+ * `latency` (milliseconds) holds each answer, as a slow API would, so a label drawn before the catalog is seen.
+ */
+export const uiInstallModelCatalogFixture: BrowserCommand<[latency?: number]> = async (commandContext, latency) => {
+  await routeModelCatalog(sessionFor(commandContext), await realModelCatalog(), latency);
+};
+
+/** How long the UI server is given to render with the catalog; covers its 30 s failure backoff. Milliseconds. */
+const serverCatalogDeadline = 40_000;
+
+/**
+ * Whether the UI server renders Home with the model catalog, polling for up to {@link serverCatalogDeadline}. Each
+ * document request is what makes the server prefetch, and a prefetch that failed earlier holds it back for its backoff.
+ *
+ * @param catalogId - A catalog row's id, which the server's HTML carries once it has the catalog.
+ * @returns Whether it did before the deadline.
+ */
+const waitForServerCatalog = async (catalogId: string): Promise<boolean> => {
+  const deadline = Date.now() + serverCatalogDeadline;
+  for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1000);
+      });
+    }
+    const html = await fetch(testBaseURL)
+      .then(async (response) => response.text())
+      .catch(() => '');
+    if (html.includes(catalogId)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Serve the API's real model catalog on the API origin itself (`TAU_E2E_API_URL`, else `http://localhost:4000`), so
+ * the UI server's own catalog prefetch finds it as it would in production, then wait until that server renders with
+ * it. Every other path is dropped unanswered, as an absent API would be, so nothing else about the tier changes. When
+ * the origin already has an API that answers `/v1/models`, that API is used instead. The stand-in closes with the
+ * target.
+ *
+ * @returns Whether the UI server renders with the catalog: false when its build has no server-side prefetch.
+ */
+export const uiStartModelCatalogApi: BrowserCommand<[], { readonly serverHasCatalog: boolean }> = async (
+  commandContext,
+) => {
+  const session = sessionFor(commandContext);
+  if (session.modelCatalogApi) {
+    throw new Error('The model catalog API stand-in is already running for this session.');
+  }
+  const origin = new URL(tauApiUrl);
+  const catalog = (await realModelCatalog()) as ReadonlyArray<{ readonly id: string }>;
+  const body = JSON.stringify(catalog);
+  const api = createServer((request, response) => {
+    if (!request.url?.startsWith('/v1/models')) {
+      request.socket.destroy();
+      return;
+    }
+    response.writeHead(200, {
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-origin': request.headers.origin ?? new URL(testBaseURL).origin,
+      'content-type': 'application/json',
+    });
+    response.end(body);
+  });
+  try {
+    /* No host: both `127.0.0.1` and `::1`, whichever `localhost` resolves to first. */
+    await new Promise<void>((resolve, reject) => {
+      api.once('error', reject);
+      api.listen(Number(origin.port || 80), () => {
+        api.off('error', reject);
+        resolve();
+      });
+    });
+    session.modelCatalogApi = api;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+      throw error;
+    }
+    const existing = await fetch(new URL('/v1/models', origin)).catch(() => undefined);
+    if (!existing?.ok) {
+      throw new Error(`${origin.origin} is taken by something that does not serve /v1/models.`, { cause: error });
+    }
+  }
+  const [first] = catalog;
+  if (!first) {
+    throw new Error('The API model catalog has no enabled rows.');
+  }
+  return { serverHasCatalog: await waitForServerCatalog(first.id) };
+};
+
+/** CDP sessions holding a page's CPU throttle; the rate lasts only while its session stays attached. */
+const cpuThrottlingSessions = new WeakMap<TargetPage, CdpSession>();
+
+/**
+ * Slow the page's CPU by `rate` (1 is no throttle) through Chromium's `Emulation.setCPUThrottlingRate`. The rate holds
+ * across reloads of the same page, so a spec sets it before the navigation it measures.
+ */
+export const uiEmulateCpuThrottling: BrowserCommand<[rate: number, surface?: TargetSurface]> = async (
+  commandContext,
+  rate,
+  surface,
+) => {
+  const session = sessionFor(commandContext);
+  const page = pageFor(session, surface);
+  let cdp = cpuThrottlingSessions.get(page);
+  if (!cdp) {
+    cdp = await session.context.newCDPSession(page);
+    cpuThrottlingSessions.set(page, cdp);
+  }
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+};
+
 export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   [script?: readonly GatewayScriptTurn[], options?: AgentHostGatewayFixtureOptions]
 > = async (commandContext, script = browserHostScript, options = {}) => {
@@ -920,31 +1098,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   // The browser-host vertical proves the API absent from the DATA path; the
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
-  const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
-    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
-    await import('../../../libs/api-llm-gateway/src/models/model.constants.js');
-  const catalog = Object.values(modelList)
-    .flatMap((entries) => Object.values(entries))
-    .filter((entry) => isModelListEntryEnabled(entry))
-    // The window a row advertises is the compaction budget `agentHostConfig`
-    // hands the host, so overriding it is how a vertical crosses the compaction
-    // threshold on scripted usage instead of on real megabytes.
-    .map((entry) => {
-      const model = modelListEntryToModel(entry);
-      const { contextWindow } = options;
-      return contextWindow === undefined ? model : { ...model, details: { ...model.details, contextWindow } };
-    });
-  await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'access-control-allow-credentials': 'true',
-        'access-control-allow-origin': new URL(testBaseURL).origin,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(catalog),
-    });
-  });
+  await routeModelCatalog(session, await realModelCatalog(options.contextWindow));
   session.agentHostGatewayServer = server;
   const address = server.address();
   if (!address || typeof address === 'string') {
@@ -3226,6 +3380,7 @@ export const uiBrowserCommands = {
   uiReadObservedRequests,
   uiEmulateColorScheme,
   uiEmulateContrast,
+  uiEmulateCpuThrottling,
   uiEmulateForcedColors,
   uiEmulateReducedMotion,
   uiEmulateSafeAreaInsets,
@@ -3237,6 +3392,8 @@ export const uiBrowserCommands = {
   uiHoverTarget,
   uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
+  uiInstallModelCatalogFixture,
+  uiStartModelCatalogApi,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,

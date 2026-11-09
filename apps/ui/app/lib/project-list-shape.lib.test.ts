@@ -7,7 +7,6 @@ import {
   projectListShapeStorageKey,
   projectListShapeStore,
   readProjectListCountFromHeader,
-  rememberedProjectNameLimit,
 } from '#lib/project-list-shape.lib.js';
 
 const project = (id: string, lastActivityAt: number, deletedAt?: number) => ({
@@ -42,23 +41,8 @@ describe('project list count cookie', () => {
 });
 
 describe('projectListShapeOf', () => {
-  it('counts live projects and names the most recent first', () => {
-    expect(projectListShapeOf([project('a', 1), project('b', 3), project('gone', 9, 10)])).toEqual({
-      count: 2,
-      projects: [
-        { id: 'b', name: 'Name b' },
-        { id: 'a', name: 'Name a' },
-      ],
-    });
-  });
-
-  it('remembers a bounded number of names while counting every project', () => {
-    const shape = projectListShapeOf(
-      Array.from({ length: rememberedProjectNameLimit + 5 }, (_, index) => project(`p${index}`, index)),
-    );
-
-    expect(shape.count).toBe(rememberedProjectNameLimit + 5);
-    expect(shape.projects).toHaveLength(rememberedProjectNameLimit);
+  it('counts live projects and remembers no names', () => {
+    expect(projectListShapeOf([project('a', 1), project('b', 3), project('gone', 9, 10)])).toEqual({ count: 2 });
   });
 });
 
@@ -76,10 +60,7 @@ describe('projectListShapeStore', () => {
 
     expect(listener).toHaveBeenCalledOnce();
     expect(Cookies.get(projectListCountCookieName)).toBe('1');
-    expect(JSON.parse(globalThis.localStorage.getItem(projectListShapeStorageKey) ?? 'null')).toEqual({
-      count: 1,
-      projects: [{ id: 'a', name: 'Name a' }],
-    });
+    expect(JSON.parse(globalThis.localStorage.getItem(projectListShapeStorageKey) ?? 'null')).toEqual({ count: 1 });
   });
 
   it('does not notify or rewrite when the shape is unchanged', () => {
@@ -96,7 +77,15 @@ describe('projectListShapeStore', () => {
   it('falls back to the cookie count when local storage holds nothing', () => {
     Cookies.set(projectListCountCookieName, '4', { path: '/' });
 
-    expect(projectListShapeStore.get()).toEqual({ count: 4, projects: [] });
+    expect(projectListShapeStore.get()).toEqual({ count: 4 });
+  });
+
+  it('clears the names an earlier version stored', () => {
+    globalThis.localStorage.setItem('tau-project-list-shape', '{"count":1,"projects":[{"id":"a","name":"Name a"}]}');
+
+    projectListShapeStore.get();
+
+    expect(globalThis.localStorage.getItem('tau-project-list-shape')).toBeNull();
   });
 
   it('ignores a corrupt stored shape', () => {

@@ -12,6 +12,7 @@ import { toRpcError } from '@taucad/chat/rpc';
 import { geoSpecDefaultRunBudget } from '@taucad/chat/constants';
 import {
   createChatToolRegistry,
+  createGatewayWebResearchClient,
   createProviderRpcFileSystem,
   createRuntimeWorkbenchClient,
 } from '@taucad/agent-tools/registry';
@@ -759,6 +760,7 @@ const composeProjectHost = async (
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
+  const webResearch = createGatewayWebResearchClient({ baseUrl: provide.gatewayBaseUrl });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
     provider: FileSystemProvider & Pick<ComposedView, 'pendingPaths'>,
@@ -799,6 +801,8 @@ const composeProjectHost = async (
       testingEnabled: provide.testingEnabled ?? false,
       // X43: under the locked profile the page's own install_packages makes no registry request.
       acquisition: runtimeConfig.acquisition,
+      /* R1: web research runs on Tau's API under the page's session cookie, so the search key never reaches the tab. */
+      web: webResearch,
     });
   };
   const toolRegistry = toolRegistryOver(workspaceProvider, fileSystem);

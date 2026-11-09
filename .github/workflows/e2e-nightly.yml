@@ -32,7 +32,10 @@ concurrency:
 
 env:
   pnpm_config_verify_deps_before_run: warn
-  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
+  # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
   TAU_API_URL: http://localhost:4000
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000

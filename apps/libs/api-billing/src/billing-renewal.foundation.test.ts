@@ -7,8 +7,10 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
+import { isBillingAccountRestricted } from '@taucad/api-llm-gateway';
 import {
   billingFinancialCase,
+  billingPurchase,
   billingProviderLeg,
   billingRecoveryNotice,
   billingStripeCustomer,
@@ -288,25 +290,28 @@ describe('billing renewal native foundation', { concurrent: false }, () => {
     ]);
   });
 
-  it('refuses preparation for a closed account or a blocking cash case', async () => {
+  it('refuses preparation for a closed account and prepares despite a non-blocking case', async () => {
     const closed = await seedSubscription();
     await database.update(creditAccount).set({ status: 'closed' }).where(eq(creditAccount.id, closed.accountId));
     const posts = createPostCount + updatePostCount;
     await expect(prepare(closed)).rejects.toMatchObject({ response: { code: 'payment_account_not_open' } });
+    expect(createPostCount + updatePostCount).toBe(posts);
 
-    const paused = await seedSubscription();
-    await seedCashCase(paused.accountId);
-    await expect(prepare(paused)).rejects.toMatchObject({ response: { message: 'cash_scope_attention' } });
+    // Tau's own fee accounting names this account but never stops it paying for its next period.
+    const booked = await seedSubscription();
+    await seedCashCase(booked.accountId);
+    await expect(prepare(booked)).resolves.toBeDefined();
     expect(
       await database
         .select()
         .from(billingSubscriptionOffer)
-        .where(eq(billingSubscriptionOffer.subscriptionId, paused.subscriptionId)),
-    ).toHaveLength(0);
-    expect(createPostCount + updatePostCount).toBe(posts);
+        .where(eq(billingSubscriptionOffer.subscriptionId, booked.subscriptionId)),
+    ).toHaveLength(1);
+    // Later recovery passes in this file count provider POSTs; a closed account's prepared offer never dispatches.
+    await database.update(creditAccount).set({ status: 'closed' }).where(eq(creditAccount.id, booked.accountId));
   });
 
-  it('blocks a prepared renewal dispatch after closure and after a cash pause', async () => {
+  it('blocks a prepared renewal dispatch after closure and dispatches despite a non-blocking case', async () => {
     const closed = await seedSubscription();
     await prepare(closed);
     await database.update(creditAccount).set({ status: 'closed' }).where(eq(creditAccount.id, closed.accountId));
@@ -315,13 +320,53 @@ describe('billing renewal native foundation', { concurrent: false }, () => {
     expect(blocked.failed).toContain(await offerIdFor(closed.subscriptionId));
     expect(createPostCount + updatePostCount).toBe(posts);
 
-    const paused = await seedSubscription();
-    await prepare(paused);
-    await seedCashCase(paused.accountId);
-    const pausedOutcome = await payments.recoverRenewalOffers({ environment: 'development', limit: 20 });
-    expect(pausedOutcome.failed).toContain(await offerIdFor(paused.subscriptionId));
+    const booked = await seedSubscription();
+    await prepare(booked);
+    await seedCashCase(booked.accountId);
+    const bookedOutcome = await payments.recoverRenewalOffers({ environment: 'development', limit: 20 });
+    expect(bookedOutcome.failed).not.toContain(await offerIdFor(booked.subscriptionId));
+    expect(bookedOutcome.processed).toContain(await offerIdFor(booked.subscriptionId));
+  });
+
+  it('should refuse new collection only for the account a spend-blocking case names', async () => {
+    const disputed = await seedSubscription();
+    const bystander = await seedSubscription();
+    const owed = await seedSubscription();
+    await seedCashCase(disputed.accountId, 'dispute_unresolved');
+    await seedCashCase(owed.accountId, 'missing_local_payment');
+    const posts = createPostCount + updatePostCount;
+
+    const [disputedTopup, disputedRenewal, bystanderTopup] = await Promise.allSettled([
+      prepareTopup(disputed),
+      prepare(disputed),
+      prepareTopup(bystander),
+    ]);
+    const owedTopup = await prepareTopup(owed);
+
+    for (const outcome of [disputedTopup, disputedRenewal]) {
+      if (outcome.status !== 'rejected') {
+        throw new Error('A spend-blocked account prepared new collection');
+      }
+      // The refusal an operator-restricted account gets, which model admission answers as BILLING_ACCOUNT_RESTRICTED.
+      expect(outcome.reason).toMatchObject({
+        status: 403,
+        response: { code: 'billing_account_closed', restricted: true },
+      });
+      expect(isBillingAccountRestricted(outcome.reason)).toBe(true);
+    }
+    expect(await purchasesOf(disputed.accountId)).toEqual([]);
+    expect(
+      await database
+        .select()
+        .from(billingSubscriptionOffer)
+        .where(eq(billingSubscriptionOffer.subscriptionId, disputed.subscriptionId)),
+    ).toEqual([]);
     expect(createPostCount + updatePostCount).toBe(posts);
-    expect(await offerStateFor(paused.subscriptionId)).not.toBe('confirmed');
+
+    expect(bystanderTopup).toMatchObject({ status: 'fulfilled', value: { state: 'prepared' } });
+    expect(owedTopup).toMatchObject({ state: 'prepared' });
+    expect(await purchasesOf(bystander.accountId)).toEqual([expect.objectContaining({ state: 'prepared' })]);
+    expect(await purchasesOf(owed.accountId)).toEqual([expect.objectContaining({ state: 'prepared' })]);
   });
 
   it('still qualifies an already dispatched schedule against a closed account without a new POST', async () => {
@@ -421,6 +466,7 @@ describe('billing renewal native foundation', { concurrent: false }, () => {
 });
 
 type OwnedSubscription = {
+  readonly userId: string;
   readonly accountId: string;
   readonly bindingId: string;
   readonly customerId: string;
@@ -468,7 +514,21 @@ async function seedSubscription(): Promise<OwnedSubscription> {
     status: 'active',
   });
   remotes.set(remoteSubscriptionId, { customer: customerId, livemode: false, itemId, priceId: 'price_old' });
-  return { accountId, bindingId, customerId, subscriptionId, remoteSubscriptionId, itemId };
+  return { userId, accountId, bindingId, customerId, subscriptionId, remoteSubscriptionId, itemId };
+}
+
+/** A hosted top-up on the account's bound Customer; preparation writes local rows only. */
+async function prepareTopup(owned: OwnedSubscription) {
+  return payments.prepareTopup(owned.userId, {
+    requestId: randomUUID(),
+    returnPath: '/settings/billing',
+    amountMinor: '500',
+    method: 'checkout',
+  });
+}
+
+async function purchasesOf(accountId: string): Promise<Array<typeof billingPurchase.$inferSelect>> {
+  return database.select().from(billingPurchase).where(eq(billingPurchase.accountId, accountId));
 }
 
 async function prepare(owned: OwnedSubscription): Promise<unknown> {
@@ -547,14 +607,14 @@ async function offerStateFor(subscriptionId: string): Promise<string> {
   return row.state;
 }
 
-async function seedCashCase(accountId: string): Promise<void> {
+async function seedCashCase(accountId: string, kind = 'gross_fee_net_mismatch'): Promise<void> {
   await database.insert(billingFinancialCase).values({
     id: randomUUID(),
     environment: 'development',
     stripeAccountId,
     livemode: false,
-    kind: 'gross_fee_net_mismatch',
-    dedupeKey: `renewal-pause:${accountId}`,
+    kind,
+    dedupeKey: `renewal-case:${kind}:${accountId}`,
     accountId,
     evidence: { kind: 'local_fixture' },
     owner: 'finance',

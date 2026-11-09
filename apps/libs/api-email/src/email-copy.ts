@@ -26,7 +26,7 @@ export const expiresIn = (kind: TokenLifetimeKind): string => describeDuration(t
 
 /** Footer strings, shared by every template. Operator ruling 2026-09-16 (OQ3) fixes the entity line. */
 export const footerCopy = {
-  entity: 'Tau · taucad limited · Auckland, New Zealand',
+  entity: 'Tau · TAUCAD LIMITED · Auckland, New Zealand',
   helpUrl: 'https://docs.tau.new',
 } as const;
 

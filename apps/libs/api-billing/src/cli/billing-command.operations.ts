@@ -15,18 +15,41 @@ type UnpricedOperations = {
   readonly operations: number;
 };
 
+/** Open or attention financial cases of one kind and attribution. */
+type OpenCases = {
+  readonly kind: string;
+  /** Whether the cases name an account; an unattributed case is operator work that pages at once. */
+  readonly attributed: boolean;
+  readonly open: number;
+  /** Seconds since the oldest of these cases was first seen. */
+  readonly oldestAgeSeconds: number;
+};
+
 /** The hourly gauges' two reads, separated from the recording so the pass can be tested without a database. */
 export type OperationsGaugeSource = {
-  /** Open or attention financial cases of this environment, per kind. */
-  readonly openCases: () => Promise<ReadonlyArray<{ readonly kind: string; readonly open: number }>>;
+  /** Open or attention financial cases of this environment, per kind and attribution. */
+  readonly openCases: () => Promise<readonly OpenCases[]>;
   /** Terminal operations of this environment whose receipt carries no supplier cost, per provider, SKU and reason. */
   readonly unpricedOperations: () => Promise<readonly UnpricedOperations[]>;
 };
 
 export type OperationsGaugeMetrics = Pick<
   MetricsService,
-  'billingOpenFinancialCases' | 'billingSupplierUnpricedOperations'
+  'billingOpenFinancialCases' | 'billingOpenFinancialCaseAge' | 'billingSupplierUnpricedOperations'
 >;
+
+/**
+ * Every case kind the hourly pass reports, so each gets a zero for both attribution values and a rule
+ * on it reads Normal rather than NoData: the cash, purchase and journal kinds, tax registration review
+ * (`billing-tax.service.ts`) and the supplier invoice check (`billing-supplier-reconciliation.service.ts`).
+ */
+const reportedFinancialCaseKinds: readonly string[] = [
+  ...cashBlockingFinancialCaseKinds,
+  'tax_registration_review',
+  'supplier_invoice_total_mismatch',
+];
+
+const attributionValues = [true, false] as const;
 
 /**
  * Reads the gauges from the durable tables, so operations settled by recovery count the same as live ones.
@@ -38,10 +61,13 @@ export const createOperationsGaugeSource = (
   sql: postgres.Sql,
   environment: FinancialEnvironment,
 ): OperationsGaugeSource => ({
-  openCases: async () => sql<Array<{ kind: string; open: number }>>`
-    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
+  // `first_seen_at`, not `first_effective_at`: the effective time is the scan window start, a day old on a first pass.
+  openCases: async () => sql<OpenCases[]>`
+    SELECT kind, account_id IS NOT NULL AS attributed, count(*)::int AS open,
+      extract(epoch FROM clock_timestamp() - min(first_seen_at))::int AS "oldestAgeSeconds"
+    FROM billing.billing_financial_case
     WHERE environment = ${environment} AND state IN ('open', 'attention')
-    GROUP BY kind`,
+    GROUP BY kind, attributed`,
   unpricedOperations: async () => sql<UnpricedOperations[]>`
     SELECT provider_id AS provider, sku, supplier_cost_unpriced_reason AS reason, count(*)::int AS operations
     FROM billing.credit_operation
@@ -51,12 +77,16 @@ export const createOperationsGaugeSource = (
 });
 
 /**
- * Records the open-case gauge per kind and the unpriced-operation gauge per provider, SKU and reason.
+ * Records the open-case count and oldest-case age gauges per kind and attribution, and the
+ * unpriced-operation gauge per provider, SKU and reason.
  *
- * A paid obligation with no grant (for example a lost success webhook) holds the customer's money
- * without credit; the per-kind gauge is what the alert watches. The unpriced gauge is the durable
- * cross-check of the supplier meter: a cut stream or an unpriced dimension leaves a receipt with no
- * supplier cost, and the monthly invoice check cannot see what it does not count.
+ * A case that names no account is operator work nobody else will see, so its attribution is a label
+ * the paging rule selects on, and each pass also writes it to stderr as a `billing.alert`. The age
+ * gauge lets a rule ask "open for a day" without a `for:` that a restart resets. A paid obligation
+ * with no grant (for example a lost success webhook) holds the customer's money without credit. The
+ * unpriced gauge is the durable cross-check of the supplier meter: a cut stream or an unpriced
+ * dimension leaves a receipt with no supplier cost, and the monthly invoice check cannot see what it
+ * does not count.
  */
 export const recordOpenCases = async (input: {
   readonly source: OperationsGaugeSource;
@@ -64,10 +94,30 @@ export const recordOpenCases = async (input: {
   readonly environment: FinancialEnvironment;
 }): Promise<void> => {
   const openCases = await input.source.openCases();
-  for (const kind of new Set([...cashBlockingFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
-    input.metrics.billingOpenFinancialCases.record(openCases.find((row) => row.kind === kind)?.open ?? 0, { kind });
+  let unattributed = 0;
+  let unfulfilled = 0;
+  for (const row of openCases) {
+    unattributed += row.attributed ? 0 : row.open;
+    unfulfilled += row.kind === 'unfulfilled_purchase_obligation' ? row.open : 0;
   }
-  const unfulfilled = openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
+  for (const kind of new Set([...reportedFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
+    for (const attributed of attributionValues) {
+      const row = openCases.find((candidate) => candidate.kind === kind && candidate.attributed === attributed);
+      const attributes = { kind, attributed: String(attributed) };
+      input.metrics.billingOpenFinancialCases.record(row?.open ?? 0, attributes);
+      input.metrics.billingOpenFinancialCaseAge.record(row?.oldestAgeSeconds ?? 0, attributes);
+    }
+  }
+  if (unattributed > 0) {
+    console.error(
+      JSON.stringify({
+        event: 'billing.alert',
+        environment: input.environment,
+        kind: 'unattributed_financial_case',
+        open: unattributed,
+      }),
+    );
+  }
   if (unfulfilled > 0) {
     console.error(
       JSON.stringify({

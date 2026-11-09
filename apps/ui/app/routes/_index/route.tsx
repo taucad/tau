@@ -1,8 +1,11 @@
+import { useEffect } from 'react';
 import type { MetaFunction } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
 import type { Handle } from '#types/matches.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { setEntryPreference } from '#lib/entry-preference.js';
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },
@@ -16,10 +19,34 @@ export const handle: Handle = {
 
 /** Session-neutral app home; the marketing site (`apps/www`) is served by the edge before this app. */
 export default function WebHome(): React.JSX.Element {
+  useAppEntryParameter();
   return (
     <div className='pb-10'>
       <HomepageChatHero />
       <ProjectLibrary headingLevel={2} />
     </div>
   );
+}
+
+/**
+ * Marketing links reach Home as `/?app` so they work even where their click hook could not write the app preference
+ * (a new tab, a modified click, blocked cookies). Record the preference here and drop the marker from the address.
+ */
+function useAppEntryParameter(): void {
+  const [searchParameters, setSearchParameters] = useSearchParams();
+  const hasAppParameter = searchParameters.has('app');
+  useEffect(() => {
+    if (!hasAppParameter) {
+      return;
+    }
+    setEntryPreference('app');
+    setSearchParameters(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete('app');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [hasAppParameter, setSearchParameters]);
 }

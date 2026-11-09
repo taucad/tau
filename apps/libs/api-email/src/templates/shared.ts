@@ -222,7 +222,7 @@ export const tauEmailLayout = ({
           createElement(
             Text,
             { className: 'tau-muted', style: styles.footerText },
-            'Tau · taucad limited · Auckland, New Zealand',
+            'Tau · TAUCAD LIMITED · Auckland, New Zealand',
           ),
           createElement(
             Text,

@@ -181,7 +181,8 @@ export class TelemetryController {
     entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
     durationSeconds: number,
   ): void {
-    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens, context } = entry.detail;
+    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens, safeguards, compactions, context } =
+      entry.detail;
     const agent = { [AttributeKey.AGENT_ID]: recordedAgentId(entry.detail.agentId) };
     const placed = { ...agent, [AttributeKey.AGENT_PLACEMENT]: placement };
     const turn = { ...placed, [AttributeKey.AGENT_OUTCOME]: outcome };
@@ -212,6 +213,21 @@ export class TelemetryController {
           this.metrics.agentTokens.add(count, { ...agent, [AttributeKey.AGENT_TOKEN_TYPE]: tokenType });
         }
       }
+    }
+    for (const { pattern, action, count } of safeguards ?? []) {
+      this.metrics.agentSafeguardInterventions.add(count, {
+        ...agent,
+        [AttributeKey.AGENT_SAFEGUARD_PATTERN]: pattern,
+        [AttributeKey.AGENT_SAFEGUARD_ACTION]: action,
+      });
+    }
+    for (const { lane, tier, outcome: compactionOutcome, count } of compactions ?? []) {
+      this.metrics.agentCompactions.add(count, {
+        ...agent,
+        [AttributeKey.AGENT_COMPACTION_LANE]: lane,
+        [AttributeKey.AGENT_COMPACTION_TIER]: tier,
+        [AttributeKey.AGENT_COMPACTION_OUTCOME]: compactionOutcome,
+      });
     }
     if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
       this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });

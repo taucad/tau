@@ -49,8 +49,6 @@ export type TessellationReport = Readonly<{
    * Absent means the uniform mesh.
    */
   adaptivity?: number;
-  /** Whether the adaptive mesh relaxed disoriented triangles; voxel kernels only, present only with `adaptivity`. */
-  relax?: boolean;
   /** The requested tessellation form: a quality preset name, or `'explicit'` for explicit tolerances. */
   requested?: 'low' | 'medium' | 'high' | 'extra-high' | 'explicit';
   /** Absolute chordal deviation in millimetres the mesh was produced at. */

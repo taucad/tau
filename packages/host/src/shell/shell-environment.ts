@@ -68,7 +68,8 @@ export const shellEnvironment = (options: ShellEnvironmentOptions): Readonly<Rec
     LANG: options.platform === 'darwin' && locale === 'C.UTF-8' ? 'en_US.UTF-8' : locale,
     SHELL: options.executablePath,
     TERM: options.terminal ? 'xterm-256color' : 'dumb',
-    ...(options.terminal ? { COLORTERM: 'truecolor' } : {}),
+    /* BSD `ls` on macOS colours its listing only under CLICOLOR; GNU tools ignore it. */
+    ...(options.terminal ? { COLORTERM: 'truecolor', CLICOLOR: '1' } : {}),
     ...plain('USER'),
     ...plain('LOGNAME'),
   };

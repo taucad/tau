@@ -99,6 +99,23 @@ it.each(['staging', 'production'] as const)('labels %s crash reports with the pa
   expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ environment: channel, sendDefaultPii: false }));
 });
 
+it('reports the release the workflow baked in, never the SDK default', async () => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  vi.stubGlobal('tauSentryRelease', 'tau-desktop@0.1.0-staging.894');
+  const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
+  initializeDesktopErrorReporting('staging');
+  expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ release: 'tau-desktop@0.1.0-staging.894' }));
+});
+
+it('leaves the release to the SDK when the build named none', async () => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  vi.stubGlobal('tauSentryRelease', '');
+  const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
+  initializeDesktopErrorReporting('production');
+  expect(initialize).toHaveBeenCalledOnce();
+  expect(initialize.mock.calls[0]?.[0]).not.toHaveProperty('release');
+});
+
 it.each(['staging', 'production'] as const)('labels an automated %s run apart from real use', async (channel) => {
   vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
   const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');

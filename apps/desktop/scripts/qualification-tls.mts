@@ -10,17 +10,53 @@ export type QualificationTlsOwner = {
   platform: NodeJS.Platform;
   home: string;
   execute(name: string, args: string[]): string;
+  /**
+   * Create the Linux NSS directory when missing and report whether it is empty. Defaults to this process's own
+   * filesystem access; a consumer's home is only reachable as that consumer.
+   */
+  prepareNssDirectory?(path: string): Promise<boolean>;
+};
+const nativeExecute = (name: string, args: string[]): string =>
+  execFileSync(name, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 30_000,
+  });
+/** Create this process's NSS directory and report whether it was empty before trust is added. */
+const emptyNssDirectory = async (path: string): Promise<boolean> => {
+  await mkdir(path, { recursive: true });
+  const entries = await readdir(path);
+  return entries.length === 0;
 };
 const nativeOwner = (): QualificationTlsOwner => ({
   platform: process.platform,
   home: process.env['HOME'] ?? process.env['USERPROFILE'] ?? '',
-  execute: (name, args) =>
-    execFileSync(name, args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 30_000,
-    }),
+  execute: nativeExecute,
 });
+/**
+ * Linux clean host: the consumer's browser and app read their own NSS database, so its trust entry is added and removed
+ * as that consumer; the system store and certificate generation stay with this administrator process.
+ */
+export const linuxConsumerTlsOwner = (name: string): QualificationTlsOwner => {
+  if (process.platform !== 'linux' || !/^[a-z_][a-z\d_-]{0,31}$/u.test(name)) {
+    throw new Error('Invalid Linux consumer trust owner');
+  }
+  const fields = nativeExecute('getent', ['passwd', name]).trim().split(':');
+  const home = fields[5] ?? '';
+  if (fields[0] !== name || !isAbsolute(home)) {
+    throw new Error('Linux consumer account unavailable');
+  }
+  const asConsumer = (args: string[]): string =>
+    nativeExecute('sudo', ['-n', '-u', name, '--', '/usr/bin/env', '-i', `HOME=${home}`, ...args]);
+  return {
+    platform: 'linux',
+    home,
+    execute: (command, args) =>
+      command === 'certutil' ? asConsumer(['certutil', ...args]) : nativeExecute(command, args),
+    prepareNssDirectory: async (path) =>
+      asConsumer(['/bin/sh', '-c', 'mkdir -p -m 700 -- "$1" && ls -A -- "$1"', 'sh', path]).trim().length === 0,
+  };
+};
 const operationSchema = z.enum(['nss', 'windows', 'macSystemTrust', 'linuxFile', 'linuxRefresh']);
 /*
  * A hosted macOS runner has no session that can answer a trust-settings authorization: user-domain
@@ -350,12 +386,11 @@ export const prepareQualificationTls = async (
       }
       case 'linux': {
         const nssDirectory = join(owner.home, '.pki/nssdb');
-        await mkdir(nssDirectory, { recursive: true });
+        const empty = await (owner.prepareNssDirectory ?? emptyNssDirectory)(nssDirectory);
         try {
           command('certutil', ['-L', '-d', `sql:${nssDirectory}`]);
         } catch (error) {
-          const existing = await readdir(nssDirectory);
-          if (existing.length > 0) {
+          if (!empty) {
             throw new Error('Refusing to initialize an existing unreadable NSS trust database', { cause: error });
           }
           command('certutil', ['-N', '--empty-password', '-d', `sql:${nssDirectory}`]);

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation */
 import { describe, it, expect, vi } from 'vitest';
 import type { TelemetryBackend } from '#reporter.js';
 import { createReporter } from '#reporter.js';
@@ -58,11 +57,11 @@ describe('createReporter', () => {
     const backend = createMockBackend();
     const reporter = createReporter(backend, TauMetrics);
 
-    reporter['genAiToolInvocations']!(1, { 'gen_ai.tool.name': 'render' });
+    reporter['agentToolCalls']!(1, { 'agent.id': 'tau' });
     expect(backend.recordCounter).toHaveBeenCalledWith(
-      'gen_ai.tool.invocations',
+      'tau.agent.tool_calls',
       1,
-      expect.objectContaining({ 'gen_ai.tool.name': 'render' }),
+      expect.objectContaining({ 'agent.id': 'tau' }),
     );
   });
 

@@ -230,6 +230,10 @@ AI Agent › Evidence Admissions by Outcome
 AI Agent › Evidence Deliveries by Outcome
 AI Agent › Langfuse Erasure Steps by Outcome
 
+# Agent loop (R9): these fill only when a safeguard fires or a compaction runs in a funded chat.
+Agents & Codex Usage › Safeguard Interventions by Pattern
+Agents & Codex Usage › Compaction Decisions by Lane and Tier
+
 # Agent prompt cache (prompt caching program R3). The turn-step series need the agent host's x-tau-turn-step and
 # x-tau-turn-gap headers (R1), and the 1-hour write panel needs the Anthropic 1-hour cache tier (W2.2 transport).
 Agent prompt cache › First-Step Cache-Hit Share (24h)

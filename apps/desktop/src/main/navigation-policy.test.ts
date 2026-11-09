@@ -9,6 +9,7 @@ import {
   isRendererUrl,
   isTrustedSender,
   navigationDecision,
+  postHogConnectOrigins,
   rendererOrigins,
 } from '#main/navigation-policy.js';
 
@@ -74,6 +75,26 @@ describe('isTrustedSender', () => {
   it('refuses a document that navigated away, and an absent frame', () => {
     expect(isTrustedSender({ url: 'https://example.com/' }, production)).toBe(false);
     expect(isTrustedSender(undefined, production)).toBe(false);
+  });
+});
+
+describe('postHogConnectOrigins', () => {
+  it.each([
+    ['https://us.i.posthog.com', ['https://us.i.posthog.com', 'https://us-assets.i.posthog.com']],
+    ['https://eu.i.posthog.com/', ['https://eu.i.posthog.com', 'https://eu-assets.i.posthog.com']],
+    ['https://ph.example.com/ingest', ['https://ph.example.com']],
+  ] as const)('should grant %s and the host its remote config comes from', (apiHost, origins) => {
+    expect(postHogConnectOrigins(apiHost)).toEqual(origins);
+    const sources = contentSecurityPolicy(postHogConnectOrigins(apiHost))
+      .split('; ')
+      .find((entry) => entry.startsWith('connect-src '))!
+      .split(' ');
+    expect(sources).toEqual(expect.arrayContaining([...origins]));
+  });
+
+  it('should grant nothing for a missing or unusable host', () => {
+    expect(postHogConnectOrigins(undefined)).toEqual([]);
+    expect(postHogConnectOrigins('not a url')).toEqual([]);
   });
 });
 

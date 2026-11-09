@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { linuxInstallation } from '#shared/linux-installation.js';
 
 /** Distribution identity shared by packaging, publishing and the installed updater. */
 export type DesktopReleaseChannel = 'production' | 'staging';
@@ -268,6 +269,73 @@ const windowsConsumerReceiptSchema = z.strictObject({
     .length(2),
 });
 
+/** Stock `kernel.apparmor_restrict_unprivileged_userns`: Ubuntu restricts, Debian ships no such restriction. */
+export const linuxStockUsernsRestriction = (id: 'ubuntu' | 'debian'): readonly string[] =>
+  id === 'ubuntu' ? ['1'] : ['absent', '0'];
+/** Software rasterizers never count as stock GPU graphics. */
+export const linuxSoftwareRendererPattern = /llvmpipe|softpipe|swiftshader|lavapipe|software rasterizer/iu;
+/**
+ * The qualified GPU: the tau-cloud hosts carry an NVIDIA Tesla T4, so a virtual (virgl), layered (zink) or other
+ * renderer is not stock hardware rendering even when it is not a software rasterizer.
+ */
+export const linuxGpuRendererPattern = /NVIDIA|Tesla T4/u;
+/** Paravirtual, layered or translated GL renderers: not the host GPU's own driver even when they name it. */
+const linuxVirtualRendererPattern = /virgl|virtio|zink|d3d12|svga|vmware|parallels|microsoft basic/iu;
+/** A renderer string from the qualified GPU's own driver: the T4, and neither software nor virtual. */
+export const isLinuxStockGpuRenderer = (value: string): boolean =>
+  linuxGpuRendererPattern.test(value) &&
+  !linuxSoftwareRendererPattern.test(value) &&
+  !linuxVirtualRendererPattern.test(value);
+/** The tau-cloud GPU host template family for each qualified distribution release. */
+const linuxCleanHostTemplates = {
+  ubuntu: { '24.04': 'ubuntu2404', '26.04': 'ubuntu2604' },
+  debian: { '13': 'debian13' },
+} as const;
+const linuxBrowserDownloadSchema = z.strictObject({
+  stage: z.enum(['initial', 'reinstall']),
+  name: z.string().min(1),
+  sha256: digestSchema,
+  size: z.number().int().positive(),
+  /** Path of the real-browser download on the run's loopback mirror. */
+  urlPath: z.string().startsWith('/releases/'),
+  browser: z.string().min(1),
+  /** The consumer made the browser-written AppImage executable; Debian packages are never executed. */
+  madeExecutable: z.boolean(),
+});
+/** Clean-host facts a Linux `vm` receipt carries: a standard consumer on a stock, GPU-rendering distribution host. */
+const linuxCleanHostReceiptSchema = z.strictObject({
+  platform: z.literal('linux'),
+  runner: z.string().min(1),
+  nativeArch: z.literal('x64'),
+  host: z.strictObject({
+    provider: z.literal('gcp'),
+    template: z.string().regex(/^ci-gpu-(?:ubuntu2404|ubuntu2604|debian13)-[a-z\d-]+$/u),
+    instance: z.string().regex(/^[a-z](?:[a-z\d-]{0,61}[a-z\d])?$/u),
+    zone: z.string().regex(/^[a-z]+-[a-z]+\d+-[a-z]$/u),
+  }),
+  distribution: z.strictObject({ id: z.enum(['ubuntu', 'debian']), versionId: z.enum(['24.04', '26.04', '13']) }),
+  kernel: z.string().min(1),
+  appArmor: z.literal('enabled'),
+  /** Identical before, during and after the run, and the distribution's stock value. */
+  usernsRestriction: z.enum(['1', '0', 'absent']),
+  graphics: z.strictObject({
+    mode: z.literal('stock'),
+    glRenderer: z.string().min(1),
+    webglRenderer: z.string().min(1),
+  }),
+  account: z.strictObject({
+    name: z.string().min(1),
+    uid: z.number().int().min(1000),
+    administrator: z.literal(false),
+  }),
+  /** The administrator only installs the consumer's downloaded packages, which enrolls the signed repository. */
+  consent: z.strictObject({ account: z.string().min(1), step: z.literal('apt-install-browser-downloads') }),
+  downloads: z.array(linuxBrowserDownloadSchema).min(4),
+  installedPath: z.string().regex(/^\/usr\/bin\/tau(?:-staging)?(?:-appimage)?$/u),
+  desktopEntry: z.string().regex(/^\/usr\/share\/applications\/tau(?:-staging)?(?:-appimage)?\.desktop$/u),
+  launch: z.literal('desktop-entry'),
+});
+
 const receiptSchema = z.strictObject({
   schemaVersion: z.literal(1),
   status: z.literal('passed'),
@@ -285,7 +353,13 @@ const receiptSchema = z.strictObject({
     arch: z.enum(['arm64', 'x64']),
     kind: z.enum(['ci', 'vm']),
     sandbox: z.literal('enabled'),
-    host: z.discriminatedUnion('platform', [macosCleanHostReceiptSchema, windowsConsumerReceiptSchema]).optional(),
+    host: z
+      .discriminatedUnion('platform', [
+        macosCleanHostReceiptSchema,
+        windowsConsumerReceiptSchema,
+        linuxCleanHostReceiptSchema,
+      ])
+      .optional(),
   }),
   trust: z.strictObject({ kind: z.enum(['test', 'release']), identity: z.string().min(1) }),
   checks: z.strictObject({ cleanInstall: z.literal(true), upgrade: z.literal(true), dataPreserved: z.literal(true) }),
@@ -293,6 +367,44 @@ const receiptSchema = z.strictObject({
   logs: z.string().min(1),
 });
 export type DesktopAcceptanceReceipt = z.infer<typeof receiptSchema>;
+type LinuxCleanHostReceipt = z.infer<typeof linuxCleanHostReceiptSchema>;
+
+/** A Linux row is internally consistent: its route's launcher, its distribution's stock policy and both download sets. */
+const assertLinuxCleanHostReceipt = (receipt: DesktopAcceptanceReceipt, host: LinuxCleanHostReceipt): void => {
+  const linuxRoute = receipt.route === 'linux-apt' || receipt.route === 'linux-appimage';
+  const { name, launcher } = linuxInstallation(receipt.channel, receipt.route === 'linux-appimage');
+  const kinds: readonly DesktopArtifactKind[] = linuxRoute ? desktopAcceptanceRoutes[receipt.route] : [];
+  const downloads = (stage: 'initial' | 'reinstall') => host.downloads.filter((entry) => entry.stage === stage);
+  const templates: Partial<Record<string, string>> = linuxCleanHostTemplates[host.distribution.id];
+  // The receipt's OS observation (`<kernel> <os-release>`) is the same host the facts describe.
+  const { os } = receipt.environment;
+  const release = new Set(os.split(/\r?\n/u).map((line) => line.trim()));
+  const { id, versionId } = host.distribution;
+  if (
+    !linuxRoute ||
+    !os.startsWith(`${host.kernel} `) ||
+    !release.has(`ID=${id}`) ||
+    !(release.has(`VERSION_ID="${versionId}"`) || release.has(`VERSION_ID=${versionId}`)) ||
+    host.installedPath !== launcher ||
+    host.desktopEntry !== `/usr/share/applications/${name}.desktop` ||
+    !linuxStockUsernsRestriction(host.distribution.id).includes(host.usernsRestriction) ||
+    !host.host.template.startsWith(`ci-gpu-${templates[host.distribution.versionId] ?? 'unqualified'}-`) ||
+    ![host.graphics.glRenderer, host.graphics.webglRenderer].every((value) => isLinuxStockGpuRenderer(value)) ||
+    !host.graphics.webglRenderer.includes(host.graphics.glRenderer.split('/')[0]!.trim()) ||
+    host.account.name === host.consent.account ||
+    downloads('initial').length !== kinds.length ||
+    downloads('reinstall').length !== kinds.length ||
+    !downloads('initial').some((entry) => entry.sha256 === receipt.baseline.artifactSha256) ||
+    receipt.artifacts.some(
+      (proof) => !downloads('reinstall').some((entry) => entry.name === proof.name && entry.sha256 === proof.sha256),
+    ) ||
+    host.downloads.some(
+      (entry) => entry.madeExecutable !== entry.name.endsWith('.AppImage') || !entry.urlPath.endsWith(`/${entry.name}`),
+    )
+  ) {
+    throw new TypeError('Linux clean-host facts disagree with the receipt route, distribution or downloads');
+  }
+};
 
 /** Bind untrusted installed-acceptance evidence to this exact candidate, route and architecture. */
 export const parseDesktopAcceptanceReceipt = (input: unknown, candidate: unknown): DesktopAcceptanceReceipt => {
@@ -309,11 +421,9 @@ export const parseDesktopAcceptanceReceipt = (input: unknown, candidate: unknown
     throw new TypeError('Acceptance receipt identity disagrees with candidate');
   }
   const { host } = receipt.environment;
-  // Each supported consumer platform requires its own facts; CI receipts never claim them.
+  // Every consumer receipt requires its own platform's facts; CI receipts never claim them.
   if (
-    (receipt.environment.kind === 'vm' &&
-      (receipt.target.startsWith('darwin-') || receipt.target === 'win32-x64') &&
-      !host) ||
+    (receipt.environment.kind === 'vm' && !host) ||
     (host && (receipt.environment.kind !== 'vm' || `${host.platform}-${host.nativeArch}` !== receipt.target))
   ) {
     throw new TypeError('Clean-host receipt facts disagree with its environment');
@@ -335,6 +445,9 @@ export const parseDesktopAcceptanceReceipt = (input: unknown, candidate: unknown
       ))
   ) {
     throw new TypeError('Windows consumer manual evidence disagrees with its candidate or run');
+  }
+  if (host?.platform === 'linux') {
+    assertLinuxCleanHostReceipt(receipt, host);
   }
   const baseline = receipt.baseline.version.split('.').map(Number);
   const next = receipt.version.split('.').map(Number);

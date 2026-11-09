@@ -50,26 +50,9 @@ describe('MetricsService', () => {
       expect(service.genAiCost).toBeDefined();
     });
 
-    it('should create genAiToolInvocations counter', () => {
-      expect(service.genAiToolInvocations).toBeDefined();
-    });
-
-    it('should create genAiToolDuration histogram', () => {
-      expect(service.genAiToolDuration).toBeDefined();
-    });
-
-    it('should create genAiToolInputRepairs counter', () => {
-      expect(service.genAiToolInputRepairs).toBeDefined();
-      expect(() => service.genAiToolInputRepairs.add(1)).not.toThrow();
-    });
-
     it('should create tool-result media preservation counter', () => {
       expect(service.chatToolResultMediaPreserved).toBeDefined();
       expect(() => service.chatToolResultMediaPreserved.add(1)).not.toThrow();
-    });
-
-    it('should create genAiAgentIterations histogram', () => {
-      expect(service.genAiAgentIterations).toBeDefined();
     });
 
     it('should create genAiPromptSectionSize histogram', () => {
@@ -77,11 +60,14 @@ describe('MetricsService', () => {
       expect(() => service.genAiPromptSectionSize.record(1234)).not.toThrow();
     });
 
-    it('should create context budget and compaction metrics', () => {
+    it('should create the context budget histogram', () => {
       expect(service.genAiContextBudgetTokens).toBeDefined();
-      expect(service.genAiContextCompactionDecisions).toBeDefined();
       expect(() => service.genAiContextBudgetTokens.record(1234)).not.toThrow();
-      expect(() => service.genAiContextCompactionDecisions.add(1)).not.toThrow();
+    });
+
+    it('should create the client-reported safeguard and compaction counters (R9)', () => {
+      expect(() => service.agentSafeguardInterventions.add(1)).not.toThrow();
+      expect(() => service.agentCompactions.add(1)).not.toThrow();
     });
 
     it('should create content-free funded-operation metrics', () => {

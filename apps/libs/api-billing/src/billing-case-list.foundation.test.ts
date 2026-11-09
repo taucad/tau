@@ -195,17 +195,15 @@ describe('financial case listing foundation', () => {
   it('should close an unattributed case with resolve-case resolved through the lifecycle command alone', async () => {
     const scope = { environment: 'staging', stripeAccountId: `acct_resolve_${randomUUID()}`, livemode: false } as const;
     const caseId = randomUUID();
-    await database
-      .insert(schema.billingFinancialCase)
-      .values(
-        caseRow({
-          scope,
-          id: caseId,
-          kind: 'missing_local_payment',
-          sourceType: 'payment_intent',
-          sourceId: `pi_${randomUUID()}`,
-        }),
-      );
+    await database.insert(schema.billingFinancialCase).values(
+      caseRow({
+        scope,
+        id: caseId,
+        kind: 'missing_local_payment',
+        sourceType: 'payment_intent',
+        sourceId: `pi_${randomUUID()}`,
+      }),
+    );
     // The read key alone: no write key and no collection, as an operator holds outside a collecting deployment.
     const lifecycle = async (request: Record<string, unknown>) =>
       runBillingLifecycleCommand({

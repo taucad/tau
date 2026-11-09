@@ -1,7 +1,7 @@
 /**
  * Totality baseline for the graphics machine (MC-R17). It locks today's answers before any state moves:
  * every public event is sampled in every reachable state, and each pair left unanswered must be on
- * `graphicsIgnoredEvents`. A later package that answers an event removes its pair; this file then fails until it does.
+ * `graphicsIgnoredEvents`. A later change that answers an event removes its pair; this file then fails until it does.
  *
  * The claim is bounded by the samples below, the projection (one snapshot per state value, the last one the traversal
  * reached) and the traversal limit. A silent `{}` branch that needs other context, such as a repeated

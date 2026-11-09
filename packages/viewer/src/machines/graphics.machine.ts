@@ -1907,7 +1907,7 @@ const graphicsMachineDefinition = setup({
 });
 
 /**
- * The (state, event) pairs the graphics machine leaves unanswered today (MC-R17): its totality baseline (G0.4). Each
+ * The (state, event) pairs the graphics machine leaves unanswered today (MC-R17): its totality baseline. Each
  * state is a dotted path or `'*'`. The list records the gaps without changing them; a later package that answers one of
  * these events removes its pair here, and the totality test fails on a stale pair or an unlisted gap.
  *

@@ -1,5 +1,5 @@
 /**
- * Totality baseline for the controls listener (G0.4, MC-R17): every public event is sampled in its one state, and each
+ * Totality baseline for the controls listener (MC-R17): every public event is sampled in its one state, and each
  * pair left unanswered must be on `controlsListenerIgnoredEvents`. Path table: 1. `active`, initial.
  */
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';

@@ -1,10 +1,12 @@
 /**
- * Totality baseline for the graphics machine (G0.4, MC-R17). It locks today's answers before any state moves (D14):
+ * Totality baseline for the graphics machine (MC-R17). It locks today's answers before any state moves:
  * every public event is sampled in every reachable state, and each pair left unanswered must be on
  * `graphicsIgnoredEvents`. A later package that answers an event removes its pair; this file then fails until it does.
  *
- * The claim is bounded by the samples below, the projection (one vertex per state value, reached by its shortest
- * path) and the traversal limit. Path table, kept current with `pathTable`:
+ * The claim is bounded by the samples below, the projection (one snapshot per state value, the last one the traversal
+ * reached) and the traversal limit. A silent `{}` branch that needs other context, such as a repeated
+ * `markModelPointerGestureMoved` or `commitSectionCuts`, is not sampled into silence. Path table (the shortest path to
+ * each state value), kept current with `pathTable`:
  *
  * 1. `section.off`, `measure.off`: initial
  * 2. `section.on`, `measure.off`: `setSectionViewActive(true)`

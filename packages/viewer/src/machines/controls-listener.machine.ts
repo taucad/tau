@@ -37,7 +37,7 @@ export const controlsListenerEventTypes = [
 ] as const satisfies ReadonlyArray<ControlsListenerEvent['type']>;
 
 /**
- * The (state, event) pairs the controls listener leaves unanswered today (MC-R17): its totality baseline (G0.4).
+ * The (state, event) pairs the controls listener leaves unanswered today (MC-R17): its totality baseline.
  * `stopListening` is the machine's message to its monitor, which the machine itself never handles.
  */
 export const controlsListenerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [

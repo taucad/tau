@@ -1,12 +1,12 @@
 {
   "darwin-arm64": {
     "closureIntegrity": "sha256-RWjlZIvzVv4vaWVS7JtebBACN3FlmfXOuSEnGLhx/W4=",
-    "treeIntegrity": "sha256-W+UebWDJyEnQECxBlKAJ0JlWay8DooW/RhXJ1vFgNe8=",
+    "treeIntegrity": "sha256-b5IQL1i860xmeMJoBXvSMluBi4mEN7NK49NIdjGwVW0=",
     "fileCount": 230
   },
   "linux-x64-glibc": {
     "closureIntegrity": "sha256-Kl+BS6fo9RD3NPtBh+s+kuFG2BMzlB6LRZge0F4/AVE=",
-    "treeIntegrity": "sha256-5wEONqqXqevK79Gr6jTkcyYthHTpM35wxavwn6Yk2aU=",
+    "treeIntegrity": "sha256-kBC01TWqFfBIYLp+M61/axtEdSSG4tcUv+6EaCY/CWI=",
     "fileCount": 231
   }
 }

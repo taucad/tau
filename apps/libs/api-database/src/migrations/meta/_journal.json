@@ -463,6 +463,13 @@
       "when": 1794112808571,
       "tag": "0066_drop_refund_intent",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794189301116,
+      "tag": "0067_supplier_contract",
+      "breakpoints": true
     }
   ]
 }

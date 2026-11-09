@@ -9,7 +9,6 @@ import {
   creditAccount,
   creditOperation,
   creditTransaction,
-  supplierCostEvidence,
   user,
 } from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#billing-policy.service.js';
@@ -492,9 +491,6 @@ describe('supplier invoice reconciliation', () => {
       operations: 1,
       unpricedOperations: 0,
     });
-    expect(
-      await database.select().from(supplierCostEvidence).where(eq(supplierCostEvidence.operationId, refused.id)),
-    ).toEqual([]);
     expect(
       await database
         .select()

@@ -8,6 +8,7 @@ related:
   - docs/research/ui-feature-library-architecture-blueprint.md
   - docs/research/api-module-layout-blueprint.md
   - docs/research/workspace-license-boundary-migration.md
+  - docs/research/package-library-policy-audit.md
   - docs/research/ci-decomposition-blueprint.md
   - docs/policy/library-api-policy.md
   - docs/policy/public-surface-policy.md
@@ -25,7 +26,7 @@ Nx caches, validates, and schedules work at project boundaries. Consistent place
 
 | Code being created                                    | Placement                 | Required tags                                     | Build           |
 | ----------------------------------------------------- | ------------------------- | ------------------------------------------------- | --------------- |
-| Published npm package                                 | `packages/<name>`         | `scope:shared type:package`                       | tsdown          |
+| Published npm package (Rule 0)                        | `packages/<name>`         | `scope:shared type:package`                       | tsdown          |
 | Apache capability shared by multiple apps or packages | `libs/<name>`             | `scope:shared type:lib`                           | tsdown          |
 | Private capability used by both UI and API            | `apps/libs/<name>`        | `scope:shared type:app-lib layer:<layer>`         | source-consumed |
 | UI feature, primitives, or data access                | `apps/libs/<name>`        | `scope:ui type:app-lib layer:<layer>`             | source-consumed |
@@ -36,6 +37,22 @@ Nx caches, validates, and schedules work at project boundaries. Consistent place
 | One-off script                                        | `scripts/`                | none                                              | none            |
 
 ## Rules
+
+### 0. Publish Only What Stands on Its Own
+
+A project is a published package (`packages/**`, `scope:shared type:package`, not `private`) only when its output stands on its own: something outside the workspace installs it by name, or the project is designed to be installed that way. That is a `bin` a user runs; a plugin or kernel under `packages/plugins/*` that defines a kernel, machine, bundler, middleware or transcoder plugin with a documented composition (`defineRuntime`, `tau --plugin`, `tau-plugin.json`, an agent plugin manifest), even while a first-party host still composes it by a hard-wired import; an SDK or embedding surface documented for outsiders; a product or brand surface, or a content package, that the project presents under its own name and that the operator has recorded as such in its README; or a runtime that a separately installed product loads. A capability with no such contract is a private library: `libs/<name>` (`scope:shared type:lib`, `private: true`) when packages or several apps consume it, or when it keeps a build, bundled into each publishable owner as a `workspace:` devDependency through `bundlePattern`; `apps/libs/<name>` when only applications consume it from source. A library may have several owners.
+
+A dependency with no contract of its own stays published only under one of three exceptions, each recorded in the package's README:
+
+- **Shared package.** Bundling a copy into each publishable owner would ship at least 100 kB of duplicated built output (`du -sk dist`) in the largest install that carries it (the CLI, the agent plugin, the React SDK, the host, a plugin author). Before a new shared helper becomes a package, check whether a peer every dependent already installs (`@taucad/runtime`) can carry it as a subpath; prefer the subpath to a new name.
+- **Singleton.** It holds state that must exist once per process or install: a `Symbol.for` or module-level registry, a path or plugin registry, classes checked with `instanceof` across packages, or a native or WASM payload.
+- **Peer contract.** Another publishable names it in `peerDependencies`, or a planned published package compiles against it, so plugins and providers see one type identity.
+
+A package that meets none of these is retired: its final version publishes once with a README pointer to the owner and is promoted to `latest` while it is still publishable; the project then moves to `libs/` or `apps/libs/`, becomes `private: true` and leaves the fixed train by its tag; the owner bundles it and re-exports what outside callers used; the name, final version and pointer go into `supersededPackages` in `scripts/src/promote-npm-train.ts`, which deprecates every published version on the next promotion and is the retired-name register; the operator revokes the name's trusted-publishing binding. `pkgcheck` refuses a bundle the owner's manifest does not permit.
+
+**Why**: a package costs an npm name and trusted-publishing binding, a train entry every release versions and publishes, `pkgcheck`, a size budget, a README quick start, a `check-pack-install` closure and a semver obligation to consumers nobody can see. A library costs bytes in its owners.
+
+**Enforced by**: `pkgcheck` (`tau-bundle-ownership`, `tau-bundled-artifact`), `create-package` (asks the audience question before generating), and the retirement procedure's `supersededPackages` register. A `check-release-projects` guard that refuses a publishable leaving the train unregistered is proposed in `docs/research/package-library-policy-audit.md` (R2) and is not yet enforced.
 
 ### 1. Place Code by Audience
 
@@ -124,6 +141,7 @@ It counts source files and `it`/`test` call sites (a static approximation of the
 
 ## Review Checklist
 
+- [ ] A new published package meets Rule 0 or records its exception in the README.
 - [ ] Placement matches the audience router.
 - [ ] `scope:`, `type:`, and required `layer:` tags are present exactly once.
 - [ ] Dependency direction satisfies the layer table.

@@ -41,7 +41,6 @@ import {
   billingBudget,
   billingBudgetFunding,
   billingFinancialCase,
-  supplierCostEvidence,
   billingPromotionIssuance,
   creditAccount,
   creditOperation,
@@ -1367,8 +1366,6 @@ it.each([
         supplierCostUnpricedReason: settled?.supplierCostUnpricedReason,
         terminalRevision: settled?.terminalRevision,
       });
-      // No supplier hold, finality state or supplier evidence is written on the way.
-      expect(settled).toMatchObject({ spendBudgetHoldId: null, riskBudgetHoldId: null, supplierState: null });
     } finally {
       const closed = once(server, 'close');
       server.close();
@@ -2039,7 +2036,7 @@ const resolveCases = async (ids: readonly string[] = openedCases): Promise<void>
 afterAll(async () => resolveCases());
 
 describe('funded admission reads no supplier state', () => {
-  it('should admit with no supplier budget, write no hold, and admit under an operator pause only once resumed', async () => {
+  it('should admit with no supplier budget, and admit under an operator pause only once resumed', async () => {
     const provider = await settlingProvider();
     const metrics = mockDeep<MetricsService>();
     const owner = createOwner(provider.url, 60_000, undefined, metrics);
@@ -2047,21 +2044,7 @@ describe('funded admission reads no supplier state', () => {
     try {
       const admitted = await settle(owner, fixture.authUserId);
       const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, admitted));
-      expect(operation).toMatchObject({
-        customerState: 'settled',
-        spendBudgetHoldId: null,
-        riskBudgetHoldId: null,
-        supplierState: null,
-      });
-      expect(
-        await database
-          .select()
-          .from(schema.billingBudgetHold)
-          .where(eq(schema.billingBudgetHold.operationId, admitted)),
-      ).toEqual([]);
-      expect(
-        await database.select().from(supplierCostEvidence).where(eq(supplierCostEvidence.operationId, admitted)),
-      ).toEqual([]);
+      expect(operation).toMatchObject({ customerState: 'settled' });
 
       const pause = await pauseRoute('operator review');
       const deniedKey = `paused-${randomUUID()}`;
@@ -2227,7 +2210,6 @@ describe('funded admission reads no supplier state', () => {
                 supplierCostUnpricedReason: null,
               },
         );
-        expect(recovered?.supplierState).toBeNull();
         // Nothing reads a terminal turn's age at admission any more; a later pass finds nothing to do for it.
         await ledger.recoverDueLlmOperations({ environment: 'development', limit: 100 });
         // What the retired supplier sweep opened a day later for such a turn no longer stops anyone.

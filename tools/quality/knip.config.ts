@@ -175,8 +175,9 @@ const config: KnipConfig = {
         'app/testing/project-deletion-process.ts',
       ],
       ignoreDependencies: [
-        // Imported by the source-consumed `api-observability` and `api-email` libraries the server bundle
-        // inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        // Imported by the source-consumed `api-observability`, `api-email` and `api-object-storage` libraries
+        // the server bundle inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        '@aws-sdk/s3-request-presigner',
         '@pyroscope/nodejs',
         '@sentry/node',
         'react-email',

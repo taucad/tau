@@ -243,10 +243,10 @@ const memberOrdering = [
  * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
  * instead names the API libraries it may depend on (the "May depend on" column of
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
- * project. Every edge points down `billing -> llm-gateway -> hosts -> auth ->
- * {database, email, redis} -> lifecycle -> observability -> core`; no library may
- * depend on the `api` app (its `type:app` tag is outside every `type:app-lib`
- * allowlist). Entries marked "measured" are downward edges the moved code already
+ * project. Every edge points down `object-storage -> billing -> llm-gateway -> hosts ->
+ * auth -> {database, email, redis} -> lifecycle -> observability -> core`, with `testing`
+ * beside `database`; no library may depend on the `api` app (its `type:app` tag is
+ * outside every `type:app-lib` allowlist). Entries marked "measured" are downward edges the moved code already
  * had that the blueprint's column did not list.
  */
 const apiLibraryDependencies = {
@@ -265,6 +265,12 @@ const apiLibraryDependencies = {
   'llm-gateway': ['hosts', 'auth', 'core', 'observability', 'lifecycle'],
   // measured: `createBillingTestApp` boots `RedisModule`.
   billing: ['llm-gateway', 'hosts', 'auth', 'database', 'email', 'core', 'observability', 'lifecycle', 'redis'],
+  // Shared test fixtures (ci-decomposition-blueprint P1-a): only the database and core, so a library's tests
+  // that import them gain no feature library in their dependency closure.
+  testing: ['database', 'core'],
+  // The object store, signed file links and storage accounting (P1-b). Git imports it, so it may not name
+  // git; accounting reads the subscription tier from billing and keeps its snapshots in Redis.
+  'object-storage': ['billing', 'database', 'redis', 'core', 'observability'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({

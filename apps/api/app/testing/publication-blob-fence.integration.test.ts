@@ -11,8 +11,8 @@ import { databaseReachable } from '@taucad/api-database/testing/database-reachab
 import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

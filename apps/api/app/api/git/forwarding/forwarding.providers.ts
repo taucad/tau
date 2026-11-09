@@ -5,7 +5,7 @@ import { ModuleRef } from '@nestjs/core';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { RedisService } from '@taucad/api-redis';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { developmentPublicKeysJson } from '#api/git/forwarding/contract/development-keys.js';

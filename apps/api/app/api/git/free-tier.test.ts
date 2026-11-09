@@ -5,7 +5,7 @@ import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import type { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import type { ProjectAccessService, ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type {

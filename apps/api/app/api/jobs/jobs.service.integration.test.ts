@@ -10,7 +10,7 @@ import { digestJobDefinition } from '@taucad/jobs';
 import type { Environment } from '@taucad/api-core';
 import { durableStreamEvent, jobArtifact, user } from '@taucad/api-database/schema';
 import { DatabaseService } from '@taucad/api-database';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import { jobArtifactStorageKey } from '#api/jobs/job-artifacts.js';
 import { JobsService } from '#api/jobs/jobs.service.js';

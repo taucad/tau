@@ -31,8 +31,8 @@ import {
 import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import type { ObjectStorageServiceContract, PutBlobResult } from '@taucad/api-object-storage';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import * as schema from '@taucad/api-database/schema';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;

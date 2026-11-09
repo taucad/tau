@@ -4,7 +4,7 @@ import { eq, lt } from 'drizzle-orm';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { projectGit, storageTombstone } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { lfsObjectLocations, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { writeSpilledPushLog } from '#api/git/store/commit.js';
 import { repositoryLocator } from '#api/git/store/locator.js';

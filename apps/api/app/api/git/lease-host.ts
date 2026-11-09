@@ -21,7 +21,7 @@ import { refusalFor } from '#api/git/git-refusals.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import type { PrereadManifest, RepositoryLease } from '#api/git/store/lease.js';
 import { PackCache } from '#api/git/store/pack-cache.js';
-import { repositoryByteCeiling } from '#api/git/store/limits.js';
+import { repositoryByteCeiling } from '@taucad/api-object-storage/repository-byte-ceiling';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';

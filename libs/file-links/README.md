@@ -2,7 +2,7 @@
 
 Signed download links for the Tau files service: HMAC-SHA256 link signing and verification on WebCrypto, shared by the API and the files Worker.
 
-The API (`apps/api/app/storage/file-links.service.ts`) signs, and the `files.<zone>` Worker (`apps/files`) verifies. Both use this library, so the link format has one definition. The code uses only `globalThis.crypto.subtle`, so it runs unchanged in Node and in Cloudflare Workers. The link format, bindings and error codes are in the [files Worker README](../../apps/files/README.md) and the [files service blueprint](../../docs/research/files-service-blueprint.md) §3.
+The API (`apps/libs/api-object-storage/src/file-links.service.ts`) signs, and the `files.<zone>` Worker (`apps/files`) verifies. Both use this library, so the link format has one definition. The code uses only `globalThis.crypto.subtle`, so it runs unchanged in Node and in Cloudflare Workers. The link format, bindings and error codes are in the [files Worker README](../../apps/files/README.md) and the [files service blueprint](../../docs/research/files-service-blueprint.md) §3.
 
 ## Entrypoints
 

@@ -5,14 +5,14 @@ import type { Database } from '@taucad/api-database/owner-lock';
 import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { project, projectGitLfsObject } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
 
 /*
  * Moved out of `lfs-keys.ts` unchanged (north star DC4): that module is on the
  * API's request path, and this one deletes the legacy key. Kept here, the
  * delete is reachable only from the maintenance image
- * (`app/storage/delete-reachability.test.ts`). It still has no subcommand
+ * (`app/delete-reachability.test.ts`). It still has no subcommand
  * (go-live STO-7).
  */
 

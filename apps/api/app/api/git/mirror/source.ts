@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
-import { isS3ObjectMissing } from '#storage/object-storage.service.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import { isS3ObjectMissing } from '@taucad/api-object-storage';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';

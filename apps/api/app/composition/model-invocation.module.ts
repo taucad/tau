@@ -9,8 +9,8 @@ import {
   ModelModule,
 } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
-import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
-import { ObservedModelInvocationService } from '#api/agent-observability/model-invocation-observer.js';
+import { ModelInvocationEvidenceRecorder } from '@taucad/api-agent-observability/model-invocation-recorder.service';
+import { ObservedModelInvocationService } from '@taucad/api-agent-observability/model-invocation-observer';
 import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 import type { Environment } from '@taucad/api-core';
 

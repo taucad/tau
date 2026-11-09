@@ -239,7 +239,8 @@ const memberOrdering = [
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
  * project. Every edge points down `git-mirror -> git-core -> object-storage -> billing ->
  * llm-gateway -> hosts -> auth -> {database, email, redis} -> lifecycle -> observability ->
- * core`, with `testing` beside `database`; no library but `api` imports `git-mirror`, and no
+ * core`, with `testing` beside `database` and `agent-observability` and `chat` beside
+ * `object-storage`; no library but `api` imports `git-mirror`, and no
  * library may depend on the `api` app (its `type:app` tag is
  * outside every `type:app-lib` allowlist). Entries marked "measured" are downward edges the moved code already
  * had that the blueprint's column did not list.
@@ -271,6 +272,11 @@ const apiLibraryDependencies = {
   'git-core': ['object-storage', 'database', 'redis', 'lifecycle', 'core', 'observability'],
   // The off-site mirror and the maintenance jobs (P1-c). Only the `api` app's command entries import it.
   'git-mirror': ['git-core', 'object-storage', 'database', 'core'],
+  // Evidence admission, delivery and erasure, the model-invocation recorder and telemetry purposes (P1-e).
+  // The app binds the recorder into the gateway's port (`composition/`); billing never imports it.
+  'agent-observability': ['billing', 'llm-gateway', 'hosts', 'auth', 'database', 'lifecycle', 'core', 'observability'],
+  // The chat controller and service (P1-e). measured: the billing-backed chat tests build `BillingModule`.
+  chat: ['billing', 'llm-gateway', 'auth', 'core', 'observability'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({

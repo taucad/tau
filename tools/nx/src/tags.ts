@@ -34,6 +34,8 @@ export const projectTagVocabulary = {
     'object-storage',
     'git-core',
     'git-mirror',
+    'agent-observability',
+    'chat',
   ],
   shell: ['sandbox', 'service', 'terminal'],
 } as const;

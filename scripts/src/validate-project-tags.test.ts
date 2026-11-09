@@ -64,8 +64,10 @@ describe('apiLibraryAppEdges()', () => {
     );
 
     expect(apiLibraries.toSorted()).toEqual([
+      'api-agent-observability',
       'api-auth',
       'api-billing',
+      'api-chat',
       'api-core',
       'api-database',
       'api-email',

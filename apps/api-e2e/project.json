@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
   "tags": ["scope:api", "type:e2e"],
-  "implicitDependencies": ["api"],
+  "implicitDependencies": ["api", "api-git-core", "api-git-mirror"],
   "targets": {
     "test:server-modes": {
       "executor": "nx:run-commands",

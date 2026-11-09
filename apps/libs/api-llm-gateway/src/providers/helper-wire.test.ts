@@ -64,7 +64,6 @@ describe('helperModelRoute', () => {
     ['anthropic', 'claude-haiku-5.5', 'anthropic'],
     ['vertexai', 'gemini-3.8-flash', 'openai-completions'],
     ['together', 'kimi-k3.1-pro', 'openai-completions'],
-    ['morph', 'deepseek-v4.1-flash', 'openai-completions'],
   ] as const)('should route %s %s to its provider model on its wire', (providerId, slug, wire) => {
     const row = catalogRow(providerId, slug);
 
@@ -82,6 +81,7 @@ describe('helperModelRoute', () => {
   it.each([
     ['cerebras', 'qwen-3-235b'],
     ['moonshot', 'kimi-k3'],
+    ['morph', 'deepseek-v4.1-flash'],
   ] as const)('should not route the disabled %s %s row', (providerId, slug) => {
     expect(helperModelRoute(catalogRow(providerId, slug))).toBeUndefined();
   });
@@ -236,7 +236,13 @@ describe('helperRequestBody', () => {
   });
 
   it('should send Morph the ceiling but not the row reasoning effort it never received', () => {
-    const body = bodyFor(catalogRow('morph', 'deepseek-v4.1-flash'));
+    // The row is disabled (taucad/tau#1687), so no listed model routes here today; the codec still owns its shape.
+    const row = catalogRow('morph', 'deepseek-v4.1-flash');
+    const body = helperRequestBody(
+      { providerId: 'morph', modelId: row.model, wire: 'openai-completions' },
+      row,
+      textPrompt,
+    );
 
     expect(body).toMatchObject({ model: 'morph-dsv41flash', max_tokens: 64 });
     expect(body).not.toHaveProperty('reasoning_effort');

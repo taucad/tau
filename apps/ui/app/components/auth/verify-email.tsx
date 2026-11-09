@@ -31,7 +31,7 @@ export const sanitizeVerifyEmailRedirectTo = (value?: string): string => {
   }
 
   try {
-    const origin = globalThis.location.origin;
+    const { origin } = globalThis.location;
     const target = new URL(value, origin);
     if (target.origin !== origin) {
       return '/';
@@ -74,7 +74,9 @@ export function VerifyEmail({ className }: VerifyEmailProps): React.JSX.Element 
         }
 
         // With auto sign-in the answer carries the new session's user; without one there is nothing to go back to.
-        if (!result.data?.user) {
+        // The client types the answer as `{ status }`; the server adds `user` (null when no session was made).
+        const data: unknown = result.data;
+        if (typeof data !== 'object' || data === null || !('user' in data) || !data.user) {
           setStatus('verified-signed-out');
           return;
         }

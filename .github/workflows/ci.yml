@@ -178,6 +178,25 @@ jobs:
         if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
 
+      # A change to the PicoGK browser host pin merges only once both dependency hosts, production
+      # dependencies.tau.new and staging dependencies.taucad.dev, serve every blob it names with its
+      # pinned digest, so `main` never names a digest either environment does not serve (charter
+      # picogk-interim-digest-consumer, D9 and I2). It runs in this required check, on the pull
+      # request and in the merge queue, only when the pin differs from the base.
+      - name: Prove a changed PicoGK browser host pin is served on both hosts
+        if: steps.queue.outputs.run-id == '' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PIN: packages/plugins/picogk/browser-host.pin.json
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- "$PIN"; then
+            echo "$PIN is unchanged from the base; no blob to prove."
+          else
+            node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
+          fi
+
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every
   # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the

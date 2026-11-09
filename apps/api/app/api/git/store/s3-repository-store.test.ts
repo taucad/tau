@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Environment } from '@taucad/api-core';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { hydrateLease } from '#api/git/store/lease.js';

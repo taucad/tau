@@ -59,10 +59,16 @@
       "path": "./apps/libs/api-llm-gateway"
     },
     {
+      "path": "./apps/libs/api-object-storage"
+    },
+    {
       "path": "./apps/libs/api-observability"
     },
     {
       "path": "./apps/libs/api-redis"
+    },
+    {
+      "path": "./apps/libs/api-testing"
     },
     {
       "path": "./apps/libs/billing"

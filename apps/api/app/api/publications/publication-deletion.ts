@@ -5,7 +5,7 @@ import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/
 import { blobRef, projectDeletionManifest, publication } from '@taucad/api-database/schema';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
-import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
+import type { ObjectStorageServiceContract } from '@taucad/api-object-storage';
 
 /** Milliseconds allowed for fetching and reading one immutable manifest. */
 export const publicationManifestReadTimeout = 10_000;

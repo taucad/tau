@@ -4,7 +4,7 @@ import type { Database } from '@taucad/api-database/owner-lock';
 import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { project, projectGit, projectGitLfsObject, projectDeletion } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { hydrateAdmittedLease } from '#api/git/admission/admitted-lease.js';

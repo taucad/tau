@@ -5,7 +5,8 @@ import {
   reservationFor,
   reservationFloorBytes,
 } from '#api/git/admission/reservation.js';
-import { livePackBound, repositoryByteCeiling } from '#api/git/store/limits.js';
+import { livePackBound } from '#api/git/store/limits.js';
+import { repositoryByteCeiling } from '@taucad/api-object-storage/repository-byte-ceiling';
 
 const mebibyte = 1024 ** 2;
 const gibibyte = 1024 ** 3;

@@ -1,4 +1,4 @@
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { projectPreviewKey } from '#api/projects/project-preview-key.js';
 
 /**

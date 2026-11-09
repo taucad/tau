@@ -9,8 +9,8 @@ import { getMaintenanceEnvironment } from '#config/maintenance-environment.confi
 import type { MaintenanceEnvironment } from '#config/maintenance-environment.config.js';
 import * as schema from '@taucad/api-database/schema';
 import { project, projectGitLfsObject, storageTombstone } from '@taucad/api-database/schema';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import type { StorageAccount } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import type { StorageAccount } from '@taucad/api-object-storage';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';

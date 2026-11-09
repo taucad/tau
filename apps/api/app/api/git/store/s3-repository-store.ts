@@ -4,8 +4,8 @@ import { Transform, pipeline } from 'node:stream';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Injectable, Optional } from '@nestjs/common';
-import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
-import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
+import { concatUint8Arrays } from '@taucad/api-object-storage/concat-uint8-arrays';
+import { ObjectStorageService, isS3ObjectMissing } from '@taucad/api-object-storage';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { repositoryPrefix } from '#api/git/store/repository-key.js';
 import type {

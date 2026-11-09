@@ -40,7 +40,7 @@ import type { RepositoryStore } from '#api/git/store/port.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 const ownerId = 'user_dw2';

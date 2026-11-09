@@ -12,7 +12,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseType } from '@taucad/api-database';
 import { DatabaseService } from '@taucad/api-database';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import {
   durableStream,
   durableStreamEvent,

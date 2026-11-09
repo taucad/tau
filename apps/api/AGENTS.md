@@ -26,7 +26,7 @@ Use `pnpm nx lint api`, `pnpm nx test api --watch=false`, `pnpm nx typecheck api
 
 When using `ioredis-mock`, flush its shared keyspace when creating the test harness. `mockDeep` covers the declared `query.*.find*` members; stub Drizzle `update().set().where()` chains explicitly. If asymmetric values inside `objectContaining` trigger unsafe-assignment diagnostics, inspect typed mock calls or assert a literal call instead of casting away the type check.
 
-Object-store namespace prefixes live in `app/storage/storage.constants.ts`. Public content and private publication storage have distinct authorization and readiness requirements; read [infrastructure instructions](../../infra/AGENTS.md) for the current bucket/CDN contract.
+Object-store namespace prefixes live in `apps/libs/api-object-storage/src/storage.constants.ts`. Public content and private publication storage have distinct authorization and readiness requirements; read [infrastructure instructions](../../infra/AGENTS.md) for the current bucket/CDN contract.
 
 ## Model catalog and publication
 

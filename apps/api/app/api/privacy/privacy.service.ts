@@ -4,8 +4,8 @@ import { DatabaseService } from '@taucad/api-database';
 import { user } from '@taucad/api-database/schema';
 import type { PrivacyPreferences, UpdatePrivacyPreferencesInput } from '#api/privacy/privacy.schema.js';
 import { effectiveTrainingConsent } from '@taucad/billing/training-consent';
-import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
-import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
+import { tierAssuranceKey } from '@taucad/api-agent-observability/telemetry-purposes/tier-assurance';
+import type { TierAssuranceSource } from '@taucad/api-agent-observability/telemetry-purposes/tier-assurance';
 import { Span } from '@taucad/api-observability';
 
 type StoredPreferences = Pick<

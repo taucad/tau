@@ -4,7 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import { AIMessageChunk } from '@langchain/core/messages';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatService } from '#api/chat/chat.service.js';
+import { ChatService } from '@taucad/api-chat/chat.service';
 import { DirectModelInvocationService, LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelService } from '@taucad/api-llm-gateway';
 import type { Environment } from '@taucad/api-core';

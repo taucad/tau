@@ -18,7 +18,7 @@ import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-c
 import { liveOwnerIds, purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { purgeDeletedProject, purgeDeletedProjects } from '@taucad/api-git-mirror/maintenance/project-purge';
-import { releaseDeletedProjectPublicationReferences } from '#api/publications/publication-deletion.js';
+import { releaseDeletedProjectPublicationReferences } from '@taucad/api-projects/publications/publication-deletion';
 import { recoverProjectDeletions, runMaintenanceWorker } from '@taucad/api-git-mirror/maintenance/worker';
 import { restoreRepository } from '@taucad/api-git-mirror/maintenance/restore';
 import { copiedProjects, listCopySnapshots, restoreFromCopy } from '@taucad/api-git-mirror/maintenance/restore-copy';

@@ -40,7 +40,7 @@ Project configuration and exports define current interfaces.
 - [packages/agent-host](packages/agent-host): Portable CAD-agent execution and session log; `src/index.ts`, browser/node entrypoints
 - [libs/agent-tools](libs/agent-tools): Host-neutral tool registry, skills, GeoSpec and capture
 - [libs/chat](libs/chat): Wire/tool schemas, prompts and RPC contracts
-- [apps/api](apps/api): NestJS/Fastify auth, billing, storage and models; `app/api/chat/chat.service.ts` owns name/commit generation
+- [apps/api](apps/api): NestJS/Fastify auth, billing, storage and models; `api-chat` owns name/commit generation
 - [apps/desktop](apps/desktop): Electron desktop composition and packaging
 - [apps/docs](apps/docs): Static docs site and its gates
 - [apps/libs](apps/libs): Private app capabilities: billing hooks, fs-client, converter, LSP

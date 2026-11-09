@@ -188,7 +188,7 @@ Operator                           CI (GitHub Actions)
                                    5. Operator dispatches publish.yml
                                       on the tag (or on main at the
                                       merge commit)
-                                      ├─ check-payload-urls
+                                      ├─ check-dependency-urls
                                       ├─ nx run scripts:release-gate
                                       ├─ Assert pnpm is the publisher
                                       ├─ nx release publish --dry-run

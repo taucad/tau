@@ -173,6 +173,83 @@ describe('PicoGK browser runtime integrity', () => {
     }
   });
 
+  describe('digest mirror sources', () => {
+    const blob = (bytes: Uint8Array<ArrayBuffer>) =>
+      `https://mirror.test/blobs/sha256/${createHash('sha256').update(bytes).digest('hex')}`;
+
+    it('should fetch each resource from its source while resolving it by its identity', async () => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (input) => new Response(input === blob(js) ? js : wasm));
+      vi.stubGlobal('fetch', fetcher);
+      const blobs: Blob[] = [];
+      vi.spyOn(URL, 'createObjectURL').mockImplementation((module) => {
+        if (!(module instanceof Blob)) {
+          throw new TypeError('Expected module blob');
+        }
+        blobs.push(module);
+        return `blob:verified-${blobs.length}`;
+      });
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      // Two generated modules may hold the same bytes and so share one blob, each keeping its own identity.
+      const native = { ...bootstrap, url: 'https://example.test/_framework/dotnet.native.js', source: blob(js) };
+      const copy = { ...binary, url: 'https://example.test/_framework/copy.wasm', source: blob(wasm) };
+      const loader = await preparePicogkBrowserRuntime({
+        bootstrapUrl,
+        files: [{ ...bootstrap, source: blob(js) }, native, { ...binary, source: blob(wasm) }, copy],
+      });
+      try {
+        expect(loader.loadResource('dotnetjs', 'dotnet.js', bootstrapUrl, integrity(js))).toBe('blob:verified-1');
+        expect(loader.loadResource('dotnetjs', 'dotnet.native.js', './dotnet.native.js', integrity(js))).toBe(
+          'blob:verified-2',
+        );
+        // The verified module resolves its own resources against its identity, never against the blob.
+        expect(await blobs[1]!.text()).toBe(`export const base = ${JSON.stringify(native.url)};`);
+        const response = await loader.loadResource('dotnetwasm', 'runtime.wasm', './runtime.wasm', integrity(wasm));
+        if (!(response instanceof Response)) {
+          throw new TypeError('Expected verified response');
+        }
+        expect(new Uint8Array(await response.arrayBuffer())).toEqual(wasm);
+        await loader.loadResource('dotnetwasm', 'copy.wasm', './copy.wasm', integrity(wasm));
+        expect(fetcher.mock.calls).toEqual([
+          [blob(js), { redirect: 'error' }],
+          [blob(js), { redirect: 'error' }],
+          [blob(wasm), { redirect: 'error' }],
+          [blob(wasm), { redirect: 'error' }],
+        ]);
+        expect((): string | Promise<Response> => loader.loadResource('assembly', 'bad', blob(wasm), '')).toThrow(
+          'Unlisted',
+        );
+      } finally {
+        loader.dispose();
+      }
+    });
+
+    it.each(['file:///blob', 'https://user:pass@mirror.test/blob', 'https://mirror.test/blob#fragment'])(
+      'should reject an unsafe resource source %s before downloading',
+      async (source) => {
+        const fetcher = setup();
+        await expect(preparePicogkBrowserRuntime({ bootstrapUrl, files: [{ ...bootstrap, source }] })).rejects.toThrow(
+          'Invalid PicoGK runtime resource inventory',
+        );
+        expect(fetcher).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should reject altered bytes and HTTP failures from a source', async () => {
+      const fetcher = setup();
+      fetcher.mockResolvedValueOnce(new Response(wasm));
+      await expect(
+        preparePicogkBrowserRuntime({ bootstrapUrl, files: [{ ...bootstrap, source: blob(js) }] }),
+      ).rejects.toThrow('integrity mismatch');
+      fetcher.mockResolvedValueOnce(new Response(null, { status: 404 }));
+      await expect(
+        preparePicogkBrowserRuntime({ bootstrapUrl, files: [{ ...bootstrap, source: blob(js) }] }),
+      ).rejects.toThrow('download failed: 404');
+      expect(fetcher).toHaveBeenLastCalledWith(blob(js), { redirect: 'error' });
+    });
+  });
+
   it('should bind immutable metadata and verify non-WASM resource bytes', async () => {
     setup();
     const data = { ...binary, url: 'https://example.test/data.dat' };

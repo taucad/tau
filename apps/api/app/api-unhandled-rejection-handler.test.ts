@@ -2,7 +2,7 @@ import process from 'node:process';
 import { Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installApiUnhandledRejectionHandler } from '#api-unhandled-rejection-handler.js';
-import { ChatAbortError, clearAbortTracking, registerChatAbort } from '#api/chat/utils/chat-abort.js';
+import { ChatAbortError, clearAbortTracking, registerChatAbort } from '@taucad/api-chat/utils/chat-abort';
 
 const emitUnhandledRejection = (reason: unknown): void => {
   process.emit('unhandledRejection', reason, Promise.resolve());

@@ -299,8 +299,11 @@ export const ChatTextareaDesktop = memo(function ({
     .join('\n');
   const knownTokens = useMemo(() => new Set(knownTokensKey === '' ? [] : knownTokensKey.split('\n')), [knownTokensKey]);
 
+  /* Texts the editor reported that no render has shown back yet; see the rehydration below. */
+  const unconfirmedTextsRef = useRef<string[]>([]);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
     [setDraftText],
@@ -392,9 +395,17 @@ export const ChatTextareaDesktop = memo(function ({
     if (!editor) {
       return undefined;
     }
+    const current = extractContent(editor);
+    /* This render's text can trail the editor by keystrokes it already holds: when tokens or the tree
+     * arrive mid-typing, the effect re-runs with an older text the editor itself reported, and writing
+     * that back deletes what was typed since. A render with the newer text follows, so wait for it. */
+    if (inputText === current.text) {
+      unconfirmedTextsRef.current = [];
+    } else if (unconfirmedTextsRef.current.includes(inputText)) {
+      return undefined;
+    }
     const tokensChanged = rehydratedTokensRef.current !== knownTokens;
     rehydratedTokensRef.current = knownTokens;
-    const current = extractContent(editor);
     if (inputText === '') {
       if (current.text !== '') {
         editor.commands.clearContent(false);
@@ -486,12 +497,13 @@ export const ChatTextareaDesktop = memo(function ({
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
   /* Home's native input held focus, with this box's outline, until this replaced it. The outline holds until
-   * focus lands somewhere — the editor, whose own outline then takes over in the same style pass, or wherever the
-   * person moved it — so the swap never paints the box without it (gate finding 2, #1562). Clearing it on a
-   * timer instead left a gap: Tiptap's focus command itself waits a frame before focusing. */
+   * the editor exists, which takes focus in the same commit (below) so its own outline takes over in the same
+   * style pass, or until the person moves focus elsewhere first. The swap never paints the box without it
+   * (gate finding 2, #1562). */
   const [isFocusHandoverPending, setIsFocusHandoverPending] = useState(earlyInput?.focused === true);
+  const isHandoverOutlined = isFocusHandoverPending && !editor;
   useEffect(() => {
-    if (!isFocusHandoverPending) {
+    if (!isHandoverOutlined) {
       return undefined;
     }
     const endHandover = (): void => {
@@ -501,35 +513,44 @@ export const ChatTextareaDesktop = memo(function ({
     return () => {
       document.removeEventListener('focusin', endHandover);
     };
-  }, [isFocusHandoverPending]);
+  }, [isHandoverOutlined]);
+  /* The editor takes the native input's selection and focus in the commit that replaces it, before the
+   * browser can deliver another key: anything later (a microtask, a frame) lets keys typed during the
+   * handover land on the page and vanish. Its text is already in place (`initialText`). */
+  useLayoutEffect(() => {
+    if (!editor || !earlyInput) {
+      return;
+    }
+    if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active !== editor.view.dom) {
+      // Focus is already elsewhere: there is nothing left to hand over.
+      return;
+    }
+    if (earlyInput.edited) {
+      const position = (offset: number): number => offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
+      const from = position(earlyInput.start);
+      const to = position(earlyInput.end);
+      editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+    } else {
+      editor.commands.setTextSelection(editor.state.doc.content.size);
+    }
+    // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
+    editor.view.focus();
+  }, [editor, earlyInput, enableAutoFocus]);
+
   useEffect(() => {
-    if (
-      !editor ||
-      (earlyInput
-        ? !(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))
-        : !enableAutoFocus)
-    ) {
+    // With an early input, focus is the native input's to hand over (above), not the mount's.
+    if (!editor || earlyInput !== undefined || !enableAutoFocus) {
       return undefined;
     }
     // Rehydration installs the draft in a microtask. Focus after it so opening
     // a history message keeps its first line visible instead of scrolling to the end.
     const frame = requestAnimationFrame(() => {
       if (!editor.isDestroyed) {
-        if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
-          // Focus is already elsewhere: there is nothing left to hand over.
-          setIsFocusHandoverPending(false);
-          return;
-        }
-        if (earlyInput?.edited) {
-          const position = (offset: number): number =>
-            offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
-          const from = position(earlyInput.start);
-          const to = position(earlyInput.end);
-          editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
-          editor.commands.focus();
-        } else {
-          editor.commands.focus(mode === 'edit' ? 'start' : 'end');
-        }
+        editor.commands.focus(mode === 'edit' ? 'start' : 'end');
       }
     });
     return () => {
@@ -624,7 +645,7 @@ export const ChatTextareaDesktop = memo(function ({
           collapse.composer,
           'has-[.tiptap:focus-visible]:focus-outline',
           /* Home's native input held focus until this replaced it: keep its outline until the editor takes focus. */
-          isFocusHandoverPending && 'focus-outline',
+          isHandoverOutlined && 'focus-outline',
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}

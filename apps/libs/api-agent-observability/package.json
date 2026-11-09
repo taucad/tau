@@ -1,0 +1,81 @@
+{
+  "name": "@taucad/api-agent-observability",
+  "version": "0.1.0-beta.0",
+  "description": "API agent observability: evidence admission, delivery, erasure and the model-invocation recorder, with telemetry purposes",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-agent-observability"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-agent-observability#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./agent-observability.module": "./src/agent-observability.module.ts",
+    "./evidence-admission": "./src/evidence-admission.ts",
+    "./evidence-delivery": "./src/evidence-delivery.ts",
+    "./evidence-erasure": "./src/evidence-erasure.ts",
+    "./evidence-erasure.service": "./src/evidence-erasure.service.ts",
+    "./evidence-ingress.controller": "./src/evidence-ingress.controller.ts",
+    "./evidence-ingress.service": "./src/evidence-ingress.service.ts",
+    "./evidence-seal": "./src/evidence-seal.ts",
+    "./langfuse-observation": "./src/langfuse-observation.ts",
+    "./langfuse-scorecard": "./src/langfuse-scorecard.ts",
+    "./ledger-reconciliation": "./src/ledger-reconciliation.ts",
+    "./ledger-settlements": "./src/ledger-settlements.ts",
+    "./model-invocation-observer": "./src/model-invocation-observer.ts",
+    "./model-invocation-recorder.service": "./src/model-invocation-recorder.service.ts",
+    "./settlement-evidence": "./src/settlement-evidence.ts",
+    "./telemetry-purposes/telemetry-purpose.controller": "./src/telemetry-purposes/telemetry-purpose.controller.ts",
+    "./telemetry-purposes/telemetry-purpose.module": "./src/telemetry-purposes/telemetry-purpose.module.ts",
+    "./telemetry-purposes/telemetry-purpose.schema": "./src/telemetry-purposes/telemetry-purpose.schema.ts",
+    "./telemetry-purposes/telemetry-purpose.service": "./src/telemetry-purposes/telemetry-purpose.service.ts",
+    "./telemetry-purposes/tier-assurance": "./src/telemetry-purposes/tier-assurance.ts",
+    "./testing/evidence.fixture": "./src/testing/evidence.fixture.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "catalog:",
+    "@taucad/agent-observability": "workspace:*",
+    "@taucad/api-auth": "workspace:*",
+    "@taucad/api-billing": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-hosts": "workspace:*",
+    "@taucad/api-lifecycle": "workspace:*",
+    "@taucad/api-llm-gateway": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "catalog:",
+    "nestjs-zod": "^5.4.0"
+  },
+  "devDependencies": {
+    "dotenv": "catalog:",
+    "postgres": "^3.4.9",
+    "reflect-metadata": "^0.2.2",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

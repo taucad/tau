@@ -236,6 +236,21 @@ describe('accountingTasks', () => {
         private: 'tau-content-private-staging',
       },
     });
+    expect(
+      r2SourceOf({
+        accountId: 'acct',
+        token: 'token',
+        publicBucket: 'tau-content-staging',
+        privateBucket: 'tau-content-private-staging',
+        downloadsBucket: 'tau-downloads-staging',
+        dependenciesBucket: 'tau-dependencies-staging',
+      })?.buckets,
+    ).toStrictEqual({
+      public: 'tau-content-staging',
+      private: 'tau-content-private-staging',
+      downloads: 'tau-downloads-staging',
+      dependencies: 'tau-dependencies-staging',
+    });
   });
 });
 

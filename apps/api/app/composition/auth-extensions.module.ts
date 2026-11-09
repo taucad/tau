@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
-import { eraseAccountEvidence } from '#api/agent-observability/evidence-erasure.js';
+import { eraseAccountEvidence } from '@taucad/api-agent-observability/evidence-erasure';
 import {
   BillingAccountClosureService,
   BillingModule,

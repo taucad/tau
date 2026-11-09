@@ -145,7 +145,7 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
         <div className='band footer-grid'>
           <div className='cell footer-brand'>
             <Brand />
-            <p>Design Verify Make.</p>
+            <p>Design. Verify. Build.</p>
             <p className='fine'>Open-source, AI-native CAD.</p>
           </div>
           <nav className='cell' aria-label='Product'>

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -378,10 +379,11 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       enableMobileCollapse?: boolean;
       isFocused?: boolean;
       earlyInput?: EarlyChatInput;
+      setDraftText?: (text: string) => void;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
-    const element = (session: AcpSessionData): React.JSX.Element => (
+    const element = (session: AcpSessionData, text = inputText): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
           earlyInput={options.earlyInput}
@@ -393,7 +395,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           isSubmitting={options.isSubmitting ?? false}
           isAttaching={false}
           canResume={canResume}
-          inputText={inputText}
+          inputText={text}
           attachments={[]}
           attachmentDirectory={undefined}
           sendBlockReason={undefined}
@@ -403,7 +405,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           formattedCancelKeyCombination='⇧⌘⌫'
           treeService={undefined}
           chats={[]}
-          setDraftText={noop}
+          setDraftText={options.setDraftText ?? noop}
           acpAgentId={options.useTauSkills ? undefined : 'codex'}
           acpSessionData={session}
           fileInputReference={{ current: null }}
@@ -429,8 +431,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = render(element(acpSessionData));
     return {
       ...view,
-      rerenderWith: (session: AcpSessionData): void => {
-        view.rerender(element(session));
+      rerenderWith: (session: AcpSessionData, text?: string): void => {
+        view.rerender(element(session, text));
       },
     };
   };
@@ -458,9 +460,10 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     },
   );
 
-  /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The box keeps
-   * that outline until the editor has focus, so the swap never paints an unfocused border. */
-  it('should keep the focus outline across the handover from a focused native input', async () => {
+  /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The editor
+   * takes focus in the same commit, so no frame paints the box unfocused and no key typed during the
+   * handover lands on the page. */
+  it('should hand focus to the editor in the commit that replaces a focused native input', () => {
     const createRange = document.createRange.bind(document);
     vi.spyOn(document, 'createRange').mockImplementation(() =>
       Object.assign(createRange(), {
@@ -480,30 +483,18 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         direction: 'none',
       },
     });
+    // No waiting: a frame's delay is where typed keys were lost.
+    expect(screen.getByRole('textbox')).toHaveFocus();
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
-    expect(box).toHaveClass('focus-outline');
-    /* Gate finding 2 (#1562): the handover outline leaves only once the editor holds focus, never a frame before. */
-    const focusWhenOutlineLeft: Element[] = [];
-    const observer = new MutationObserver(() => {
-      if (!box.classList.contains('focus-outline')) {
-        focusWhenOutlineLeft.push(document.activeElement ?? document.body);
-      }
-    });
-    observer.observe(box, { attributes: true, attributeFilter: ['class'] });
-    try {
-      await waitFor(() => {
-        expect(screen.getByRole('textbox')).toHaveFocus();
-        expect(box).not.toHaveClass('focus-outline');
-      });
-      expect(focusWhenOutlineLeft[0]).toBe(screen.getByRole('textbox'));
-    } finally {
-      observer.disconnect();
-    }
+    // The editor's own focus outline has taken over from the handover outline.
+    expect(box).not.toHaveClass('focus-outline');
+    expect(box).toHaveClass('has-[.tiptap:focus-visible]:focus-outline');
   });
 
-  it('should drop the handover outline when focus moves elsewhere first', async () => {
+  it('should leave focus where it moved and drop the handover outline', () => {
     const other = document.createElement('button');
     document.body.append(other);
+    other.focus();
     try {
       renderComposer('', codexSession, {
         earlyInput: {
@@ -517,13 +508,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         },
       });
       const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
-      expect(box).toHaveClass('focus-outline');
-      act(() => {
-        other.focus();
-      });
-      await waitFor(() => {
-        expect(box).not.toHaveClass('focus-outline');
-      });
+      expect(box).not.toHaveClass('focus-outline');
       expect(other).toHaveFocus();
     } finally {
       other.remove();
@@ -710,6 +695,34 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     expect(view.container.querySelector('[data-slot=composer-bar]')).toBe(bar);
     expect(screen.getByRole('textbox')).toBe(editor);
     expect(editor).toHaveTextContent('Keep this draft');
+  });
+
+  /* When tokens arrive mid-typing, a render can still carry a text the editor reported a keystroke ago.
+   * Writing that back deleted what was typed since. */
+  it('should not write back an older text the editor itself reported', async () => {
+    const reported: string[] = [];
+    const view = renderComposer('', codexSession, {
+      setDraftText(text) {
+        reported.push(text);
+      },
+    });
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    expect(editor).toBeDefined();
+    act(() => {
+      editor!.commands.insertContent('A');
+    });
+    act(() => {
+      editor!.commands.insertContent('B');
+    });
+    expect(reported).toEqual(['A', 'AB']);
+    // The parent has rendered only the first report, and the agent's commands arrive with it.
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] }, 'A');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(editor!.getText()).toBe('AB');
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] }, 'AB');
+    expect(editor!.getText()).toBe('AB');
   });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {

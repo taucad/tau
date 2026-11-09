@@ -1,0 +1,866 @@
+{
+  "uid": "tau-r2-buckets",
+  "title": "R2 buckets",
+  "tags": ["tau", "storage", "r2"],
+  "description": "R2 usage per bucket role from the accounting scheduler's Cloudflare GraphQL analytics (W14 OB3, R2 storage blast-radius blueprint phase 8): objects, stored bytes, daily growth, write operations, origin egress and request errors for the dependency, public, private, downloads and other buckets. A bucket name is never a label; the API learns the downloads and dependency buckets from analytics-only settings. Cost lives on Storage — critical.",
+  "timezone": "browser",
+  "refresh": "5m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Storage — critical",
+      "type": "link",
+      "url": "/d/tau-storage-critical",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "Storage capability",
+      "type": "link",
+      "url": "/d/tau-sync",
+      "icon": "dashboard",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "API application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": {
+          "text": "tau-api",
+          "value": "tau-api"
+        },
+        "options": [
+          {
+            "text": "tau-api",
+            "value": "tau-api",
+            "selected": true
+          }
+        ],
+        "includeAll": false
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Dependencies",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": [],
+      "id": 1
+    },
+    {
+      "title": "Dependencies: objects",
+      "type": "stat",
+      "description": "The locked release dependency bucket (`TAU_CLOUDFLARE_DEPENDENCIES_BUCKET`). Objects step up only on a release and never down: a drop means the bucket lock was removed. Writes belong in release hours, and a delete never succeeds.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "title": "Dependencies: stored bytes",
+      "type": "stat",
+      "description": "Payload and metadata bytes from Cloudflare's latest storage sample. Storage is R2's main recurring cost; per role it shows which data class drives it.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "title": "Dependencies: growth per day",
+      "type": "timeseries",
+      "description": "Change in stored bytes and objects over one day. Cloudflare samples storage sparsely (48 h lookback), so a day is the honest resolution; it sizes quota and B2 copy planning and shows a runaway writer.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\"}[1d]))",
+          "legendFormat": "bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\"}[1d]))",
+          "legendFormat": "objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4
+    },
+    {
+      "title": "Dependencies: write operations last hour",
+      "type": "timeseries",
+      "description": "PutObject, CopyObject, CompleteMultipartUpload and DeleteObject per hour, from Cloudflare analytics: the hourly, aggregate twin of the real-time write alarms.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_action) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\",tau_r2_window=\"hour\",tau_r2_action=~\"PutObject|CopyObject|CompleteMultipartUpload|DeleteObject\"}))",
+          "legendFormat": "{{tau_r2_action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 9
+      },
+      "id": 5
+    },
+    {
+      "title": "Dependencies: origin egress last hour",
+      "type": "timeseries",
+      "description": "Bytes R2 served to the edge and to presigned clients. For a CDN-fronted bucket this is cache-miss traffic, so a rise means a cache rule stopped matching. Cloudflare omits transfers under 100 KiB; edge egress to users is not here.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\",direction=\"download\",tau_r2_window=\"hour\"})",
+          "legendFormat": "download",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 9
+      },
+      "id": 6
+    },
+    {
+      "title": "Dependencies: request errors last hour",
+      "type": "timeseries",
+      "description": "Requests R2 refused, by status. On the dependency bucket `userError` includes refused overwrites (409 from the bucket lock) and wrong-token writes, which Data Access Logs never record.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_status) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"dependencies\",tau_r2_window=\"hour\",tau_r2_status!=\"success\"}))",
+          "legendFormat": "{{tau_r2_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "id": 7
+    },
+    {
+      "title": "Public content",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "panels": [],
+      "id": 8
+    },
+    {
+      "title": "Public content: objects",
+      "type": "stat",
+      "description": "The environment's public content bucket (`TAU_S3_BUCKET`): public publication blobs, derivatives, defaults and the probe. Tracks publication volume.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 18
+      },
+      "id": 9
+    },
+    {
+      "title": "Public content: stored bytes",
+      "type": "stat",
+      "description": "Payload and metadata bytes from Cloudflare's latest storage sample. Storage is R2's main recurring cost; per role it shows which data class drives it.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 18
+      },
+      "id": 10
+    },
+    {
+      "title": "Public content: growth per day",
+      "type": "timeseries",
+      "description": "Change in stored bytes and objects over one day. Cloudflare samples storage sparsely (48 h lookback), so a day is the honest resolution; it sizes quota and B2 copy planning and shows a runaway writer.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\"}[1d]))",
+          "legendFormat": "bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\"}[1d]))",
+          "legendFormat": "objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 18
+      },
+      "id": 11
+    },
+    {
+      "title": "Public content: write operations last hour",
+      "type": "timeseries",
+      "description": "PutObject, CopyObject, CompleteMultipartUpload and DeleteObject per hour, from Cloudflare analytics: the hourly, aggregate twin of the real-time write alarms.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_action) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\",tau_r2_window=\"hour\",tau_r2_action=~\"PutObject|CopyObject|CompleteMultipartUpload|DeleteObject\"}))",
+          "legendFormat": "{{tau_r2_action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "id": 12
+    },
+    {
+      "title": "Public content: origin egress last hour",
+      "type": "timeseries",
+      "description": "Bytes R2 served to the edge and to presigned clients. For a CDN-fronted bucket this is cache-miss traffic, so a rise means a cache rule stopped matching. Cloudflare omits transfers under 100 KiB; edge egress to users is not here.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\",direction=\"download\",tau_r2_window=\"hour\"})",
+          "legendFormat": "download",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "id": 13
+    },
+    {
+      "title": "Public content: request errors last hour",
+      "type": "timeseries",
+      "description": "Requests R2 refused, by status. On the dependency bucket `userError` includes refused overwrites (409 from the bucket lock) and wrong-token writes, which Data Access Logs never record.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_status) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"public\",tau_r2_window=\"hour\",tau_r2_status!=\"success\"}))",
+          "legendFormat": "{{tau_r2_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "id": 14
+    },
+    {
+      "title": "Private content",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": [],
+      "id": 15
+    },
+    {
+      "title": "Private content: objects",
+      "type": "stat",
+      "description": "The private bucket (`TAU_S3_PRIVATE_BUCKET`): repositories, LFS objects, private publications and manifests. Tracks repository volume.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 35
+      },
+      "id": 16
+    },
+    {
+      "title": "Private content: stored bytes",
+      "type": "stat",
+      "description": "Payload and metadata bytes from Cloudflare's latest storage sample. Storage is R2's main recurring cost; per role it shows which data class drives it.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 35
+      },
+      "id": 17
+    },
+    {
+      "title": "Private content: growth per day",
+      "type": "timeseries",
+      "description": "Change in stored bytes and objects over one day. Cloudflare samples storage sparsely (48 h lookback), so a day is the honest resolution; it sizes quota and B2 copy planning and shows a runaway writer.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\"}[1d]))",
+          "legendFormat": "bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\"}[1d]))",
+          "legendFormat": "objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 35
+      },
+      "id": 18
+    },
+    {
+      "title": "Private content: write operations last hour",
+      "type": "timeseries",
+      "description": "PutObject, CopyObject, CompleteMultipartUpload and DeleteObject per hour, from Cloudflare analytics: the hourly, aggregate twin of the real-time write alarms.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_action) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\",tau_r2_window=\"hour\",tau_r2_action=~\"PutObject|CopyObject|CompleteMultipartUpload|DeleteObject\"}))",
+          "legendFormat": "{{tau_r2_action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 43
+      },
+      "id": 19
+    },
+    {
+      "title": "Private content: origin egress last hour",
+      "type": "timeseries",
+      "description": "Bytes R2 served to the edge and to presigned clients. For a CDN-fronted bucket this is cache-miss traffic, so a rise means a cache rule stopped matching. Cloudflare omits transfers under 100 KiB; edge egress to users is not here.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\",direction=\"download\",tau_r2_window=\"hour\"})",
+          "legendFormat": "download",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 43
+      },
+      "id": 20
+    },
+    {
+      "title": "Private content: request errors last hour",
+      "type": "timeseries",
+      "description": "Requests R2 refused, by status. On the dependency bucket `userError` includes refused overwrites (409 from the bucket lock) and wrong-token writes, which Data Access Logs never record.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_status) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"private\",tau_r2_window=\"hour\",tau_r2_status!=\"success\"}))",
+          "legendFormat": "{{tau_r2_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 43
+      },
+      "id": 21
+    },
+    {
+      "title": "Downloads",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "panels": [],
+      "id": 22
+    },
+    {
+      "title": "Downloads: objects",
+      "type": "stat",
+      "description": "The desktop downloads bucket (`TAU_CLOUDFLARE_DOWNLOADS_BUCKET`): installers and update feeds. Writes belong to desktop releases only.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 52
+      },
+      "id": 23
+    },
+    {
+      "title": "Downloads: stored bytes",
+      "type": "stat",
+      "description": "Payload and metadata bytes from Cloudflare's latest storage sample. Storage is R2's main recurring cost; per role it shows which data class drives it.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 52
+      },
+      "id": 24
+    },
+    {
+      "title": "Downloads: growth per day",
+      "type": "timeseries",
+      "description": "Change in stored bytes and objects over one day. Cloudflare samples storage sparsely (48 h lookback), so a day is the honest resolution; it sizes quota and B2 copy planning and shows a runaway writer.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\"}[1d]))",
+          "legendFormat": "bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\"}[1d]))",
+          "legendFormat": "objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 52
+      },
+      "id": 25
+    },
+    {
+      "title": "Downloads: write operations last hour",
+      "type": "timeseries",
+      "description": "PutObject, CopyObject, CompleteMultipartUpload and DeleteObject per hour, from Cloudflare analytics: the hourly, aggregate twin of the real-time write alarms.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_action) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\",tau_r2_window=\"hour\",tau_r2_action=~\"PutObject|CopyObject|CompleteMultipartUpload|DeleteObject\"}))",
+          "legendFormat": "{{tau_r2_action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 60
+      },
+      "id": 26
+    },
+    {
+      "title": "Downloads: origin egress last hour",
+      "type": "timeseries",
+      "description": "Bytes R2 served to the edge and to presigned clients. For a CDN-fronted bucket this is cache-miss traffic, so a rise means a cache rule stopped matching. Cloudflare omits transfers under 100 KiB; edge egress to users is not here.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\",direction=\"download\",tau_r2_window=\"hour\"})",
+          "legendFormat": "download",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 60
+      },
+      "id": 27
+    },
+    {
+      "title": "Downloads: request errors last hour",
+      "type": "timeseries",
+      "description": "Requests R2 refused, by status. On the dependency bucket `userError` includes refused overwrites (409 from the bucket lock) and wrong-token writes, which Data Access Logs never record.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_status) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"downloads\",tau_r2_window=\"hour\",tau_r2_status!=\"success\"}))",
+          "legendFormat": "{{tau_r2_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 60
+      },
+      "id": 28
+    },
+    {
+      "title": "Other buckets",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "panels": [],
+      "id": 29
+    },
+    {
+      "title": "Other buckets: objects",
+      "type": "stat",
+      "description": "Every other bucket in the account, another environment's included. A rise means a bucket exists outside this environment's map.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 69
+      },
+      "id": 30
+    },
+    {
+      "title": "Other buckets: stored bytes",
+      "type": "stat",
+      "description": "Payload and metadata bytes from Cloudflare's latest storage sample. Storage is R2's main recurring cost; per role it shows which data class drives it.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 69
+      },
+      "id": 31
+    },
+    {
+      "title": "Other buckets: growth per day",
+      "type": "timeseries",
+      "description": "Change in stored bytes and objects over one day. Cloudflare samples storage sparsely (48 h lookback), so a day is the honest resolution; it sizes quota and B2 copy planning and shows a runaway writer.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\"}[1d]))",
+          "legendFormat": "bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (delta(tau_r2_objects{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\"}[1d]))",
+          "legendFormat": "objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 69
+      },
+      "id": 32
+    },
+    {
+      "title": "Other buckets: write operations last hour",
+      "type": "timeseries",
+      "description": "PutObject, CopyObject, CompleteMultipartUpload and DeleteObject per hour, from Cloudflare analytics: the hourly, aggregate twin of the real-time write alarms.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_action) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\",tau_r2_window=\"hour\",tau_r2_action=~\"PutObject|CopyObject|CompleteMultipartUpload|DeleteObject\"}))",
+          "legendFormat": "{{tau_r2_action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 77
+      },
+      "id": 33
+    },
+    {
+      "title": "Other buckets: origin egress last hour",
+      "type": "timeseries",
+      "description": "Bytes R2 served to the edge and to presigned clients. For a CDN-fronted bucket this is cache-miss traffic, so a rise means a cache rule stopped matching. Cloudflare omits transfers under 100 KiB; edge egress to users is not here.",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\",direction=\"download\",tau_r2_window=\"hour\"})",
+          "legendFormat": "download",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 77
+      },
+      "id": 34
+    },
+    {
+      "title": "Other buckets: request errors last hour",
+      "type": "timeseries",
+      "description": "Requests R2 refused, by status. On the dependency bucket `userError` includes refused overwrites (409 from the bucket lock) and wrong-token writes, which Data Access Logs never record.",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_status) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_bucket=\"other\",tau_r2_window=\"hour\",tau_r2_status!=\"success\"}))",
+          "legendFormat": "{{tau_r2_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 77
+      },
+      "id": 35
+    }
+  ]
+}

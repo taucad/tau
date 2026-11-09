@@ -1,5 +1,5 @@
 /**
- * Isometric illustrations for the Design, Verify and Make principles. All three draw the same
+ * Isometric illustrations for the Design, Verify and Build principles. All three draw the same
  * flanged bearing housing, a rounded plate with two mounting holes and a bored boss, so the strip
  * reads as one part moving from parametric source, through measurement, onto a machine bed.
  * Geometry is projected at render time; colour comes from the site tokens in principle-diagrams.css.
@@ -272,10 +272,10 @@ const verify = () => {
 };
 
 /**
- * Make: the housing bolted to a base, with its two cap screws and the bearing it carries dropping
+ * Build: the housing bolted to a base, with its two cap screws and the bearing it carries dropping
  * into place along dashed assembly axes. The finished part is shown becoming a working assembly.
  */
-const make = () => {
+const build = () => {
   const v = view(118, 89, 1.9);
   const { t, holeX, bossH, boreR } = part;
   const base = { a: 28, b: 19, r: 2 };
@@ -308,11 +308,11 @@ const make = () => {
   };
   return svg(
     slab(v, { ...base, z0: -3, z1: 0 }) +
-      housing(v, 'pd-make') +
+      housing(v, 'pd-build') +
       axis(-holeX, t, screw.z) +
       axis(holeX, t, screw.z) +
       axis(0, t + bossH, bearing.z) +
-      capScrew(-holeX, 'pd-make-s1') +
+      capScrew(-holeX, 'pd-build-s1') +
       cylinder(
         v,
         {
@@ -322,13 +322,13 @@ const make = () => {
           z0: bearing.z,
           z1: bearing.z + bearing.width,
         },
-        'pd-make-bearing',
+        'pd-build-bearing',
       ) +
       `<ellipse cx="${n(v.p(0, 0, bearing.z + bearing.width)[0])}" cy="${n(v.p(0, 0, bearing.z + bearing.width)[1])}" rx="${n(3.6 * v.s * radiusX)}" ry="${n(3.6 * v.s * radiusY)}" class="pd-fine"/>` +
-      hole(v, { x: 0, y: 0, r: bearing.bore, z: bearing.z + bearing.width }, 'pd-make-bore') +
-      capScrew(holeX, 'pd-make-s2'),
+      hole(v, { x: 0, y: 0, r: bearing.bore, z: bearing.z + bearing.width }, 'pd-build-bore') +
+      capScrew(holeX, 'pd-build-s2'),
   );
 };
 
 /** SVG markup for the three principles, keyed by principle id. */
-export const diagrams = { design: design(), verify: verify(), make: make() };
+export const diagrams = { design: design(), verify: verify(), build: build() };

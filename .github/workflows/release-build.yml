@@ -653,20 +653,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # The same bytes under `blobs/sha256/<hex>` of the public content bucket, the
-  # digest-addressed layout cdn.tau.new serves (D2, D25). Written once with
-  # If-None-Match and never replaced. The upload credential (go-live SEC-9) lives
-  # on the `payloads` environment; until the operator sets it this job only
-  # verifies the layer and says why it skipped.
-  # Production channel only: the `payloads` credential writes the production public bucket,
-  # which also holds user content, so staging tags (and the nightly staging cron) must not
-  # read it. Staging still gets the layer from its digest-named GitHub Release. Interim
-  # until the per-environment payload buckets exist (Brain incident
-  # 2026-11-09-r2-shared-bucket-blast-radius, blueprint phase 0).
+  # The same bytes under `blobs/sha256/<hex>` of the release channel's locked dependency
+  # bucket, the digest-addressed mirror layout (D2, D25) its dependency host serves: a
+  # production tag writes `tau-prod-dependencies` from environment `dependencies` (a required
+  # reviewer) and reads back from dependencies.tau.new; a staging tag, the nightly cron's
+  # included, writes `tau-staging-au-dependencies` from `dependencies-staging` and reads back
+  # from dependencies.taucad.dev. No staging run holds a production credential, and neither
+  # credential reaches user content (Brain incident 2026-11-09-r2-shared-bucket-blast-radius,
+  # blueprint phase 4). The bucket lock refuses an overwrite or delete with 409, so the job
+  # checks for the key first and a re-run verifies instead of writing; a refused write fails
+  # the job rather than retrying. A missing credential, endpoint or bucket, or a bucket other
+  # than the channel's own, fails the job: it never skips and never defaults a bucket.
+  # Until `dependencyBaseUrl` (`@taucad/dotnet-kernel-core/layer`) names dependencies.tau.new,
+  # the pin picogk-layer composes still names cdn.tau.new first: the base and the committed
+  # manifest switch together once this host serves the pinned digests, so `main` never pins a
+  # URL that does not serve (I13, `check-dependency-urls.yml`).
   picogk-layer-mirror:
     needs: [resolve, desktop-macos, picogk-layer-linux]
-    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' && needs.resolve.outputs.channel == 'production' }}
-    name: Mirror the Tau PicoGK ${{ matrix.target }} layer to cdn.tau.new
+    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}
+    name: Mirror the Tau PicoGK ${{ matrix.target }} layer to the ${{ needs.resolve.outputs.channel }} dependency host
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -678,15 +683,16 @@ jobs:
           - target: linux-x64
             build: picogk-layer-linux
     environment:
-      name: payloads
+      name: ${{ needs.resolve.outputs.channel == 'production' && 'dependencies' || 'dependencies-staging' }}
       deployment: false
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.PAYLOAD_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.PAYLOAD_R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      PAYLOAD_R2_ENDPOINT: ${{ vars.PAYLOAD_R2_ENDPOINT }}
-      PAYLOAD_R2_BUCKET: ${{ vars.PAYLOAD_R2_BUCKET || 'tau-prod-content' }}
-      PAYLOAD_CDN_BASE: https://cdn.tau.new/
+      DEPENDENCY_R2_ENDPOINT: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+      DEPENDENCY_R2_BUCKET: ${{ vars.DEPENDENCY_R2_BUCKET }}
+      CHANNEL: ${{ needs.resolve.outputs.channel }}
+      DEPENDENCY_BASE_URL: ${{ needs.resolve.outputs.channel == 'production' && 'https://dependencies.tau.new/' || 'https://dependencies.taucad.dev/' }}
     steps:
       - name: Require the layer build
         env:
@@ -716,46 +722,54 @@ jobs:
             echo "asset=$asset"
             echo "key=blobs/sha256/$sha256"
           } >> "$GITHUB_OUTPUT"
-      - name: Require the payload upload credential
-        id: credential
+      - name: Require the channel's dependency upload credential
         run: |
+          set -euo pipefail
+          case "$CHANNEL" in
+            production) environment=dependencies expected=tau-prod-dependencies ;;
+            staging) environment=dependencies-staging expected=tau-staging-au-dependencies ;;
+            *)
+              echo "::error::Unknown release channel '$CHANNEL'; nothing is mirrored."
+              exit 1
+              ;;
+          esac
           missing=()
-          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY PAYLOAD_R2_ENDPOINT; do
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DEPENDENCY_R2_ENDPOINT DEPENDENCY_R2_BUCKET; do
             if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::notice title=Tau PicoGK layer not mirrored::The payloads environment lacks the secrets PAYLOAD_R2_ACCESS_KEY_ID and PAYLOAD_R2_SECRET_ACCESS_KEY or the variable PAYLOAD_R2_ENDPOINT (missing: ${missing[*]}; go-live SEC-9). The layer is published on its GitHub Release only; rerun this job once they are set."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "::error::The $environment environment lacks ${missing[*]} (secrets DEPENDENCY_R2_ACCESS_KEY_ID, DEPENDENCY_R2_SECRET_ACCESS_KEY, variables DEPENDENCY_R2_ENDPOINT, DEPENDENCY_R2_BUCKET); nothing is mirrored."
+            exit 1
+          fi
+          if [ "$DEPENDENCY_R2_BUCKET" != "$expected" ]; then
+            echo "::error::The $environment environment names bucket '$DEPENDENCY_R2_BUCKET', not its own '$expected'; nothing is mirrored."
+            exit 1
           fi
       - name: Write the layer once under its digest
-        if: steps.credential.outputs.available == 'true'
         env:
           KEY: ${{ steps.layer.outputs.key }}
           SHA256: ${{ steps.layer.outputs.sha256 }}
           ASSET: ${{ steps.layer.outputs.asset }}
         run: |
           set -euo pipefail
-          s3() { aws --endpoint-url "$PAYLOAD_R2_ENDPOINT" s3api "$@"; }
-          if s3 get-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
+          s3() { aws --endpoint-url "$DEPENDENCY_R2_ENDPOINT" s3api "$@"; }
+          if s3 get-object --bucket "$DEPENDENCY_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
             echo "$SHA256  $RUNNER_TEMP/existing" | sha256sum --check --strict
             echo "::notice::$KEY already holds these bytes; nothing written."
           else
             if ! grep -Eq '\((NoSuchKey|404)\)' "$RUNNER_TEMP/get-error"; then cat "$RUNNER_TEMP/get-error" >&2; exit 1; fi
-            s3 put-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
+            s3 put-object --bucket "$DEPENDENCY_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
               --content-type application/gzip --cache-control 'public, max-age=31536000, immutable' \
               --if-none-match '*' > /dev/null
           fi
-      - name: Read the layer back from cdn.tau.new
-        if: steps.credential.outputs.available == 'true'
+      - name: Read the layer back from the channel's dependency host
         env:
           KEY: ${{ steps.layer.outputs.key }}
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
-            --output "$RUNNER_TEMP/public" "$PAYLOAD_CDN_BASE$KEY"
+            --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
   # The Tau UI that `tau serve` serves (charter W18, D29): the serve build,
@@ -930,26 +944,28 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # The same bytes under `blobs/sha256/<hex>` of the public content bucket, the
-  # first URL the pin names; written once and never replaced, as
-  # picogk-layer-mirror. Without the payloads credential (go-live SEC-9) the
-  # job only verifies the layer and says why it skipped.
+  # The same bytes under `blobs/sha256/<hex>` of the release channel's locked dependency
+  # bucket, the first URL the pin names; written once and never replaced, routed by channel
+  # and failing closed as picogk-layer-mirror. `ui@*` is the production channel (environment
+  # `dependencies`). The routing is by channel, so a staging UI tag (`ui-staging@*`, which
+  # `dependencies-staging` admits but nothing mints or resolves yet) takes the staging bucket.
   serve-ui-layer-mirror:
     needs: [resolve, serve-ui-layer]
     if: needs.resolve.outputs.project == 'ui'
-    name: Mirror the Tau serve UI layer to cdn.tau.new
+    name: Mirror the Tau serve UI layer to the ${{ needs.resolve.outputs.channel }} dependency host
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment:
-      name: payloads
+      name: ${{ needs.resolve.outputs.channel == 'production' && 'dependencies' || 'dependencies-staging' }}
       deployment: false
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.PAYLOAD_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.PAYLOAD_R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      PAYLOAD_R2_ENDPOINT: ${{ vars.PAYLOAD_R2_ENDPOINT }}
-      PAYLOAD_R2_BUCKET: ${{ vars.PAYLOAD_R2_BUCKET || 'tau-prod-content' }}
-      PAYLOAD_CDN_BASE: https://cdn.tau.new/
+      DEPENDENCY_R2_ENDPOINT: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+      DEPENDENCY_R2_BUCKET: ${{ vars.DEPENDENCY_R2_BUCKET }}
+      CHANNEL: ${{ needs.resolve.outputs.channel }}
+      DEPENDENCY_BASE_URL: ${{ needs.resolve.outputs.channel == 'production' && 'https://dependencies.tau.new/' || 'https://dependencies.taucad.dev/' }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -968,46 +984,54 @@ jobs:
             echo "asset=$asset"
             echo "key=blobs/sha256/$sha256"
           } >> "$GITHUB_OUTPUT"
-      - name: Require the payload upload credential
-        id: credential
+      - name: Require the channel's dependency upload credential
         run: |
+          set -euo pipefail
+          case "$CHANNEL" in
+            production) environment=dependencies expected=tau-prod-dependencies ;;
+            staging) environment=dependencies-staging expected=tau-staging-au-dependencies ;;
+            *)
+              echo "::error::Unknown release channel '$CHANNEL'; nothing is mirrored."
+              exit 1
+              ;;
+          esac
           missing=()
-          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY PAYLOAD_R2_ENDPOINT; do
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DEPENDENCY_R2_ENDPOINT DEPENDENCY_R2_BUCKET; do
             if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::notice title=Tau serve UI layer not mirrored::The payloads environment lacks the secrets PAYLOAD_R2_ACCESS_KEY_ID and PAYLOAD_R2_SECRET_ACCESS_KEY or the variable PAYLOAD_R2_ENDPOINT (missing: ${missing[*]}; go-live SEC-9). The layer is published on its GitHub Release only; rerun this job once they are set."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "::error::The $environment environment lacks ${missing[*]} (secrets DEPENDENCY_R2_ACCESS_KEY_ID, DEPENDENCY_R2_SECRET_ACCESS_KEY, variables DEPENDENCY_R2_ENDPOINT, DEPENDENCY_R2_BUCKET); nothing is mirrored."
+            exit 1
+          fi
+          if [ "$DEPENDENCY_R2_BUCKET" != "$expected" ]; then
+            echo "::error::The $environment environment names bucket '$DEPENDENCY_R2_BUCKET', not its own '$expected'; nothing is mirrored."
+            exit 1
           fi
       - name: Write the layer once under its digest
-        if: steps.credential.outputs.available == 'true'
         env:
           KEY: ${{ steps.layer.outputs.key }}
           SHA256: ${{ steps.layer.outputs.sha256 }}
           ASSET: ${{ steps.layer.outputs.asset }}
         run: |
           set -euo pipefail
-          s3() { aws --endpoint-url "$PAYLOAD_R2_ENDPOINT" s3api "$@"; }
-          if s3 get-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
+          s3() { aws --endpoint-url "$DEPENDENCY_R2_ENDPOINT" s3api "$@"; }
+          if s3 get-object --bucket "$DEPENDENCY_R2_BUCKET" --key "$KEY" "$RUNNER_TEMP/existing" > /dev/null 2> "$RUNNER_TEMP/get-error"; then
             echo "$SHA256  $RUNNER_TEMP/existing" | sha256sum --check --strict
             echo "::notice::$KEY already holds these bytes; nothing written."
           else
             if ! grep -Eq '\((NoSuchKey|404)\)' "$RUNNER_TEMP/get-error"; then cat "$RUNNER_TEMP/get-error" >&2; exit 1; fi
-            s3 put-object --bucket "$PAYLOAD_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
+            s3 put-object --bucket "$DEPENDENCY_R2_BUCKET" --key "$KEY" --body "layer/$ASSET" \
               --content-type application/gzip --cache-control 'public, max-age=31536000, immutable' \
               --if-none-match '*' > /dev/null
           fi
-      - name: Read the layer back from cdn.tau.new
-        if: steps.credential.outputs.available == 'true'
+      - name: Read the layer back from the channel's dependency host
         env:
           KEY: ${{ steps.layer.outputs.key }}
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
-            --output "$RUNNER_TEMP/public" "$PAYLOAD_CDN_BASE$KEY"
+            --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
   desktop-portable:

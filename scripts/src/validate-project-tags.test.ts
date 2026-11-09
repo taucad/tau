@@ -64,8 +64,10 @@ describe('apiLibraryAppEdges()', () => {
     );
 
     expect(apiLibraries.toSorted()).toEqual([
+      'api-agent-observability',
       'api-auth',
       'api-billing',
+      'api-chat',
       'api-core',
       'api-database',
       'api-email',
@@ -76,6 +78,7 @@ describe('apiLibraryAppEdges()', () => {
       'api-llm-gateway',
       'api-object-storage',
       'api-observability',
+      'api-projects',
       'api-redis',
       'api-testing',
     ]);

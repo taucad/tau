@@ -65,7 +65,7 @@
         "violated": "NoSnapBack"
       },
       "kind": "witness",
-      "ref": "AttributionSound removed: the target binding and camera still snap back without RecordSync OwnWriteAttributed (I5)"
+      "ref": "AttributionSound removed: the target binding and camera still snap back without the planned RecordSync OwnWriteAttributed (I5)"
     },
     "CameraAuthority.no-origin-guard.cfg": {
       "tier": "pr",
@@ -82,6 +82,30 @@
       },
       "kind": "witness",
       "ref": "EchoStamp removed: the driver's controls update is taken for input"
+    },
+    "CameraAuthority.no-resave-on-drop.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "DroppedPoseOverwritten"
+      },
+      "kind": "witness",
+      "ref": "ResaveOnDrop removed: a person's pose that landed before a foreign write is not saved again when the camera drops the foreign pose, so the file keeps the dropped pose (D15)"
+    },
+    "CameraAuthority.emission-gate.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "IdleForeignApplies"
+      },
+      "kind": "witness",
+      "ref": "QuietGate = emission with the drop rule: a foreign pose that arrives in idle inside the quiet window is dropped, not applied (D15)"
+    },
+    "CameraAuthority.queue-until-idle-NothingQueued.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NothingQueued"
+      },
+      "kind": "witness",
+      "ref": "Adoption = queue with the input gate: a foreign pose that arrives during a drag waits for the gate (I2, D15)"
     }
   },
   "graphs": {

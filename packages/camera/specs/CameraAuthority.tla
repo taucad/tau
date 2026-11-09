@@ -12,9 +12,10 @@
 (* made it" are modelled, never geometry.                                  *)
 (*                                                                         *)
 (* The record store is abstracted to what the binding observes: the file's *)
-(* camera pose with an origin label. `RecordSync.tla` owns the store's     *)
-(* protocol; its `OwnWriteAttributed` (I5) is this module's assumption,    *)
-(* switched by `AttributionSound`.                                         *)
+(* camera pose with an origin label. The planned `RecordSync.tla` (formal  *)
+(* methods blueprint, § Specs) will own the store's protocol; its planned  *)
+(* `OwnWriteAttributed` (I5) is this module's assumption, switched by      *)
+(* `AttributionSound`.                                                     *)
 (*                                                                         *)
 (* Switches (the target value first):                                      *)
 (*   Adoption          "drop": a persisted pose that cannot apply now is   *)
@@ -31,27 +32,35 @@
 (*                     pose (as built: `previousSettingsRef`,              *)
 (*                     `adoptedPoseRef`, `firstFrameReceiptRef`).          *)
 (*   AttributionSound  the store labels every read of this view's own      *)
-(*                     write `own` (RecordSync I5). FALSE: it may label    *)
-(*                     one `foreign` (the view store before taucad/tau     *)
-(*                     #1602).                                             *)
+(*                     write `own` (the planned RecordSync's I5). FALSE:   *)
+(*                     it may label one `foreign` (the view store before   *)
+(*                     taucad/tau #1602).                                  *)
 (*   OriginGuard       the binding adopts only records labelled `foreign`  *)
 (*                     (I6).                                               *)
 (*   EchoStamp         a controls update caused by the driver carries the  *)
 (*                     driver's echo revision and the camera ignores it    *)
 (*                     (I3).                                               *)
+(*   ResaveOnDrop      when the camera drops a foreign pose and its        *)
+(*                     current pose is person-made, the binding saves that *)
+(*                     pose again, so the file ends with the person's pose *)
+(*                     (D15). FALSE: nothing is saved, and the file keeps  *)
+(*                     the dropped foreign pose.                           *)
 (*                                                                         *)
 (* Correspondence (target names; the as-built seam in brackets):           *)
-(*   PoseObserved     camera `poseObserved{source: input | gizmo}`         *)
+(*   PoseObserved     camera `poseObserved{source: input | gizmo}`; the    *)
+(*                    step label carries the source (`PoseObserved:input`) *)
 (*   InteractionEnded camera `interactionEnded`                            *)
 (*   SettleElapsed    camera `settling --after(poseSettle)--> idle`        *)
 (*   Changed          `setVerticalFieldOfView` (fov), `setUpDirection`     *)
 (*                    (up), `frameGeometry` (fit, framing), `frameBounds`  *)
-(*                    (focus), `setViewport`, `setBounds`                  *)
+(*                    (focus), `setViewport`, `setBounds`; the step label  *)
+(*                    carries the source (`Changed:fov`)                   *)
 (*   Observe          a `recordSync` publication reaching the binding,     *)
 (*                    then `adoptPersistedPose` and the camera's answer:   *)
 (*                    AdoptApplied `adoptionApplied`, AdoptDropped         *)
-(*                    `adoptionDropped` [the record effect of              *)
-(*                    `useViewSettingsSync` and its `apply`]               *)
+(*                    `adoptionDropped`, on which the binding re-issues    *)
+(*                    the person's current pose as an edit [the record     *)
+(*                    effect of `useViewSettingsSync` and its `apply`]     *)
 (*   Captured, Landed the binding's `edit` and the store's checked write   *)
 (*                    [`persist` and `writeRecord`]                        *)
 (*   EchoObserved     `poseObserved{echoRevision}` from the controls       *)
@@ -67,7 +76,8 @@ CONSTANTS MaxRevision,       \* camera changes explored
           WriteRule,
           AttributionSound,
           OriginGuard,
-          EchoStamp
+          EchoStamp,
+          ResaveOnDrop
 
 ASSUME /\ MaxRevision \in 1..99
        /\ MaxForeign \in Nat
@@ -77,6 +87,7 @@ ASSUME /\ MaxRevision \in 1..99
        /\ AttributionSound \in BOOLEAN
        /\ OriginGuard \in BOOLEAN
        /\ EchoStamp \in BOOLEAN
+       /\ ResaveOnDrop \in BOOLEAN
 
 VARIABLES
   cam,          \* the camera: [pose, source, revision, input]
@@ -102,6 +113,15 @@ PersonSources == {"input", "gizmo", "fov", "up", "fit", "focus"}
 MachineSources == {"framing", "persisted", "viewport", "bounds"}
 Sources == PersonSources \cup MachineSources
 
+\* The sources of a drag and of a command or automatic change. The step label carries the source, so the
+\* covering suite replays every source; no property reads these labels.
+DragSources == {"input", "gizmo"}
+ChangeSources == {"fov", "up", "fit", "focus", "framing", "viewport", "bounds"}
+DragLabel == [input |-> "PoseObserved:input", gizmo |-> "PoseObserved:gizmo"]
+ChangeLabel == [fov |-> "Changed:fov", up |-> "Changed:up", fit |-> "Changed:fit",
+                focus |-> "Changed:focus", framing |-> "Changed:framing",
+                viewport |-> "Changed:viewport", bounds |-> "Changed:bounds"]
+
 \* The opening rig pose. Local poses take the revision that made them; another party's poses start at 101.
 Rig == 0
 ForeignPose(k) == 100 + k
@@ -124,9 +144,10 @@ TypeOK ==
   /\ echo \in 0..MaxRevision
   /\ arrivedBusy \subseteq Poses
   /\ foreignCount \in 0..MaxForeign
-  /\ act \in {"Init", "PoseObserved", "InteractionEnded", "SettleElapsed", "Changed", "RecordOwn",
-              "AdoptApplied", "AdoptDropped", "AdoptQueued", "PendingApplied", "Captured", "Landed",
-              "ForeignWrite", "EchoObserved", "QuietElapsed"}
+  /\ act \in {"Init", "InteractionEnded", "SettleElapsed", "RecordOwn", "AdoptApplied", "AdoptDropped",
+              "AdoptQueued", "PendingApplied", "Captured", "Landed", "ForeignWrite", "EchoObserved",
+              "QuietElapsed"}
+              \cup {DragLabel[s] : s \in DragSources} \cup {ChangeLabel[s] : s \in ChangeSources}
 
 Init ==
   /\ cam = [pose |-> Rig, source |-> "framing", revision |-> 0, input |-> "idle"]
@@ -164,10 +185,10 @@ Still == UNCHANGED <<cam, poseBy, quiet, echo, intent>>
 
 \* The person drags the view or the gizmo: every observed pose is a new pose and the gesture is live.
 PoseObserved(source) ==
-  /\ source \in {"input", "gizmo"}
+  /\ source \in DragSources
   /\ Touch(cam.revision + 1, source, "dragging")
   /\ UNCHANGED <<file, seen, pending, saved, adoptedPose, firstPose, arrivedBusy, foreignCount>>
-  /\ act' = "PoseObserved"
+  /\ act' = DragLabel[source]
 
 \* The person releases the gesture.
 InteractionEnded ==
@@ -187,13 +208,13 @@ SettleElapsed ==
 
 \* A command or an automatic change, in any input state. Viewport and bounds changes keep the pose.
 Changed(source) ==
-  /\ source \in {"fov", "up", "fit", "focus", "framing", "viewport", "bounds"}
+  /\ source \in ChangeSources
   /\ Touch(IF source \in {"viewport", "bounds"} THEN cam.pose ELSE cam.revision + 1, source, cam.input)
   /\ firstPose' = IF WriteRule = "value" /\ source = "framing" /\ firstPose = Rig
                   THEN cam.revision + 1
                   ELSE firstPose
   /\ UNCHANGED <<file, seen, pending, saved, adoptedPose, arrivedBusy, foreignCount>>
-  /\ act' = "Changed"
+  /\ act' = ChangeLabel[source]
 
 \* A persisted pose becomes the camera's pose in one change.
 Apply(pose) ==
@@ -208,7 +229,8 @@ Labels ==
 
 \* The store publishes the file's camera pose and the binding handles it once. An `own` record is not
 \* adopted (I6). A `foreign` one is sent to the camera, which applies it at the gate and otherwise drops
-\* it (D15) or, as built, queues it.
+\* it (D15) or, as built, queues it. On a drop the binding re-issues the camera's current pose as an edit
+\* when a person made it, so the person's pose is saved over the foreign one (D15, last writer wins).
 Observe(label) ==
   /\ file.pose # seen
   /\ label \in Labels
@@ -224,8 +246,11 @@ Observe(label) ==
              THEN /\ Apply(file.pose)
                   /\ pending' = NoPending
                   /\ act' = "AdoptApplied"
-             ELSE /\ Still
-                  /\ UNCHANGED adoptedPose
+             ELSE /\ UNCHANGED <<cam, poseBy, quiet, echo, adoptedPose>>
+                  /\ intent' = IF ResaveOnDrop /\ Adoption = "drop" /\ WriteRule = "provenance"
+                                  /\ poseBy \in PersonSources
+                               THEN [pose |-> cam.pose, source |-> poseBy]
+                               ELSE intent
                   /\ IF Adoption = "drop"
                      THEN /\ pending' = NoPending
                           /\ act' = "AdoptDropped"
@@ -298,10 +323,10 @@ QuietElapsed ==
   /\ act' = "QuietElapsed"
 
 Next ==
-  \/ \E source \in {"input", "gizmo"} : PoseObserved(source)
+  \/ \E source \in DragSources : PoseObserved(source)
   \/ InteractionEnded
   \/ SettleElapsed
-  \/ \E source \in {"fov", "up", "fit", "focus", "framing", "viewport", "bounds"} : Changed(source)
+  \/ \E source \in ChangeSources : Changed(source)
   \/ \E label \in {"own", "foreign"} : Observe(label)
   \/ PendingApplied
   \/ Captured
@@ -325,6 +350,21 @@ NothingQueued == pending = NoPending
 \* D15: a persisted pose that arrives while the camera is idle applies at once.
 IdleForeignApplies == act \in {"AdoptDropped", "AdoptQueued"} => cam.input # "idle"
 
+\* Nothing is in flight: the gesture has settled, every edit has landed, every publication is handled
+\* and no controls update is pending. The nightly simulation keeps the behaviours that reach it.
+Quiescent ==
+  /\ act # "Init"
+  /\ cam.input = "idle"
+  /\ quiet
+  /\ intent = NoIntent
+  /\ pending = NoPending
+  /\ echo = 0
+  /\ seen = file.pose
+
+\* D15: when the drag ends, the person's pose is saved over a foreign pose the camera dropped.
+DroppedPoseOverwritten ==
+  Quiescent => ~(file.writer = "foreign" /\ file.pose \in arrivedBusy /\ poseBy \in PersonSources)
+
 \* I6: the binding never asks the camera to adopt a record this view wrote.
 OwnNeverAdopted == act \in AdoptionRequests => file.writer # "self"
 
@@ -340,16 +380,5 @@ NoEchoLoop == [][act' = "EchoObserved" => cam' = cam]_vars
 \* The incident (taucad/tau#1602): the camera never moves back to a pose this view saved earlier.
 AppliedWriter == IF act' = "PendingApplied" THEN pending.writer ELSE file.writer
 NoSnapBack == [][(act' \in AdoptionApplies /\ AppliedWriter = "self") => cam'.pose = cam.pose]_vars
-
-\* Nothing is in flight: the gesture has settled, every edit has landed, every publication is handled
-\* and no controls update is pending. The nightly simulation keeps the behaviours that reach it.
-Quiescent ==
-  /\ act # "Init"
-  /\ cam.input = "idle"
-  /\ quiet
-  /\ intent = NoIntent
-  /\ pending = NoPending
-  /\ echo = 0
-  /\ seen = file.pose
 
 =============================================================================

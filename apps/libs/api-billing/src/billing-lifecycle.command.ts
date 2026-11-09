@@ -7,6 +7,7 @@ import { CreditLedgerService } from '#credit-ledger.service.js';
 import { BillingPaymentsService } from '#billing-payments.service.js';
 import { BillingCashService } from '#billing-cash.service.js';
 import { BillingCashReconciliationService } from '#billing-cash-reconciliation.service.js';
+import { financialCaseStates, listFinancialCases } from '#billing-case-list.js';
 import {
   BillingSupplierReconciliationService,
   operatorSupplierInvoiceSchema,
@@ -47,6 +48,16 @@ const requestSchema = z.discriminatedUnion('operation', [
       disposition: z.enum(['resolved', 'rescoped']),
       reviewActorId: id,
       reason: z.string().min(1).max(2000),
+    })
+    .strict(),
+  // Read-only: absent from the write operations, so the read key alone lists cases.
+  z
+    .object({
+      operation: z.literal('list-cases'),
+      environment,
+      state: z.array(z.enum(financialCaseStates)).min(1),
+      attributed: z.union([z.literal('any'), z.boolean()]),
+      limit,
     })
     .strict(),
   z
@@ -142,6 +153,9 @@ export async function runBillingLifecycleCommand(input: {
     }
     case 'resolve-case': {
       return reconciliation.resolveCaseByOperator(request);
+    }
+    case 'list-cases': {
+      return listFinancialCases(input.database, config, request);
     }
     case 'create-cash-scan': {
       return reconciliation.createScan(request);

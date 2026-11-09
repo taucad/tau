@@ -1,8 +1,8 @@
 import {
-  assertNewCollectionCashScope,
   BillableModelInvocationService,
   BillingAccountClosureService,
   BillingAttemptController,
+  BillingCashService,
   BillingController,
   BillingEstimatesService,
   BillingPaymentsService,
@@ -11,6 +11,7 @@ import {
   BillingUsageService,
   CodeOwnedBillableModelQualificationResolver,
   createBillableModelProviderAdapters,
+  createBillingStripeClient,
   CreditLedgerService,
   qualifiedMeterContracts,
   registerBillableModelMeterContracts,
@@ -24,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { once } from 'node:events';
 import { ConfigService } from '@nestjs/config';
-import { ConflictException, Logger, VersioningType } from '@nestjs/common';
+import { Logger, VersioningType } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -2287,7 +2288,7 @@ describe('account-scoped spend gate', () => {
     }
   });
 
-  it('should answer 409 cash_scope_attention at new collection for an unattributed missing_local_payment and admit every account', async () => {
+  it("should settle every account's model step while an unattributed missing_local_payment is open", async () => {
     const provider = await settlingProvider();
     const owner = createOwner(provider.url);
     const fixture = await createFixture();
@@ -2298,16 +2299,6 @@ describe('account-scoped spend gate', () => {
       sourceId: `pi_${randomUUID()}`,
     });
     try {
-      const refusal = await assertNewCollectionCashScope(
-        { database },
-        { environment: 'development', stripeAccountId: 'acct_admission', livemode: false },
-        fixture.accountId,
-      ).catch((error: unknown) => error);
-      if (!(refusal instanceof ConflictException)) {
-        throw new TypeError('Expected the purchase-time cash scope refusal');
-      }
-      expect(refusal.getStatus()).toBe(409);
-      expect(refusal.message).toBe('cash_scope_attention');
       for (const account of [fixture, bystander]) {
         // oxlint-disable-next-line no-await-in-loop -- one settled turn per account against the same open case
         const operationId = await settle(owner, account.authUserId);
@@ -2318,6 +2309,58 @@ describe('account-scoped spend gate', () => {
     } finally {
       await resolveCases([opened]);
       await provider.close();
+    }
+  });
+
+  it("should admit a bystander's purchase while an unattributed case is open", async () => {
+    const bystander = await createFixture();
+    const stripe = createBillingStripeClient({
+      secretKey: 'sk_test_admission_collection',
+      fixtureUrl: 'http://127.0.0.1:9/',
+    });
+    const scope = { environment: 'development', stripeAccountId: 'acct_admission', livemode: false } as const;
+    const payments = new BillingPaymentsService(
+      { database },
+      stripe,
+      stripe,
+      {
+        ...scope,
+        uiOrigin: 'http://127.0.0.1:3000',
+        webhookSecret: 'whsec_admission_collection',
+        collection: { kind: 'local_fixture', monthlyPriceId: 'price_admission', topupProductId: 'prod_admission' },
+      },
+      policy,
+      ledger,
+      new BillingCashService({ database }, stripe, ledger, scope),
+    );
+    // A bound Customer, so preparation writes only local rows and never calls the provider.
+    await database.insert(schema.billingStripeCustomer).values({
+      id: `customer-${randomUUID()}`,
+      accountId: bystander.accountId,
+      ...scope,
+      stripeCustomerId: `cus_admission_${randomUUID()}`,
+    });
+    // Foreign cash in the shared test account: a payment no Tau account owns.
+    const opened = await openCase({
+      kind: 'missing_local_payment',
+      sourceType: 'stripe_payment_intent',
+      sourceId: `pi_${randomUUID()}`,
+    });
+    try {
+      const prepared = await payments.prepareTopup(bystander.authUserId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '1',
+        method: 'checkout',
+      });
+      expect(prepared).toMatchObject({ purpose: 'manual_topup', state: 'prepared' });
+      const [purchase] = await database
+        .select()
+        .from(schema.billingPurchase)
+        .where(eq(schema.billingPurchase.id, prepared.actionId));
+      expect(purchase).toMatchObject({ accountId: bystander.accountId, state: 'prepared', purpose: 'manual_checkout' });
+    } finally {
+      await resolveCases([opened]);
     }
   });
 

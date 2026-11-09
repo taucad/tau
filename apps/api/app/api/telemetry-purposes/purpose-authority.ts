@@ -44,6 +44,12 @@ export type PurposeAuthorityInput = Readonly<{
    * billing access safe but must never become affirmative reuse authority.
    */
   tierAssured: boolean;
+  /**
+   * Whether the account's "Improve Tau for everyone" switch is on. On an
+   * assured Free tier it grants the improvement purposes by default until the
+   * account decides them itself; it authorises nothing on any other tier.
+   */
+  improvementDefault?: boolean | undefined;
   project?: ProjectAuthority | undefined;
 }>;
 
@@ -52,6 +58,12 @@ export type PurposeAuthorityInput = Readonly<{
  * protection to be established, not merely unobjected-to.
  */
 const reusePurposes = new Set<TelemetryPurpose>(['reuse', 'training']);
+
+/**
+ * Purposes the Free plan grants by default: recording is the cost of the free
+ * plan, with an opt-out. Ratings stay per rating and diagnosis per report.
+ */
+const freeDefaultPurposes = new Set<TelemetryPurpose>(['summary', 'content', 'reuse', 'training']);
 
 /** Purposes that carry prompts, designs or messages rather than counts and timings. */
 const contentPurposes = new Set<TelemetryPurpose>(['content', 'diagnosis', 'reuse', 'training']);
@@ -70,6 +82,33 @@ const latestDecision = (
     }
   }
   return newest;
+};
+
+/** Whether the Free plan's default grant answers for this purpose: no decision under this notice, and an assured Free account with the switch on. */
+const freeDefaultApplies = (
+  purpose: TelemetryPurpose,
+  input: PurposeAuthorityInput,
+  current: RecordedPurposeDecision | undefined,
+): boolean =>
+  current === undefined &&
+  input.improvementDefault === true &&
+  input.tier === 'free' &&
+  input.tierAssured &&
+  freeDefaultPurposes.has(purpose);
+
+/**
+ * The Free default's answer for an account with no decision under this notice.
+ * An opt-out taken under an earlier notice still stands.
+ */
+const freeDefaultRefusal = (
+  purpose: TelemetryPurpose,
+  input: PurposeAuthorityInput,
+  decision: RecordedPurposeDecision | undefined,
+): PurposeRefusal | undefined => {
+  if (decision !== undefined && !decision.granted) {
+    return 'withdrawn';
+  }
+  return input.project?.mixedSource === true && contentPurposes.has(purpose) ? 'project-mixed-source' : undefined;
 };
 
 /**
@@ -95,6 +134,9 @@ const refuse = (
   }
   if (input.project !== undefined && !input.project.ownedByPrincipal) {
     return { refusal: 'project-not-owned', ...state };
+  }
+  if (freeDefaultApplies(purpose, input, current)) {
+    return { refusal: freeDefaultRefusal(purpose, input, decision), ...state };
   }
   if (decision === undefined) {
     return { refusal: 'no-decision', ...state };
@@ -122,10 +164,12 @@ const refuse = (
 /**
  * Project the effective purpose state for one principal, and optionally one
  * project. Default-deny: a purpose is allowed only when an explicit decision
- * under the current notice says so and every independent check passes.
+ * under the current notice says so, or the Free plan's default does, and every
+ * independent check passes.
  *
- * The legacy `allowsAiTraining` and `allowsUsageMetrics` booleans are not
- * inputs. Neither authorises any purpose here, whatever their value.
+ * `allowsUsageMetrics` is not an input. `allowsAiTraining` is, only as the
+ * Free plan's default (`improvementDefault`); it authorises nothing on a paid
+ * tier or an unassured one.
  *
  * @param input - Notice, recorded decisions, tier assurance and project authority.
  * @returns One state per purpose, in the declared order.
@@ -157,11 +201,15 @@ export const purposeEpoch = (
     projectId: string | undefined;
     noticeVersion: string | undefined;
     decisions: readonly RecordedPurposeDecision[];
+    /** The Free default's switch; turning it off must make a cached answer stale. */
+    improvementDefault?: boolean | undefined;
   }>,
 ): string => {
   let newest = 0;
   for (const decision of subject.decisions) {
     newest = Math.max(newest, decision.sequence);
   }
-  return [subject.userId, subject.projectId ?? '-', subject.noticeVersion ?? '-', String(newest)].join(':');
+  const epoch = [subject.userId, subject.projectId ?? '-', subject.noticeVersion ?? '-', String(newest)];
+  /* Appended only when on, so every existing epoch is unchanged. */
+  return (subject.improvementDefault === true ? [...epoch, 'd'] : epoch).join(':');
 };

@@ -223,16 +223,66 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: max by (app, kind) (tau_billing_open_financial_cases{app=~".*",service_name="tau-api",kind=~"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+"}) > 0
+              expr: max by (app, kind) (tau_billing_open_financial_cases{app=~".*",service_name="tau-api",attributed="true",kind=~"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+"}) > 0
               intervalMs: 15000
               maxDataPoints: 20
               refId: account_spend_blocked
         noDataState: OK
         execErrState: OK
-        for: 1h
+        for: 15m
         annotations:
           runbook_url: docs/handbooks/cloud/playbooks/ledger-drift.md
-          summary: A spend-blocking financial case (dispute, unbacked credit or journal drift; charter D11) has been open for more than 1 h. Every named account gets 403 BILLING_ACCOUNT_RESTRICTED on every model until an operator resolves it. Owed-money and fee kinds never block and are not in this rule. Grouped by Fly `app` and case kind.
+          summary: 'Tier T1: a spend-blocking financial case (dispute, orphan receipt, invalid grant cause, entitlement disagreement or journal drift; charter D11) that names an account has been open for more than 15 min. That customer gets 403 BILLING_ACCOUNT_RESTRICTED on every model step and cannot start a new purchase until an operator resolves it. Start with the billing lifecycle `list-cases` with `attributed: true`. An unattributed case pages as billing-case-unattributed instead; owed-money and bookkeeping kinds never block and are not in this rule. Grouped by Fly `app` and case kind.'
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+      - uid: billing-case-unattributed
+        title: 'P0: Financial Case Without an Account'
+        condition: case_unattributed
+        data:
+          - refId: case_unattributed
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max by (app, kind) (tau_billing_open_financial_cases{app=~".*",service_name="tau-api",attributed="false",kind!~"tax_registration_review|supplier_.+"}) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: case_unattributed
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/refunds-and-financial-cases.md
+          summary: 'Tier U (billing collection gate blueprint D5): an open financial case names no Tau account, usually foreign cash (a payment with no Tau customer) or a Stripe read that could not attribute it. No customer is refused anything; it is operator work and pages at the first evaluation after the hourly gauge write. Run the billing lifecycle `list-cases` with `attributed: false`, then close each row with `resolve-case` (`resolved` for foreign cash). tax_registration_review and supplier_* cases never name an account, so they are left to billing-books-overdue-24h (and billing-supplier-invoice-mismatch) instead of paging here. Grouped by Fly `app` and case kind.'
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+      - uid: billing-owed-overdue-24h
+        title: 'P0: Customer Owed for More Than 24 h'
+        condition: owed_overdue
+        data:
+          - refId: owed_overdue
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max by (app, kind) (tau_billing_open_financial_case_age_seconds{app=~".*",service_name="tau-api",attributed="true",kind=~"missing_local_payment|paid_unfulfilled_recovery|unfulfilled_purchase_obligation"}) > 86400
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: owed_overdue
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+          summary: 'Tier T2: Tau has owed a named customer for more than 24 h: the oldest open missing_local_payment, paid_unfulfilled_recovery or unfulfilled_purchase_obligation case (paid, not yet credited or fulfilled) is older than a day. Nothing is refused; the customer is still waiting for what they paid for. Start with the billing lifecycle `list-cases` with `attributed: true`, then follow paid-not-credited. billing-owed-stale-2h warned at 2 h. Reads the oldest-case age gauge, written hourly. Grouped by Fly `app` and case kind.'
         labels:
           severity: critical
           service: tau-api
@@ -654,6 +704,57 @@ groups:
           severity: warning
           service: tau-api
           component: billing
+      - uid: billing-owed-stale-2h
+        title: 'P1: Customer Owed for More Than 2 h'
+        condition: owed_stale
+        data:
+          - refId: owed_stale
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max by (app, kind) (tau_billing_open_financial_case_age_seconds{app=~".*",service_name="tau-api",attributed="true",kind=~"missing_local_payment|paid_unfulfilled_recovery|unfulfilled_purchase_obligation"}) > 7200
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: owed_stale
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+          summary: 'Tier T2: Tau has owed a named customer for more than 2 h: the oldest open missing_local_payment, paid_unfulfilled_recovery or unfulfilled_purchase_obligation case (paid, not yet credited or fulfilled) is older than 2 h. Nothing is refused; the customer is waiting for what they paid for. Start with the billing lifecycle `list-cases` with `attributed: true`, then follow paid-not-credited. Pages as billing-owed-overdue-24h after 24 h. Reads the oldest-case age gauge, written hourly. Grouped by Fly `app` and case kind.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+      - uid: billing-books-overdue-24h
+        title: 'P1: Bookkeeping Case Open for More Than 24 h'
+        condition: books_overdue
+        data:
+          - refId: books_overdue
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max by (app, kind) (tau_billing_open_financial_case_age_seconds{app=~".*",service_name="tau-api",kind=~"gross_fee_net_mismatch|refund_unresolved|dispute_balance_transaction|tax_registration_review|supplier_.+"}) > 86400
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: books_overdue
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/refunds-and-financial-cases.md
+          summary: "Tier T3, daily digest (repeat_interval 24h): one of Tau's bookkeeping cases (gross_fee_net_mismatch, refund_unresolved, dispute_balance_transaction, tax_registration_review or a supplier_* kind), attributed or not, has been open for more than 24 h. No customer is refused anything. Run the billing lifecycle `list-cases` and work each row by its owner, next step and deadline. An unattributed row also pages as billing-case-unattributed; billing-supplier-invoice-mismatch still warns on its own. Grouped by Fly `app` and case kind."
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+          repeat_interval: 24h
       - uid: runtime-implementation-failures
         title: TauRuntimeImplementationFailures
         condition: implementation_failures

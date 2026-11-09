@@ -111,7 +111,9 @@ describe('outdated pull request runs', () => {
     'should key %s on the head branch for pull requests and on the run otherwise',
     (path) => {
       expect(workflow(path).concurrency?.group).toContain(
-        expression("github.event_name == 'pull_request' && github.head_ref || github.run_id"),
+        expression(
+          "github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id",
+        ),
       );
     },
   );

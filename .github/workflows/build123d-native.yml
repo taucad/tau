@@ -25,7 +25,7 @@ permissions:
 
 # A newer push to a pull request's head branch cancels its outdated run; a dispatch is never cancelled.
 concurrency:
-  group: build123d-native-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  group: build123d-native-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:

@@ -205,6 +205,26 @@ describe('DirectModelInvocationService', () => {
     );
   });
 
+  it('should code a refused reasoning replay as its own refusal and keep the provider reason for the operator', async () => {
+    const sentence =
+      'messages.1.content.4: Invalid `signature` in `thinking` block. The block is bound to a different conversation.';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: sentence } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    const refused = await service.invoke(gatewayIntent()).catch((error: unknown) => error);
+
+    expect((refused as LlmGatewayError).getStatus()).toBe(502);
+    expect(errorDetails(refused)).toMatchObject({
+      type: 'REASONING_REPLAY_REJECTED',
+      message: `Configured provider returned HTTP 400. ${sentence}`,
+    });
+  });
+
   it('should redact a credential the provider quotes back before it reaches the client', async () => {
     const quotedKey = 'sk-proj-abcdefghijklmnop1234';
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

@@ -51,7 +51,10 @@ describe('VerifyEmail', () => {
   });
 
   it('verifies the token and redirects to a sanitized app path', async () => {
-    authMocks.verifyEmail.mockResolvedValue({ data: {}, error: null });
+    authMocks.verifyEmail.mockResolvedValue({
+      data: { status: true, user: { id: 'usr_1' } },
+      error: null,
+    });
 
     renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2Fs%2Ftau%7Epub_123');
 
@@ -64,7 +67,29 @@ describe('VerifyEmail', () => {
       vi.advanceTimersByTime(900);
     });
 
-    expect(authMocks.navigate).toHaveBeenCalledWith({ to: '/s/tau~pub_123', replace: true });
+    expect(authMocks.navigate).toHaveBeenCalledWith({
+      to: '/s/tau~pub_123',
+      replace: true,
+    });
+  });
+
+  it('asks for a sign-in when the link verified but brought no session', async () => {
+    // A verification link stays valid until it expires; opening it again verifies nothing new and signs nobody in.
+    authMocks.verifyEmail.mockResolvedValue({
+      data: { status: true, user: null },
+      error: null,
+    });
+
+    renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2F');
+
+    await flushAsyncEffects();
+
+    expect(screen.getByText('Your email is confirmed. Sign in to continue.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', '/auth/sign-in');
+    act(() => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(authMocks.navigate).not.toHaveBeenCalled();
   });
 
   it('shows a recovery state when the token is missing', () => {
@@ -93,4 +118,11 @@ describe('sanitizeVerifyEmailRedirectTo', () => {
     expect(sanitizeVerifyEmailRedirectTo('https://example.com/steal')).toBe('/');
     expect(sanitizeVerifyEmailRedirectTo('//example.com/steal')).toBe('/');
   });
+
+  it.each([String.raw`/\example.com`, String.raw`/\/example.com`, String.raw`\\example.com`])(
+    'rejects %s, which a browser would leave the origin for (assessment F-6)',
+    (value) => {
+      expect(sanitizeVerifyEmailRedirectTo(value)).toBe('/');
+    },
+  );
 });

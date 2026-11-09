@@ -6,7 +6,7 @@
 
 ## 1. Introduction
 
-These Terms of Service ("Terms") govern your access to and use of the TauCAD Limited software service, including any associated websites, networks, applications, and other services provided by TauCAD Limited (collectively, the "Service"). These Terms constitute a legally binding agreement between you and TauCAD Limited ("we," "us," or "our"). By accessing or using our Service, you acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/legal/privacy), which is incorporated by reference.
+These Terms of Service ("Terms") govern your access to and use of Tau, the software service provided by TauCAD Limited, including any associated websites, networks, applications, and other services provided by TauCAD Limited (collectively, the "Service"). These Terms constitute a legally binding agreement between you and TauCAD Limited ("we," "us," or "our"). By accessing or using our Service, you acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/legal/privacy), which is incorporated by reference.
 
 If you are using our Service on behalf of an organization, you represent and warrant that you have the authority to bind that organization to these Terms. If you do not agree to these Terms, you may not access or use our Service.
 
@@ -27,7 +27,7 @@ We reserve the right to modify these Terms at any time. We will provide notice o
 
 ### 3.1 Service Description
 
-TauCAD is an AI-assisted computer-aided design (CAD) software service. The Service enables users to create, edit, convert, and export 3D designs through various tools and features, which may include AI-powered assistance, code-based modeling, file format conversion, and integrations with third-party platforms. We may also offer developer tools, APIs, and software packages for programmatic access to certain Service functionality.
+Tau is an AI-assisted computer-aided design (CAD) software service. The Service enables users to create, edit, convert, and export 3D designs through various tools and features, which may include AI-powered assistance, code-based modeling, file format conversion, and integrations with third-party platforms. We may also offer developer tools, APIs, and software packages for programmatic access to certain Service functionality.
 
 To use our Service, you must be at least 18 years old or the age of legal majority in your jurisdiction, whichever is greater.
 
@@ -115,19 +115,19 @@ These restrictions do not apply to the open-source software in the Service, incl
 
 ### 6.2 Open Source
 
-TauCAD is built on open-source software. The source code is publicly available at [https://github.com/taucad/tau](https://github.com/taucad/tau).
+Tau is built on open-source software. The source code is publicly available at [https://github.com/taucad/tau](https://github.com/taucad/tau).
 
-All TauCAD-authored source, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses, listed in our [Open-Source Notices](/legal/open-source).
+All source authored by TauCAD Limited, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses, listed in our [Open-Source Notices](/legal/open-source).
 
-Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the TauCAD name and trademarks, and any content we create that is not part of the open-source codebase.
+Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the Tau and TauCAD names and trademarks, and any content we create that is not part of the open-source codebase.
 
 ### 6.3 Your Designs
 
-CAD designs, models, and other creative works you create using TauCAD are your intellectual property. Your use of TauCAD does not create any obligation for you to license your designs under any open-source license.
+CAD designs, models, and other creative works you create using Tau are your intellectual property. Your use of Tau does not create any obligation for you to license your designs under any open-source license.
 
 ### 6.4 Feedback & Contributions
 
-You grant us a perpetual, irrevocable, royalty-free license to use any feedback, comments, or suggestions you provide. If you contribute to the TauCAD open-source project, your contributions will be licensed under the same license as the project.
+You grant us a perpetual, irrevocable, royalty-free license to use any feedback, comments, or suggestions you provide. If you contribute to the Tau open-source project, your contributions will be licensed under the same license as the project.
 
 ## 7. Disclaimers & Liability
 

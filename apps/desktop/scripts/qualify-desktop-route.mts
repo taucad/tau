@@ -612,7 +612,14 @@ const main = async (): Promise<void> => {
               }
             })()
           : execFileAsync(process.execPath, rendererArguments, {
-              env: { ...process.env, ...rendererEnv },
+              env: {
+                ...process.env,
+                ...rendererEnv,
+                /* The reinstalled app's attach stalls after `<ws connected>` with every target still answering (run
+                 * 42563760774 macos-zip-arm64): Playwright's own CDP traffic for this step names the command that
+                 * never got its answer. Diagnostics only; the step's behaviour and limits are unchanged. */
+                ...(action === 'reinstall-ui' ? { DEBUG: 'pw:protocol', DEBUG_FILE: `${output}.protocol.txt` } : {}),
+              },
               maxBuffer: 8 * 1024 * 1024,
               timeout: 1_200_000,
             })

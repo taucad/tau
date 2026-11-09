@@ -10,6 +10,39 @@ import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
 import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
 
+/**
+ * Longest wait for an idle period before requesting the editor runtime anyway. Milliseconds.
+ * Short enough that a permanently busy page still gets a source pane, long enough that opening a
+ * project serves the chat composer first.
+ */
+const runtimeIdleLimit = 2000;
+
+/**
+ * Run `start` once the main thread is idle, or after `runtimeIdleLimit`, whichever comes first.
+ *
+ * The runtime and its syntax were requested in a microtask, which runs inside the task that mounted
+ * the pane. Opening a project mounts this pane as soon as the project's file services publish, and
+ * measurement on the cloud host found the CodeMirror runtime and the TypeScript syntax chunk
+ * compiling in front of the chat composer: the composer accepted a draft 2.3 s later than it did
+ * when the pane had not yet been reached. Loading the editor is not a first action, so it waits for
+ * a gap instead of taking one.
+ *
+ * @param start - Called once, when the main thread has a gap.
+ * @returns Cancels a start that has not run yet.
+ */
+const whenIdle = (start: () => void): (() => void) => {
+  if ('requestIdleCallback' in globalThis) {
+    const id = requestIdleCallback(start, { timeout: runtimeIdleLimit });
+    return () => {
+      cancelIdleCallback(id);
+    };
+  }
+  const id = setTimeout(start, 0);
+  return () => {
+    clearTimeout(id);
+  };
+};
+
 /** Browser timing marks carry pane identity but never document text or paths. */
 export function markCodeEditorMilestone(name: string, viewId: string): void {
   if (typeof performance.mark === 'function') {
@@ -82,21 +115,33 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       }
     }
   }, []);
+  /* The runtime and the syntax are requested from one idle gap, so the syntax reaches a mounted view
+   * no later than it did when both were requested from one microtask: a syntax that lands after the
+   * view mounts reconfigures it under whatever the user has already started, such as a completion. */
+  const runtimeRequested = useRef(false);
+  const languageId = useRef(props.languageId);
   useEffect(() => {
     markCodeEditorMilestone('code-pane-admission', props.viewId);
     let active = true;
-    queueMicrotask(() => {
+    runtimeRequested.current = false;
+    const cancel = whenIdle(() => {
       if (active) {
+        runtimeRequested.current = true;
         void loadRuntime();
+        void loadSyntax(languageId.current);
       }
     });
     return () => {
       active = false;
+      cancel();
       runtimeLoadSequence.current += 1;
+      syntaxController.current?.abort();
     };
-  }, [loadRuntime, props.viewId]);
+  }, [loadRuntime, loadSyntax, props.viewId]);
   useEffect(() => {
-    let active = true;
+    languageId.current = props.languageId;
+    // Until the idle gap requests the runtime, that gap requests this language with it.
+    let active = runtimeRequested.current;
     queueMicrotask(() => {
       if (active) {
         void loadSyntax(props.languageId);

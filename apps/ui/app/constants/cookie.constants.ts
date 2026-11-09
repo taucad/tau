@@ -99,6 +99,8 @@ export const cookieName = {
   /* Privacy */
   // The device's runtime telemetry preference: `on`, `off` (sticky) or unset (`on`).
   telemetry: 'telemetry',
+  // Whether the desktop app sends product analytics: `false` once turned off in Data controls, otherwise on.
+  desktopAnalytics: 'desktop-analytics',
 
   /* Docs */
   // Whether the docs sidebar is open.

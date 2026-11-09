@@ -7,6 +7,9 @@ type Usage = {
   input?: bigint;
   cacheRead?: bigint;
   cacheWrite?: bigint;
+  /** Anthropic's per-lifetime split of `cacheWrite`, present only when the supplier reports it. */
+  cacheWrite5m?: bigint;
+  cacheWrite1h?: bigint;
   output?: bigint;
   reasoning?: bigint;
   requestId?: string;
@@ -58,10 +61,13 @@ const usageFrom = (wire: BillableProviderWire, providerId: string, value: unknow
     return undefined;
   }
   if (wire === 'anthropic') {
+    const cacheCreation = record(usage['cache_creation']);
     return {
       input: integer(usage['input_tokens']),
       cacheRead: integer(usage['cache_read_input_tokens']),
       cacheWrite: integer(usage['cache_creation_input_tokens']),
+      cacheWrite5m: integer(cacheCreation?.['ephemeral_5m_input_tokens']),
+      cacheWrite1h: integer(cacheCreation?.['ephemeral_1h_input_tokens']),
       output: integer(usage['output_tokens']),
       requestId: typeof response['id'] === 'string' ? response['id'] : undefined,
     };
@@ -95,7 +101,7 @@ const parseEvents = (bytes: Uint8Array<ArrayBuffer>): unknown[] => {
       values.push(
         JSON.parse(
           candidate.replaceAll(
-            /("(?:input_tokens|output_tokens|prompt_tokens|completion_tokens|cached_tokens|cache_write_tokens|cache_read_input_tokens|cache_creation_input_tokens|reasoning_tokens|cost_in_usd_ticks)"\s*:\s*)([0-9]+)/gu,
+            /("(?:input_tokens|output_tokens|prompt_tokens|completion_tokens|cached_tokens|cache_write_tokens|cache_read_input_tokens|cache_creation_input_tokens|ephemeral_5m_input_tokens|ephemeral_1h_input_tokens|reasoning_tokens|cost_in_usd_ticks)"\s*:\s*)([0-9]+)/gu,
             '$1"$2"',
           ),
         ),
@@ -160,6 +166,26 @@ const incompleteKindOf = (
   }
 };
 
+/**
+ * Anthropic's cache writes split by lifetime, when they can be priced exactly.
+ *
+ * @param usage - The latest merged Anthropic usage.
+ * @returns Both tiers' quantities, or `undefined` when the split is missing or inconsistent.
+ */
+const anthropicCacheWrites = (
+  usage: Usage | undefined,
+): { readonly fiveMinutes: bigint; readonly oneHour: bigint } | undefined => {
+  if (usage?.cacheWrite === undefined) {
+    return undefined;
+  }
+  if (usage.cacheWrite5m === undefined && usage.cacheWrite1h === undefined) {
+    return usage.cacheWrite === 0n ? { fiveMinutes: 0n, oneHour: 0n } : undefined;
+  }
+  const fiveMinutes = usage.cacheWrite5m ?? 0n;
+  const oneHour = usage.cacheWrite1h ?? 0n;
+  return fiveMinutes + oneHour === usage.cacheWrite ? { fiveMinutes, oneHour } : undefined;
+};
+
 /** Creates an exact protocol usage collector over preserved provider response bytes. */
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
@@ -190,6 +216,8 @@ export const createBillableModelEvidenceCollector = (
                 input: next.input ?? latest?.input,
                 cacheRead: next.cacheRead ?? latest?.cacheRead,
                 cacheWrite: next.cacheWrite ?? latest?.cacheWrite,
+                cacheWrite5m: next.cacheWrite5m ?? latest?.cacheWrite5m,
+                cacheWrite1h: next.cacheWrite1h ?? latest?.cacheWrite1h,
                 output: next.output ?? latest?.output,
                 reasoning: next.reasoning ?? latest?.reasoning,
                 requestId: next.requestId ?? latest?.requestId,
@@ -209,7 +237,15 @@ export const createBillableModelEvidenceCollector = (
           (providerId === 'vertexai' && events.some((event) => isVertexFinalUsageEvent(event)))
         : terminalEvent;
     const cacheRead = expectedDimensions.has('cache_read') ? latest?.cacheRead : undefined;
-    const cacheWrite = expectedDimensions.has('cache_write') ? latest?.cacheWrite : undefined;
+    /* Anthropic prices a 5-minute and a 1-hour write differently, so its writes are known only
+     * when the supplier splits them by lifetime and the split adds up. A total with no split is
+     * known only when it is zero; otherwise the turn is unpriced rather than given a guessed tier
+     * (I3). Every other wire reports one write class. */
+    const anthropicWrites = wire === 'anthropic' ? anthropicCacheWrites(latest) : undefined;
+    const cacheWrite =
+      !expectedDimensions.has('cache_write') || (wire === 'anthropic' && anthropicWrites === undefined)
+        ? undefined
+        : latest?.cacheWrite;
     const invalidCache =
       wire !== 'anthropic' && latest?.input !== undefined && (cacheRead ?? 0n) + (cacheWrite ?? 0n) > latest.input;
     const inputPartitionKnown =
@@ -237,13 +273,22 @@ export const createBillableModelEvidenceCollector = (
           ]),
       ...(cacheWrite === undefined
         ? []
-        : [
-            {
-              dimension: 'cache_write',
-              tier: wire === 'anthropic' ? '5m' : '30m',
-              quantity: cacheWrite,
-            } satisfies NormalizedMeterItem,
-          ]),
+        : anthropicWrites === undefined
+          ? [
+              {
+                dimension: 'cache_write',
+                tier: '30m',
+                quantity: cacheWrite,
+              } satisfies NormalizedMeterItem,
+            ]
+          : [
+              {
+                dimension: 'cache_write',
+                tier: '5m',
+                quantity: anthropicWrites.fiveMinutes,
+              } satisfies NormalizedMeterItem,
+              { dimension: 'cache_write', tier: '1h', quantity: anthropicWrites.oneHour } satisfies NormalizedMeterItem,
+            ]),
       ...(latest?.output === undefined
         ? []
         : [
@@ -306,7 +351,7 @@ export const createBillableModelEvidenceCollector = (
       latest?.input === undefined ||
       latest.output === undefined ||
       (expectedDimensions.has('cache_read') && latest.cacheRead === undefined) ||
-      (expectedDimensions.has('cache_write') && latest.cacheWrite === undefined)
+      (expectedDimensions.has('cache_write') && cacheWrite === undefined)
     ) {
       return {
         kind: incompleteKind,

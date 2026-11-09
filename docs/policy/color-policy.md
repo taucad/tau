@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-10-04'
+updated: '2026-11-09'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -135,6 +135,12 @@ Components always use semantic Tailwind classes. Shared CSS-variable mappings li
 | Error or alert state | `--feature`          | `bg-feature`, `text-feature`          |
 | Data-losing action   | `--destructive`      | `variant='destructive'`               |
 | Success state        | `--success`          | `bg-success`, `text-success`          |
+
+### State on Badges and Notices
+
+A badge that reports a state ("On", "Paused", "Canceled", "Payment failed") uses the design system's badge variants as they are: `outline` for neutral and warning states, `secondary` for a positive one. A warning adds the warning glyph in `text-warning` before the words; it does not tint the badge's border or fill. Only a notice, a block that asks the person to act, may take `border-warning`.
+
+**Why**: an "On" badge with an amber border read as a fault; state is carried by a glyph and words on one outline, which also holds for people who cannot tell the hues apart (§7).
 
 ### Opacity Modifiers
 

@@ -18,7 +18,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { Mesh, Object3D } from 'three';
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
-import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
+import { clearRendererSpans, markGeometryReceipt, rendererSpans } from '#lib/renderer-telemetry.js';
+import * as gltfEdges from '#graphics/three/materials/gltf-edges.js';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 
@@ -292,6 +293,38 @@ async function waitForCommits(keys: readonly string[]): Promise<void> {
   await act(async () => undefined);
 }
 
+/** A `performance.now` that moves only when a test advances it. */
+function installClock(start = 0): { advance: (milliseconds: number) => void } {
+  let now = start;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  return {
+    advance: (milliseconds) => {
+      now += milliseconds;
+    },
+  };
+}
+
+type ObservedSend = { readonly line: string; readonly attached: boolean; readonly invalidations: number };
+
+/**
+ * Record, as each event is sent, whether React has attached a model `<primitive>` and how many frames
+ * the viewer had requested by then.
+ */
+function observeSends(): ObservedSend[] {
+  const observed: ObservedSend[] = [];
+  mocks.graphicsActor.send.mockImplementation((event: SentEvent) => {
+    observed.push({
+      line: describeEvent(event),
+      attached: document.querySelector('primitive') !== null,
+      invalidations: mocks.invalidate.mock.calls.length,
+    });
+  });
+  return observed;
+}
+
+/** The counts `gltfPresentationMeasured` reports for {@link buildGlb}'s one surface and its edges. */
+const buildGlbCounts = { meshCount: 1, triangleCount: 1, sourceLineCount: 1, lineSegmentCount: 2 };
+
 /** Run the render-loop callback the viewer registered, as R3F does once per frame. */
 const renderFrame = (): void => {
   if (!mocks.frameCallback) {
@@ -310,7 +343,7 @@ describe('GltfMesh presentation protocol', () => {
     vi.restoreAllMocks();
     mocks.graphicsActor.send.mockReset();
     mocks.cameraRig.actorRef.send.mockClear();
-    mocks.invalidate.mockClear();
+    mocks.invalidate.mockReset();
     mocks.frameCallback = undefined;
     mocks.sectionView = { isActive: false };
   });
@@ -991,6 +1024,278 @@ describe('GltfMesh presentation protocol', () => {
       });
 
       expect(trace().slice(0, 2)).toEqual(['gltfPreparationStarted 1:a', 'gltfDisplayReady 1:a display-ready']);
+    });
+  });
+
+  describe('first-frame telemetry values', () => {
+    it('should measure each duration from the receipt, preparation, commit and first-frame anchors', async () => {
+      const clock = installClock(100);
+      const original = GLTFLoader.prototype.parseAsync;
+      vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async (data, path) => {
+        const gltf = await original.call(new GLTFLoader(), data, path);
+        clock.advance(20);
+        return gltf;
+      });
+      const source = buildGlb();
+      markGeometryReceipt(source);
+      clock.advance(10);
+      render(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+      clock.advance(30);
+      renderFrame();
+
+      expect(measuredTelemetry()).toEqual([
+        expect.objectContaining({
+          glbBytes: source.byteLength,
+          meshCount: buildGlbCounts.meshCount,
+          triangleCount: buildGlbCounts.triangleCount,
+          sourceLineCount: buildGlbCounts.sourceLineCount,
+          lineSegmentCount: buildGlbCounts.lineSegmentCount,
+          durations: {
+            receiptToPreparation: 10,
+            parse: 20,
+            manifest: 0,
+            annotation: 0,
+            fatLines: 0,
+            materials: 0,
+            commitToFirstFrame: 30,
+            receiptToFirstFrame: 60,
+          },
+        }),
+      ]);
+    });
+
+    it('should measure an in-place update from its own receipt and commit', async () => {
+      const clock = installClock(100);
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      renderFrame();
+      clock.advance(100);
+      const replacement = buildGlb({ lift: 5 });
+      markGeometryReceipt(replacement);
+      clock.advance(5);
+
+      view.rerender(<GltfMesh gltfFile={replacement} geometryHash='b' presentationRevision={2} enableMatcap={false} />);
+      await waitForCommits(['a', 'b']);
+      clock.advance(20);
+      renderFrame();
+
+      expect(measuredTelemetry().at(-1)).toMatchObject({
+        revision: 2,
+        glbBytes: replacement.byteLength,
+        durations: {
+          receiptToPreparation: 5,
+          manifest: 0,
+          inPlace: 0,
+          annotation: 0,
+          commitToFirstFrame: 20,
+          receiptToFirstFrame: 25,
+        },
+      });
+    });
+  });
+
+  describe('commit timing', () => {
+    it('should send the commit only once React has attached the scene, after the pipeline requested a frame', async () => {
+      const observed = observeSends();
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+
+      expect(observed.map(({ line, attached }) => [line, attached])).toEqual([
+        ['gltfPreparationStarted 1:a', false],
+        ['gltfDisplayReady 1:a display-ready', false],
+        ['gltfPresentationCommitted 1:a unit:a manifest=a', true],
+      ]);
+      expect(observed[1]?.invalidations).toBe(0);
+      expect(observed[2]?.invalidations).toBeGreaterThan(0);
+    });
+
+    it('should request a frame for an in-place update before its commit is sent', async () => {
+      const observed = observeSends();
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      mocks.invalidate.mockClear();
+      const before = observed.length;
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      const commit = observed.slice(before).find(({ line }) => line.startsWith('gltfPresentationCommitted'));
+      expect(commit?.invalidations).toBeGreaterThan(0);
+    });
+
+    it('should request a frame when analysis lands on the scene already on screen', async () => {
+      const analysing =
+        Promise.withResolvers<Awaited<ReturnType<typeof sectionTopology.registerGltfSectionSurfaceSources>>>();
+      vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockImplementationOnce(
+        async () => analysing.promise,
+      );
+      const source = buildGlb();
+      const view = render(
+        <GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      mocks.sectionView = { isActive: true };
+      view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await act(async () => undefined);
+      mocks.invalidate.mockClear();
+
+      analysing.resolve([]);
+      await waitFor(() => {
+        expect(trace()).toContain('gltfAnalysisReady 1:a');
+      });
+
+      // No React state changes here; this request is the only thing that draws the caps.
+      expect(mocks.invalidate).toHaveBeenCalled();
+    });
+  });
+
+  describe('first-frame ownership', () => {
+    it('should not count a frame drawn before React attaches the scene as its first frame', async () => {
+      // A frame requested by the pipeline runs at once, before React re-renders with the new scene.
+      mocks.invalidate.mockImplementation(() => {
+        mocks.frameCallback?.();
+      });
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+
+      const lines = trace();
+      const committedAt = lines.indexOf('gltfPresentationCommitted 1:a unit:a manifest=a');
+      const measuredAt = lines.indexOf('gltfPresentationMeasured 1:a presented');
+      expect(committedAt).toBeGreaterThan(-1);
+      expect(measuredAt === -1 || measuredAt > committedAt).toBe(true);
+    });
+
+    it('should record no presentation opportunity for a presentation replaced before its animation frame', async () => {
+      const frames = captureAnimationFrames();
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      renderFrame();
+      expect(frames.pending()).toBe(1);
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'b']);
+      frames.run();
+
+      expect(rendererSpans().filter((span) => span.name === 'renderer.presentation-opportunity')).toEqual([]);
+    });
+  });
+
+  describe('superseded preparation that throws', () => {
+    it('should stay silent when a superseded parse rejects', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const gate = Promise.withResolvers<void>();
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async () => {
+        await gate.promise;
+        throw new Error('aborted');
+      });
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitFor(() => {
+        expect(parseAsync).toHaveBeenCalledOnce();
+      });
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 1 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      gate.resolve();
+      await waitForCommits(['b']);
+
+      expect(trace()).toEqual([
+        'gltfPreparationStarted 1:a',
+        'setHoveredModelComponent unit:a none',
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b display-ready',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
+      ]);
+      expect(errors).not.toHaveBeenCalled();
+    });
+
+    it('should stay silent when a parse rejects after the viewer unmounts', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const gate = Promise.withResolvers<void>();
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async () => {
+        await gate.promise;
+        throw new Error('aborted');
+      });
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitFor(() => {
+        expect(parseAsync).toHaveBeenCalledOnce();
+      });
+      view.unmount();
+      gate.resolve();
+      await act(async () => undefined);
+      await act(async () => undefined);
+
+      expect(trace()).toEqual(['gltfPreparationStarted 1:a', 'setHoveredModelComponent unit:a none']);
+      expect(errors).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('annotation and edge yield', () => {
+    /** Make edge expansion take `milliseconds` on a frozen clock, and mark the next task boundary. */
+    const edgesTaking = (milliseconds: number): { readonly reached: Promise<void> } => {
+      const clock = installClock();
+      const reached = Promise.withResolvers<void>();
+      const original = gltfEdges.applyFatLineSegments;
+      vi.spyOn(gltfEdges, 'applyFatLineSegments').mockImplementationOnce((...parameters) => {
+        original(...parameters);
+        clock.advance(milliseconds);
+        setTimeout(() => {
+          mocks.graphicsActor.send({ type: 'taskBoundary' });
+        }, 0);
+        reached.resolve();
+      });
+      return { reached: reached.promise };
+    };
+
+    it('should yield one task when annotation and edges take 16 ms', async () => {
+      edgesTaking(16);
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+
+      expect(trace().slice(0, 3)).toEqual([
+        'gltfPreparationStarted 1:a',
+        'taskBoundary undefined:undefined',
+        'gltfDisplayReady 1:a display-ready',
+      ]);
+    });
+
+    it('should not yield when annotation and edges take under 16 ms', async () => {
+      edgesTaking(15);
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+      await waitFor(() => {
+        expect(trace()).toContain('taskBoundary undefined:undefined');
+      });
+
+      expect(trace().slice(0, 2)).toEqual(['gltfPreparationStarted 1:a', 'gltfDisplayReady 1:a display-ready']);
+    });
+
+    it('should drop a revision superseded during that yield before it is display-ready', async () => {
+      const { reached } = edgesTaking(16);
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await reached;
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 1 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['b']);
+
+      expect(trace()).not.toContain('gltfDisplayReady 1:a display-ready');
     });
   });
 

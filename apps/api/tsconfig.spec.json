@@ -46,6 +46,7 @@
     "../libs/api-git-mirror/src/**/*.ts",
     "../libs/api-agent-observability/src/**/*.ts",
     "../libs/api-chat/src/**/*.ts",
+    "../libs/api-projects/src/**/*.ts",
     "../libs/api-testing/src/**/*.ts"
   ],
   "exclude": ["../libs/*/src/**/*.test.ts", "../libs/*/src/**/*.spec.ts", "../libs/*/src/**/*.test-d.ts"]

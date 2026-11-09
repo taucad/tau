@@ -78,6 +78,7 @@ describe('apiLibraryAppEdges()', () => {
       'api-llm-gateway',
       'api-object-storage',
       'api-observability',
+      'api-projects',
       'api-redis',
       'api-testing',
     ]);

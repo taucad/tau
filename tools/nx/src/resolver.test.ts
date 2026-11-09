@@ -231,7 +231,7 @@ describe('validateTags()', () => {
     ).toEqual([
       'fixture/api-without-name: expected exactly one api: tag, found none',
       'fixture/api-two-names: expected exactly one api: tag, found api:core, api:redis',
-      'fixture/api-unknown-name: unknown tag "api:git" (api: must be one of core, observability, lifecycle, database, redis, email, auth, hosts, llm-gateway, billing, testing, object-storage, git-core, git-mirror, agent-observability, chat)',
+      'fixture/api-unknown-name: unknown tag "api:git" (api: must be one of core, observability, lifecycle, database, redis, email, auth, hosts, llm-gateway, billing, testing, object-storage, git-core, git-mirror, agent-observability, chat, projects)',
       'fixture/named-app: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
       'fixture/named-ui-lib: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
     ]);

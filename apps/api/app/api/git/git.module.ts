@@ -4,7 +4,7 @@ import type { MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/commo
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import { DatabaseModule } from '@taucad/api-database';
-import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
+import { ProjectAccessModule } from '@taucad/api-projects/collaboration/project-access.module';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';

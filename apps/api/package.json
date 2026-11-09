@@ -27,6 +27,7 @@
     "@taucad/api-llm-gateway": "workspace:*",
     "@taucad/api-object-storage": "workspace:*",
     "@taucad/api-observability": "workspace:*",
+    "@taucad/api-projects": "workspace:*",
     "@taucad/api-redis": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",

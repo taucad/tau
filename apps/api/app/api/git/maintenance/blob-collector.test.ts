@@ -14,7 +14,7 @@ import { ObjectStorageService } from '@taucad/api-object-storage';
 import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
 import { StorageModule } from '@taucad/api-object-storage/module';
 import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
-import { applyBlobReferences } from '#api/publications/publication-materializer.js';
+import { applyBlobReferences } from '@taucad/api-projects/publications/publication-materializer';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';

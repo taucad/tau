@@ -77,6 +77,9 @@
       "path": "./apps/libs/api-observability"
     },
     {
+      "path": "./apps/libs/api-projects"
+    },
+    {
       "path": "./apps/libs/api-redis"
     },
     {

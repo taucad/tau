@@ -11,13 +11,16 @@ import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
 import {
   releaseDeletedProjectPublicationReferences,
   publicationManifestReadTimeout,
-} from '#api/publications/publication-deletion.js';
+} from '@taucad/api-projects/publications/publication-deletion';
 import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
-import { materializePublication, materializePublishedTags } from '#api/publications/publication-materializer.js';
-import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { PublicationsService } from '#api/publications/publications.service.js';
-import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
+import {
+  materializePublication,
+  materializePublishedTags,
+} from '@taucad/api-projects/publications/publication-materializer';
+import type { MaterializerDependencies } from '@taucad/api-projects/publications/publication-materializer';
+import { PublicationsService } from '@taucad/api-projects/publications/publications.service';
+import type { StoredPublicationManifest } from '@taucad/api-projects/publications/publications.dto';
 import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import { lockProjectLifecycle } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';

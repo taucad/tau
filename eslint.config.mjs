@@ -237,7 +237,7 @@ const memberOrdering = [
  * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
  * instead names the API libraries it may depend on (the "May depend on" column of
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
- * project. Every edge points down `git-mirror -> git-core -> object-storage -> billing ->
+ * project. Every edge points down `{git-mirror, projects} -> git-core -> object-storage -> billing ->
  * llm-gateway -> hosts -> auth -> {database, email, redis} -> lifecycle -> observability ->
  * core`, with `testing` beside `database` and `agent-observability` and `chat` beside
  * `object-storage`; no library but `api` imports `git-mirror`, and no
@@ -277,6 +277,9 @@ const apiLibraryDependencies = {
   'agent-observability': ['billing', 'llm-gateway', 'hosts', 'auth', 'database', 'lifecycle', 'core', 'observability'],
   // The chat controller and service (P1-e). measured: the billing-backed chat tests build `BillingModule`.
   chat: ['billing', 'llm-gateway', 'auth', 'core', 'observability'],
+  // Projects, previews, deletion, collaboration and publications (P1-d). The API binds the git service's
+  // leases to `publicationRepositoryLeasesKey`; measured: `testing` for the shared database fixtures.
+  projects: ['git-core', 'object-storage', 'auth', 'database', 'email', 'redis', 'testing', 'core', 'observability'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({

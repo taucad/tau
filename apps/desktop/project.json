@@ -698,6 +698,13 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-windows.test.mts"
       }
     },
+    "test-qualification-profile-access": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-profile-access.test.mts"
+      }
+    },
     "test-qualification-linux": {
       "executor": "nx:run-commands",
       "options": {

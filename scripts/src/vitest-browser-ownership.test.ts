@@ -218,7 +218,8 @@ describe('Vitest Browser test-runner ownership', () => {
     // The S31 and S32 native-dependency spikes install the three engines they measure.
     // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
     // The hosted staging observability workflow installs Chromium and WebKit for its isolated contexts.
-    // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
+    // The clean-host Mac acceptance workflow installs the Chromium its browser download uses, and the Linux clean-host
+    // guest installs the same Chromium for its consumer account's download.
     // The PicoGK browser archive workflow installs the one engine each parity leg measures the browser
     // runtime in, which Browser Mode cannot host.
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
@@ -239,6 +240,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/ui-asset-integrity.yml',
         '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
+        'apps/desktop/scripts/hosted-linux-qualification-guest.sh',
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',
         'apps/www/README.md',

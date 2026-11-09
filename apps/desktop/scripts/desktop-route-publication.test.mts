@@ -15,6 +15,7 @@ import {
   parseDesktopArtifactManifest,
 } from '#shared/desktop-release.js';
 import type { DesktopArtifactKind, DesktopArtifactManifest } from '#shared/desktop-release.js';
+import { linuxInstallation } from '#shared/linux-installation.js';
 /* oxlint-disable no-restricted-imports -- Test the publication gate itself. */
 import {
   assertDesktopCatalogRetainsRoutes,
@@ -262,6 +263,55 @@ const productionTrust = {
   'linux-apt': 'fingerprint',
   'linux-appimage': 'ed25519-key',
 };
+const linuxKernel = '6.8.0-1015-gcp';
+/** Observed Linux clean-host facts consistent with one production route's artifacts and baseline. */
+const linuxCleanHost = (
+  route: 'linux-apt' | 'linux-appimage',
+  artifacts: ReadonlyArray<{ name: string; sha256: string }>,
+  baselineSha256: string,
+) => {
+  const { name, launcher } = linuxInstallation('production', route === 'linux-appimage');
+  const download = (stage: 'initial' | 'reinstall', entry: { name: string; sha256: string }) => ({
+    stage,
+    name: entry.name,
+    sha256: entry.sha256,
+    size: 1024,
+    urlPath: `/releases/${encodeURIComponent(stage === 'initial' ? 'desktop@0.1.0' : productionTag)}/${entry.name}`,
+    browser: 'Chromium 140.0.0.0',
+    madeExecutable: entry.name.endsWith('.AppImage'),
+  });
+  return {
+    platform: 'linux',
+    runner: `tau-q-1-1-ubuntu2404-${route.slice('linux-'.length)}`,
+    nativeArch: 'x64',
+    host: {
+      provider: 'gcp',
+      template: 'ci-gpu-ubuntu2404-20261101',
+      instance: `tau-q-1-1-ubuntu2404-${route.slice('linux-'.length)}`,
+      zone: 'us-central1-a',
+    },
+    distribution: { id: 'ubuntu', versionId: '24.04' },
+    kernel: linuxKernel,
+    appArmor: 'enabled',
+    usernsRestriction: '1',
+    graphics: {
+      mode: 'stock',
+      glRenderer: 'Tesla T4/PCIe/SSE2',
+      webglRenderer: 'ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)',
+    },
+    account: { name: 'consumer', uid: 1001, administrator: false },
+    consent: { account: 'tau', step: 'apt-install-browser-downloads' },
+    downloads: [
+      ...artifacts.map((entry, index) =>
+        download('initial', { name: entry.name, sha256: index === 0 ? baselineSha256 : 'e'.repeat(64) }),
+      ),
+      ...artifacts.map((entry) => download('reinstall', entry)),
+    ],
+    installedPath: launcher,
+    desktopEntry: `/usr/share/applications/${name}.desktop`,
+    launch: 'desktop-entry',
+  };
+};
 const productionReceipts = requirements.flatMap((requirement) =>
   ['ci', 'vm'].map((environment) => ({
     ...receipt('ci'),
@@ -282,6 +332,20 @@ const productionReceipts = requirements.flatMap((requirement) =>
       ...(environment === 'vm' && requirement.target === 'win32-x64' ? { host: windowsHost() } : {}),
       ...(environment === 'vm' && requirement.target.startsWith('darwin-')
         ? { host: cleanHost(requirement.target.endsWith('arm64') ? 'arm64' : 'x64') }
+        : {}),
+      ...(environment === 'vm' && requirement.target === 'linux-x64'
+        ? {
+            os: `${linuxKernel} PRETTY_NAME="Ubuntu 24.04.3 LTS"\nID=ubuntu\nVERSION_ID="24.04"`,
+            host: linuxCleanHost(
+              requirement.route as 'linux-apt' | 'linux-appimage',
+              production.artifacts
+                .filter(
+                  (artifact) => artifact.target === requirement.target && requirement.kinds.includes(artifact.kind),
+                )
+                .map(({ name, sha256 }) => ({ name, sha256 })),
+              'c'.repeat(64),
+            ),
+          }
         : {}),
     },
     trust: { kind: 'release', identity: productionTrust[requirement.route as keyof typeof productionTrust] },

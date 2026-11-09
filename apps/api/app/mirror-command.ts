@@ -6,23 +6,28 @@ import postgres from 'postgres';
 import type { Environment } from '@taucad/api-core';
 import { assertSchemaCompatibility } from '@taucad/api-database/migration';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { readMirrorEnvironment } from '#api/git/mirror/config.js';
-import type { MirrorEnvironment } from '#api/git/mirror/config.js';
-import { copyRepository, markTombstonedOwners } from '#api/git/mirror/copier.js';
-import type { CopierContext } from '#api/git/mirror/copier.js';
-import { S3MirrorDestination } from '#api/git/mirror/destination.js';
-import type { DestinationAccount } from '#api/git/mirror/destination.js';
-import { PostgresDrillLedger, exportLastDrillPass, removeDrillScratch, runVerifyDrill } from '#api/git/mirror/drill.js';
-import type { DrillContext } from '#api/git/mirror/drill.js';
-import { MirrorMetrics } from '#api/git/mirror/metrics.js';
-import { reconcile } from '#api/git/mirror/reconcile.js';
-import { runRetentionSweep } from '#api/git/mirror/retention.js';
-import { R2MirrorSource } from '#api/git/mirror/source.js';
-import { PostgresMirrorLedger } from '#api/git/mirror/watermark.js';
-import { exportBacklog, runMirrorWorker } from '#api/git/mirror/worker.js';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
+import { readMirrorEnvironment } from '@taucad/api-git-mirror/mirror/config';
+import type { MirrorEnvironment } from '@taucad/api-git-mirror/mirror/config';
+import { copyRepository, markTombstonedOwners } from '@taucad/api-git-mirror/mirror/copier';
+import type { CopierContext } from '@taucad/api-git-mirror/mirror/copier';
+import { S3MirrorDestination } from '@taucad/api-git-mirror/mirror/destination';
+import type { DestinationAccount } from '@taucad/api-git-mirror/mirror/destination';
+import {
+  PostgresDrillLedger,
+  exportLastDrillPass,
+  removeDrillScratch,
+  runVerifyDrill,
+} from '@taucad/api-git-mirror/mirror/drill';
+import type { DrillContext } from '@taucad/api-git-mirror/mirror/drill';
+import { MirrorMetrics } from '@taucad/api-git-mirror/mirror/metrics';
+import { reconcile } from '@taucad/api-git-mirror/mirror/reconcile';
+import { runRetentionSweep } from '@taucad/api-git-mirror/mirror/retention';
+import { R2MirrorSource } from '@taucad/api-git-mirror/mirror/source';
+import { PostgresMirrorLedger } from '@taucad/api-git-mirror/mirror/watermark';
+import { exportBacklog, runMirrorWorker } from '@taucad/api-git-mirror/mirror/worker';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**

@@ -49,9 +49,10 @@ const advertisementWindow = 11_000;
 
 /**
  * The printer's network address. A Bambu printer is a network machine, so the host never hands it a serial candidate.
- * @internal
  * @param candidate - The candidate being connected.
  * @returns The address its services answer at.
+ * @throws BambuProtocolError when the candidate is not a network endpoint.
+ * @public
  */
 export const bambuCandidateAddress = (candidate: Pick<MachineCandidate, 'endpoint'>): string => {
   if (candidate.endpoint.transport !== 'network') {

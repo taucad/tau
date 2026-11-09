@@ -27,13 +27,13 @@ export const desktopNativeDeployments: readonly NativeKernelDeployment[] = [
 ];
 
 /**
- * Where a packaged app keeps each native package's own payload files (its `packagePath` payloads: the worker and its
+ * Where a packaged app keeps each native package's own dependency files (its `packagePath` dependency files: the worker and its
  * support modules), under the app's resources, one directory per package name.
  */
 export const nativePackageResources = 'native-packages';
 
 /**
- * The deployments with each package root at a directory that holds the package's own payload files. Main is bundled,
+ * The deployments with each package root at a directory that holds the package's own dependency files. Main is bundled,
  * so the root a deployment derives from its module URL names the bundle, not the package: the packaged app reads the
  * copies packaging stages under its resources, and a development build reads the installed package.
  * @param input - Whether the app is packaged, and its resources directory.

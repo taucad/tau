@@ -135,7 +135,7 @@ vi.mock('@taucad/ui/components/breadcrumb', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => <span /> }));
-vi.mock('#components/icons/tau-wordmark.js', () => ({
+vi.mock('@taucad/ui-kit/icons/tau-wordmark', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
 vi.mock('#components/settings/settings-dialog.js', () => ({

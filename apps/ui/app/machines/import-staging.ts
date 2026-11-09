@@ -29,6 +29,7 @@ import {
   discardStagedImport,
   fileListImportSource,
   handleListImportSource,
+  hostImportSource,
   importStagingLeaseName,
   ImportRefusedError,
   isImportRefusal,
@@ -41,6 +42,8 @@ import {
   zipImportSource,
 } from '@taucad/filesystem/importer';
 import type {
+  HostImportGrant,
+  HostImportSourcePort,
   ImportDecoder,
   ImportMeasurer,
   ImportPlan,
@@ -66,6 +69,13 @@ export type ImportSourceDescriptor =
   | Readonly<{ kind: 'files'; files: ReadonlyArray<Readonly<{ file: File; path: string }>>; name?: string }>
   | Readonly<{ kind: 'directory'; handle: FileSystemDirectoryHandle }>
   | Readonly<{ kind: 'handles'; handles: readonly FileSystemHandle[] }>
+  /**
+   * A folder or files a person chose on the desktop host, as the grants the
+   * host minted when they chose them (W7.4): the host lists them and copies
+   * them into the staging itself, so their bytes never come to the page or
+   * the worker. Never a host path (I6).
+   */
+  | Readonly<{ kind: 'host'; grants: readonly HostImportGrant[]; name?: string }>
   /**
    * A repository archive the worker downloads itself, so the page never holds
    * it: the Tau API's archive gateway, which GitHub's own archive hosts need
@@ -353,9 +363,24 @@ const pinnedArchive = (base: ImportSource, commit: string | undefined, github: b
 
 const sourceOf = async (
   descriptor: ImportSourceDescriptor,
-  control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
+  control: Readonly<{
+    signal: AbortSignal;
+    onDownload: (progress: ImportDownloadProgress) => void;
+    hostSources?: () => Promise<HostImportSourcePort | undefined>;
+  }>,
 ): Promise<ImportSource> => {
   switch (descriptor.kind) {
+    case 'host': {
+      const sources = await control.hostSources?.();
+      if (sources === undefined) {
+        throw new Error('This app cannot import a folder from the computer it runs on.');
+      }
+      return hostImportSource(
+        sources,
+        descriptor.grants,
+        descriptor.name === undefined ? {} : { name: descriptor.name },
+      );
+    }
     case 'archive': {
       const { archive, commit } = await downloadArchive(descriptor, control);
       return pinnedArchive(
@@ -478,6 +503,8 @@ export const serveImportChannel = (
     /** The read-back measure: the compute worker's, or inline WebCrypto where there is none. */
     measure?: ImportMeasurer;
     policy: PathPolicy;
+    /** The host's chosen sources, where the worker's storage reaches a host that holds them (desktop, W7.4). */
+    hostSources?: () => Promise<HostImportSourcePort | undefined>;
     /**
      * Stage a linked repository: the worker's revisions authority fetches it
      * into the staging and stages its tree (`stageLinkedImport`, I6). Injected
@@ -500,6 +527,8 @@ export const serveImportChannel = (
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
+  /* The request whose plan `plan` is: a cancel that crossed its answer clears it, and never a newer one. */
+  let planRequest: number | undefined;
   const measuring = dependencies.measure === undefined ? {} : { measure: dependencies.measure };
   /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
   let latestPlan: number | undefined;
@@ -523,9 +552,24 @@ export const serveImportChannel = (
     await work;
     running.delete(work);
   };
+  /* A host source's file is read by its host, by grant; any other entry as the decoder reads it. */
+  const previewOf = async (
+    entry: ImportPlan['entries'][number],
+    signal: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer>> => {
+    if (entry.request !== undefined) {
+      return readImportEntry(entry.request, { signal });
+    }
+    const sources = await dependencies.hostSources?.();
+    if (sources === undefined) {
+      throw new Error('This app cannot read a file from the computer it runs on.');
+    }
+    return sources.read(entry.host.grant, entry.host.from, entry.size);
+  };
   const planOf = async (request: Extract<Request, { type: 'plan' }>, signal: AbortSignal): Promise<ImportPlan> => {
     const source = await sourceOf(request.source, {
       signal,
+      ...(dependencies.hostSources === undefined ? {} : { hostSources: dependencies.hostSources }),
       onDownload: (downloaded) => {
         answer({ id: request.id, downloaded });
       },
@@ -560,6 +604,10 @@ export const serveImportChannel = (
     planning.get(id)?.abort(new Error('The import was cancelled.'));
     if (latestPlan === id) {
       latestPlan = undefined;
+    }
+    if (planRequest === id) {
+      plan = undefined;
+      planRequest = undefined;
     }
   };
   const stageUnder = async (request: Extract<Request, { type: 'stage' }>, signal: AbortSignal): Promise<void> => {
@@ -622,6 +670,7 @@ export const serveImportChannel = (
     switch (request.type) {
       case 'plan': {
         plan = await newestPlan(request);
+        planRequest = request.id;
         answer({
           id: request.id,
           result: {
@@ -660,7 +709,7 @@ export const serveImportChannel = (
           if (entry !== undefined && entry.size <= budget) {
             budget -= entry.size;
             // oxlint-disable-next-line no-await-in-loop -- a preview reads its few files one after another.
-            files[path] = { content: await readImportEntry(entry.request, { signal: abort.signal }) };
+            files[path] = { content: await previewOf(entry, abort.signal) };
           }
         }
         answer(

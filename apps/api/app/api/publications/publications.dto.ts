@@ -1,6 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { isProjectRepositoryId } from '#api/git/git.constants.js';
+import { isProjectRepositoryId } from '@taucad/api-git-core/git.constants';
 
 const maxPublicationAccessRecipients = 50;
 

@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 
 const probeResult = { etag: 'abc', size: 2, contentType: 'text/plain', cacheControl: 'no-store' };
 

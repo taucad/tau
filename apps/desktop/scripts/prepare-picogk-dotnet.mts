@@ -1045,7 +1045,7 @@ const deterministicTarGz = async (
 
 type RuntimeVariant = {
   readonly target: { readonly os: string; readonly arch: string };
-  readonly payloads: ReadonlyArray<{
+  readonly files: ReadonlyArray<{
     readonly name: string;
     readonly integrity: string;
     readonly origin: { readonly urls?: readonly string[] };
@@ -1053,7 +1053,7 @@ type RuntimeVariant = {
 };
 
 /**
- * The `dotnet` payload tau-plugin.json pins for a target, or, for a target it does not pin yet, the one
+ * The `dotnet` dependency file tau-plugin.json pins for a target, or, for a target it does not pin yet, the one
  * tau-plugin.variants.json stages: Microsoft's runtime archive, by URL and sha512.
  */
 const pinnedRuntimeArchive = async (
@@ -1066,9 +1066,9 @@ const pinnedRuntimeArchive = async (
   const staged = JSON.parse(await readFile(stagedVariantsPath, 'utf8')) as Readonly<Record<string, RuntimeVariant>>;
   const ofTarget = ({ target }: RuntimeVariant): boolean => `${target.os}-${target.arch}` === targetName;
   const variant = manifest.dependencies['runtime']?.find(ofTarget) ?? [staged[targetName]].find(Boolean);
-  const payload = variant?.payloads.find(({ name }) => name === 'dotnet');
-  const url = payload?.origin.urls?.[0];
-  if (payload === undefined || url === undefined || !payload.integrity.startsWith('sha512-')) {
+  const runtime = variant?.files.find(({ name }) => name === 'dotnet');
+  const url = runtime?.origin.urls?.[0];
+  if (runtime === undefined || url === undefined || !runtime.integrity.startsWith('sha512-')) {
     throw new Error(
       `${pluginManifestPath} pins, and ${stagedVariantsPath} stages, no ${targetName} dotnet runtime archive by sha512.`,
     );
@@ -1080,8 +1080,8 @@ const pinnedRuntimeArchive = async (
     );
   }
   return {
-    integrity: payload.integrity,
-    sha512: Buffer.from(payload.integrity.slice('sha512-'.length), 'base64').toString('hex'),
+    integrity: runtime.integrity,
+    sha512: Buffer.from(runtime.integrity.slice('sha512-'.length), 'base64').toString('hex'),
     url,
     name: basename(url),
   };
@@ -1283,7 +1283,7 @@ const prepareLayer = async (targetName: string): Promise<void> => {
   await writeFile(
     resolve(seed, 'tau-seed.json'),
     `${JSON.stringify(
-      { closures: [{ payloads: [{ integrity: runtime.integrity, blob: `blobs/sha256/${runtimeSha256}` }] }] },
+      { closures: [{ dependencyFiles: [{ integrity: runtime.integrity, blob: `blobs/sha256/${runtimeSha256}` }] }] },
       undefined,
       2,
     )}\n`,

@@ -12,7 +12,7 @@ import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } fr
 import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
-import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
+import { loopbackHostIdPrefix } from '@taucad/chat-ui/utils/chat-execution';
 
 /**
  * The transport ladder for a daemon-placed Tau turn (`agent-host-transports-and-offline.md`, F4).

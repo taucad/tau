@@ -1,0 +1,661 @@
+{
+  "uid": "tau-agent-latency",
+  "title": "Agent latency",
+  "description": "Chat latency program: where the time to first token goes (upload, parse, admission, provider), how large request bodies are, and how long admission takes. Prompt-cache panels belong to the prompt caching program.",
+  "tags": ["tau", "ai", "llm", "genai", "latency"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": {
+          "text": "tau-api",
+          "value": "tau-api"
+        },
+        "options": [
+          {
+            "text": "tau-api",
+            "value": "tau-api",
+            "selected": true
+          }
+        ],
+        "includeAll": false
+      },
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(gen_ai_client_time_to_first_token_count{app=~\"$app\",service_name=~\"$service\"}, gen_ai_provider_name)",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "refresh": 2
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Headline (24 h)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Provider TTFT p95 (24h)",
+      "type": "stat",
+      "description": "Dispatch to the provider's first token, 95th percentile over 24 hours, every model step. Quantiles do not add, so this is not the sum of the other p95 tiles.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[24h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Upload p95 (24h)",
+      "type": "stat",
+      "description": "Request headers received to the last request body byte, as the API sees it, for every /v1/llm/* call.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_gateway_request_body_receive_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[24h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Admission p95 (24h)",
+      "type": "stat",
+      "description": "Funded invocation entry to the supplier request, for dispatched invocations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_gateway_admission_duration_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",outcome=\"dispatched\"}[24h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Median Request Body (24h)",
+      "type": "stat",
+      "description": "Median gateway request body as received (wire bytes).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_llm_gateway_request_body_size_bucket{app=~\"$app\",service_name=~\"$service\"}[24h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Time to first token, split by phase",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "title": "Mean TTFT by Phase (stacked)",
+      "type": "timeseries",
+      "description": "Mean seconds of each phase of a gateway call: upload (headers to last body byte), parse (last byte to validation), admission (funded entry to supplier request) and provider (supplier request to first token). Means add up, quantiles do not, so the stack reads as a mean TTFT only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum (rate(tau_llm_gateway_request_body_receive_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) / sum (rate(tau_llm_gateway_request_body_receive_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "upload"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum (rate(tau_llm_gateway_request_body_parse_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) / sum (rate(tau_llm_gateway_request_body_parse_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "parse"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum (rate(tau_llm_gateway_admission_duration_sum{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",outcome=\"dispatched\"}[5m])) / sum (rate(tau_llm_gateway_admission_duration_count{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",outcome=\"dispatched\"}[5m]))",
+          "legendFormat": "admission"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum (rate(gen_ai_client_time_to_first_token_sum{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])) / sum (rate(gen_ai_client_time_to_first_token_count{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m]))",
+          "legendFormat": "provider"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 30
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Phase p50 / p95",
+      "type": "timeseries",
+      "description": "Each phase on its own; these quantiles do not add up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_llm_gateway_request_body_receive_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "upload p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_gateway_request_body_receive_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "upload p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_llm_gateway_request_body_parse_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "parse p50"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_gateway_request_body_parse_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "parse p95"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_llm_gateway_admission_duration_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",outcome=\"dispatched\"}[5m])))",
+          "legendFormat": "admission p50"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_gateway_admission_duration_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",outcome=\"dispatched\"}[5m])))",
+          "legendFormat": "admission p95"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])))",
+          "legendFormat": "provider p50"
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])))",
+          "legendFormat": "provider p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Provider TTFT p95 by Provider",
+      "type": "timeseries",
+      "description": "Supplier time to first token per provider, p95.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, gen_ai_provider_name) (rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])))",
+          "legendFormat": "{{gen_ai_provider_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Upload p95 by Wire",
+      "type": "timeseries",
+      "description": "Upload time per gateway route family (anthropic, openai-completions, openai-responses), p95.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, tau_llm_wire) (rate(tau_llm_gateway_request_body_receive_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_llm_wire}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Payload",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "title": "Request Body Size Distribution",
+      "type": "heatmap",
+      "description": "Gateway request bodies by size as received.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (le) (increase(tau_llm_gateway_request_body_size_bucket{app=~\"$app\",service_name=~\"$service\"}[$__interval]))",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "bytes"
+        },
+        "cellGap": 1
+      }
+    },
+    {
+      "id": 13,
+      "title": "Inline Image Share of Request Bytes",
+      "type": "timeseries",
+      "description": "Base64 image characters as a share of all request body bytes: what image-by-reference would stop resending.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(tau_llm_gateway_request_body_inline_image_bytes_sum{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[1h])) / sum(rate(tau_llm_gateway_request_body_size_sum{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "inline images"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "title": "Effective Upload Throughput",
+      "type": "timeseries",
+      "description": "Request body bytes divided by upload seconds, over the hour.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(tau_llm_gateway_request_body_size_sum{app=~\"$app\",service_name=~\"$service\"}[1h])) / sum(rate(tau_llm_gateway_request_body_receive_duration_sum{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "bytes/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Admission",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Admission p50 / p95 by Outcome",
+      "type": "timeseries",
+      "description": "Funded invocation entry to the supplier request, or to the exit taken instead (held, replayed, refused, cancelled, error).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(tau_llm_gateway_admission_duration_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])))",
+          "legendFormat": "{{outcome}} p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(tau_llm_gateway_admission_duration_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m])))",
+          "legendFormat": "{{outcome}} p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "title": "Admissions by Outcome",
+      "type": "timeseries",
+      "description": "Funded invocations per second by how they left admission.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(tau_llm_gateway_admission_duration_count{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

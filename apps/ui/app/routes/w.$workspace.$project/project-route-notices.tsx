@@ -32,7 +32,7 @@ import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop
 import { Loader } from '@taucad/ui/components/loader';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';

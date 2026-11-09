@@ -26,7 +26,7 @@ import type { TauCloudOwner } from '#git/tau-cloud-fixture.js';
  * `dist/maintenance-command.js`, against the real MinIO the API just pushed
  * into.
  *
- * `apps/api/app/api/git/maintenance/{purge,restore}.test.ts` (W6) prove the
+ * `apps/libs/api-git-mirror/src/maintenance/{purge,restore}.test.ts` (W6) prove the
  * functions. This proves the *sequence*: a real push puts real packs in the
  * tenant prefix, deleting the account through Better Auth writes the tombstone
  * D10 asks for, `mark-erasure` collapses the thirty-day window, `purge

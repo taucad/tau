@@ -7,18 +7,31 @@ inputs:
     required: false
     default: '24.20.0'
   save-pnpm-store:
-    description: "'false' restores the pnpm store without saving it after the job, for jobs whose end gates a workflow"
+    description: "'false' restores the pnpm store and the cached Node.js without saving them after the job, for jobs whose end gates a workflow"
     required: false
     default: 'true'
 
 runs:
   using: 'composite'
   steps:
-    # This enables task distribution via Nx Cloud
-    # Run this command as early as possible, before dependencies are installed
-    # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-    # Connect your workspace by running "nx connect" and uncomment this
-    # - run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
+    # The pinned Node is not in the hosted images' toolcache, so `setup-node` downloaded it
+    # in every job (13–42 s, including a 504 and its retry; Brain
+    # research/ci-decomposition-blueprint.md, X9). Its toolcache folder (the version's
+    # directory and `.complete` marker) is cached by version, and `setup-node` then finds
+    # it installed. Saved and restored like the pnpm store below.
+    - name: Cache the pinned Node.js
+      if: inputs.save-pnpm-store == 'true'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ runner.tool_cache }}/node/${{ inputs.node-version }}
+        key: ${{ runner.os }}-${{ runner.arch }}-node-toolcache-${{ inputs.node-version }}
+
+    - name: Restore the pinned Node.js
+      if: inputs.save-pnpm-store != 'true'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ runner.tool_cache }}/node/${{ inputs.node-version }}
+        key: ${{ runner.os }}-${{ runner.arch }}-node-toolcache-${{ inputs.node-version }}
 
     - name: Setup Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -93,34 +106,36 @@ runs:
         restore-keys: |
           ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
 
+    # Postinstall scripts fetch release binaries (Vale, Electron) from GitHub, which can answer 504 for
+    # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile
+      run: |
+        for attempt in 1 2 3; do
+          pnpm install --frozen-lockfile && exit 0
+          if [ "$attempt" -lt 3 ]; then
+            echo "::warning title=pnpm install failed::attempt $attempt failed; retrying" >&2
+            sleep $((attempt * 30))
+          fi
+        done
+        exit 1
       shell: bash
 
-    # Nx 22.7.1 still segfaults now and then about two seconds into a command,
-    # before it prints or runs anything (SIGSEGV with and without the PTY
-    # runner, Node 24.10 and 24.20; no local repro). Every `pnpm nx` call goes
-    # through this bin, so it reruns a command once when Nx dies from SIGSEGV
-    # (exit 139) and passes every other exit status through unchanged.
-    - name: Rerun Nx once after a segfault
+    # Every `pnpm nx` call goes through `nx-guard.ts`: it reruns a command once
+    # when Nx dies from SIGSEGV, and points Nx at a local relay to the remote
+    # cache that turns cache faults, oversize entries and refused writes into
+    # misses (with a rerun with the cache off as the fallback; see the file
+    # header). Every other exit status passes through unchanged.
+    - name: Guard Nx against segfaults and remote cache faults
       if: runner.os != 'Windows'
       shell: bash
+      env:
+        GUARD: ${{ github.action_path }}/nx-guard.ts
       run: |
         bin=node_modules/.bin
         if [ -e "$bin/nx-segv-guarded" ]; then exit 0; fi
         mv "$bin/nx" "$bin/nx-segv-guarded"
-        cat > "$bin/nx" <<'SH'
-        #!/bin/sh
-        real="$(dirname "$0")/nx-segv-guarded"
-        "$real" "$@"
-        status=$?
-        if [ "$status" -eq 139 ]; then
-          echo "::warning title=Nx segfault::Nx was killed by SIGSEGV; rerunning: nx $*" >&2
-          "$real" "$@"
-          status=$?
-        fi
-        exit "$status"
-        SH
+        real="$(cd "$bin" && pwd)/nx-segv-guarded"
+        printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning "%s" "%s" "$@"\n' "$GUARD" "$real" > "$bin/nx"
         chmod +x "$bin/nx"
 
     - name: Set NX SHAs

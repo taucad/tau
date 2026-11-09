@@ -8,7 +8,7 @@ import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message
 
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   unknownIconId: 'unknown',
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,
 }));

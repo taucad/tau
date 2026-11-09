@@ -33,10 +33,10 @@ describe('useProjectListShape', () => {
   });
 
   it('follows the client snapshot after a listing', () => {
-    projectListShapeStore.remember(projectListShapeOf([{ id: 'a', name: 'A', lastActivityAt: 1 }]));
+    projectListShapeStore.remember(projectListShapeOf([{}]));
 
     const { result } = renderHook(() => useProjectListShape());
 
-    expect(result.current).toEqual({ count: 1, projects: [{ id: 'a', name: 'A' }] });
+    expect(result.current).toEqual({ count: 1 });
   });
 });

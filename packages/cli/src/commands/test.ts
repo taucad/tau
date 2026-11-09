@@ -5,7 +5,7 @@
  * (`@taucad/cli/geospec`) in each worker ahead of any the project's `geospec.config.*` declares, so a Tau project
  * needs no GeoSpec config. The exporter composes the runtime `tau export` and `tau check` use. Discovery is GeoSpec's
  * own (`*.geospec.ts` under the project, or the files named). Native kernels bind to their sealed closures in the
- * payload store and nothing is downloaded (I5): a suite over an unprepared `.py` model fails with the kernel's
+ * dependency store and nothing is downloaded (I5): a suite over an unprepared `.py` model fails with the kernel's
  * `KERNEL_NOT_PREPARED` refusal and exits 3.
  *
  * Exit codes: 0 every selected test passed, 1 a test failed or was left undecided (record status `inconclusive`), 2 an

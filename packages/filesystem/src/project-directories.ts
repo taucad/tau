@@ -91,6 +91,9 @@ import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 
+/** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
+type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagingPort['copyHost']> }>;
+
 /** Concurrent `tau.json` probes while scanning a discovery root. */
 const manifestProbeConcurrency = 64;
 
@@ -106,6 +109,13 @@ export type ResolvedProjectManifest = {
   readonly projectId: string;
   readonly manifest: ProjectManifest;
 };
+
+/** Read-only verification of an already installed project binding. @public */
+export type ProjectRouteVerification =
+  | { readonly status: 'verified'; readonly project: ResolvedProjectManifest }
+  | { readonly status: 'discovery-required' }
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'superseded' };
 
 /**
  * Validated or quarantined result from project discovery.
@@ -827,9 +837,14 @@ export class ProjectDirectories {
     }
     const provider = await this._registry.getProvider(parsed.data);
     const storageRootKey = this._registry.resolveStorageRootKey(parsed.data);
+    /* A desktop node root's host copies what a person chose on it straight into the staging (W7.4). */
+    const { copyFromImportGrant } = provider as Partial<Pick<HostImportCopier, 'copyFromImportGrant'>>;
     return {
       provider,
       apply: async (entries) => this._pipeline.applyUnlocked(provider, entries),
+      ...(typeof copyFromImportGrant === 'function'
+        ? { copyHost: async (grant, entries) => copyFromImportGrant.call(provider, grant, entries) }
+        : {}),
       exclusive: async <Result>(path: string, work: () => Promise<Result>): Promise<Result> => {
         const physicalLock = `${storageRootKey}:${path}`;
         return this._crossTabCoordinator.withLocks([physicalLock], async () =>
@@ -837,6 +852,45 @@ export class ProjectDirectories {
         );
       },
     };
+  }
+
+  /**
+   * Verify declaration and identity without conversion, adoption or repair.
+   * @param input - Captured exact-mount provider and its physical lock identity.
+   * @returns Verified bytes or a truthful fallback outcome; topology fencing belongs to the service.
+   */
+  public async verifyProjectRoute(input: {
+    readonly projectId: string;
+    readonly provider: FileSystemProvider;
+    readonly directory: string;
+    readonly storageRootKey: string;
+  }): Promise<ProjectRouteVerification> {
+    const directory = assertRootedPath(input.directory);
+    const locks = [`project:${input.projectId}`, `${input.storageRootKey}:${directory}`];
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async (): Promise<ProjectRouteVerification> => {
+        try {
+          await input.provider.refresh?.([directory]);
+          const manifestBytes = await input.provider.readFile(joinRelativePath(directory, 'tau.json'));
+          const manifest = parseProjectManifestBytes(manifestBytes);
+          if (!manifest.success) {
+            return { status: 'discovery-required' };
+          }
+          const identityBytes = await input.provider.readFile(joinRelativePath(directory, projectIdentityPath));
+          let identity: ProjectIdentityRecord;
+          try {
+            identity = parseProjectIdentityBytes(identityBytes);
+          } catch {
+            return { status: 'discovery-required' };
+          }
+          return identity.projectId === input.projectId
+            ? { status: 'verified', project: { projectId: input.projectId, manifest: manifest.data } }
+            : { status: 'discovery-required' };
+        } catch (error) {
+          return { status: isNotFoundError(error) ? 'discovery-required' : 'unavailable' };
+        }
+      }),
+    );
   }
 
   private async _readIdentity(authority: DirectoryAuthority): Promise<ProjectIdentityRecord | undefined> {

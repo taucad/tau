@@ -240,6 +240,65 @@ describe('createServicesHost — concern ports', () => {
     expect(port.start).toHaveBeenCalled();
   });
 
+  it("resolves only the import grants main sent for the connection's own window, and never admits them as roots", async () => {
+    const { host, serve } = hostHarness();
+    const identity = { dev: '1', ino: '2' };
+    host.handleMessage(frame({ type: 'allowRoots', roots: [homeRoot] }));
+    host.handleMessage(
+      frame({
+        type: 'importGrants',
+        grants: [
+          { grant: 'grant-folder', path: '/Users/someone/Bracket', kind: 'directory', identity, owner: '7' },
+          { grant: 'grant-other', path: '/Users/someone/Other', kind: 'directory', identity, owner: '8' },
+          { grant: 'grant-relative', path: 'relative/path', kind: 'directory', identity, owner: '7' },
+          { grant: 'grant-odd', path: '/Users/someone/x', kind: 'socket', identity, owner: '7' },
+          { grant: 'grant-unpinned', path: '/Users/someone/y', kind: 'directory', owner: '7' },
+        ],
+      }),
+    );
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs', context: { importOwner: '7' } }, [stubPort()]));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+    type Served = [
+      unknown,
+      { allowRoot: (root: string) => boolean; importSource: (grant: string) => Promise<unknown> },
+    ];
+    const [, mine] = serve.mock.calls[0] as unknown as Served;
+    const [, unowned] = serve.mock.calls[1] as unknown as Served;
+    await expect(mine.importSource('grant-folder')).resolves.toEqual({
+      path: '/Users/someone/Bracket',
+      kind: 'directory',
+      identity,
+    });
+    /* Another window's grant is refused at once, never waited for. */
+    await expect(mine.importSource('grant-other')).resolves.toBeUndefined();
+    await expect(unowned.importSource('grant-folder')).resolves.toBeUndefined();
+    expect(mine.allowRoot('/Users/someone/Bracket')).toBe(false);
+    vi.useFakeTimers();
+    try {
+      const refused = Promise.all(
+        ['grant-relative', 'grant-odd', 'grant-unpinned'].map(async (grant) => mine.importSource(grant)),
+      );
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(refused).resolves.toEqual([undefined, undefined, undefined]);
+      /* A grant main has not sent yet is waited for, and resolves once its frame arrives. */
+      const early = mine.importSource('grant-late');
+      await vi.advanceTimersByTimeAsync(500);
+      host.handleMessage(
+        frame({
+          type: 'importGrants',
+          grants: [{ grant: 'grant-late', path: '/Users/someone/Late', kind: 'file', identity, owner: '7' }],
+        }),
+      );
+      await expect(early).resolves.toEqual({ path: '/Users/someone/Late', kind: 'file', identity });
+      /* A released grant is gone with the frame that left it out. */
+      const released = mine.importSource('grant-folder');
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(released).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('serves a main-only runtime filesystem as an exact rooted authority client', async () => {
     const bridge = { emit: vi.fn(), dispose: vi.fn() };
     type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;

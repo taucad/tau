@@ -36,17 +36,17 @@ import {
   projectIdFromRepository,
   quotaRefusalMarker,
   serviceAdvertisementPrefix,
-} from '#api/git/git.constants.js';
+} from '@taucad/api-git-core/git.constants';
 import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service.js';
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
+import { gitRetryAfterSeconds } from '@taucad/api-git-core/git-refusals';
 import type { AffectedPublication } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import { gitExecutionKey } from '#api/git/forwarding/git-execution.js';
-import type { GitExecution } from '#api/git/forwarding/git-execution.js';
+import { gitExecutionKey } from '@taucad/api-git-core/forwarding/git-execution';
+import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import { AttributeKey, TauMetrics } from '@taucad/telemetry';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type {

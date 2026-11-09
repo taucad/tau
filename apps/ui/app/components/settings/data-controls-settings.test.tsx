@@ -140,7 +140,7 @@ describe('DataControlsSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1-ai-service-improvement');
+        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#2-improving-tau-with-your-chats');
         expect(link).toHaveAttribute('target', '_blank');
       }
     },
@@ -162,7 +162,7 @@ describe('DataControlsSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement');
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#2-improving-tau-with-your-chats');
       }
     },
   );
@@ -264,6 +264,13 @@ describe('DataControlsSettings', () => {
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
     expect(mockDecide).not.toHaveBeenCalled();
+  });
+
+  it('should not offer the desktop analytics switch on the web, where cookie preferences decide analytics', () => {
+    render(<DataControlsSettings />);
+
+    expect(screen.queryByRole('switch', { name: 'Analytics' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Cookie preferences' })).toBeInTheDocument();
   });
 
   it('keeps data controls to four rows, with account closure last', () => {

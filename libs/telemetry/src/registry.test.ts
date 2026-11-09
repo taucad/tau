@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(200);
+    expect(metrics).toHaveLength(196);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -544,6 +544,32 @@ describe('TauMetrics', () => {
     ).toBe(false);
   });
 
+  it('should report open financial cases and the oldest open case age per kind and a true or false attribution', () => {
+    expect(TauMetrics.billingOpenFinancialCases).toMatchObject({
+      name: 'tau.billing.open_financial_cases',
+      unit: '{case}',
+      type: 'gauge',
+    });
+    expect(TauMetrics.billingOpenFinancialCaseAge).toMatchObject({
+      name: 'tau.billing.open_financial_case_age_seconds',
+      unit: 's',
+      type: 'gauge',
+    });
+    expect(toPrometheusName(TauMetrics.billingOpenFinancialCases.name, 'gauge')).toBe(
+      'tau_billing_open_financial_cases',
+    );
+    expect(toPrometheusName(TauMetrics.billingOpenFinancialCaseAge.name, 'gauge')).toBe(
+      'tau_billing_open_financial_case_age_seconds',
+    );
+    for (const gauge of [TauMetrics.billingOpenFinancialCases, TauMetrics.billingOpenFinancialCaseAge]) {
+      expect(Object.keys(gauge.attributes.shape).sort()).toEqual(['attributed', 'kind']);
+      for (const attributed of ['true', 'false']) {
+        expect(gauge.attributes.safeParse({ kind: 'missing_local_payment', attributed }).success).toBe(true);
+      }
+      expect(gauge.attributes.safeParse({ kind: 'missing_local_payment', attributed: 'unknown' }).success).toBe(false);
+    }
+  });
+
   it('should expose the WebSocket upgrade-rejection counter with a bounded label set', () => {
     expect(TauMetrics.wsUpgradeRejections.name).toBe('ws.upgrade.rejections');
     expect(TauMetrics.wsUpgradeRejections.type).toBe('counter');
@@ -568,32 +594,38 @@ describe('TauMetrics', () => {
     expect(TauMetrics.chatToolResultMediaPreserved.unit).toBe('{preservation}');
   });
 
-  it('should expose the agent-safeguard counter with the canonical OTEL name', () => {
-    expect(TauMetrics.genAiAgentSafeguardInterventions.name).toBe('gen_ai.agent.safeguard.interventions');
-    expect(TauMetrics.genAiAgentSafeguardInterventions.type).toBe('counter');
+  /* R9: the LangChain plane's agent-loop metrics have no emitter on the Pi host. Safeguards and compactions moved to
+   * client-reported `tau.agent.*` successors; tool calls are `tau.agent.tool_calls`; the rest had no consumer. */
+  it.each([
+    'genAiToolInvocations',
+    'genAiToolDuration',
+    'genAiAgentIterations',
+    'genAiAgentSafeguardInterventions',
+    'genAiInterruptRecoveryReminders',
+    'genAiContextCompactionDecisions',
+    'genAiToolInputRepairs',
+  ])('should not declare %s, which nothing emits', (key) => {
+    expect(Object.keys(TauMetrics)).not.toContain(key);
   });
 
-  it('should expose the tool-input repair counter with the canonical OTEL name', () => {
-    expect(TauMetrics.genAiToolInputRepairs.name).toBe('gen_ai.tool_input.repairs');
-    expect(TauMetrics.genAiToolInputRepairs.type).toBe('counter');
-    expect(TauMetrics.genAiToolInputRepairs.unit).toBe('{repair}');
-  });
-
-  it('should expose the tool-duration histogram with bounded file-edit dimensions', () => {
-    expect(TauMetrics.genAiToolDuration.name).toBe('gen_ai.tool.duration');
-    expect(TauMetrics.genAiToolDuration.type).toBe('histogram');
+  it('should declare the client-reported safeguard and compaction successors with bounded labels', () => {
+    expect(TauMetrics.agentSafeguardInterventions.name).toBe('tau.agent.safeguard_interventions');
+    expect(TauMetrics.agentCompactions.name).toBe('tau.agent.compactions');
     expect(
-      TauMetrics.genAiToolDuration.attributes.safeParse({
-        'gen_ai.file_edit.interface': 'patch',
-        'gen_ai.file_edit.operation_count': 2,
-        'gen_ai.file_edit.hunk_count': 1,
+      TauMetrics.agentSafeguardInterventions.attributes.safeParse({
+        'agent.id': 'tau',
+        'safeguard.pattern': 'ping_pong',
+        'safeguard.action': 'nudge',
       }).success,
     ).toBe(true);
-  });
-
-  it('should expose the interrupt-recovery counter with the canonical OTEL name', () => {
-    expect(TauMetrics.genAiInterruptRecoveryReminders.name).toBe('gen_ai.agent.interrupt_recovery.reminders');
-    expect(TauMetrics.genAiInterruptRecoveryReminders.type).toBe('counter');
+    expect(
+      TauMetrics.agentCompactions.attributes.safeParse({
+        'agent.id': 'tau',
+        'compaction.lane': 'nightly',
+        'compaction.tier': 'summarization',
+        'compaction.outcome': 'generated',
+      }).success,
+    ).toBe(false);
   });
 
   it('should expose the prompt-section-size histogram with the canonical OTEL name', () => {
@@ -606,8 +638,6 @@ describe('TauMetrics', () => {
   it('should expose context-budget metrics with canonical OTEL names', () => {
     expect(TauMetrics.genAiContextBudgetTokens.name).toBe('gen_ai.context_budget.tokens');
     expect(TauMetrics.genAiContextBudgetTokens.type).toBe('histogram');
-    expect(TauMetrics.genAiContextCompactionDecisions.name).toBe('gen_ai.context_compaction.decisions');
-    expect(TauMetrics.genAiContextCompactionDecisions.type).toBe('counter');
   });
 
   it('should bound agent context labels to the ingest vocabularies', () => {

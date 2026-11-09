@@ -3,8 +3,8 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
 /**

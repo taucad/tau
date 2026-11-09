@@ -4,7 +4,10 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import {
   createClientContextMiddleware,
   createRecentSkillsMiddleware,
+  createTurnContextSnapshot,
   latexDelimiterMiddleware,
+  pinnedSkillsBlock,
+  skillsUpdateMessageId,
   trimToolResultContext,
 } from '#harness/cad-middleware.js';
 import { toPiToolContent } from '#harness/tools.js';
@@ -147,7 +150,7 @@ describe('ToolResultTrimmer', () => {
     expect(JSON.parse(text)).toMatchObject({ status: 'error', sourceRevision });
   });
 
-  it('keeps the newest capture whole and replaces older image blocks with a placeholder', () => {
+  it('should keep every capture whole, whichever is newest, and send text instead only to a model without images', () => {
     // Built the way the tool records it, so the trimmer sees what pi sees.
     const capture = (toolCallId: string, view: string): AgentMessage => {
       const content = { success: true, images: [{ view, dataUrl: 'data:image/webp;base64,AAAA' }] };
@@ -165,20 +168,21 @@ describe('ToolResultTrimmer', () => {
 
     const [older, newest] = trimToolResultContext(captures);
 
-    expect(older?.role === 'toolResult' ? older.content : undefined).toEqual([
-      captures[0]!.role === 'toolResult' ? captures[0]!.content[0] : undefined,
-      { type: 'text', text: '[screenshot image - previously captured]' },
-    ]);
-    // Untouched: `toPiToolContent` already built the blocks this used to rebuild.
+    // Untouched: `toPiToolContent` already built the blocks, and a newer capture never rewrites an older one (I1).
+    expect(older).toBe(captures[0]);
     expect(newest).toBe(captures[1]);
 
-    // A model that cannot take images loses both, which is the point of the gate.
+    // A model that cannot take images loses both, on every step alike, which is the point of the gate.
     const textOnly = trimToolResultContext(captures, { allowImageBlocks: false });
     expect(
       textOnly.every(
         (message) => message.role === 'toolResult' && message.content.every((block) => block.type === 'text'),
       ),
     ).toBe(true);
+    expect(textOnly[0]?.role === 'toolResult' ? textOnly[0].content.at(-1) : undefined).toEqual({
+      type: 'text',
+      text: '[screenshot image omitted: this model takes no image input]',
+    });
   });
 
   describe('on the wire', () => {
@@ -197,14 +201,10 @@ describe('ToolResultTrimmer', () => {
     const imageCount = (message: AgentMessage | undefined): number =>
       message?.role === 'toolResult' ? message.content.filter((block) => block.type === 'image').length : -1;
 
-    it('should send only the newest capture as image blocks', () => {
+    it('should send every capture as image blocks', () => {
       const [older, newest] = onTheWire([capture('call-1'), capture('call-2')]);
 
-      expect(imageCount(older)).toBe(0);
-      expect(older?.role === 'toolResult' ? older.content.at(-1) : undefined).toEqual({
-        type: 'text',
-        text: '[screenshot image - previously captured]',
-      });
+      expect(imageCount(older)).toBe(1);
       expect(imageCount(newest)).toBe(1);
     });
 
@@ -335,5 +335,107 @@ describe('RecentSkills', () => {
 
     expect(seen?.messages).toEqual([]);
     expect(remove).toHaveBeenCalledWith('chat-1', 'unversioned');
+  });
+});
+
+describe('TurnContextSnapshot skills pin', () => {
+  const blocks = [
+    { type: 'text', text: 'static', cacheControl: { type: 'ephemeral' } },
+    { type: 'text', text: 'dynamic' },
+  ] as const;
+  const brep = { name: 'brep', description: 'Build native BRep geometry', fingerprint: 'a' };
+  const gears = { name: 'gears', description: 'Involute gears', fingerprint: 'b' };
+  type Snapshot = Awaited<ReturnType<typeof createTurnContextSnapshot>>;
+  /** The turn after `previous`, whose request history carries every earlier context's messages. */
+  const snapshot = async (
+    skills: ReadonlyArray<typeof brep> | undefined,
+    ...previous: readonly Snapshot[]
+  ): Promise<Snapshot> => {
+    const carried = previous
+      .flatMap((context) => context.initialMessages)
+      .findLast((message) => message.id === skillsUpdateMessageId);
+    return createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static\n\ndynamic',
+      systemPromptBlocks: blocks,
+      clientContext: skills === undefined ? undefined : { skills },
+      previousContext: previous.at(-1),
+      carriedSkillsNote: typeof carried?.content === 'string' ? carried.content : undefined,
+    });
+  };
+
+  it("should keep the first turn's skills block byte for byte when the catalog changes, and note the change", async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    const note = second.initialMessages.find((message) => message.id === skillsUpdateMessageId);
+    expect(note?.content).toContain('**gears**');
+    expect(second.postCompactionMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+  });
+
+  it('should keep a chat that began without a catalog free of a skills block, and carry the catalog as a note', async () => {
+    const first = await snapshot(undefined);
+    const second = await snapshot([brep], first);
+    expect(pinnedSkillsBlock(first)).toBeUndefined();
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
+      '**brep**',
+    );
+  });
+
+  it('should add no note while the catalog matches the pinned block', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep], first);
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should note a catalog change once: the turn after it carries no note of its own', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    const third = await snapshot([brep, gears], first, second);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+    expect(third.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(third.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+    expect(third.postCompactionMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should note a reversion to the pinned catalog once', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    const third = await snapshot([brep], first, second);
+    const fourth = await snapshot([brep], first, second, third);
+    const note = third.initialMessages.find((message) => message.id === skillsUpdateMessageId);
+    expect(note?.content).toContain('**brep**');
+    expect(note?.content).not.toContain('**gears**');
+    expect(fourth.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should carry the catalog of a chat that began without one as a note once, not on every turn', async () => {
+    const first = await snapshot(undefined);
+    const second = await snapshot([brep], first);
+    const third = await snapshot([brep], first, second);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+    expect(third.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should pin the catalog in string-prompt form too', async () => {
+    const first = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { skills: [brep] },
+    });
+    const second = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { skills: [gears] },
+      previousContext: first,
+    });
+    expect(pinnedSkillsBlock(first)).toContain('**brep**');
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
+      '**gears**',
+    );
   });
 });

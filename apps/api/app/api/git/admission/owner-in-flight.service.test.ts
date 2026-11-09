@@ -28,23 +28,23 @@ import {
   OwnerInFlightGate,
   ownerInFlightPushCap,
   ownerInFlightRequestCap,
-} from '#api/git/admission/owner-in-flight.js';
+} from '@taucad/api-git-core/admission/owner-in-flight';
 import { GitController, syncRefusalOf } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { registerGitContentTypeParsers } from '#api/git/git-transport.js';
-import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
-import { StorageGitService } from '#api/git/worker/storage-git.service.js';
-import { commitLease } from '#api/git/store/commit.js';
-import { hydrateLease } from '#api/git/store/lease.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest } from '#api/git/store/manifest.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import { RepositoryRouteGuard } from '@taucad/api-git-core/routing/route-guard';
+import { StorageGitService } from '@taucad/api-git-core/worker/storage-git.service';
+import { commitLease } from '@taucad/api-git-core/store/commit';
+import { hydrateLease } from '@taucad/api-git-core/store/lease';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import { decodeManifest } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { loopbackExecutor, loopbackReceiptChannel } from '@taucad/api-git-core/testing/loopback-executor';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 
 /*
  * DA6 (north star Q16, charter D8): the per-owner in-flight cap at the API's git

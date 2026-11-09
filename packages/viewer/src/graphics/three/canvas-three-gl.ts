@@ -5,6 +5,7 @@ import type { RendererInstance } from '#graphics/three/renderer.js';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { createRenderer } from '#graphics/three/renderer.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
 
 type TauR3fGlDefaults = Parameters<Extract<CanvasProps['gl'], (defaults: never) => unknown>>[0];
 
@@ -151,13 +152,16 @@ export function createTauR3fGlProp(
   };
   const initialize = async (canvas: HTMLCanvasElement): Promise<FiberCompatibleGl> => {
     let renderer: RendererInstance;
+    const finishCreateSpan = beginViewerLoadSpan('renderer.create');
     try {
       renderer = await createRenderer('viewport', graphicsBackend, {
         canvas,
         preserveDrawingBuffer,
         nodePipeline: true,
       });
+      finishCreateSpan();
     } catch (error) {
+      finishCreateSpan('error');
       if (isRetired()) {
         return pending();
       }

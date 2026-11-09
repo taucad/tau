@@ -25,7 +25,7 @@ import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
@@ -107,7 +107,7 @@ const harness = vi.hoisted(() => {
 
 // The store's own `Chat` instance, minus the AI SDK and its transport: this
 // scope asserts on the host command, never on a stream.
-vi.mock('#chat-clients/_internal/shared-chat-transport.js', () => ({
+vi.mock('@taucad/chat-ui/chat-clients/_internal/shared-chat-transport', () => ({
   createChatInstance: ({ chatId }: { chatId: string }) => {
     const chat = {
       id: chatId,
@@ -139,7 +139,10 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({ useModels: () => harness.models }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: () => undefined }));
-vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: () => undefined }));
+vi.mock('#hooks/use-context-payload.js', () => ({
+  useContextPayload: () => undefined,
+  awaitContextPayload: async () => undefined,
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts' }),
 }));

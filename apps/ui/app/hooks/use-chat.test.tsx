@@ -9,8 +9,8 @@ import type { ChatError } from '@taucad/types';
 import { resolveKernel } from '@taucad/types/constants';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import { KeyedMutex } from '#db/keyed-mutex.js';
-import type * as ChatMessageQueueModule from '#db/chat-message-queue-store.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
@@ -19,7 +19,7 @@ import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 const queueMutex = new KeyedMutex<string>();
-vi.mock('#db/chat-message-queue-store.js', async (importOriginal) => {
+vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
   const original = await importOriginal<typeof ChatMessageQueueModule>();
   return {
     ...original,
@@ -159,7 +159,7 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-vi.mock('#utils/error.utils.js', () => ({
+vi.mock('@taucad/chat-ui/utils/error.utils', () => ({
   parseErrorForPersistence: (error: Error): ChatError => ({
     category: 'generic',
     title: 'Stub error',

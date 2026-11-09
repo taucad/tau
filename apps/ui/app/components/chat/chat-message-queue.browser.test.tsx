@@ -3,7 +3,7 @@ import { Button } from '@taucad/ui/components/button';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
-import { ChatMessageQueueView } from '#components/chat/chat-message-queue-view.js';
+import { ChatMessageQueueView } from '@taucad/chat-ui/components/chat-message-queue-view';
 
 afterEach(() => {
   cleanup();

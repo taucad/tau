@@ -56,7 +56,7 @@ const settlementTransport = vi.hoisted(() => ({
   ]),
 }));
 
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+vi.mock('@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport', () => ({
   subscribeHostTurnSettlements: settlementTransport.subscribe,
   getHostFinalizedTurns: settlementTransport.get,
 }));

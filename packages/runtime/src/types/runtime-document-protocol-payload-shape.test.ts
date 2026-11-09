@@ -265,7 +265,6 @@ describe('document protocol payload-shape coverage (C18)', () => {
           activeVoxels: 64,
           memoryBytes: 4096,
           adaptivity: 0.25,
-          relax: false,
         },
       },
       hash: 'model-hash',
@@ -274,6 +273,14 @@ describe('document protocol payload-shape coverage (C18)', () => {
     } as const;
     const parsed = wire.notifies.rendered.safeParse(rendered);
     expect(parsed.success && parsed.data.success ? parsed.data.artifact.tessellation : undefined).toEqual(
+      rendered.artifact.tessellation,
+    );
+    // An older kernel's `relax` (removed with the meshRelax option) is stripped, not refused.
+    const older = wire.notifies.rendered.safeParse({
+      ...rendered,
+      artifact: { ...rendered.artifact, tessellation: { ...rendered.artifact.tessellation, relax: false } },
+    });
+    expect(older.success && older.data.success ? older.data.artifact.tessellation : undefined).toEqual(
       rendered.artifact.tessellation,
     );
     expect(

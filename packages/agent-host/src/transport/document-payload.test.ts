@@ -1,13 +1,21 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
 import { describe, expect, it, vi } from 'vitest';
-import type { Context } from '@earendil-works/pi-ai';
+import type { Context, UserMessage } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 import type { MaterializedDocument, ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
 import { documentSentinel } from '#harness/session-record.js';
 import { createMemoryEventLog } from '#harness/harness.fixture.js';
 import { createAgentSession } from '#harness/session.js';
-import { attachmentBudgetCharacters, fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
+import {
+  attachmentBudgetCharacters,
+  attachmentImageLimit,
+  fitAttachmentBudget,
+  omitAttachments,
+  planAttachmentEvictions,
+  planAttachmentOmissions,
+  rewriteDocuments,
+} from '#transport/document-payload.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -33,7 +41,7 @@ const gatewayDocumentSchemas = {
         })
         .strict(),
       cache_control: z
-        .object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() })
+        .object({ type: z.literal('ephemeral'), ttl: z.enum(['5m', '1h']).optional() })
         .strict()
         .optional(),
     })
@@ -276,28 +284,233 @@ describe('fitAttachmentBudget', () => {
 
   it('should return the same context when every attachment fits', () => {
     const input = context();
-    expect(fitAttachmentBudget(input, documents, 28)).toEqual({ context: input, omitted: 0 });
+    expect(fitAttachmentBudget(input, documents, { budget: 28 })).toEqual({ context: input, omitted: 0 });
   });
 
-  it('should keep the newest attachments and name the ones past the budget', () => {
+  it('should evict the oldest attachments in a batch and name the ones it omits', () => {
     const input = context();
     const before = structuredClone(input);
 
-    const fitted = fitAttachmentBudget(input, documents, 12);
+    /* Sizes 8, 8, 4, 8 against a budget of 12 (floor 8.4): the second overflow evicts both the 8 and the 4. */
+    const fitted = fitAttachmentBudget(input, documents, { budget: 12 });
 
-    expect(fitted.omitted).toBe(2);
+    expect(fitted.omitted).toBe(3);
     expect(fitted.context.messages.map((message) => message.content)).toEqual([
       [
         { type: 'text', text: '[attachment omitted]' },
         { type: 'text', text: '[attachment omitted: old-spec.pdf]' },
       ],
-      [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+      [{ type: 'text', text: '[attachment omitted]' }],
       [
         { type: 'text', text: 'again' },
         { type: 'text', text: sentinel },
       ],
     ]);
     expect(input).toEqual(before);
+  });
+});
+
+describe('fitAttachmentBudget batch eviction (I1)', () => {
+  const attachments = (count: number, size = 10): Context => ({
+    systemPrompt: 'CAD',
+    messages: Array.from(
+      { length: count },
+      (_, index): UserMessage => ({
+        role: 'user',
+        content: [{ type: 'image', mimeType: 'image/png', data: 'A'.repeat(size) }],
+        timestamp: index,
+      }),
+    ),
+    tools: [],
+  });
+  const omittedIndexes = (context: Context): number[] =>
+    context.messages.flatMap((message, index) =>
+      typeof message.content !== 'string' && message.content.some((block) => block.type === 'text') ? [index] : [],
+    );
+
+  it('should rewrite history only when the budget overflows, evicting the oldest down to the floor in one batch', () => {
+    const omitted = Array.from(
+      { length: 15 },
+      (_, index) => fitAttachmentBudget(attachments(index + 1), undefined, { budget: 100 }).omitted,
+    );
+    /* Ten fit; the eleventh overflows and evicts four, which lasts until the fifteenth overflows again. */
+    expect(omitted).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 8]);
+  });
+
+  it('should keep every earlier eviction when a later attachment arrives, so replays agree byte for byte', () => {
+    for (let count = 1; count < 15; count++) {
+      const before = omittedIndexes(fitAttachmentBudget(attachments(count), undefined, { budget: 100 }).context);
+      const after = omittedIndexes(fitAttachmentBudget(attachments(count + 1), undefined, { budget: 100 }).context);
+      expect(after.slice(0, before.length), `count ${String(count)}`).toEqual(before);
+      /* Evictions take the oldest attachments, never one in the middle. */
+      expect(after).toEqual(after.map((_, index) => index));
+    }
+  });
+
+  it('should keep the newest attachment unless it alone exceeds the budget', () => {
+    const pair = fitAttachmentBudget(attachments(2, 80), undefined, { budget: 100 });
+    expect(pair.omitted).toBe(1);
+    expect(omittedIndexes(pair.context)).toEqual([0]);
+    expect(fitAttachmentBudget(attachments(1, 150), undefined, { budget: 100 }).omitted).toBe(1);
+  });
+});
+
+describe('fitAttachmentBudget image count ceiling (I1)', () => {
+  const images = (count: number): Context => ({
+    systemPrompt: 'CAD',
+    messages: Array.from(
+      { length: count },
+      (_, index): UserMessage => ({
+        role: 'user',
+        content: [{ type: 'image', mimeType: 'image/png', data: 'AA' }],
+        timestamp: index,
+      }),
+    ),
+    tools: [],
+  });
+  const omittedIndexes = (context: Context): number[] =>
+    context.messages.flatMap((message, index) =>
+      typeof message.content !== 'string' && message.content.some((block) => block.type === 'text') ? [index] : [],
+    );
+
+  it('should refuse more images than the Anthropic Messages API accepts in one request', () => {
+    expect(attachmentImageLimit).toBe(100);
+    expect(fitAttachmentBudget(images(attachmentImageLimit), undefined).omitted).toBe(0);
+    const over = fitAttachmentBudget(images(attachmentImageLimit + 1), undefined);
+    expect(over.omitted).toBeGreaterThan(0);
+    expect(over.context.messages.length - omittedIndexes(over.context).length).toBeLessThanOrEqual(
+      attachmentImageLimit,
+    );
+  });
+
+  it('should evict the oldest images down to the floor in one batch when the count overflows', () => {
+    const omitted = Array.from(
+      { length: 15 },
+      (_, index) => fitAttachmentBudget(images(index + 1), undefined, { imageLimit: 10 }).omitted,
+    );
+    /* Ten fit; the eleventh overflows and evicts four, which lasts until the fifteenth overflows again. */
+    expect(omitted).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 8]);
+  });
+
+  it('should keep every earlier eviction when a later image arrives, so replays agree byte for byte', () => {
+    for (let count = 1; count < 15; count++) {
+      const before = omittedIndexes(fitAttachmentBudget(images(count), undefined, { imageLimit: 10 }).context);
+      const after = omittedIndexes(fitAttachmentBudget(images(count + 1), undefined, { imageLimit: 10 }).context);
+      expect(after.slice(0, before.length), `count ${String(count)}`).toEqual(before);
+      expect(after).toEqual(after.map((_, index) => index));
+    }
+  });
+
+  it('should count documents toward the bytes only, never toward the images', () => {
+    const documents = new Map<string, MaterializedDocument>([[hash, { ...pdf, data: 'AAAA' }]]);
+    const context: Context = {
+      systemPrompt: 'CAD',
+      messages: Array.from(
+        { length: 12 },
+        (_, index): UserMessage => ({ role: 'user', content: [{ type: 'text', text: sentinel }], timestamp: index }),
+      ),
+      tools: [],
+    };
+    expect(fitAttachmentBudget(context, documents, { imageLimit: 10 }).omitted).toBe(0);
+  });
+});
+
+describe('planAttachmentEvictions: each bound evicts by its own rule', () => {
+  const document = (size: number) => ({ size, image: false });
+  const image = { size: 0, image: true };
+
+  it('should evict down to the byte floor alone when only the bytes overflow, leaving the images under their limit', () => {
+    /* 1,100 characters against 1,000: the first document alone brings the total to the floor of 700. */
+    const measures = [document(600), ...Array.from({ length: 90 }, () => image), document(500)];
+    expect([...planAttachmentEvictions(measures, { budget: 1000, imageLimit: 100 })]).toEqual([0]);
+  });
+
+  it('should evict only the oldest images when only the images overflow, whatever bytes a document weighs', () => {
+    /* 101 images against 100 while the bytes sit between the floor and the budget: the document stays. */
+    const measures = [document(75), ...Array.from({ length: 101 }, () => image)];
+    const evicted = [...planAttachmentEvictions(measures, { budget: 100, imageLimit: 100 })];
+    expect(evicted).not.toContain(0);
+    /* Down to the image floor of 70: the oldest 31 images. */
+    expect(evicted).toEqual(Array.from({ length: 31 }, (_, index) => index + 1));
+  });
+
+  it('should apply both rules when one attachment overflows both bounds', () => {
+    const measures = [...Array.from({ length: 10 }, () => ({ size: 10, image: true })), { size: 100, image: true }];
+    const evicted = [...planAttachmentEvictions(measures, { budget: 100, imageLimit: 10 })];
+    /* Bytes: 200 down to a floor of 70 takes the ten oldest; images were then under their floor of 7 as well. */
+    expect(evicted).toEqual(Array.from({ length: 10 }, (_, index) => index));
+  });
+});
+
+describe('attachment omissions decided from the durable rows (I1 across devices)', () => {
+  const imageRef = (index: number, byteLength?: number): ProviderMessage => ({
+    id: `user-${String(index)}`,
+    role: 'user',
+    content: [
+      { type: 'text', text: `capture ${String(index)}` },
+      {
+        type: 'file-ref',
+        path: `attachments/${String(index).padStart(64, '0')}.png`,
+        mimeType: 'image/png',
+        filename: `view-${String(index)}.png`,
+        ...(byteLength === undefined ? {} : { byteLength }),
+      },
+    ],
+  });
+  const documentRef: ProviderMessage = {
+    id: 'user-doc',
+    role: 'user',
+    content: [{ type: 'file-ref', path: `attachments/${hash}.pdf`, mimeType: 'application/pdf', byteLength: 30 }],
+  };
+  const stored = (index: number): ProviderMessage => ({
+    id: `shot-${String(index)}`,
+    role: 'tool-output',
+    toolCallId: `call-${String(index)}`,
+    toolName: 'screenshot',
+    content: {
+      images: [
+        { view: 'front', path: `attachments/${'f'.repeat(64)}.webp`, mimeType: 'image/webp', byteLength: 3 },
+        { view: 'top', dataUrl: 'data:image/png;base64,AAAA' },
+      ],
+    },
+    isError: false,
+  });
+
+  it('should evict the oldest images past the limit, whatever device reads them, and leave documents alone', () => {
+    const history = [
+      imageRef(0, 3),
+      imageRef(1, 3),
+      documentRef,
+      stored(2),
+      ...[3, 4, 5, 6, 7, 8, 9].map((i) => imageRef(i, 3)),
+    ];
+    /* Eleven images (two per capture) against a limit of ten: the oldest four go, down to the floor of seven. */
+    const omissions = planAttachmentOmissions(history, { imageLimit: 10 });
+    expect([...omissions.entries()].map(([id, omission]) => [id, [...omission.blocks], [...omission.images]])).toEqual([
+      ['user-0', [1], []],
+      ['user-1', [1], []],
+      ['shot-2', [], [0, 1]],
+    ]);
+    expect(omitAttachments(history[0]!, omissions.get('user-0')!).content).toEqual([
+      { type: 'text', text: 'capture 0' },
+      { type: 'text', text: '[attachment omitted: view-0.png]' },
+    ]);
+    expect(omitAttachments(stored(2), omissions.get('shot-2')!).content).toEqual({ images: [] });
+    /* The copy is transient: the durable row is untouched. */
+    expect(history[0]).toEqual(imageRef(0, 3));
+  });
+
+  it('should weigh a reference by the bytes its row records and count one it does not size as an image of no bytes', () => {
+    /* 36 bytes encode to 48 characters each; three overflow a budget of 100 and evict down to the floor of 70. */
+    expect([
+      ...planAttachmentOmissions([imageRef(0, 36), imageRef(1, 36), imageRef(2, 36)], { budget: 100 }).keys(),
+    ]).toEqual(['user-0', 'user-1']);
+    expect(planAttachmentOmissions([imageRef(0), imageRef(1), imageRef(2)], { budget: 100 }).size).toBe(0);
+    /* Three images against a limit of two: the floor is one, so the oldest two go. */
+    expect([...planAttachmentOmissions([imageRef(0), imageRef(1), imageRef(2)], { imageLimit: 2 }).keys()]).toEqual([
+      'user-0',
+      'user-1',
+    ]);
   });
 });
 
@@ -341,7 +554,7 @@ describe('gateway transport document rewrite (D21, D22)', () => {
       type: 'document',
       title: 'bracket-spec.pdf',
       source: { type: 'base64', media_type: 'application/pdf', data: pdfData },
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     });
     expect(gatewayDocumentSchemas['anthropic-messages'].safeParse(content.at(-1)).success).toBe(true);
     expect(content[0]).not.toHaveProperty('cache_control');

@@ -338,7 +338,7 @@ vi.mock('@taucad/host', async (importOriginal) => {
     await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-    defaultPayloadStore: vi.fn(() => join(state.userData, 'store')),
+    defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
@@ -1096,7 +1096,8 @@ describe('desktop main compute owner', () => {
 
       for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
         listener(
-          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          /* A filesystem concern is scoped to the asking window's import grants (W7.4). */
+          { sender: { id: 7 }, senderFrame: { url: 'app://tau/index.html', postMessage } },
           { requestId: 'req-quit', concern: 'nodeFs' },
         );
       }
@@ -2073,7 +2074,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'reads the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    'reads the shared dependency store and posts its native composition to the kernel utilities, with no resource roots',
     async () => {
       await boot();
       await vi.waitFor(() => {

@@ -62,8 +62,8 @@ import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
-import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
-import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
+import { createProjectOpenTimer, markProjectOpen } from '@taucad/project-workspace/utils/project-open-timer';
+import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-open-timer';
 import { createRevisionCompute } from '#machines/revision-compute.js';
 import { linkedImportPort, stageLinkedImport } from '#machines/import-linked.js';
 import { importConnectMessageType, serveImportChannel } from '#machines/import-staging.js';
@@ -770,6 +770,8 @@ self.addEventListener(
         /* Each written file's one hash, from its read-back, on the compute worker (EQ6, I2). */
         measure: async (bytes, expectedSize) => revisionCompute.measureImportBytes(bytes, expectedSize),
         policy: tauPathPolicy,
+        /* What a person chose on the desktop host is listed and copied by that host, by grant (W7.4, I6). */
+        hostSources: async () => fileService.importSources(),
         /* A linked repository is fetched here, into the staging, by the revisions authority: `.git` never reaches the page (I6). */
         stageLinked: async (input) =>
           stageLinkedImport({

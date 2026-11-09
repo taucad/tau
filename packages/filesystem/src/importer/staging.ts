@@ -121,6 +121,29 @@ export type ImportStagingPort = Readonly<{
    * directory. A port without it (a test's) runs `work` directly.
    */
   exclusive?: <Result>(path: string, work: () => Promise<Result>) => Promise<Result>;
+  /**
+   * Copy files of a source a person chose on the host straight into the
+   * staging, host-side (W7.4): the host resolves each `from` inside the grant,
+   * lands the file as a batch write does and answers the facts it hashed from
+   * what landed, its one read (EQ6, I2). Present only where the root's host
+   * holds such sources (a desktop node root); a plan of host entries is
+   * refused anywhere else.
+   */
+  copyHost?: (
+    grant: string,
+    entries: ReadonlyArray<Readonly<{ from: string; path: string; size: number }>>,
+  ) => Promise<readonly HostImportCopyReceipt[]>;
+}>;
+
+/**
+ * One host copy's receipt: applied with the facts of what landed, or why not.
+ *
+ * @public
+ */
+export type HostImportCopyReceipt = Readonly<{
+  outcome: 'applied' | 'failed' | 'uncertain';
+  facts?: StagedImportEntry['facts'];
+  error?: unknown;
 }>;
 
 /**
@@ -773,6 +796,19 @@ const refusalOf = (error: unknown, path: string): Error => {
 
 const asError = (value: unknown): Error => (value instanceof Error ? value : new Error(String(value)));
 
+/*
+ * Why a host copy did not land, as the review says it: a source that changed
+ * since it was listed is damaged as an import; anything else keeps its code.
+ */
+const hostCopyRefusal = (error: unknown, path: string): Error => {
+  const { message, code } = (error ?? {}) as { message?: unknown; code?: unknown };
+  const text = typeof message === 'string' ? message : 'A file could not be copied from the host.';
+  if (code === 'ESTALE') {
+    return new ImportRefusedError('corrupt', { path, message: 'A file changed while it was imported.' });
+  }
+  return Object.assign(new Error(`${text} (${path})`), typeof code === 'string' ? { code } : {});
+};
+
 const refusalReasons: ReadonlySet<string> = new Set<ImportRefusalReason>([
   'archiveTooLarge',
   'expandedTooLarge',
@@ -836,6 +872,9 @@ export const stageImport = async (
   const directory = importStagingDirectory(operationId);
   if (input.target !== undefined && !isProjectDirectory(input.target)) {
     throw new TypeError(`Not a project directory: ${input.target}`);
+  }
+  if (plan.entries.some((entry) => entry.host !== undefined) && port.copyHost === undefined) {
+    throw new Error('This storage root cannot copy from a source on the host.');
   }
   const writesInPlace = input.target !== undefined && port.provider.capabilities.movesInPlace !== true;
   const candidates = writesInPlace ? targetCandidates(input.target) : [];
@@ -919,10 +958,16 @@ export const stageImport = async (
   /* A failure anywhere stops every decode still queued or running, as the caller's abort does. */
   const halt = new AbortController();
   const signal = input.signal === undefined ? halt.signal : AbortSignal.any([input.signal, halt.signal]);
-  const decodeWindow = async (window: readonly PlannedImportEntry[]): Promise<ImportDecodedEntry[]> => {
+  const decodeWindow = async (
+    window: readonly PlannedImportEntry[],
+  ): Promise<Array<ImportDecodedEntry | undefined>> => {
     let acquired = 0;
     try {
       return await bounded(window, concurrency, async (entry) => {
+        /* The host copies it: nothing is decoded, and nothing is held here. */
+        if (entry.request === undefined) {
+          return undefined;
+        }
         await budget.acquire(entry.size, signal);
         acquired += entry.size;
         try {
@@ -947,7 +992,7 @@ export const stageImport = async (
   /* Settled, never rejected: a later batch's failure is seen when its turn comes, not while another one writes. */
   const settled = async (
     window: readonly PlannedImportEntry[],
-  ): Promise<Readonly<{ decoded: ImportDecodedEntry[] } | { error: unknown }>> => {
+  ): Promise<Readonly<{ decoded: Array<ImportDecodedEntry | undefined> } | { error: unknown }>> => {
     try {
       return { decoded: await decodeWindow(window) };
     } catch (error) {
@@ -961,6 +1006,44 @@ export const stageImport = async (
    */
   /* Past a compute supervisor's default three restarts, so a worker that never loads ends in its inline fallback. */
   const measureAttempts = 6;
+  /*
+   * A host copy's facts come with its receipt: the host hashed the landed file
+   * through its own handle before its rename, the one read I2 allows, so it is
+   * not read back again here. One request per grant the window holds.
+   */
+  const copyFromHost = async (
+    window: readonly PlannedImportEntry[],
+  ): Promise<Map<string, StagedImportEntry['facts']>> => {
+    const facts = new Map<string, StagedImportEntry['facts']>();
+    const byGrant = new Map<string, PlannedImportEntry[]>();
+    for (const entry of window) {
+      if (entry.host !== undefined) {
+        const group = byGrant.get(entry.host.grant) ?? [];
+        group.push(entry);
+        byGrant.set(entry.host.grant, group);
+      }
+    }
+    for (const [grant, entries] of byGrant) {
+      signal.throwIfAborted();
+      // oxlint-disable-next-line no-await-in-loop -- one grant's copies after another's, inside one batch.
+      const receipts = await port.copyHost!(
+        grant,
+        entries.map((entry) => ({
+          from: entry.host!.from,
+          path: stagedEntryLocation({ directory, inPlace }, entry.path),
+          size: entry.size,
+        })),
+      );
+      for (const [at, entry] of entries.entries()) {
+        const receipt = receipts[at];
+        if (receipt?.outcome !== 'applied' || receipt.facts === undefined) {
+          throw hostCopyRefusal(receipt?.error, entry.path);
+        }
+        facts.set(entry.path, receipt.facts);
+      }
+    }
+    return facts;
+  };
   const readBack = async (window: readonly PlannedImportEntry[]): Promise<Array<StagedImportEntry['facts']>> => {
     const held = byteBudget(Math.max(0, ...window.map(({ size }) => size)));
     /* Only the caller stops it: a later batch's failed decode still lets this written batch keep its record. */
@@ -1020,7 +1103,9 @@ export const stageImport = async (
         throw outcome.error;
       }
       const { decoded } = outcome;
-      const windowBytes = window.reduce((sum, { size }) => sum + size, 0);
+      /* Only what was decoded holds the budget: a host copy is never in hand. */
+      const windowBytes = window.reduce((sum, entry) => sum + (entry.request === undefined ? 0 : entry.size), 0);
+      let copied = new Map<string, StagedImportEntry['facts']>();
       try {
         signal.throwIfAborted();
         decoding = index + 1 < windows.length ? settled(windows[index + 1]!) : undefined;
@@ -1034,22 +1119,26 @@ export const stageImport = async (
             data: encode({ at: Date.now(), entries: window.map(({ path }) => path) }),
           },
         ]);
-        const batch = window.map(
-          (entry, at): BatchEntry => ({
-            op: 'write',
-            path: stagedEntryLocation({ directory, inPlace }, entry.path),
-            data: decoded[at]!.data,
-          }),
+        const batch = window.flatMap((entry, at): BatchEntry[] =>
+          entry.request === undefined
+            ? []
+            : [{ op: 'write', path: stagedEntryLocation({ directory, inPlace }, entry.path), data: decoded[at]!.data }],
         );
+        const write = async (): Promise<void> => {
+          if (batch.length > 0) {
+            await applied(port, batch);
+          }
+          copied = await copyFromHost(window);
+        };
         // oxlint-disable-next-line no-await-in-loop -- the ledger record follows its batch's durable writes.
         await (inPlace === undefined
-          ? applied(port, batch)
+          ? write()
           : exclusively(port, inPlace, async () => {
               /* Every batch asks again: a folder whose marker names another owner is not written into. */
               if (!(await ownsImportTarget(port.provider, inPlace, operationId))) {
                 throw new Error(`The project folder ${inPlace} no longer belongs to this import.`);
               }
-              await applied(port, batch);
+              await write();
             }));
         /* Written: the decoded bytes go, so the read-back is all this batch still holds. */
         decoded.length = 0;
@@ -1057,13 +1146,15 @@ export const stageImport = async (
       } finally {
         budget.release(windowBytes);
       }
+      const decodedEntries = window.filter((entry) => entry.request !== undefined);
       // oxlint-disable-next-line no-await-in-loop -- a batch's facts come from its own read-back, before its record.
-      const measured = await readBack(window);
-      const records: StagedImportEntry[] = window.map((entry, at) => ({
+      const measured = decodedEntries.length === 0 ? [] : await readBack(decodedEntries);
+      const measuredFacts = new Map(decodedEntries.map((entry, at) => [entry.path, measured[at]!]));
+      const records: StagedImportEntry[] = window.map((entry) => ({
         path: entry.path,
         size: entry.size,
         ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-        facts: measured[at]!,
+        facts: (measuredFacts.get(entry.path) ?? copied.get(entry.path))!,
       }));
       const ledgerStem = `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}`;
       /* The record replaces its announcement: it names the same paths, with their facts. */

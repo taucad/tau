@@ -9,23 +9,23 @@ import { metaConfig } from '#constants/meta.constants.js';
  * Projects are listed by the browser file-manager worker, which the server cannot
  * reach and which boots after hydration. Without a remembered shape every load
  * reserves a guessed number of rows and cards and the list jumps when the real
- * listing arrives. The last listing's count and leading names are kept in
- * `localStorage` for the client's first render, and the count alone rides a
- * request cookie so the server reserves the same number of slots, or renders
- * the empty state, before any script runs.
+ * listing arrives. The last listing's count is kept in `localStorage` for the
+ * client's first render and rides a request cookie, so the server reserves the
+ * same number of slots, or renders the empty state, before any script runs.
  *
- * The snapshot is presentation only: it never decides what a project is or
- * whether it exists. The real listing replaces it in place and refreshes it.
+ * Only the count is remembered, never names: placeholders are skeletons until the
+ * real listing fills them, so nothing stale (a project renamed or deleted on
+ * another device, or a previous user's list) is ever shown as if it were data.
  */
 
 /** The request cookie carrying only the remembered project count. */
 export const projectListCountCookieName = `${metaConfig.cookiePrefix}project-count`;
 
-/** The `localStorage` key holding the whole remembered shape. */
-export const projectListShapeStorageKey = `${metaConfig.cookiePrefix}project-list-shape`;
+/** The `localStorage` key holding the remembered shape. */
+export const projectListShapeStorageKey = `${metaConfig.cookiePrefix}project-list-count`;
 
-/** How many leading project names are remembered for first paint. */
-export const rememberedProjectNameLimit = 20;
+/** The key that once also held project names; cleared on first read so no name lingers. */
+const legacyProjectListShapeStorageKey = `${metaConfig.cookiePrefix}project-list-shape`;
 
 /** A count past this is not a list shape any page reserves; it is a corrupt cookie. */
 const maxRememberedCount = 100_000;
@@ -33,24 +33,13 @@ const maxRememberedCount = 100_000;
 /** Cookie lifetime in days, below the 400-day cap browsers apply. */
 const cookieLifetimeDays = 365;
 
-/** One remembered project: enough to name its placeholder row. */
-export type RememberedProject = {
-  readonly id: string;
-  readonly name: string;
-};
-
-/** The remembered list shape. `projects` is empty when only the count is known (the server's view). */
+/** The remembered list shape: how many live projects the last listing held. */
 export type ProjectListShape = {
   readonly count: number;
-  readonly projects: readonly RememberedProject[];
 };
 
 const shapeSchema = z.object({
   count: z.number().int().min(0).max(maxRememberedCount),
-  projects: z
-    .array(z.object({ id: z.string(), name: z.string() }))
-    .max(rememberedProjectNameLimit)
-    .readonly(),
 });
 
 /**
@@ -77,47 +66,30 @@ export const readProjectListCountFromHeader = (header: string | undefined): numb
   header ? parseProjectListCount(Cookies.parse(header)[projectListCountCookieName]) : undefined;
 
 /**
- * The shape the server can know: the count, with no names.
+ * The shape for a remembered count.
  *
  * @param count - The remembered count, if any.
  * @returns The shape, or `undefined` when the count is unknown.
  */
 export const projectListShapeFromCount = (count: number | undefined): ProjectListShape | undefined =>
-  count === undefined ? undefined : { count, projects: [] };
+  count === undefined ? undefined : { count };
 
 /**
- * Build the shape of a listing: its live projects, most recent first.
+ * Build the shape of a listing: how many of its projects are live.
  *
  * @param projects - The listing's projects, trashed ones included or not.
  * @returns The shape to remember.
  */
-export const projectListShapeOf = (
-  projects: ReadonlyArray<{
-    readonly id: string;
-    readonly name: string;
-    readonly lastActivityAt: number;
-    readonly deletedAt?: number;
-  }>,
-): ProjectListShape => {
-  const live = projects
-    .filter((project) => project.deletedAt === undefined)
-    .toSorted((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
-  return {
-    count: live.length,
-    projects: live.slice(0, rememberedProjectNameLimit).map(({ id, name }) => ({ id, name })),
-  };
-};
+export const projectListShapeOf = (projects: ReadonlyArray<{ readonly deletedAt?: number }>): ProjectListShape => ({
+  count: projects.filter((project) => project.deletedAt === undefined).length,
+});
 
 const isSameShape = (left: ProjectListShape | undefined, right: ProjectListShape): boolean =>
-  left !== undefined &&
-  left.count === right.count &&
-  left.projects.length === right.projects.length &&
-  left.projects.every(
-    (project, index) => project.id === right.projects.at(index)?.id && project.name === right.projects.at(index)?.name,
-  );
+  left !== undefined && left.count === right.count;
 
 const readStoredShape = (): ProjectListShape | undefined => {
   try {
+    globalThis.localStorage.removeItem(legacyProjectListShapeStorageKey);
     const raw = globalThis.localStorage.getItem(projectListShapeStorageKey);
     if (raw === null) {
       return undefined;

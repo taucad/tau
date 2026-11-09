@@ -5,17 +5,19 @@ import { useSession } from '@better-auth-ui/react';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { CookiePreferencesDialog } from '#components/cookie-preferences.js';
 import { CloudAccountClosure } from '#cloud/settings-billing.js';
+import { desktopAnalyticsCopy, useDesktopAnalytics } from '#hooks/use-desktop-analytics.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { useTelemetryPurposes } from '#hooks/use-telemetry-purposes.js';
 import type { TelemetryPurpose } from '#hooks/use-telemetry-purposes.js';
 import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.js';
 import { authClient } from '#lib/auth-client.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { legalUrl } from '#lib/legal-url.js';
 
 function LearnMore(): React.JSX.Element {
   return (
     <a
-      href={legalUrl('privacy#9.2.1-ai-service-improvement')}
+      href={legalUrl('privacy#2-improving-tau-with-your-chats')}
       target='_blank'
       rel='noopener noreferrer'
       className='underline hover:text-foreground'
@@ -35,7 +37,8 @@ const improvementPurposes: readonly TelemetryPurpose[] = ['summary', 'content', 
 /**
  * Whether the owner's chats may improve the service. The server answers with the effective consent: on by default for
  * Free, off for a paid plan until its owner turns it on here. Turning it on or off also records an explicit decision
- * for each improvement purpose once a recording notice is in force; the Free default alone records nothing.
+ * for each improvement purpose once a recording notice is in force. While a Free account's switch is on and it has not
+ * decided, the server grants those purposes by default; turning the switch off opts out.
  */
 function ImproveServiceRow(): React.JSX.Element {
   const { data: session } = useSession(authClient);
@@ -95,6 +98,37 @@ function ImproveServiceRow(): React.JSX.Element {
 }
 
 /**
+ * The desktop app's analytics switch, on until the person turns it off (Q3). Turning it off stops capture, resets the
+ * analytics identity and clears its stored data, as withdrawing cookie consent does on the web; turning it on resumes.
+ */
+function DesktopAnalyticsRow(): React.JSX.Element | undefined {
+  const [isEnabled, setEnabled] = useDesktopAnalytics();
+  return (
+    <SettingsRow
+      settingId='desktop-analytics'
+      title={desktopAnalyticsCopy.label}
+      info={desktopAnalyticsCopy.details.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+      description={
+        <>
+          {desktopAnalyticsCopy.description}.{' '}
+          <a
+            href={legalUrl('cookies')}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='underline hover:text-foreground'
+          >
+            {desktopAnalyticsCopy.learnMore}
+          </a>
+        </>
+      }
+      control={<Switch aria-label={desktopAnalyticsCopy.label} checked={isEnabled} onCheckedChange={setEnabled} />}
+    />
+  );
+}
+
+/**
  * Data controls: every choice about what Tau collects, keeps and uses, and closing the account.
  */
 export function DataControlsSettings(): React.JSX.Element {
@@ -122,6 +156,7 @@ export function DataControlsSettings(): React.JSX.Element {
           }
         />
         <ImproveServiceRow />
+        {isDesktopTarget() ? <DesktopAnalyticsRow /> : undefined}
         <SettingsRow
           settingId='cookie-preferences'
           title='Cookie preferences'

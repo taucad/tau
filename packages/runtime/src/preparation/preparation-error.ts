@@ -5,7 +5,7 @@ import type { PreparationErrorCode } from '#preparation/preparation.types.js';
  * @public
  */
 export type PreparationErrorOptions = {
-  /** The manifest field a `MANIFEST_INVALID` error is about, such as `dependencies.engine[0].payloads[2].integrity`. */
+  /** The manifest field a `MANIFEST_INVALID` error is about, such as `dependencies.engine[0].files[2].integrity`. */
   readonly field?: string;
   readonly cause?: unknown;
 };

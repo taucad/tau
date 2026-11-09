@@ -23,7 +23,7 @@ vi.mock('#hooks/use-chat.js', () => ({
   },
 }));
 
-vi.mock('#components/chat/chat-tool-card.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
   ChatToolCard({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <div data-testid='chat-tool-card'>{children}</div>;
   },
@@ -41,7 +41,7 @@ vi.mock('#components/chat/chat-tool-card.js', () => ({
   },
 }));
 
-vi.mock('#components/chat/requirement-indicator.js', () => ({
+vi.mock('@taucad/chat-ui/components/requirement-indicator', () => ({
   RequirementIndicator({
     failedCount,
     passedCount,
@@ -64,7 +64,7 @@ vi.mock('#components/chat/requirement-indicator.js', () => ({
   },
 }));
 
-vi.mock('#components/chat/chat-tool-text.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-text', () => ({
   ChatToolAction({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <span>{children}</span>;
   },

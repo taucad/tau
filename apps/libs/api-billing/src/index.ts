@@ -40,7 +40,6 @@ export * from '#billing-recovery.scheduler.js';
 export * from '#billing-route-pause.service.js';
 export * from '#billing-stripe-webhook.route.js';
 export * from '#billing-stripe.js';
-export * from '#billing-supplier-legacy-export.js';
 export * from '#billing-supplier-reconciliation.service.js';
 export * from '#billing-tax.service.js';
 export * from '#billing-usage.service.js';

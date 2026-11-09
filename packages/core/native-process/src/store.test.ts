@@ -13,7 +13,7 @@ import { withNativeDeployment } from '#native-kernel-adopter.js';
 import { deployments, engineNative, fixtureUrl, seal, voxelManifest, voxelNative } from '#store.fixture.js';
 import {
   bindNativeKernel,
-  defaultPayloadStore,
+  defaultDependencyStore,
   inspectionResolver,
   inspectNativeKernels,
   installNativeClosureResolver,
@@ -120,13 +120,13 @@ describe('native deployments of a resolved runtime', () => {
   });
 });
 
-describe('native kernels from the payload store', () => {
+describe('native kernels from the dependency store', () => {
   let directory: string;
   let store: string;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'tau-native-store-'));
-    store = join(directory, 'payloads');
+    store = join(directory, 'dependencies');
   });
 
   afterEach(async () => {
@@ -183,7 +183,7 @@ describe('native kernels from the payload store', () => {
   });
 
   it('should inspect every declared kernel on a cold store, with the bytes preparing downloads, downloading nothing', async () => {
-    const managed = readManagedPreparation({ TAU_PAYLOAD_TARGET: 'linux-x64-glibc' });
+    const managed = readManagedPreparation({ TAU_DEPENDENCY_TARGET: 'linux-x64-glibc' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     const inspection = await inspectNativeKernels({ deployments, store, managed });
@@ -210,10 +210,10 @@ describe('native kernels from the payload store', () => {
   it('should read the store by its real path when the store is reached through a link', async () => {
     /* As under macOS's `/tmp` (a link to `/private/tmp`), whose spelling a sandboxed worker cannot start through. */
     const realDirectory = join(directory, 'real');
-    await mkdir(join(realDirectory, 'payloads'), { recursive: true });
+    await mkdir(join(realDirectory, 'dependencies'), { recursive: true });
     const linkedDirectory = join(directory, 'linked');
     await symlink(realDirectory, linkedDirectory);
-    const linked = join(linkedDirectory, 'payloads');
+    const linked = join(linkedDirectory, 'dependencies');
     opened.stores.length = 0;
 
     await inspectNativeKernels({ deployments, store: linked, managed: readManagedPreparation({}) });
@@ -232,7 +232,7 @@ describe('native kernels from the payload store', () => {
 
   it('should refuse to bind an unprepared kernel with KERNEL_NOT_PREPARED naming the call that prepares it', async () => {
     vi.stubEnv('TAU_CONFIG_DIR', directory);
-    vi.stubEnv('TAU_PAYLOAD_TARGET', 'linux-x64-glibc');
+    vi.stubEnv('TAU_DEPENDENCY_TARGET', 'linux-x64-glibc');
 
     const binding = bindNativeKernel({ deployment: engineNative, kernel: 'engine', options: { requestTimeout: 0 } });
 
@@ -386,7 +386,7 @@ describe('nativeKernelIdsSupportedOn', () => {
   });
 });
 
-describe('defaultPayloadStore', () => {
+describe('defaultDependencyStore', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -394,12 +394,12 @@ describe('defaultPayloadStore', () => {
   it('should put the store under TAU_CONFIG_DIR when it is set, and under the data root otherwise', () => {
     vi.stubEnv('TAU_CONFIG_DIR', '/config/tau');
 
-    expect(defaultPayloadStore()).toBe(join('/config/tau', 'payloads'));
+    expect(defaultDependencyStore()).toBe(join('/config/tau', 'dependencies'));
 
     vi.stubEnv('TAU_CONFIG_DIR', '');
     vi.stubEnv('XDG_DATA_HOME', '/data');
     vi.stubEnv('LOCALAPPDATA', String.raw`C:\Local`);
 
-    expect(defaultPayloadStore()).toMatch(/[/\\]tau[/\\]payloads$/);
+    expect(defaultDependencyStore()).toMatch(/[/\\]tau[/\\]dependencies$/);
   });
 });

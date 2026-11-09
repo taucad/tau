@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the existing authentic installed harness inside a disposable proved Linux guest.
 # Required files: ~/node (verified host runtime), ~/qualification-env.json (explicit job input allowlist).
-# Optional env: none. Usage: invoked over SSH by hosted-linux-vm.sh in qualification mode.
+# Optional env: none. Usage: invoked over SSH by hosted-linux-vm.sh in tooling, qualification or clean-host mode;
+#   clean-host adds the standard `consumer` account that runs the app (qualification-linux-consumer.mts).
 # Exit codes: 0 harness/cleanup passed; nonzero missing prerequisite, qualification or cleanup failure.
 set -euo pipefail
 # The transferred credential file is already 0600; public source/package directories need normal modes.
@@ -25,7 +26,13 @@ git checkout --detach "$source_sha"
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 # Use the repository's integrity-pinned pnpm and frozen dependencies. No token is exported during install.
 corepack enable
-pnpm install --frozen-lockfile
+# Postinstall downloads from GitHub releases can answer 504 for minutes; a frozen install is idempotent.
+for attempt in 1 2 3; do
+  pnpm install --frozen-lockfile && break
+  [[ "$attempt" -lt 3 ]] || exit 1
+  echo "pnpm install attempt $attempt failed; retrying" >&2
+  sleep $((attempt * 30))
+done
 # The guest gets the same guard as setup-nx's "Rerun Nx once after a segfault" step: Nx 22.7.1 is sometimes
 # killed by SIGSEGV about two seconds into a command, before it runs anything, and the guest's own install has no
 # such guard (guest (ubuntu) on #1378: `nx run desktop:test-qualification-electron-writer` killed 2 s after start).
@@ -45,6 +52,56 @@ fi
 exit "$status"
 SH
 chmod +x "$nx_bin/nx"
+mode="$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/"qualification-env.json").read_text())["TAU_VM_MODE"])')"
+if [[ "$mode" == clean-host ]]; then
+  # A standard consumer account, as on a person's desktop: its own group only (no sudo/adm), locked password, its own
+  # systemd user session and D-Bus, and the session's X display. It downloads, makes the AppImage executable and runs
+  # Tau; this administrator account only installs the downloaded packages and reads system state.
+  consumer=consumer
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends acl libglib2.0-bin dbus-user-session
+  if id "$consumer" >/dev/null 2>&1; then printf 'Consumer account already exists\n' >&2; exit 1; fi
+  sudo useradd --create-home --user-group --shell /bin/bash "$consumer"
+  sudo passwd --lock "$consumer" >/dev/null
+  consumer_uid="$(id -u "$consumer")"
+  sudo loginctl enable-linger "$consumer"
+  # Lingering requests the user manager; start it and its socket-activated bus explicitly, as a graphical login would.
+  sudo systemctl start "user@$consumer_uid.service"
+  sudo -n -u "$consumer" env -i "XDG_RUNTIME_DIR=/run/user/$consumer_uid" \
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$consumer_uid/systemd/private" systemctl --user start dbus.socket || true
+  # /run/user/<uid> is 0700 and owned by the consumer, so this administrator can only see the socket through sudo;
+  # a plain test from this account was always false (the actual cause of run 42563902208's refusal).
+  for _attempt in $(seq 1 120); do sudo test -S "/run/user/$consumer_uid/bus" && break; sleep 1; done
+  if ! sudo test -S "/run/user/$consumer_uid/bus"; then
+    printf 'Consumer session bus did not start\n' >&2
+    # Unit states and the user manager's own log only; the consumer has no credentials or profile yet.
+    loginctl show-user "$consumer" --property=State --property=Linger --property=RuntimePath || true
+    systemctl show "user@$consumer_uid.service" --property=ActiveState,SubState,Result || true
+    sudo -n -u "$consumer" env -i "XDG_RUNTIME_DIR=/run/user/$consumer_uid" systemctl --user show dbus.socket \
+      --property=ActiveState,SubState,Result,Listen || true
+    sudo ls -la "/run/user/$consumer_uid" || true
+    sudo journalctl --no-pager -o short-iso -u "user@$consumer_uid.service" | tail -n 30 || true
+    exit 1
+  fi
+  # Same rights a desktop user has on their own display, from the session's cookie.
+  xauth -f "$HOME/.Xauthority" nlist :0 |
+    sudo -n -u "$consumer" env -i "HOME=/home/$consumer" xauth -f "/home/$consumer/.Xauthority" nmerge -
+  # Search (x) on this home and read on the verified Node runtime. The public harness checkout is world-readable under
+  # umask 022, so the consumer reads it as any local user could; the job's environment file (the only credential) is
+  # 0600, as are the run's private TLS keys. Nothing grants the consumer a write or admin path.
+  sudo setfacl -m "u:$consumer:x" "$HOME"
+  sudo setfacl -R -m "u:$consumer:rX" "$HOME/node"
+  # The consumer's download browser, installed once outside every home and read-only to it.
+  sudo install -d -m 0755 -o "$(id -un)" /usr/local/share/ms-playwright
+  PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright pnpm exec playwright install chromium
+  sudo env "PATH=$PATH" "$PWD/node_modules/.bin/playwright" install-deps chromium
+  # The consumer has no administrator rights (the harness re-observes this as the consumer and records it).
+  # Container, VM and raw-disk groups are root-equivalent, so they count as administrator rights too.
+  if id -nG "$consumer" | grep -qwE 'root|sudo|admin|adm|wheel|google-sudoers|lxd|incus-admin|docker|libvirt|disk' ||
+    sudo -n -u "$consumer" sudo -n true 2>/dev/null; then
+    printf 'Consumer account has administrator rights\n' >&2
+    exit 1
+  fi
+fi
 python3 - <<'PYRUN'
 import json, os, pathlib, select, subprocess, sys, tempfile, time, zipfile
 root = pathlib.Path.home() / 'tau'
@@ -63,6 +120,8 @@ subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=mod
 # The harness now creates both parents itself; these stay as a guest-side belt
 # and braces, and neither touches the leaves it creates with recursive=false.
 (root / 'out').mkdir(exist_ok=True)
+# Run outputs keep the umask's 0755: a clean-host consumer must read the run's public mirror CA there to trust it in
+# its own NSS database. Private TLS keys and the trust journal are written 0600 by the harness.
 (pathlib.Path.home() / '.config').mkdir(exist_ok=True)
 # Exercise the same native ZIP listing/extraction used by authenticated artifact admission.
 with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:
@@ -133,7 +192,10 @@ if mode == 'tooling':
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',
                              'test-qualification-metadata', 'test-qualification-evidence', 'test-qualification-probe-process'], cwd=root, env=env)
     sys.exit(result.returncode)
-if mode != 'qualification':
+if mode == 'clean-host':
+    # The harness reaches the consumer's profile and app only through its unprivileged agent.
+    env['TAU_QUALIFICATION_CONSUMER'] = 'consumer'
+elif mode != 'qualification':
     raise ValueError('Invalid guest mode')
 status = 1
 try:

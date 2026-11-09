@@ -28,7 +28,7 @@ const loadCliKernelExtensions = async (): Promise<Readonly<Record<string, readon
 };
 
 /**
- * Native kernels the CLI lists, each binding a sealed closure from the local payload store; the hosted publication
+ * Native kernels the CLI lists, each binding a sealed closure from the local dependency store; the hosted publication
  * runtime prepares no native closure, so it serves none of them.
  */
 const cliOnlyKernelIds = new Set(['smlibpy', 'build123d', 'picogk']);

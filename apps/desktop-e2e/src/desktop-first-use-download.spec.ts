@@ -40,7 +40,7 @@ import {
 
 /**
  * Desktop first-use download (charter W6 phase 2, blueprint DS-C): the packaged app ships no kernel closure, so the
- * first Build123d model on an empty payload store refuses with `KERNEL_NOT_PREPARED`, and the viewer downloads the
+ * first Build123d model on an empty dependency store refuses with `KERNEL_NOT_PREPARED`, and the viewer downloads the
  * kernel at once through main's preparation, shows its progress, and renders the model when it is ready. The closure
  * lands sealed in the store, free of the quarantine flag a browser-style download would leave; a second launch runs
  * it without downloading again, and its startup collection removes the garbage and keeps the closure.
@@ -101,7 +101,7 @@ const pinnedBuild123dClosure = async (): Promise<string> => {
   for (const variants of Object.values(deployment.dependencies)) {
     const selection = selectVariant(variants, indicators);
     if (selection.status === 'selected') {
-      return computeClosureIntegrity(selection.variant.payloads);
+      return computeClosureIntegrity(selection.variant.files);
     }
   }
   throw new Error('@taucad/build123d declares no variant for this host.');
@@ -193,7 +193,7 @@ test('[completed-artifact] downloads Build123d on first use, renders the model, 
   });
   const { configRoot, logPath } = session;
   const userData = dirname(configRoot);
-  const store = join(configRoot, 'payloads');
+  const store = join(configRoot, 'dependencies');
   const closures = join(store, 'closures', 'sha256');
   try {
     expect(await readdir(closures).catch(() => [])).toEqual([]);
@@ -308,8 +308,8 @@ test('[completed-artifact] downloads Build123d on first use, renders the model, 
           PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
           TMPDIR: `${userData}/`,
           TAU_CONFIG_DIR: configRoot,
-          TAU_PAYLOAD_MIRROR: 'http://127.0.0.1:1',
-          TAU_PAYLOAD_MIRROR_NO_FALLBACK: '1',
+          TAU_DEPENDENCY_MIRROR: 'http://127.0.0.1:1',
+          TAU_DEPENDENCY_MIRROR_NO_FALLBACK: '1',
           TAU_SECRET_VAULT: 'file',
           NX_PREFER_NODE_STRIP_TYPES: 'true',
         },

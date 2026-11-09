@@ -7,7 +7,7 @@ import { useChats } from '#hooks/use-chats.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
-import { ArchivedChatsView } from '#routes/w.$workspace.$project/archived-chats-view.js';
+import { ArchivedChatsView } from '@taucad/project-workspace/components/archived-chats-view';
 
 const queryCodec = stringParameter();
 

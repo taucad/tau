@@ -31,7 +31,7 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
     <div data-testid='location-picker'>{state.phase === 'ready' ? state.value.kind : 'loading'}</div>
   ),
 }));
-vi.mock('#components/icons/svg-icon.js', () => ({ SvgIcon: () => null }));
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => null }));
 
 const { default: ProjectsNew } = await import('#routes/projects_.new/route.js');
 

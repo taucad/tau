@@ -203,7 +203,7 @@ export const exportCommand = defineCommand({
     // folder resolves (S11 F2). Plugins still load from the invoking project.
     const { root: projectRoot } = resolveProjectRoot({ file: inputPath, cwd: process.cwd() });
     const sourcePath = relative(projectRoot, inputPath).split(sep).join('/');
-    // A native kernel binds to its sealed closure itself, reading the payload store's launch index, and refuses with
+    // A native kernel binds to its sealed closure itself, reading the dependency store's launch index, and refuses with
     // KERNEL_NOT_PREPARED until it is prepared; nothing is downloaded.
     await authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({

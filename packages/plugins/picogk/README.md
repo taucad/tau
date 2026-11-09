@@ -135,7 +135,7 @@ The kernel runs a sandboxed .NET worker that the package does not carry. `tau-pl
 closure for macOS 14+ on Apple silicon: Microsoft's .NET runtime archive, byte-for-byte from
 `builds.dotnet.microsoft.com`, and the Tau PicoGK layer (the ReadyToRun worker, patched `PicoGK.dll`,
 Roslyn, SkiaSharp and the Tau-built engine) from `cdn.tau.new` with its GitHub Release as fallback.
-`tau prepare picogk` downloads, verifies and seals both in the payload store. Every `picogkKernel`
+`tau prepare picogk` downloads, verifies and seals both in the dependency store. Every `picogkKernel`
 registration carries `picogkNative` (the `/native` deployment), so a host that lists `picogk()` in a runtime
 definition prepares it from the definition, and the kernel resolves the prepared closure itself when it
 initializes. To pin a closure instead, pass it explicitly:
@@ -180,10 +180,11 @@ library a project would restore outside Tau has drifted from the library the ker
 
 ## Display meshing
 
-`meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) are evaluate options, so the viewer's
-settings menu shows them and a change re-evaluates the model. Unset, a view meshes at 0.25 (Balanced) where the
+`meshAdaptivity` (0 to below 1) is an evaluate option, so the viewer's settings menu shows it and a change
+re-evaluates the model. OpenVDB's relax pass for adaptive meshes stays off: measured, it moved vertices further
+from the surface and added slivers, so it is not an option. Unset, a view meshes at 0.25 (Balanced) where the
 prepared runtime meshes adaptively, and uniformly where it does not; the tessellation report says which. Exports
-take the same two options and mesh uniformly (0) unless they set one, so `export('glb', { meshAdaptivity: 0.25 })`
+take the same option and mesh uniformly (0) unless they set it, so `export('glb', { meshAdaptivity: 0.25 })`
 writes the adaptive mesh. An export whose meshing matches the view's reuses the view's build; any other rebuilds.
 
 ## Large models

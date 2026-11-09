@@ -130,7 +130,7 @@ vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ open: vi.fn() }),
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 

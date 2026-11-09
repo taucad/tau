@@ -17,7 +17,7 @@ import {
 import { erasureTiming, EvidenceErasureService } from '#api/agent-observability/evidence-erasure.service.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.js';
-import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
 import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import * as schema from '@taucad/api-database/schema';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';

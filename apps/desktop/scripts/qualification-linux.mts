@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, constants } from 'node:fs';
 import { chmod, copyFile, lstat, mkdtemp, readFile, readlink, realpath, rm } from 'node:fs/promises';
-import { arch, release, tmpdir } from 'node:os';
+import { arch, release, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { extractFile, uncache } from '@electron/asar';
@@ -11,9 +11,10 @@ import { z } from 'zod';
 import { isManagedAppImage } from '#main/managed-appimage.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
-import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
+import { desktopAcceptanceRoutes, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Adjacent qualification and APT snapshot owners provide shared contracts. */
 import { readDesktopAptSnapshot } from './desktop-apt-publication.mjs';
+import type { LinuxCleanInstall, LinuxCleanLaunch } from './qualification-evidence.mjs';
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
 import type {
   QualificationCandidate,
@@ -31,6 +32,11 @@ const host = (): void => {
   ) {
     throw new QualificationUnavailable('Linux x64 disposable-host authorization is required');
   }
+};
+/** Root's own `stat` of a path: owner uid, raw mode and size. */
+const rootStat = (path: string): { uid: number; mode: number; size: number } => {
+  const [uid, mode, size] = command('sudo', ['-n', 'stat', '-c', '%u %f %s', '--', path]).trim().split(' ');
+  return { uid: Number(uid), mode: Number.parseInt(mode ?? '', 16), size: Number(size) };
 };
 const command = (file: string, args: string[], inheritOutput = false): string => {
   host();
@@ -170,7 +176,8 @@ const readCommandLine = async (pid: number): Promise<string> => {
   const value = await readFile(`/proc/${pid}/cmdline`, 'utf8');
   return value.replaceAll('\0', ' ');
 };
-const measureSecurity: QualificationPlatformDriver['measureSecurity'] = async (processes) => {
+/** Read `/proc` as the account that owns the processes: another user cannot read their executables or namespaces. */
+export const measureLinuxSecurity: QualificationPlatformDriver['measureSecurity'] = async (processes) => {
   host();
   const ids = [processes.mainPid, ...processes.rendererPids, ...processes.nativeChildPids];
   if (
@@ -227,6 +234,99 @@ const measureSecurity: QualificationPlatformDriver['measureSecurity'] = async (p
     },
     processes: observations,
   };
+};
+const measureSecurity = measureLinuxSecurity;
+/** A running process's start time, executable and a resource beside it, read by the account that owns the process. */
+export type LinuxRuntimeFacts = {
+  pid: number;
+  startTime: string;
+  executable: string;
+  resourcePath: string;
+  resourceSha256: string;
+  /** Present when the caller asked for the running image itself (a mounted AppImage payload). */
+  image?: { executableSha256: string; asarSha256: string };
+};
+export const linuxRuntimeFacts = async (
+  pid: number,
+  resourceRelativePath: string,
+  image: boolean,
+): Promise<LinuxRuntimeFacts> => {
+  host();
+  const executable = await readlink(`/proc/${pid}/exe`);
+  const base = dirname(executable);
+  const resourcePath = resolve(base, resourceRelativePath);
+  if (isAbsolute(resourceRelativePath) || relative(base, resourcePath).startsWith('..')) {
+    throw new Error('Active process resource is outside its generation');
+  }
+  return {
+    pid,
+    startTime: await processStartTime(pid),
+    executable,
+    resourcePath,
+    resourceSha256: await hashFile(resourcePath),
+    ...(image
+      ? {
+          image: {
+            executableSha256: await hashFile(executable),
+            asarSha256: await hashFile(join(base, 'resources/app.asar')),
+          },
+        }
+      : {}),
+  };
+};
+/** Observations that must run as the account owning the app's processes, profile and FUSE mount. */
+export type LinuxProcessAccess = {
+  measureSecurity: QualificationPlatformDriver['measureSecurity'];
+  runtime(pid: number, resourceRelativePath: string, image: boolean): Promise<LinuxRuntimeFacts>;
+  sha256(path: string): Promise<string>;
+};
+const localProcessAccess: LinuxProcessAccess = {
+  measureSecurity: measureLinuxSecurity,
+  runtime: linuxRuntimeFacts,
+  sha256: async (path) => hashFile(path),
+};
+/** The consumer account of a clean-host run, reached through its own unprivileged agent. */
+export type LinuxCleanHostConsumer = LinuxProcessAccess & {
+  name: string;
+  uid: number;
+  home: string;
+  mkdir(path: string): Promise<void>;
+  download(options: { url: string; directory: string; name: string }): Promise<{
+    path: string;
+    browser: string;
+    sha256: string;
+    size: number;
+    mode: number;
+    uid: number;
+  }>;
+  chmod(path: string, mode: number): Promise<number>;
+  exec(
+    file: string,
+    args: readonly string[],
+    options?: {
+      env?: Record<string, string>;
+      /** Milliseconds; three minutes when absent. */
+      killAfter?: number;
+      /** Working directory; the consumer's home when absent. */
+      cwd?: string;
+    },
+  ): Promise<{ status: number; stdout: string; stderr: string }>;
+  spawn(file: string, args: readonly string[], env: Record<string, string>): Promise<number>;
+  /** The consumer's own main (non `--type=`) processes whose executable matches `pattern`. */
+  mainProcesses(pattern: string): Promise<Array<{ pid: number; uid: number; executable: string }>>;
+};
+export type LinuxCleanHostRecord = { installs: LinuxCleanInstall[]; launches: LinuxCleanLaunch[] };
+const preserveWith = async (
+  access: LinuxProcessAccess,
+  files: ReadonlyArray<{ path: string; sha256: string }>,
+): Promise<void> => {
+  await Promise.all(
+    files.map(async (file) => {
+      if ((await access.sha256(file.path)) !== file.sha256) {
+        throw new Error('Preserved project/profile bytes changed');
+      }
+    }),
+  );
 };
 const preserve = async (files: ReadonlyArray<{ path: string; sha256: string }>): Promise<void> => {
   await Promise.all(
@@ -339,6 +439,13 @@ export type ActiveAptRuntime = {
   resourceSha256: string;
 };
 export type LinuxAptQualificationDriver = QualificationPlatformDriver & {
+  /** Clean host only: a consumer launch, from the launcher (`offline`, `reinstall`) or the desktop entry (`initial`). */
+  launchConsumer?(
+    stage: LinuxCleanLaunch['stage'],
+    args: readonly string[],
+    env: Record<string, string>,
+  ): Promise<number>;
+  cleanHostRecord?(): LinuxCleanHostRecord;
   captureActiveRuntime(pid: number, resourceRelativePath: string): Promise<ActiveAptRuntime>;
   waitForScheduledUpgrade(request: {
     candidate: QualificationCandidate;
@@ -453,13 +560,136 @@ finally:
 };
 /** Bind initial dpkg installation to an authenticated repository snapshot; subsequent upgrades must come from systemd/APT. */
 export const createLinuxAptQualificationDriver = (
-  options: QualificationDriverOptions & { repository: AptQualificationRepository },
+  options: QualificationDriverOptions & {
+    repository: AptQualificationRepository;
+    /**
+     * Clean-host acceptance: the consumer downloads the packages with a real browser and runs the app; this
+     * (administrator) process only installs those downloads and reads system state.
+     */
+    cleanHost?: { consumer: LinuxCleanHostConsumer; origin: string };
+  },
 ): LinuxAptQualificationDriver => {
   host();
   if (process.getuid?.() === 0) {
     throw new QualificationUnavailable('APT qualification application runner must be an ordinary user');
   }
   command('sudo', ['-n', 'true']);
+  const { cleanHost } = options;
+  if (cleanHost && (options.mode !== 'release' || cleanHost.consumer.uid === process.getuid?.())) {
+    throw new Error('Clean-host acceptance installs release candidates for a separate consumer account');
+  }
+  const access: LinuxProcessAccess = cleanHost?.consumer ?? localProcessAccess;
+  const record: LinuxCleanHostRecord = { installs: [], launches: [] };
+  /** Consumer browser downloads, then the administrator's consent: install exactly those downloaded packages. */
+  const installFromBrowser = async (
+    candidate: QualificationCandidate,
+    stage: LinuxCleanInstall['stage'],
+  ): Promise<void> => {
+    if (!cleanHost || (candidate.route !== 'linux-apt' && candidate.route !== 'linux-appimage')) {
+      throw new Error('Browser installation requires a Linux clean host');
+    }
+    const { consumer } = cleanHost;
+    const manifest = parseDesktopArtifactManifest(candidate.manifest);
+    const { name, launcher } = linuxInstallation(manifest.channel, candidate.route === 'linux-appimage');
+    // Separate stage folders keep the reinstall's AppImage from colliding with the first stage's same file name.
+    const directory = join(consumer.home, 'Downloads', stage);
+    await consumer.mkdir(directory);
+    const downloads: LinuxCleanInstall['downloads'] = [];
+    for (const kind of desktopAcceptanceRoutes[candidate.route]) {
+      const artifact = manifest.artifacts.find((item) => item.kind === kind && item.target === 'linux-x64');
+      if (!artifact) {
+        throw new Error('Required clean-host artifact missing');
+      }
+      const url = `${cleanHost.origin}/releases/${encodeURIComponent(manifest.tag)}/${artifact.name}`;
+      // oxlint-disable-next-line no-await-in-loop -- One real browser download at a time, as a person would.
+      const downloaded = await consumer.download({ url, directory, name: artifact.name });
+      if (downloaded.sha256 !== artifact.sha256 || downloaded.size !== artifact.size) {
+        throw new Error('Browser-downloaded bytes differ from the candidate manifest');
+      }
+      // Root re-reads the file the agent reported, so its owner, mode and size are not only the agent's word.
+      const rootDownload = rootStat(downloaded.path);
+      if (
+        // oxlint-disable-next-line no-bitwise -- POSIX execute permission bits.
+        (downloaded.mode & 0o111) !== 0 ||
+        downloaded.uid !== consumer.uid ||
+        rootDownload.uid !== downloaded.uid ||
+        rootDownload.mode !== downloaded.mode ||
+        rootDownload.size !== downloaded.size
+      ) {
+        throw new QualificationUnavailable('Browser download is already executable or not owned by the consumer');
+      }
+      let executable: { mode: number; rootMode: number; offset: string } | undefined;
+      if (kind === 'linux-appimage') {
+        // What the consumer does with a downloaded AppImage: `chmod +x`, then run it.
+        // oxlint-disable-next-line no-await-in-loop, no-bitwise -- Ordered consumer steps on POSIX mode bits.
+        const mode = await consumer.chmod(downloaded.path, (downloaded.mode & 0o777) | 0o111);
+        // oxlint-disable-next-line no-await-in-loop -- The runtime must execute for the consumer after chmod.
+        const probe = await consumer.exec(downloaded.path, ['--appimage-offset'], { killAfter: 60_000 });
+        if (probe.status !== 0 || !/^[1-9]\d*$/u.test(probe.stdout.trim())) {
+          throw new QualificationUnavailable(`Downloaded AppImage did not run for the consumer: ${probe.stderr}`);
+        }
+        const rootMode = rootStat(downloaded.path).mode;
+        if (rootMode !== mode) {
+          throw new QualificationUnavailable('Root observes another AppImage mode than the consumer set');
+        }
+        executable = { mode, rootMode, offset: probe.stdout.trim() };
+      }
+      downloads.push({
+        artifact: { kind, name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+        download: {
+          browser: downloaded.browser,
+          url,
+          path: downloaded.path,
+          sha256: downloaded.sha256,
+          size: downloaded.size,
+          mode: downloaded.mode,
+          uid: downloaded.uid,
+          root: rootDownload,
+        },
+        ...(executable ? { executable } : {}),
+      });
+    }
+    const packages = downloads.filter((entry) => entry.artifact.name.endsWith('.deb'));
+    const rootDigest = (path: string): string => command('sudo', ['-n', 'sha256sum', '--', path]).split(/\s+/u)[0]!;
+    // The administrator's consent installs a root-owned copy of each download, hashed after copying, so the consumer
+    // cannot change the bytes between the digest and `apt-get install` (and `_apt` can read them).
+    const consentDirectory = command('sudo', [
+      '-n',
+      'mktemp',
+      '-d',
+      '/var/lib/tau-qualification-consent.XXXXXXXX',
+    ]).trim();
+    command('sudo', ['-n', 'chmod', '0755', '--', consentDirectory]);
+    let consented: LinuxCleanInstall['consent']['packages'];
+    try {
+      const copies = packages.map((entry) => {
+        const copy = join(consentDirectory, entry.artifact.name);
+        command('sudo', ['-n', 'install', '-m', '0644', '-o', 'root', '-g', 'root', '--', entry.download.path, copy]);
+        return { path: entry.download.path, copy, before: rootDigest(copy) };
+      });
+      if (copies.some((value, index) => value.before !== packages[index]!.artifact.sha256)) {
+        throw new Error('Administrator copied different package bytes than the consumer downloaded');
+      }
+      runQualificationApt(
+        'install',
+        copies.map((entry) => entry.copy),
+      );
+      consented = copies.map((entry) => ({ ...entry, after: rootDigest(entry.copy) }));
+    } finally {
+      command('sudo', ['-n', 'rm', '-rf', '--', consentDirectory]);
+    }
+    record.installs.push({
+      stage,
+      downloads,
+      consent: {
+        account: userInfo().username,
+        uid: process.getuid?.() ?? -1,
+        packages: consented,
+      },
+      installedPath: launcher,
+      desktopEntry: `/usr/share/applications/${name}.desktop`,
+    });
+  };
   const lifecycle = createQualificationReinstallGuard();
   let installed = false;
   let current: QualificationCandidate | undefined;
@@ -570,8 +800,12 @@ export const createLinuxAptQualificationDriver = (
     if (!current) {
       throw new Error('Observe installed APT generation first');
     }
-    const executable = await readlink(`/proc/${pid}/exe`);
     const managedImage = current.route === 'linux-appimage';
+    if (!Number.isSafeInteger(pid) || pid < 1) {
+      throw new Error('Invalid active process');
+    }
+    const facts = await access.runtime(pid, resourceRelativePath, managedImage);
+    const { executable } = facts;
     const expected = managedImage
       ? executable
       : join(options.installationPath, 'releases', current.manifest.version, 'Tau');
@@ -579,27 +813,117 @@ export const createLinuxAptQualificationDriver = (
       const observation = await observe(current);
       if (
         !/^\/tmp\/\.mount_[^/]+\/Tau$/u.test(executable) ||
-        (await hashFile(executable)) !== observation.measurements['expectedExecutableSha256'] ||
-        (await hashFile(join(dirname(executable), 'resources/app.asar'))) !== observation.asarSha256
+        facts.image?.executableSha256 !== observation.measurements['expectedExecutableSha256'] ||
+        facts.image?.asarSha256 !== observation.asarSha256
       ) {
         throw new Error('Active mounted image differs from authenticated generation');
       }
     }
     if (
       executable !== expected ||
+      facts.resourcePath !== resolve(dirname(expected), resourceRelativePath) ||
       isAbsolute(resourceRelativePath) ||
-      relative(dirname(expected), resolve(dirname(expected), resourceRelativePath)).startsWith('..')
+      relative(dirname(expected), facts.resourcePath).startsWith('..')
     ) {
       throw new Error('Active process/resource is outside original generation');
     }
-    const resourcePath = resolve(dirname(expected), resourceRelativePath);
     return {
       pid,
-      startTime: await processStartTime(pid),
+      startTime: facts.startTime,
       executable,
-      resourcePath,
-      resourceSha256: await hashFile(resourcePath),
+      resourcePath: facts.resourcePath,
+      resourceSha256: facts.resourceSha256,
     };
+  };
+  /** The consumer's newly started main process, found in `/proc` independently of what the app writes. */
+  const launchConsumer = async (
+    stage: LinuxCleanLaunch['stage'],
+    args: readonly string[],
+    env: Record<string, string>,
+  ): Promise<number> => {
+    if (!cleanHost || !current) {
+      throw new Error('Consumer launch requires an observed clean-host installation');
+    }
+    const { consumer } = cleanHost;
+    const managedImage = current.route === 'linux-appimage';
+    const { name, launcher } = linuxInstallation(current.manifest.channel, managedImage);
+    const desktopEntry = `/usr/share/applications/${name}.desktop`;
+    if (stage === 'initial' && args.length > 0) {
+      throw new Error('A desktop-entry launch cannot carry arguments');
+    }
+    const pattern = managedImage
+      ? String.raw`^/tmp/\.mount_[^/]+/Tau$`
+      : `^${options.installationPath.replaceAll('.', String.raw`\.`)}/releases/[^/]+/Tau$`;
+    const existing = await consumer.mainProcesses(pattern);
+    const before = new Set(existing.map((entry) => entry.pid));
+    const commandLine = stage === 'initial' ? ['gio', 'launch', desktopEntry] : [launcher, ...args];
+    let spawned: number | undefined;
+    if (stage === 'initial') {
+      // The gio launch command hands its stdio to the launched app: detach it so the call returns and the app keeps no pipe.
+      const result = await consumer.exec(
+        '/bin/sh',
+        [
+          '-c',
+          'e=$(mktemp) || exit 1; gio launch "$1" </dev/null >/dev/null 2>"$e"; s=$?; cat "$e" >&2; rm -f "$e"; exit $s',
+          'sh',
+          desktopEntry,
+        ],
+        { env, killAfter: 60_000 },
+      );
+      if (result.status !== 0) {
+        throw new QualificationUnavailable(`Desktop entry launch failed: ${result.stderr}`);
+      }
+    } else {
+      spawned = await consumer.spawn(launcher, args, env);
+    }
+    const deadline = Date.now() + 120_000;
+    let started: Array<{ pid: number; uid: number; executable: string }> = [];
+    while (Date.now() < deadline) {
+      // oxlint-disable-next-line no-await-in-loop -- Poll /proc until the launched main process appears.
+      const current = await consumer.mainProcesses(pattern);
+      started = current.filter((entry) => !before.has(entry.pid));
+      if (started.length > 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Bounded polling without busy waiting.
+      await delay(500);
+    }
+    const [main] = started;
+    if (started.length !== 1 || !main || (spawned !== undefined && main.pid !== spawned)) {
+      // Name what was seen, from root's own /proc view: the parent and argument vector of every new main process.
+      const seen = await Promise.all(
+        started.map(async ({ pid, executable }) => {
+          const [status, rawCommandLine] = await Promise.all([
+            readFile(`/proc/${pid}/status`, 'utf8').catch(() => ''),
+            readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => ''),
+          ]);
+          const parent = /^PPid:\s+(\d+)/mu.exec(status)?.[1] ?? 'exited';
+          return `${pid} (parent ${parent}) ${executable} ${JSON.stringify(rawCommandLine.replaceAll('\0', ' ').trim())}`;
+        }),
+      );
+      throw new QualificationUnavailable(
+        `Consumer ${stage} launch did not start exactly one installed main process` +
+          `${spawned === undefined ? '' : ` (spawned ${spawned})`}: ${seen.length === 0 ? 'none within 120 s' : seen.join('; ')}`,
+      );
+    }
+    // Independent of the consumer agent's reply: the kernel's owner of the process and root's view of its executable.
+    const status = await readFile(`/proc/${main.pid}/status`, 'utf8');
+    const rootUid = Number(/^Uid:\s+(\d+)/mu.exec(status)?.[1] ?? Number.NaN);
+    const rootExecutable = command('sudo', ['-n', 'readlink', '--', `/proc/${main.pid}/exe`]).trim();
+    if (rootUid !== consumer.uid || main.uid !== rootUid || rootExecutable !== main.executable) {
+      throw new QualificationUnavailable('Launched main process is not owned by the consumer as the agent reported');
+    }
+    record.launches.push({
+      stage,
+      via: stage === 'initial' ? 'desktop-entry' : 'launcher',
+      command: commandLine,
+      account: consumer.name,
+      pid: main.pid,
+      processUid: main.uid,
+      executable: main.executable,
+      root: { uid: rootUid, executable: rootExecutable },
+    });
+    return main.pid;
   };
   return {
     async install(candidate) {
@@ -630,27 +954,48 @@ export const createLinuxAptQualificationDriver = (
         );
       }
       await authenticate(candidate, options.repository);
-      const paths = await Promise.all([runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)));
-      runQualificationApt('install', paths);
+      if (cleanHost) {
+        await installFromBrowser(candidate, 'initial');
+      } else {
+        const paths = await Promise.all(
+          [runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)),
+        );
+        runQualificationApt('install', paths);
+      }
       installed = true;
       lifecycle.installed();
       return observe(candidate);
     },
     observe,
-    measureSecurity,
+    measureSecurity: access.measureSecurity,
     captureActiveRuntime,
+    ...(cleanHost
+      ? {
+          launchConsumer,
+          cleanHostRecord: (): LinuxCleanHostRecord => ({
+            installs: [...record.installs],
+            launches: [...record.launches],
+          }),
+        }
+      : {}),
     async reinstall(candidate, files) {
       lifecycle.admit(candidate, files);
-      await preserve(files);
+      await preserveWith(access, files);
       await authenticate(candidate, currentRepository);
       const { runtimeKind, selectorKind } = linuxInstallation(
         candidate.manifest.channel,
         candidate.route === 'linux-appimage',
       );
-      const paths = await Promise.all([runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)));
-      runQualificationApt('install', paths);
+      if (cleanHost) {
+        await installFromBrowser(candidate, 'reinstall');
+      } else {
+        const paths = await Promise.all(
+          [runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)),
+        );
+        runQualificationApt('install', paths);
+      }
       const observation = await observe(candidate);
-      await preserve(files);
+      await preserveWith(access, files);
       return observation;
     },
     async waitForScheduledUpgrade(request) {
@@ -715,10 +1060,16 @@ export const createLinuxAptQualificationDriver = (
       if (!invocation || invocation === beforeInvocation || result !== 'success' || !journal.includes(invocation)) {
         throw new QualificationUnavailable('No new successful real unattended scheduler invocation observed');
       }
+      const retained = await access.runtime(
+        baseline.pid,
+        relative(dirname(baseline.executable), baseline.resourcePath),
+        false,
+      );
       if (
-        (await processStartTime(baseline.pid)) !== baseline.startTime ||
-        (await readlink(`/proc/${baseline.pid}/exe`)) !== baseline.executable ||
-        (await hashFile(baseline.resourcePath)) !== baseline.resourceSha256
+        retained.startTime !== baseline.startTime ||
+        retained.executable !== baseline.executable ||
+        retained.resourcePath !== baseline.resourcePath ||
+        retained.resourceSha256 !== baseline.resourceSha256
       ) {
         throw new Error('Running A process or retained resource changed during scheduled update');
       }
@@ -733,7 +1084,7 @@ export const createLinuxAptQualificationDriver = (
       if (!current) {
         throw new Error('No APT installation observed');
       }
-      await preserve(files);
+      await preserveWith(access, files);
       const { name: selector } = linuxInstallation(current.manifest.channel, current.route === 'linux-appimage');
       runQualificationApt(current.route === 'linux-appimage' ? 'purge' : 'remove', [selector]);
       const remaining = command('dpkg-query', [
@@ -768,7 +1119,7 @@ export const createLinuxAptQualificationDriver = (
           }
         }
       }
-      await preserve(files);
+      await preserveWith(access, files);
       lifecycle.removed(files);
     },
   };

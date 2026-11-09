@@ -5,7 +5,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectCreationLocationErrorCopy } from '#utils/project-creation-location.utils.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /** Presents one canonical recovery path while leaving retry and source state to the caller. */
 export const useProjectCreationLocationError = (): ((error: unknown) => boolean) => {

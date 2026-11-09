@@ -17,15 +17,22 @@ import {
   kernelIds,
   tauToolNames,
 } from '@taucad/telemetry';
-import type { AgentTurnContext, ClientMetricEntry, evaluationClasses, lookupOutcomes } from '@taucad/telemetry';
+import type {
+  AgentTurnContext,
+  ClientMetricEntry,
+  agentSafeguardPatterns,
+  evaluationClasses,
+  lookupOutcomes,
+} from '@taucad/telemetry';
 import { tauToolKinds } from '@taucad/agent-host';
+import type { RunEntry } from '@taucad/agent-host';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: 'agent.turn' }>['detail'];
 type AgentSessionDetail = Extract<ClientMetricEntry, { name: 'agent.session' }>['detail'];
@@ -35,6 +42,7 @@ type SkillLabel = AgentTurnContext['skillsActivated'][number];
 type LookupOutcome = (typeof lookupOutcomes)[number];
 type EvaluationClass = (typeof evaluationClasses)[number];
 type GeospecRunStatus = (typeof geospecRunStatuses)[number];
+type SafeguardPatternLabel = (typeof agentSafeguardPatterns)[number];
 
 /** Who ran a turn, in the labels the API records. @public */
 export type AgentIdentity = Readonly<{ agentId: string; placement: AgentTurnDetail['placement'] }>;
@@ -581,6 +589,55 @@ const tokensOf = (facts: TurnFacts): Pick<AgentTurnDetail, 'tokens'> => {
   };
 };
 
+/**
+ * Count what this turn's rows recorded after `skip` earlier entries (a resumed run's earlier attempts), by label.
+ *
+ * @param entries - The run's ledger entries, in log order.
+ * @param skip - How many of them were recorded before this turn was admitted.
+ * @param labelsOf - The entry's labels, as they ride the report.
+ * @returns One counted row per distinct label set, in first-seen order; empty when nothing was recorded.
+ */
+const countedSince = <Entry, Labels extends Readonly<Record<string, string>>>(
+  entries: readonly Entry[] | undefined,
+  skip: number,
+  labelsOf: (entry: Entry) => Labels,
+): Array<Labels & { count: number }> => {
+  const counts = new Map<string, Labels & { count: number }>();
+  for (const entry of (entries ?? []).slice(skip)) {
+    const labels = labelsOf(entry);
+    const key = Object.values(labels).join(':');
+    const row = counts.get(key) ?? { ...labels, count: 0 };
+    row.count += 1;
+    counts.set(key, row);
+  }
+  return [...counts.values()];
+};
+
+const loopOf = (
+  run: RunEntry | undefined,
+  initialRun: RunEntry | undefined,
+): Pick<AgentTurnDetail, 'safeguards' | 'compactions'> => {
+  /* The host's pattern union is the ingest vocabulary: a pattern it adds fails this assignment until telemetry knows it. */
+  const safeguards = countedSince(
+    run?.safeguards,
+    initialRun?.safeguards?.length ?? 0,
+    ({ pattern, action }): { pattern: SafeguardPatternLabel; action: 'nudge' | 'terminate' } => ({ pattern, action }),
+  );
+  const compactions = countedSince(
+    run?.compactions,
+    initialRun?.compactions?.length ?? 0,
+    ({ lane, tier, outcome }) => ({
+      lane,
+      tier,
+      outcome,
+    }),
+  );
+  return {
+    ...(safeguards.length === 0 ? {} : { safeguards }),
+    ...(compactions.length === 0 ? {} : { compactions }),
+  };
+};
+
 const terminalLifecycles: ReadonlySet<unknown> = new Set(['completed', 'failed', 'cancelled']);
 
 const outcomeOf = (lifecycle: unknown, code: string | undefined): Pick<AgentTurnDetail, 'outcome' | 'errorCode'> => {
@@ -696,6 +753,7 @@ export const trackAgentTurn = (
         ...(timeToFirstUpdate === undefined ? {} : { timeToFirstUpdate }),
         ...toolCallsOf(facts, usageMetrics !== undefined),
         ...tokensOf(facts),
+        ...loopOf(run, initialRun),
         ...(usageMetrics === undefined
           ? {}
           : {

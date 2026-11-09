@@ -19,18 +19,18 @@ const repoRoot = resolve(import.meta.dirname, '../../..');
 type TaskGraph = { tasks: { tasks: Record<string, unknown>; dependencies: Record<string, string[]> } };
 
 const nxBin = join(repoRoot, 'node_modules/.bin/nx');
+const nxGuard = join(repoRoot, '.github/actions/setup-nx/nx-guard.ts');
 
-/* Nx 22.7.1 intermittently segfaults before it runs anything, as the CI setup
- * (`.github/actions/setup-nx`) records; the Dockerfile also turns off its native PTY
- * runner. Call the bin directly, so the signal reaches this process instead of pnpm's
- * exit 1, then rerun once on SIGSEGV and pass every other outcome through. */
+/* Every Nx call goes through CI's guard (`.github/actions/setup-nx/nx-guard.ts`, kept in the build context by
+ * `apps/api/Dockerfile.dockerignore`). It reruns once when Nx segfaults before it runs anything, and points Nx at a
+ * local relay to the remote cache, so an unreachable cache or a refused entry costs a miss, not a failed command. It
+ * reruns with the remote cache off only when Nx fails on one of its own remote cache errors; any other failure, such
+ * as a compile error, fails the build the first time. Without a remote cache the guard runs Nx unchanged. */
 const nx = (...args: string[]): void => {
-  const run = () => spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
-  let result = run();
-  if (result.signal === 'SIGSEGV') {
-    console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
-    result = run();
-  }
+  const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', nxGuard, nxBin, ...args], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
   if (result.status !== 0) {
     throw new Error(`nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);
   }

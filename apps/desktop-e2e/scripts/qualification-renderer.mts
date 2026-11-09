@@ -7,6 +7,10 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
 import { z } from 'zod';
+/* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns its attach failure evidence. */
+import { recordCdpAttachFailure, snapshotTargets } from './qualification-cdp-diagnostics.mjs';
+/* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns its attach readiness. */
+import { waitForCommittedDocument } from './qualification-cdp-ready.mjs';
 /* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns the bounded native close driver. */
 import { requestQualificationQuit } from './qualification-quit.mjs';
 
@@ -142,10 +146,36 @@ const main = async (): Promise<void> => {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('Invalid renderer debugging port');
   }
+  const expectedPid = Number(process.env['TAU_QUALIFICATION_EXPECTED_PID']);
+  const recordFailure = async (beforeAttach: unknown): Promise<void> =>
+    recordCdpAttachFailure({
+      port,
+      pid: Number.isSafeInteger(expectedPid) && expectedPid > 0 ? expectedPid : undefined,
+      output,
+      profile,
+      beforeAttach,
+    });
+  // Attach only once the window has committed its first app document. Attaching while that commit is in flight
+  // leaves Playwright waiting for a navigation event Chromium never sends (macOS ZIP `c/reinstall-ui`, runs
+  // 42536450184 and 42563760774); see qualification-cdp-ready.mts. The wait is bounded by the same two minutes
+  // the harness gives the app renderer to appear; no existing timeout changes.
+  await waitForCommittedDocument({
+    port,
+    accept: (href) => href.startsWith('app://tau/'),
+    deadline: Date.now() + 120_000,
+  }).catch(async (error: unknown) => {
+    await recordFailure(await snapshotTargets(port));
+    throw error;
+  });
+  const beforeAttach = await snapshotTargets(port);
   // A freshly reinstalled app can publish its debugging port before its browser answers CDP target discovery: run
   // 41745619222 macos-dmg-arm64 connected the reinstall-ui websocket and then hit the default 30s connect timeout.
   // Allow the same two minutes the harness already gives the app renderer to appear; it accepts nothing new.
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 });
+  const attach = chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 });
+  const browser = await attach.catch(async (error: unknown) => {
+    await recordFailure(beforeAttach);
+    throw error;
+  });
   let page: Page | undefined;
   try {
     const rendererDeadline = Date.now() + 120_000;
@@ -384,8 +414,12 @@ const main = async (): Promise<void> => {
     }
     await page.screenshot({ path: `${output}.png`, fullPage: true });
     let softwareRenderer: string | undefined;
-    if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
-      softwareRenderer = await page
+    const softwareGraphics = process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software';
+    // Linux clean-host acceptance asks for the viewer's renderer too, to prove it drew on the host GPU.
+    const reportRenderer = process.env['TAU_QUALIFICATION_REPORT_GL_RENDERER'] === '1';
+    let glRenderer: string | undefined;
+    if (softwareGraphics || reportRenderer) {
+      const renderer = await page
         .getByTestId('cad-viewer-canvas-region')
         .locator('canvas')
         .evaluate((canvas) => {
@@ -403,8 +437,13 @@ const main = async (): Promise<void> => {
           }
           return renderer;
         });
-      if (!/SwiftShader/iu.test(softwareRenderer)) {
-        throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+      if (softwareGraphics) {
+        softwareRenderer = renderer;
+        if (!/SwiftShader/iu.test(softwareRenderer)) {
+          throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+        }
+      } else {
+        glRenderer = renderer;
       }
     }
     await writeFile(
@@ -420,6 +459,7 @@ const main = async (): Promise<void> => {
           logOffset,
           observedAt: new Date().toISOString(),
           ...(softwareRenderer ? { softwareRenderer } : {}),
+          ...(glRenderer ? { glRenderer } : {}),
         },
         undefined,
         2,

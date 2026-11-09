@@ -100,7 +100,7 @@ export type RuntimeChildClosureRequest = {
   readonly kernel: string;
   readonly dependencies: readonly string[];
   readonly manifest: unknown;
-  /** `file:` URL of the package root, which payloads shipped inside the package resolve against. */
+  /** `file:` URL of the package root, which dependency files shipped inside the package resolve against. */
   readonly packageRoot: string;
 };
 
@@ -108,7 +108,7 @@ export type RuntimeChildClosureRequest = {
  * The native kernels a daemon serves through its runtime children (D37).
  *
  * A child lists its native kernels in its own runtime definition and reports their deployments once it has built it.
- * It cannot read the payload store, so each kernel asks the daemon for its sealed closure when it binds. The child runs
+ * It cannot read the dependency store, so each kernel asks the daemon for its sealed closure when it binds. The child runs
  * project code under Node's permission model and may not spawn, so the daemon starts each native worker on its behalf
  * (North Star S2): only from a closure it answered that child with, only through the OS sandbox, and with the sandbox
  * granting only a directory the daemon created for that child, which holds the child's private directory and which
@@ -124,7 +124,7 @@ export type RuntimeChildNativeKernels = {
    */
   readonly directory: string;
   /**
-   * The payload store's root. The broker resolves it to its real path once, when a child starts, so a store reached
+   * The dependency store's root. The broker resolves it to its real path once, when a child starts, so a store reached
    * through a symbolic link (macOS's `/tmp`, a linked home or `TAU_CONFIG_DIR`) still launches, while a closure whose
    * real path leaves the store does not.
    */
@@ -253,7 +253,7 @@ const launchRefusal = async (
     !isWithin(store, runtimePath) ||
     (launch.runtimePath !== closure.root && launch.runtimePath !== runtimePath)
   ) {
-    return `${launch.runtimePath} is not a closure sealed in the payload store.`;
+    return `${launch.runtimePath} is not a closure sealed in the dependency store.`;
   }
   const escaped = [launch.executablePath, ...launch.resources.map(({ path }) => path)].find(
     (path) => !isWithin(launch.runtimePath, path),
@@ -349,7 +349,7 @@ const brokerNativeWorkers = (
     try {
       const [real, store] = await Promise.all([realpath(runtimePath).catch(() => undefined), directories.store()]);
       if (store === undefined || real === undefined || !isWithin(store, real)) {
-        return { message: `Tau Host refused to verify ${runtimePath}: it is not inside the payload store.` };
+        return { message: `Tau Host refused to verify ${runtimePath}: it is not inside the dependency store.` };
       }
       /* No timer of its own: a local re-hash of one closure, bounded by the child's wait and cancelled when the
        * child exits. */

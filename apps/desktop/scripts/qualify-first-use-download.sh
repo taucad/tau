@@ -4,7 +4,7 @@
 #
 # Charter W12 (native dependency resolution, go-live DSK-6): before the desktop stops bundling
 # its Python and .NET runtimes, prove on a clean Mac that the closures a notarised Tau.app
-# downloads run. The desktop does not prepare into the payload store yet (W6), so the script
+# downloads run. The desktop does not prepare into the dependency store yet (W6), so the script
 # runs the preparation entry point the app will call, `tau prepare` and `tau export` from this
 # checkout's built CLI, inside the notarised Tau binary as Node (ELECTRON_RUN_AS_NODE=1). The
 # notarised binary is then the process that downloads and writes every byte, and the parent of
@@ -21,7 +21,7 @@
 #   golden       build123d's treeIntegrity and closureIntegrity equal tau-plugin.golden.json
 #
 # Optional env vars:
-#   TAU_CONFIG_DIR   Config directory whose `payloads` is the store (default: the macOS default,
+#   TAU_CONFIG_DIR   Config directory whose `dependencies` is the store (default: the macOS default,
 #                    ~/Library/Application Support/tau). The store must not exist yet.
 #   W12_ANNOTATE     1 to print GitHub check annotations (default: 0)
 #
@@ -59,7 +59,7 @@ ANNOTATE="${W12_ANNOTATE:-0}"
 command -v node >/dev/null || { echo "ERROR: node required" >&2; exit 3; }
 
 CONFIG_DIR="${TAU_CONFIG_DIR:-$HOME/Library/Application Support/tau}"
-STORE="$CONFIG_DIR/payloads"
+STORE="$CONFIG_DIR/dependencies"
 if [[ -e "$STORE" ]]; then
   echo "ERROR: the store $STORE already exists; qualification starts from an empty store (set TAU_CONFIG_DIR)" >&2
   exit 2
@@ -286,9 +286,9 @@ node "$EVIDENCE" policy "$OUT" "$TAU_APP" "$STORE" "$log_status"
 # --- Quarantined copy -----------------------------------------------------------------------
 echo "→ quarantined clone of the store"
 mkdir -p "$Q_CONFIG"
-cp -c -R "$STORE" "$Q_CONFIG/payloads"
-xattr -r -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$Q_CONFIG/payloads"
-q_helper=$(find "$Q_CONFIG/payloads" -type f -path '*/bin/python3*' -print -quit)
+cp -c -R "$STORE" "$Q_CONFIG/dependencies"
+xattr -r -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$Q_CONFIG/dependencies"
+q_helper=$(find "$Q_CONFIG/dependencies" -type f -path '*/bin/python3*' -print -quit)
 q_marked=$(xattr -p com.apple.quarantine "$q_helper")
 Q_START="$(stamp)"
 negative_detail="quarantine set ('$q_marked'); "

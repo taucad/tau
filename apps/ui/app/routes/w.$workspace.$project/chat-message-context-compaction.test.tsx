@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { ContextCompactionData } from '@taucad/chat';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
 
-vi.mock('#components/chat/chat-tool-card.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
   ChatToolCard({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <div data-testid='chat-tool-card'>{children}</div>;
   },

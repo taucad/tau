@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.6.0 (2026-11-09)
+
+### Features
+
+- feat(agent-host): Ask Anthropic for a one-hour prompt cache and key OpenAI and xAI caches by chat (#1643) (bbcde6478)
+- feat(nx): Add the shell tag, pin the shell import surface, and adopt the package rule (#1644) (a973dfa77)
+- feat(api): Drop the retired supplier budget holds and cost evidence (0067) (#1621) (15d30731a)
+- feat(billing): price Anthropic one-hour cache writes and admit prompt cache keys (#1597) (5213a7c2d)
+- feat(telemetry): Report agent-loop safeguards and compactions from the Pi host (R9) (#1623) (1ab6c548e)
+- feat(agent-tools): Restore web search and web browsing on the Pi agent host (#1605) (79bbd572f)
+- feat(api): refresh Morph catalog to the models Morph serves today (#1631) (9fa28f697)
+
+### Fixes
+
+- fix(agent-host, ui): Restore the LangChain plane's interrupt reminder, recent skills, read dedup, result offloading and outage resume (R2–R6) (#1634) (723bf4c3f)
+- fix(agent-host): unblock Together turns; refresh Together catalog to the cheapest provider per model (#1640) (d143e0d21)
+- fix(agent-host): Keep the prompt prefix identical across turns and steps (#1629) (5fbe770fb)
+
+### Performance
+
+- perf(ui): Verify an installed project route without catalog discovery (#1625) (cea01b6f4)
+
+### Other changes
+
+- ci(cli-e2e): Run the CLI end-to-end suites in their own gated lane (#1670) (1f8e6d7e2)
+- test(telemetry): Stop Grafana and OTel bootstrap edits from selecting telemetry and the native rows (#1662) (569643b0a)
+- refactor(host): Move the X1C qualifier from bambu to host:qualify-x1c (#1651) (8d6c13f46)
+- ci(nx): Harden the remote cache relay, write from main and the merge queue, upload behind Nx (#1645) (302ddc9ff)
+- test(telemetry): Stop kernel-plugin changes from selecting telemetry, host and agent-tools (#1639) (6c5f87c2e)
+
+## 0.5.0 (2026-11-09)
+
+### Features
+
+- feat(api): record free accounts by default until they opt out (#1543) (9dba60326)
+- feat(api-billing): Add read-only list-cases lifecycle operation (#1611) (57c14cf56)
+- feat(api-billing): Label open cases by attribution and add age gauge (#1607) (195e6fa92)
+- feat(filesystem, desktop): Import a desktop folder or opened file by copying it host-side (W7.4) (#1584) (2305062c9)
+- feat(api): Measure gateway upload, admission and first-step prompt-cache hits (#1578) (5321d3e8a)
+- feat(filesystem, ui, api): Confirm editor saves before close and stream exports and publications (W12) (#1581) (be2ffdbcc)
+- feat(revisions): Honour the checkout's own Git ignore rules on both legs (#1572) (a01585196)
+
+### Fixes
+
+- fix(api-billing): Refuse new collection only for an account a spend-blocking case names (#1614) (805d4d7f6)
+- fix(ui): Light the Terminal's text on macOS and turn on ls colours (#1592) (a25024279)
+- fix(api): Boot without a tariff and pause only billing (#1593) (bec7e7673)
+- fix: report a failed Linux sandbox setup as not started, give shell cleanup a realistic deadline, and stop the location chip loop from #1558 (#1586) (595c1737d)
+- fix(revisions): Give the compute worker realm its own Buffer global (#1505) (5476c70ba)
+- fix(api): Idle the billing workers while Tau Cloud is off instead of exiting (#1548) (2a8303d86)
+
+### Performance
+
+- perf(api-llm-gateway): Sign Vertex bearer tokens locally instead of exchanging them (#1599) (2e4140a92)
+- perf(api-llm-gateway): Reuse the Vertex access token across requests (#1590) (9ea11f5e2)
+
+### Other changes
+
+- docs(www): simplify legal documents and describe agent recording (#1457) (d2d039df7)
+- ci(nx): Read and write the self-hosted Nx remote cache (#1603) (e59e3bd22)
+- refactor(api): Split the API into ten module libraries and run only affected package tests (#1576) (735d178dc)
+- ci(root): Run the standalone oracles only when they are affected, plus nightly (#1549) (6fc04b8d6)
+- refactor(chat): share the model catalog wire schema so the UI stops importing the API (#1568) (cb1b424f4)
+- test(api): pin the HTTP route table and schema-migration parity before the library split (#1565) (d5387548a)
+
 ## 0.4.0 (2026-11-08)
 
 ### Features

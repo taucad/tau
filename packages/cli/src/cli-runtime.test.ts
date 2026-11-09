@@ -87,7 +87,6 @@ describe('createCliRuntime', () => {
           '@taucad/camera',
           '@taucad/filesystem',
           '@taucad/host',
-          '@taucad/jobs-solvers',
           // The worker launcher `tau serve` brokers native kernels with, not a runtime plugin.
           '@taucad/native-process-core',
           '@taucad/parameters',
@@ -168,7 +167,7 @@ describe('createCliRuntime', () => {
       { package: '@taucad/build123d', kernels: [{ id: 'build123d', extensions: ['py'] }] },
       { package: '@taucad/picogk', kernels: [{ id: 'picogk', extensions: ['cs'] }] },
     ]);
-    /* Listed with no closure: each binds to the sealed closure the payload store holds when it initializes. */
+    /* Listed with no closure: each binds to the sealed closure the dependency store holds when it initializes. */
     expect(runtime.kernels.find(({ id }) => id === 'build123d')).not.toHaveProperty('options.closure');
     expect(deriveImportExtensions(runtime)).toEqual(expect.arrayContaining(['py', 'cs']));
   });

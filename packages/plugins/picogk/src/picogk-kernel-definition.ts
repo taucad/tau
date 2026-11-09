@@ -84,7 +84,7 @@ const meshingUnsupportedIssue = (requested: PicogkMeshing): KernelIssue => ({
   code: 'RUNTIME',
   type: 'kernel',
   severity: 'error',
-  details: { reason: 'meshing-unsupported', meshAdaptivity: requested.adaptivity, meshRelax: requested.relax },
+  details: { reason: 'meshing-unsupported', meshAdaptivity: requested.adaptivity },
 });
 
 /** Environment-owned resources behind the shared PicoGK behavior. @internal */
@@ -243,7 +243,8 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
        * carries no capability and the published layers predate the echo. */
       const defaulted = options.meshAdaptivity === undefined;
       const adaptivity = options.meshAdaptivity ?? picogkPreviewAdaptivity;
-      const meshing = adaptivity > 0 ? { adaptivity, relax: options.meshRelax } : undefined;
+      // The worker protocol still carries OpenVDB's relax pass; Tau always leaves it off (it never improved a mesh).
+      const meshing = adaptivity > 0 ? { adaptivity, relax: false } : undefined;
       const paths = await context.mirror.sync(services);
       // D35: the project's own references must name the PicoGK this kernel runs, or it runs differently outside Tau.
       const manifestIssues: KernelIssue[] = [];
@@ -378,7 +379,7 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
     },
 
     /* The report names the mesh a handle holds: no adaptivity is the uniform mesh (also what a worker that predates
-     * adaptive meshing answers a default view with), otherwise its adaptivity and relax. An export asking for that same
+     * adaptive meshing answers a default view with), otherwise its adaptivity. An export asking for that same
      * meshing reuses the handle; any other export builds. A snapshot without a report says nothing. */
     effectiveOptions: ({ handle, options }) =>
       handle.tessellation === undefined
@@ -386,7 +387,6 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
         : {
             ...options,
             meshAdaptivity: handle.tessellation.adaptivity ?? 0,
-            meshRelax: handle.tessellation.relax ?? false,
           },
 
     async render({ handle }) {

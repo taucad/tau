@@ -9,7 +9,7 @@
           "arch": "arm64",
           "minimumOsVersion": "11.0"
         },
-        "payloads": [
+        "files": [
           {
             "name": "python",
             "integrity": "sha256-05BL1qByJG4Hqgva3umhToBSHkKpQ8CEgFn+sWooFtw=",
@@ -153,7 +153,7 @@
           "arch": "x64",
           "minimumOsVersion": "11.0"
         },
-        "payloads": [
+        "files": [
           {
             "name": "python",
             "integrity": "sha256-9xKpFDyKXSSEOOx5IaC0jVSLyk8TN9M8aQ0owtBQQTc=",
@@ -298,7 +298,7 @@
           "libc": "glibc",
           "minimumLibcVersion": "2.27"
         },
-        "payloads": [
+        "files": [
           {
             "name": "python",
             "integrity": "sha256-Ac4M6Rif6urTKYq/ENTv6ZjFWkibPV04yk+D3afnl34=",
@@ -443,7 +443,7 @@
           "libc": "glibc",
           "minimumLibcVersion": "2.27"
         },
-        "payloads": [
+        "files": [
           {
             "name": "python",
             "integrity": "sha256-imiaB3M3vqbRxLwLffHVL8qij19n5Q34v0F8Hj+diHQ=",

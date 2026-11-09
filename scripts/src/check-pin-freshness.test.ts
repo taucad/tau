@@ -42,7 +42,7 @@ const manifest = {
     engine: [
       {
         target: { runtime: 'native', os: 'darwin', arch: 'arm64' },
-        payloads: [
+        files: [
           payload('python', integrity('sha256', 'python'), [pbsUrl]),
           payload('demo-pkg', integrity('sha256', 'wheel'), [wheelUrl]),
           payload('dotnet', integrity('sha512', 'dotnet'), [dotnetUrl]),
@@ -53,7 +53,7 @@ const manifest = {
       },
       {
         target: { runtime: 'native', os: 'darwin', arch: 'x64' },
-        payloads: [payload('demo-pkg', integrity('sha256', 'wheel'), [wheelUrl])],
+        files: [payload('demo-pkg', integrity('sha256', 'wheel'), [wheelUrl])],
       },
     ],
   },

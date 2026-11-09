@@ -51,8 +51,8 @@ export const pinnedUrls = (manifest: unknown): PinnedUrl[] => {
   const pins: PinnedUrl[] = [];
   for (const [dependency, variants] of Object.entries(manifest['dependencies'])) {
     for (const variant of Array.isArray(variants) ? variants : []) {
-      const payloads: unknown = isRecord(variant) ? variant['payloads'] : undefined;
-      for (const payload of Array.isArray(payloads) ? payloads : []) {
+      const files: unknown = isRecord(variant) ? variant['files'] : undefined;
+      for (const payload of Array.isArray(files) ? files : []) {
         if (!isRecord(payload) || !isRecord(payload['origin']) || payload['origin']['kind'] !== 'url') {
           continue;
         }

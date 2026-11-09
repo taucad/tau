@@ -2,7 +2,7 @@
  * Purpose: Build the Tau UI layer `tau serve` serves, and rewrite the CLI's pin from a published layer (charter W18,
  * Q51, ruling X2).
  * Why: The serve UI is too large for npm and is published by nothing else, so it ships as a Tau-authored layer that
- * the preparation host downloads by digest into the payload store. `build` turns `ui:build:serve`'s client directory
+ * the preparation host downloads by digest into the dependency store. `build` turns `ui:build:serve`'s client directory
  * into a deterministic ustar `tar.gz` (sorted names, mtime 0, uid and gid 0, modes 0644 or 0755, no source maps) and
  * its record `tau-layer.json`, and refuses a layer over the size line. `pin` re-hashes a published archive against its
  * record and writes `packages/cli/serve-ui-layer.json` from it; `--check` compares instead of writing.

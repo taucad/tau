@@ -16,7 +16,7 @@ const agentEnvironment = (): NodeJS.ProcessEnv => {
     'NODE_EXTRA_CA_CERTS',
     'NODE_USE_ENV_PROXY',
     'TAU_CONFIG_DIR',
-    'TAU_PAYLOAD_MIRROR',
+    'TAU_DEPENDENCY_MIRROR',
     'TAU_ACQUISITION',
     /* What Claude Code passes through and a runtime thread must never see (S25). */
     'ANTHROPIC_API_KEY',
@@ -47,7 +47,7 @@ describe('childEnvironment', () => {
         'PATH',
         'TAU_ACQUISITION',
         'TAU_CONFIG_DIR',
-        'TAU_PAYLOAD_MIRROR',
+        'TAU_DEPENDENCY_MIRROR',
         'TMPDIR',
         'XDG_DATA_HOME',
         'no_proxy',

@@ -31,6 +31,24 @@ const prerenderConcurrency = 4;
 export default {
   ssr: true,
   /**
+   * Every route is known on boot, so no navigation waits on `/__manifest`.
+   *
+   * Lazy discovery only learns a route from a `<Link>` already in the DOM. On a phone the
+   * sidebar is a sheet whose links mount on open, and its discovery request is debounced
+   * until the sheet stops mutating, so a tap on a sidebar row can race it: the navigation then
+   * fetches `/__manifest` for itself, or overlaps the sheet's request, before it can start.
+   * Measured from the editor on two hosts, main made a `/__manifest` request after the tap in
+   * 19 of 20 (cloud) and 16 of 20 (M2 Pro) samples, and this mode made none (Brain `phone-nav-discovery`, 2026-11-09).
+   * The whole manifest ships as one hashed, immutable `manifest-<version>.js`
+   * (~15 KB compressed) instead of a per-page slice inlined in each document, so documents
+   * get ~4 KB smaller and a cold first visit transfers ~6 KB more.
+   *
+   * React Router's `/__manifest` version check goes with it; it only ever covered routes not
+   * yet discovered. Skew is handled by `build-skew` (`stale-build-navigation`,
+   * `stale-build-recovery`) and the patched route-module loader.
+   */
+  routeDiscovery: { mode: 'initial' },
+  /**
    * `buildEnd` is the only hook that runs after prerendering, so it is where
    * the offline shell worker is generated from the emitted `/usage` document
    * and the Vite build manifest (B5 R3). The desktop and daemon configs are

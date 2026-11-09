@@ -14,7 +14,7 @@ vi.mock('#hooks/use-project-availability.js', () => ({
   useLargeObjectPending: () => false,
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));

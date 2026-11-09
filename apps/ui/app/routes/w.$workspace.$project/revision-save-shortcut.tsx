@@ -15,7 +15,7 @@ import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /** The workbench-wide *Save revision* gesture. @public */
 export const saveRevisionKeyCombination = {

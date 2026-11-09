@@ -32,6 +32,8 @@ docs
 # `scripts` stays in the context: it is an Nx project that `runtime-e2e` lists
 # as an implicit dependency, and the project graph fails without it.
 .github
+# `build-image.mts` runs every Nx call through CI's Nx guard and remote cache relay.
+!.github/actions/setup-nx/nx-guard.ts
 .claude/worktrees
 .cursor
 .vscode
@@ -85,6 +87,8 @@ LICENSE
 CODEOWNERS
 docker-compose.yml
 infra
+# The API image seeds the public bucket's two default images at boot (`apps/api/vite.config.ts` copies them).
+!infra/seed
 
 # Package builds copy this generated inventory into published distributions.
 !docs/licensing/third-party-licenses.md

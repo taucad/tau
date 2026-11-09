@@ -64,9 +64,6 @@ WEB_CONCURRENCY = '1'
 TAU_FRONTEND_URL = 'https://tau.new'
 # Replies to transactional email land here (OQ8); the mailbox must exist before this deploys.
 TAU_EMAIL_REPLY_TO = 'help@tau.new'
-LANGSMITH_TRACING = true
-LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
-LANGSMITH_PROJECT = 'tau-api-prod'
 AUTH_URL = 'https://api.tau.new'
 # Browser-facing origin of this API, used to build authenticated publication file
 # proxy URLs. Required by the env schema with no default.
@@ -161,9 +158,8 @@ processes = ['app']
 # schema, Stripe, react-email through EmailService, OTel auto-instrumentations) and
 # measured ~213 MiB peak RSS locally; staging OOM-killed it twice at 256 MB, once with
 # a one-shot `billing-command.js` run inside it and once on a failing pass alone. One-shot
-# `billing-command.js` runs (`recover-payments`, `lifecycle`, `pause-route`, `resume-route`,
-# `export-supplier-legacy` and the like) belong on an `app` Machine (`fly ssh console -g app`),
-# never inside this worker.
+# `billing-command.js` runs (`recover-payments`, `lifecycle`, `pause-route`, `resume-route`
+# and the like) belong on an `app` Machine (`fly ssh console -g app`), never inside this worker.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

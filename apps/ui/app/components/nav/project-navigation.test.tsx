@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { mock } from 'vitest-mock-extended';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import type { ReactNode } from 'react';
 import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
@@ -138,7 +138,7 @@ vi.mock('#components/inline-text-editor.js', () => ({
     </div>
   ),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
     properties['open'] === false ? null : <div role='dialog'>{children}</div>,
@@ -286,7 +286,7 @@ describe('ProjectNavigation', () => {
   it('renders one Projects group with every project in deterministic activity order', () => {
     render(<ProjectNavigation />);
 
-    expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recents' })).toBeInTheDocument();
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
     expect(screen.queryByRole('button', { name: 'Show more projects' })).not.toBeInTheDocument();
   });
@@ -450,9 +450,9 @@ describe('ProjectNavigation', () => {
     mockLiveNow.mockReturnValue({ projects: 2, idleProjectIds: ['proj_two'] });
     render(<ProjectNavigation />);
 
-    expect(screen.getByRole('heading', { name: 'Projects 2 live' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recents 2 live' })).toBeInTheDocument();
     expect(screen.queryByText('Live now')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'More actions for projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More actions for recent projects' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close 1 idle project' }));
     expect(mockCloseProject).toHaveBeenCalledExactlyOnceWith('proj_two');
   });
@@ -469,14 +469,14 @@ describe('ProjectNavigation', () => {
     render(<ProjectNavigation />);
 
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Projects 1 live' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'More actions for projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recents 1 live' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More actions for recent projects' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
   it('says nothing about liveness on the label while nothing is live', () => {
     render(<ProjectNavigation />);
-    expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recents' })).toBeInTheDocument();
   });
 
   /* D6, D18: no Retry anywhere; a failed refresh keeps the last good list. */
@@ -505,33 +505,21 @@ describe('ProjectNavigation', () => {
   });
 
   /* R5: the listing fills the rows the last listing had, so nothing below them moves. */
-  it('reserves the remembered rows, with their names, and the Show more row past a page', () => {
-    rememberedShape = {
-      count: 7,
-      projects: Array.from({ length: 7 }, (_, index) => ({ id: `p${index}`, name: `Remembered ${index}` })),
-    };
+  it('reserves skeleton rows, never names, and the Show more row past a page', () => {
+    rememberedShape = { count: 7 };
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
     render(<ProjectNavigation />);
 
     const placeholders = screen.getAllByTestId('project-navigation-skeleton');
     expect(placeholders).toHaveLength(6);
-    expect(placeholders[0]).toHaveTextContent('Remembered 0');
+    expect(placeholders[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
+    expect(placeholders[0]).toHaveTextContent('');
     expect(placeholders[5]).toHaveTextContent('Show more projects');
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
   });
 
-  it('reserves bars when the server knows only the count', () => {
-    rememberedShape = { count: 2, projects: [] };
-    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
-    render(<ProjectNavigation />);
-
-    const placeholders = screen.getAllByTestId('project-navigation-skeleton');
-    expect(placeholders).toHaveLength(2);
-    expect(placeholders[1]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
-  });
-
   it('says there are no projects before the listing when the last listing had none', () => {
-    rememberedShape = { count: 0, projects: [] };
+    rememberedShape = { count: 0 };
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
     render(<ProjectNavigation />);
 
@@ -592,10 +580,10 @@ describe('ProjectNavigation', () => {
     render(<ProjectNavigation />);
 
     const header = screen
-      .getByRole('button', { name: 'More actions for projects' })
+      .getByRole('button', { name: 'More actions for recent projects' })
       .closest('[data-testid=dropdown-menu]');
     expect(header).toHaveAttribute('data-responsive', 'true');
-    expect(header?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Projects');
+    expect(header?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Recents');
     const row = screen.getByRole('button', { name: 'More actions for Two' }).closest('[data-testid=dropdown-menu]');
     expect(row).toHaveAttribute('data-responsive', 'true');
     expect(row?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Two');

@@ -23,7 +23,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#comp
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import type { TypedUiMatchWithHandle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { Compose } from '#components/ui/utils/compose.js';
+import { Compose } from '@taucad/ui-kit/utils/compose';
 import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';

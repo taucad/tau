@@ -4,7 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   NativeFileManagerIcon,
   revealProjectPathInFileManager,
@@ -28,7 +28,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
 vi.mock('#lib/agent-host-placement.js', () => ({
   desktopWorkspaceRoot: async (projectId: string) => mockWorkspaceRoot(projectId),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
 
 const directories = {
   openLabel: 'Open in Finder',

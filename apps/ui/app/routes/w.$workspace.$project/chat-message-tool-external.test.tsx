@@ -14,10 +14,10 @@ import {
   externalToolPresentation,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
-import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
-import { projectAgentHostEvent } from '#services/agent-host-event-projection.js';
+import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
+import { projectAgentHostEvent } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { ChatAttachmentDirectoriesContext } from '#components/chat/attachment-preview.js';
-import { classifyActivityPart } from '#utils/assistant-message-activity.js';
+import { classifyActivityPart } from '@taucad/chat-ui/utils/assistant-message-activity';
 import chatMessageSource from '#routes/w.$workspace.$project/chat-message.tsx?raw';
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn()] }));

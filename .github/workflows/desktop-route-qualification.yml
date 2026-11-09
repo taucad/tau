@@ -162,6 +162,7 @@ jobs:
             out/route-qualification/qualification-*.json
             out/route-qualification/renderer-*.json
             out/route-qualification/renderer-*.png
+            out/route-qualification/renderer-*.txt
             out/route-qualification/mirror-trust.json
           if-no-files-found: warn
       - name: Keep passed row separate until every required host succeeds

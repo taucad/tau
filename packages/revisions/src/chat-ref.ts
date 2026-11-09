@@ -97,7 +97,7 @@ const isOwnSegment = (context: ChatRefContext, path: string): boolean =>
  * One attachment blob as the closed tree spells it: `attachments/<64 hex>.<ext>`
  * over the five media types the composer stores (blueprint D12).
  *
- * Restated here rather than imported: `apps/ui/app/utils/attachment.utils.ts`
+ * Restated here rather than imported: `apps/libs/chat-ui/src/utils/attachment.utils.ts`
  * owns the canonical media-type table and mints the names, and nothing under
  * `packages/**` may depend on `apps/**`. Lower-case hex only, because the store
  * writes lower-case and two spellings of one hash would be two entries for one

@@ -8,11 +8,14 @@ import type { Mesh, Voxels } from 'picovoxel';
 
 import type { PicovoxelLane } from '#picovoxel.schemas.js';
 
-/** Adaptive meshing for one build: OpenVDB adaptivity in (0, 1) and its relax pass. */
-export type PicovoxelMeshing = { readonly adaptivity: number; readonly relax: boolean };
+/**
+ * Adaptive meshing for one build: OpenVDB adaptivity in (0, 1). OpenVDB's relax pass stays off: the adaptivity
+ * sweep measured it moving vertices further from the surface and adding slivers, never improving a mesh.
+ */
+export type PicovoxelMeshing = { readonly adaptivity: number };
 
 /**
- * PicoVoxel releases whose `Voxels.toMesh()` takes no options. They would ignore `{ adaptivity, relax }`
+ * PicoVoxel releases whose `Voxels.toMesh()` takes no options. They would ignore `{ adaptivity }`
  * and return the uniform mesh, so Tau refuses an adaptive request under them rather than mislabel it.
  */
 const withoutAdaptiveMeshing: ReadonlySet<string> = new Set(['0.1.0']);
@@ -56,16 +59,12 @@ export const picovoxelDefaultAdaptivity = (
  *
  * @param options - The view's construction options.
  * @param options.meshAdaptivity - Requested adaptivity in [0, 1), 0 for the uniform mesh; absent for the default.
- * @param options.meshRelax - Whether to relax an adaptive mesh.
  * @param lane - The build's lane.
  * @param version - The installed PicoVoxel version.
  * @returns The meshing to apply (absent for the uniform mesh), or the issue refusing the request.
  */
 export const resolvePicovoxelMeshing = (
-  {
-    meshAdaptivity: requested,
-    meshRelax,
-  }: { readonly meshAdaptivity?: number | undefined; readonly meshRelax: boolean },
+  { meshAdaptivity: requested }: { readonly meshAdaptivity?: number | undefined },
   lane: PicovoxelLane,
   version: string,
 ): { readonly meshing?: PicovoxelMeshing } | { readonly refusal: KernelIssue } => {
@@ -73,7 +72,7 @@ export const resolvePicovoxelMeshing = (
   if (meshAdaptivity <= 0) {
     return {};
   }
-  const details = { producer: { kernelId: 'picovoxel' }, meshAdaptivity, meshRelax, lane, version };
+  const details = { producer: { kernelId: 'picovoxel' }, meshAdaptivity, lane, version };
   if (lane === 'exact') {
     return {
       refusal: {
@@ -96,7 +95,7 @@ export const resolvePicovoxelMeshing = (
       },
     };
   }
-  return { meshing: { adaptivity: meshAdaptivity, relax: meshRelax } };
+  return { meshing: { adaptivity: meshAdaptivity } };
 };
 
 /**
@@ -111,23 +110,22 @@ export const meshPicovoxelField = (field: Voxels, meshing: PicovoxelMeshing | un
   field.toMesh(meshing);
 
 /**
- * The tessellation fields an adaptive mesh adds; none for the uniform mesh.
+ * The tessellation field an adaptive mesh adds; none for the uniform mesh.
  *
  * @param meshing - The build's adaptive meshing, when it has one.
- * @returns `adaptivity` and `relax`, or nothing.
+ * @returns `adaptivity`, or nothing.
  */
-export const picovoxelMeshingReport = (
-  meshing: PicovoxelMeshing | undefined,
-): Pick<TessellationReport, 'adaptivity' | 'relax'> =>
-  meshing === undefined ? {} : { adaptivity: meshing.adaptivity, relax: meshing.relax };
+export const picovoxelMeshingReport = (meshing: PicovoxelMeshing | undefined): Pick<TessellationReport, 'adaptivity'> =>
+  meshing === undefined ? {} : { adaptivity: meshing.adaptivity };
 
 /**
- * Restore the meshing fields of a serialized tessellation report at the snapshot trust boundary.
+ * Restore the meshing field of a serialized tessellation report at the snapshot trust boundary. A snapshot written
+ * before the relax option was removed also carries a boolean `relax` beside `adaptivity`; it is accepted and dropped.
  *
  * @param value - The serialized report.
- * @returns `adaptivity` and `relax` when both are present and valid, nothing when both are absent.
+ * @returns `adaptivity` when present and valid, nothing when absent.
  */
-export const snapshotPicovoxelMeshingReport = (value: unknown): Pick<TessellationReport, 'adaptivity' | 'relax'> => {
+export const snapshotPicovoxelMeshingReport = (value: unknown): Pick<TessellationReport, 'adaptivity'> => {
   const read = (key: string): unknown =>
     typeof value === 'object' && value !== null ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
   const adaptivity = read('adaptivity');
@@ -135,10 +133,14 @@ export const snapshotPicovoxelMeshingReport = (value: unknown): Pick<Tessellatio
   if (adaptivity === undefined && relax === undefined) {
     return {};
   }
-  if (typeof adaptivity !== 'number' || !(adaptivity > 0 && adaptivity < 1) || typeof relax !== 'boolean') {
+  if (
+    typeof adaptivity !== 'number' ||
+    !(adaptivity > 0 && adaptivity < 1) ||
+    !(relax === undefined || typeof relax === 'boolean')
+  ) {
     throw new TypeError(
-      'Invalid PicoVoxel serialized tessellation: adaptivity in (0, 1) and a boolean relax must appear together.',
+      'Invalid PicoVoxel serialized tessellation: adaptivity must be in (0, 1), and a stored relax must be a boolean beside it.',
     );
   }
-  return { adaptivity, relax };
+  return { adaptivity };
 };

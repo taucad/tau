@@ -42,7 +42,7 @@ const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObje
 const unitId = 'src/main.ts';
 const internalUnitId = createSourceModelInteractionUnitId(unitId);
 
-vi.mock('#components/chat/chat-context-insertion.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   geometryReferenceToToken: () => '@cad[src/main.ts#component]',
   useChatContextInsertion: () => ({ addContextReferences: mocks.addContextReferences }),
 }));

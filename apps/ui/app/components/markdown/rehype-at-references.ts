@@ -1,5 +1,5 @@
 import type { Root, Element, ElementContent, RootContent } from 'hast';
-import { parseInlineReferences } from '#utils/at-reference.utils.js';
+import { parseInlineReferences } from '@taucad/chat-ui/utils/at-reference.utils';
 
 const skipParentTags = new Set(['code', 'pre', 'a']);
 

@@ -1,0 +1,119 @@
+name: 'PicoGK browser host publish'
+description: >-
+  Writes the pinned PicoGK browser host once under its digests to one environment's locked
+  dependency bucket, then reads every blob back from that environment's public host. It is the
+  one step implementation `picogk-browser-host-publish.yml` runs in `publish-staging`
+  (environment `dependencies-staging`) and `publish-production` (environment `dependencies`).
+  The caller checks out the tagged commit first. A missing credential, endpoint or bucket, or a
+  bucket other than the environment's own, refuses: it never skips.
+
+inputs:
+  environment:
+    description: '`production` or `staging`: selects the expected bucket and the host every blob is read back from'
+    required: true
+  artifact:
+    description: 'The artifact holding the prepared bundle'
+    required: true
+  inputs-key:
+    description: 'The inputs key computed at the tag'
+    required: true
+  bucket:
+    description: 'The environment variable DEPENDENCY_R2_BUCKET'
+    required: false
+    default: ''
+  endpoint:
+    description: 'The environment variable DEPENDENCY_R2_ENDPOINT'
+    required: false
+    default: ''
+  access-key-id:
+    description: 'The environment secret DEPENDENCY_R2_ACCESS_KEY_ID'
+    required: false
+    default: ''
+  secret-access-key:
+    description: 'The environment secret DEPENDENCY_R2_SECRET_ACCESS_KEY'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '24.20.0'
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact }}
+        path: out/picogk-browser-host
+    - name: Verify the bundle against the tagged pin
+      shell: bash
+      env:
+        KEY: ${{ inputs.inputs-key }}
+      run: |
+        node scripts/src/picogk-browser-host-pin.ts plan --pin "$PIN" --key "$KEY" \
+          --bundle out/picogk-browser-host --tag "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/plan.tsv"
+    - name: Write every blob once, the manifest last
+      shell: bash
+      env:
+        TARGET: ${{ inputs.environment }}
+        DEPENDENCY_R2_BUCKET: ${{ inputs.bucket }}
+        DEPENDENCY_R2_ENDPOINT: ${{ inputs.endpoint }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_DEFAULT_REGION: auto
+      run: |
+        set -euo pipefail
+        case "$TARGET" in
+          production) environment=dependencies expected=tau-prod-dependencies ;;
+          staging) environment=dependencies-staging expected=tau-staging-au-dependencies ;;
+          *)
+            echo "::error::Unknown dependency environment '$TARGET'; nothing is published."
+            exit 1
+            ;;
+        esac
+        missing=()
+        for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY DEPENDENCY_R2_ENDPOINT DEPENDENCY_R2_BUCKET; do
+          if [ -z "${!name}" ]; then missing+=("$name"); fi
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "::error::The $environment environment lacks ${missing[*]} (secrets DEPENDENCY_R2_ACCESS_KEY_ID, DEPENDENCY_R2_SECRET_ACCESS_KEY, variables DEPENDENCY_R2_ENDPOINT, DEPENDENCY_R2_BUCKET); nothing is published."
+          exit 1
+        fi
+        if [ "$DEPENDENCY_R2_BUCKET" != "$expected" ]; then
+          echo "::error::The $environment environment names bucket '$DEPENDENCY_R2_BUCKET', not its own '$expected'; nothing is published."
+          exit 1
+        fi
+        written=0
+        present=0
+        existing="$RUNNER_TEMP/existing-blob"
+        while IFS=$'\t' read -r sha path type; do
+          key="blobs/sha256/$sha"
+          if aws --endpoint-url "$DEPENDENCY_R2_ENDPOINT" s3api put-object --bucket "$DEPENDENCY_R2_BUCKET" \
+            --key "$key" --body "out/picogk-browser-host/$path" --content-type "$type" \
+            --cache-control 'public, max-age=31536000, immutable' --if-none-match '*' \
+            > /dev/null 2> "$RUNNER_TEMP/put-error"; then
+            written=$((written + 1))
+            continue
+          fi
+          # The bucket is locked and the put asks If-None-Match: an existing key is refused, with 412 or with the
+          # lock's own error. Neither is trusted on its own: the object counts as present only when its bytes,
+          # read back through the bucket, hash to the digest it is stored under. Any other refusal fails too.
+          rm -f "$existing"
+          if aws --endpoint-url "$DEPENDENCY_R2_ENDPOINT" s3api get-object --bucket "$DEPENDENCY_R2_BUCKET" \
+            --key "$key" "$existing" > /dev/null 2> "$RUNNER_TEMP/get-error" \
+            && [ "$(sha256sum "$existing" | cut -d' ' -f1)" = "$sha" ]; then
+            present=$((present + 1))
+            rm -f "$existing"
+            continue
+          fi
+          echo "::error::$key ($path) was refused and is not already present with its digest in $DEPENDENCY_R2_BUCKET."
+          cat "$RUNNER_TEMP/put-error" >&2
+          exit 1
+        done < "$RUNNER_TEMP/plan.tsv"
+        echo "::notice title=PicoGK browser host published to $TARGET::$written blobs written, $present already present and verified."
+        printf '### PicoGK browser host: %s to %s\n\n- %s blobs written, %s already present and verified\n' \
+          "$GITHUB_REF_NAME" "$DEPENDENCY_R2_BUCKET" "$written" "$present" >> "$GITHUB_STEP_SUMMARY"
+    - name: Read every blob back from the environment's host
+      shell: bash
+      env:
+        TARGET: ${{ inputs.environment }}
+      run: node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN" --environment "$TARGET"

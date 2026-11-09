@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { FeedbackGrant, FeedbackGrants } from '@taucad/agent-observability/scorecard';
 import { DatabaseService } from '@taucad/api-database';
-import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '@taucad/api-database/schema';
+import {
+  project,
+  projectDeletion,
+  projectInvitation,
+  telemetryPurposeDecision,
+  user,
+} from '@taucad/api-database/schema';
 import type { Environment } from '@taucad/api-core';
 import { Span } from '@taucad/api-observability';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
@@ -73,15 +79,16 @@ export class TelemetryPurposeService {
     projectId?: string,
   ): Promise<Readonly<{ effective: EffectiveTelemetryPurposes; protection: 'pro' | 'free' | 'unknown' }>> {
     const noticeVersion = this.noticeVersion();
-    const [decisions, assurance, projectAuthority] = await Promise.all([
+    const [decisions, assurance, projectAuthority, improvementDefault] = await Promise.all([
       this.decisionsFor(userId),
       this.tierAssurance.getTierAssurance(userId),
       projectId === undefined ? undefined : this.projectAuthority(userId, projectId),
+      this.improvementSwitch(userId),
     ]);
 
     return {
       effective: {
-        epoch: purposeEpoch({ userId, projectId, noticeVersion, decisions }),
+        epoch: purposeEpoch({ userId, projectId, noticeVersion, decisions, improvementDefault }),
         ...(noticeVersion === undefined ? {} : { noticeVersion }),
         ...(projectId === undefined ? {} : { projectId }),
         purposes: resolvePurposeAuthority({
@@ -89,6 +96,7 @@ export class TelemetryPurposeService {
           decisions,
           tier: assurance.tier,
           tierAssured: assurance.assured,
+          improvementDefault,
           project: projectAuthority,
         }),
         answeredAt: Date.now(),
@@ -210,6 +218,15 @@ export class TelemetryPurposeService {
   /** The approved production notice in force, or `undefined` while none is (T01 gate). */
   public noticeVersion(): string | undefined {
     return this.configService.get('TAU_OBSERVABILITY_NOTICE_VERSION', { infer: true });
+  }
+
+  /** The account's "Improve Tau for everyone" switch; on unless the account turned it off. */
+  private async improvementSwitch(userId: string): Promise<boolean> {
+    const row = await this.databaseService.database.query.user.findFirst({
+      where: eq(user.id, userId),
+      columns: { allowsAiTraining: true },
+    });
+    return row?.allowsAiTraining ?? false;
   }
 
   private async decisionsFor(userId: string): Promise<RecordedPurposeDecision[]> {

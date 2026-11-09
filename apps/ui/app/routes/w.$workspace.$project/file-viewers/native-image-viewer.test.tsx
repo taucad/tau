@@ -12,7 +12,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { NativeImageViewer } from '#routes/w.$workspace.$project/file-viewers/native-image-viewer.js';
-import { nativeImageFormats } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';
+import { nativeImageFormats } from '@taucad/project-workspace/utils/native-image-format';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

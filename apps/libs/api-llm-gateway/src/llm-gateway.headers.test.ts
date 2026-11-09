@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { gatewayTurnGaps, gatewayTurnSteps } from '@taucad/agent-host/wire';
 import { assertNoQuery, invocationSignal, readHint, readTurnTelemetry } from '#llm-gateway.headers.js';
 
 describe('funded invocation HTTP boundary', () => {
@@ -70,6 +71,16 @@ describe('readTurnTelemetry', () => {
       turn: { step: 'first', gap: '5m_60m' },
     });
   });
+
+  /* The agent host's own vocabulary (`@taucad/agent-host/wire`) must read back as itself, never as `unknown`. */
+  it.each(gatewayTurnSteps.flatMap((step) => gatewayTurnGaps.map((gap) => [step, gap] as const)))(
+    'should keep every label the agent host sends (%s, %s)',
+    (step, gap) => {
+      expect(readTurnTelemetry(requestWith({ 'x-tau-turn-step': step, 'x-tau-turn-gap': gap }))).toEqual({
+        turn: { step, gap },
+      });
+    },
+  );
 
   it.each([
     [{ 'x-tau-turn-step': 'second' }, { step: 'unknown', gap: 'unknown' }],

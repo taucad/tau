@@ -5,7 +5,7 @@ import { ChevronRight } from 'lucide-react';
 import { getReasoningEndedAtMs, getReasoningStartedAtMs } from '@taucad/chat';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
-import { ThoughtBubble } from '#components/icons/thought-bubble.js';
+import { ThoughtBubble } from '@taucad/ui-kit/icons/thought-bubble';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
 
 type ChatMessageReasoningProperties = {

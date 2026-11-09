@@ -6,7 +6,7 @@ import postgres from 'postgres';
 import type { Environment } from '@taucad/api-core';
 import { assertSchemaCompatibility } from '@taucad/api-database/migration';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { readMirrorEnvironment } from '#api/git/mirror/config.js';

@@ -16,7 +16,7 @@
 import { useEffect } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { draftMachine } from '#hooks/draft.machine.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 export function useDraftImageErrorToast(draftActorRef: ActorRefFrom<typeof draftMachine>): void {
   useEffect(() => {

@@ -177,7 +177,7 @@ const [selectedKernel, setSelectedKernel] = useState<KernelProvider | 'all'>('al
 
 ### 6. Render collections through one grid owner and paginate with the shared owner
 
-Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. Skeletons use the same owner. Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`components/ui/data-table.tsx`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
+Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. Skeletons use the same owner. Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`@taucad/ui-kit/components/data-table`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
 
 **Why**: the chain was written three times and the library skeleton had already lost `2xl:grid-cols-5`; `/community`'s "Load More Projects" never sliced the grid, and `/projects` already paginates through `DataTablePagination`, so one standard serves both.
 
@@ -296,7 +296,7 @@ INCORRECT (the pre-refresh community grid):
 
 ### 10. Keep a busy action's name
 
-While an action runs, keep its label (a progressive verb with "…" is allowed), set `aria-busy`, and ignore repeat activation. The glyph may stay or give way to `Loader` (`components/ui/loader.tsx`, `aria-hidden`); never swap the label itself for `Loader`, which leaves the control nameless and collapses its width. Use `Spinner` (`components/ui/spinner.tsx`, `role='status' aria-label='Loading'`) for standalone progress, never inside a named control, where its label joins the control's name. `Loader` and `Spinner` stay two owners. A pending `NavLink` follows the same rule.
+While an action runs, keep its label (a progressive verb with "…" is allowed), set `aria-busy`, and ignore repeat activation. The glyph may stay or give way to `Loader` (`components/ui/loader.tsx`, `aria-hidden`); never swap the label itself for `Loader`, which leaves the control nameless and collapses its width. Use `Spinner` (`@taucad/ui-kit/components/spinner`, `role='status' aria-label='Loading'`) for standalone progress, never inside a named control, where its label joins the control's name. `Loader` and `Spinner` stay two owners. A pending `NavLink` follows the same rule.
 
 **Why**: six controls, including every "New Project" link, rendered an unnamed spinner while pending; `components/billing/plan-cards.tsx` is the pattern to copy.
 
@@ -372,7 +372,7 @@ Serve web and desktop from the same route module unless `apps/ui/desktop/app/rou
 
 ### 16. Use lucide glyphs for actions and sprite marks for identities
 
-Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`components/icons/svg-icon.tsx`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
+Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`@taucad/ui-kit/icons/svg-icon`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
 
 **Enforced by**: `svg-icon.tsx` fails typecheck when a kernel or model family has no mark; otherwise default.
 

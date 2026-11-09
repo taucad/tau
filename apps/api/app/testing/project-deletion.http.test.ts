@@ -28,9 +28,9 @@ import { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 /** Real HTTP controller, session lookup, SQL transactions, S3 adapter and MinIO CAS. */
 describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {

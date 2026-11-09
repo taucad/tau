@@ -16,8 +16,8 @@ import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
 import { DirectoryLink } from '#components/files/directory-link.js';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { formatToolFileMetadata } from '#routes/w.$workspace.$project/chat-tool-file-metadata.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
+import { formatToolFileMetadata } from '@taucad/project-workspace/utils/chat-tool-file-metadata';
 
 /**
  * Joins a parent directory path with a basename. Tolerates root-listing

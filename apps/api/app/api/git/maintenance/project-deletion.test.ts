@@ -15,7 +15,7 @@ import { readOwnerUsage, withOwnerLock } from '@taucad/api-database/owner-lock';
 import type { DatabaseService } from '@taucad/api-database';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { requestProjectDeletion, completeProjectDeletion } from '#api/projects/project-deletion.js';
 import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
@@ -27,7 +27,7 @@ import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { purgeDeletedProject, projectPurgeObjectBound } from '#api/git/maintenance/project-purge.js';
 import { purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
-import { createDeletionDatabase } from '#testing/project-deletion.fixture.js';
+import { createDeletionDatabase } from '@taucad/api-testing';
 
 const planWrites = vi.hoisted(() => ({ calls: 0, lines: 0, maxLines: 0, maxBytes: 0 }));
 vi.mock('node:fs/promises', async (original) => {

@@ -6,7 +6,13 @@
   "tags": ["scope:shared", "type:package"],
   "targets": {
     "test": {
-      "inputs": ["default", "^production", "{workspaceRoot}/apps/ui/app/**/*.tsx"]
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/apps/ui/app/**/*.tsx",
+        "{workspaceRoot}/apps/libs/ui-kit/src/**/*.tsx",
+        "{workspaceRoot}/apps/libs/project-workspace/src/**/*.tsx"
+      ]
     }
   }
 }

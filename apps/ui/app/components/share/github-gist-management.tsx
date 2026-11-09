@@ -35,7 +35,7 @@ import {
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
 import type { GithubGistAuthorizationSurface } from '#lib/share-providers.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 type GithubGistManagementProps = {
   readonly locator: ShareLocator;

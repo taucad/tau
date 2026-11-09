@@ -39,7 +39,7 @@ const code = (module: string): string =>
 /** The repository store port's write verbs (`store/port.ts`). */
 const repositoryWriteVerbs = /\.(?:commitManifest|putObject|deleteObjects)\(/u;
 
-/** The object-store driver's write verbs (`storage/object-storage.service.ts`), presigned writes included. */
+/** The object-store driver's write verbs (`@taucad/api-object-storage`), presigned writes included. */
 const objectWriteVerbs =
   /\.(?:putBlob|putBlobStream|deleteBlob|deleteBlobs|copyBlob|createMultipartUpload|uploadPart|completeMultipartUpload|presignPut|presignUploadPart|deleteEntirePrefixForPurgeJob)\(/u;
 
@@ -47,7 +47,10 @@ const objectWriteVerbs =
 const repositoryKey = /repos\/|projectPreviewKey\(|repositoryPrefix\(/u;
 
 /** The drivers that define the verbs; whoever calls them is what is checked. */
-const drivers = new Set(['app/storage/object-storage.service.ts', 'app/api/git/store/s3-repository-store.ts']);
+const drivers = new Set([
+  '../libs/api-object-storage/src/object-storage.service.ts',
+  'app/api/git/store/s3-repository-store.ts',
+]);
 
 const reached = (graph: ReturnType<typeof moduleGraph>, modules: readonly string[]): string[] =>
   modules.filter((module) => graph.modules.has(module)).map((module) => importChain(graph, module));

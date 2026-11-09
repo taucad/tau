@@ -7,7 +7,7 @@ import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
 import { AuthShowcase } from '#components/auth/auth-showcase.js';
 import { MagicLinkVerify } from '#components/auth/magic-link-verify.js';
 import { sanitizeVerifyEmailRedirectTo, VerifyEmail } from '#components/auth/verify-email.js';
-import { TauWordmark } from '#components/icons/tau-wordmark.js';
+import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
 import { setEntryPreference } from '#lib/entry-preference.js';

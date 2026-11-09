@@ -10,7 +10,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import process from 'node:process';
-import { permitsPrivatePut } from '#storage/private-storage-probe.js';
+import { permitsPrivatePut } from '@taucad/api-object-storage/private-storage-probe';
 import { z } from 'zod';
 
 const actionSchema = z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() });

@@ -8,7 +8,7 @@ import type { SocialProvider } from 'better-auth/social-providers';
 import type { ComponentProps } from 'react';
 
 import { Button } from '@taucad/ui/components/button';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 
 export type ProviderButtonProps = {
   provider: SocialProvider;

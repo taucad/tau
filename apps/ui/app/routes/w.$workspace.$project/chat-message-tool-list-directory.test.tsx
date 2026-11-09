@@ -93,7 +93,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-vi.mock('#components/icons/file-extension-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({
   FileExtensionIcon({ filename }: { readonly filename: string }): React.JSX.Element {
     return <span data-testid='file-extension-icon' data-filename={filename} />;
   },

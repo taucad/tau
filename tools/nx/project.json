@@ -3,5 +3,17 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "tools/nx",
   "projectType": "library",
-  "tags": ["scope:shared", "type:tool"]
+  "tags": ["scope:shared", "type:tool"],
+  "targets": {
+    "census": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Advisory project size census: source files, test cases, closure, fan-in and simulated affected rates over recent first-parent history, flagged against the workspace project policy's size target. Local and offline; writes out/reports/census/census.json."
+      },
+      "options": {
+        "command": "node tools/nx/src/census-cli.ts"
+      }
+    }
+  }
 }

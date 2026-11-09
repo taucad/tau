@@ -111,7 +111,7 @@ vi.mock('@taucad/utils/file', async () => {
 
 const mockToastSuccess = vi.fn();
 const mockToastError = vi.fn();
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     success: (message: string) => {
       mockToastSuccess(message);

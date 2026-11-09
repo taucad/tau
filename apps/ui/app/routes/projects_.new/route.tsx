@@ -11,14 +11,14 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@tauc
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Badge } from '@taucad/ui/components/badge';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@taucad/ui/components/accordion';
 import { getKernelOption } from '#utils/kernel.utils.js';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';

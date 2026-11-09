@@ -246,7 +246,7 @@ Array order is kernel-selection precedence. Preserve it deliberately; each host'
 
 Add an entry to `kernelConfigurations` with `id`, `name`, `language`, `dimensions`, `description`, `mainFile`, `backendProvider`, `longDescription`, `emptyCode`, `recommended`, `tags`, `features`. Keep `mainFile`'s extension consistent with the kernel's `extensions`.
 
-If the product catalog id differs from the runtime capability id, document the mapping: catalog ids are persisted product offerings, while runtime ids select engines. Add a raw SVG whose id matches the catalog id under `apps/ui/app/components/icons/raw/`, then run `/regen-sprite`; `svg-icon.tsx` intentionally makes a missing kernel icon a type error.
+If the product catalog id differs from the runtime capability id, document the mapping: catalog ids are persisted product offerings, while runtime ids select engines. Add a raw SVG whose id matches the catalog id under `apps/libs/ui-kit/src/icons/raw/`, then run `/regen-sprite`; `svg-icon.tsx` intentionally makes a missing kernel icon a type error.
 
 ### 3.4 Agent skills and first-party product tables
 
@@ -339,7 +339,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - [ ] A kernel that drives a wasm or native library calls it once per operation per shape on render, edge, topology and export paths, has `src/<name>.call-count.test.ts` for render with edges and one export, exposes a summary tracer, and frees every handle (`docs/policy/cad-performance-policy.md` Rule 3)
 - [ ] UI, desktop, CLI, GeoSpec, runtime-e2e, tau-examples, and converter runtimes each reviewed; applicable manifests and lists updated; coverage tests green
 - [ ] `libs/types/src/constants/kernel.constants.ts` — catalog entry and backend/language mappings
-- [ ] `apps/ui/app/components/icons/raw/<id>.svg` added and sprite regenerated
+- [ ] `apps/libs/ui-kit/src/icons/raw/<id>.svg` added and sprite regenerated
 - [ ] Skill bundle, `skillOwners`, resources import, telemetry `kernelIds`/`builtInSkillSlugs` and billing tier rows
 - [ ] Native kernel only: `/native` deployment, `withNativeDeployment` kernel with late binding, `tau-plugin.json`, `native.test.ts`
 - [ ] `libs/api-extractor/` — extractor, target, generated declaration map/tests, `kernel-types.ts`, typetest paths

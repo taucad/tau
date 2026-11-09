@@ -38,7 +38,7 @@ import {
 } from '#api/jobs/jobs.dto.js';
 import { JobsService } from '#api/jobs/jobs.service.js';
 import { jobActionRecordStorageKey, jobArtifactChecksum, jobArtifactStorageKey } from '#api/jobs/job-artifacts.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 
 const multipartArtifactThreshold = 32 * 1024 * 1024;
 const multipartArtifactPartSize = 16 * 1024 * 1024;

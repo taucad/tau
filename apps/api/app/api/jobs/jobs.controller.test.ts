@@ -7,7 +7,7 @@ import type { HostsService } from '@taucad/api-hosts';
 import { JobsController } from '#api/jobs/jobs.controller.js';
 import type { JobsService } from '#api/jobs/jobs.service.js';
 import type { WorkerActionPublishDto } from '#api/jobs/jobs.dto.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 
 const device = { id: 'device-authenticated', ownerId: 'owner-1' };
 

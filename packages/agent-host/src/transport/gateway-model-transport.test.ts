@@ -1199,6 +1199,54 @@ describe('createGatewayModelTransport', () => {
     expect(generation.has('x-tau-activity')).toBe(false);
   });
 
+  it('sends the turn labels as headers, the gap only when known, and nothing when the request has none', async () => {
+    /* The gateway's turn-step series (`readTurnTelemetry` in apps/api) reads exactly these names and values. */
+    const labelled = await headersFor({}, { turn: { step: 'first', gap: '5m_60m' } });
+    expect(labelled.get('x-tau-turn-step')).toBe('first');
+    expect(labelled.get('x-tau-turn-gap')).toBe('5m_60m');
+
+    const continuation = await headersFor({}, { turn: { step: 'continuation', gap: 'first_turn' } });
+    expect(continuation.get('x-tau-turn-step')).toBe('continuation');
+    expect(continuation.get('x-tau-turn-gap')).toBe('first_turn');
+
+    /* A gap the host could not read is left to the gateway, which records it as `unknown`. */
+    const stepOnly = await headersFor({}, { turn: { step: 'continuation' } });
+    expect(stepOnly.get('x-tau-turn-step')).toBe('continuation');
+    expect(stepOnly.has('x-tau-turn-gap')).toBe(false);
+
+    const none = await headersFor({});
+    expect(none.has('x-tau-turn-step')).toBe(false);
+    expect(none.has('x-tau-turn-gap')).toBe(false);
+  });
+
+  it.each(['anthropic', 'openai', 'vertexai'] as const)(
+    'keeps the %s request body byte-identical with and without turn labels',
+    async (providerKind) => {
+      /* The labels ride in headers only: the prompt bytes, the prompt-cache key and the billing request digest
+       * (computed over the body) are what they would be without them (I4). */
+      const responses = {
+        anthropic: () => byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn),
+        openai: () => byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn),
+        vertexai: fixtureResponse,
+      };
+      const bodies: string[] = [];
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          bodies.push(init?.body as string);
+          return responses[providerKind]();
+        }),
+      });
+      await collect(transport.stream(request({ providerKind, chatId: 'chat_fixture' })));
+      await collect(
+        transport.stream(request({ providerKind, chatId: 'chat_fixture', turn: { step: 'first', gap: 'gt_60m' } })),
+      );
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toBe(bodies[0]);
+      expect(bodies[0]).not.toMatch(/first|gt_60m|x-tau-turn/u);
+    },
+  );
+
   it('strips the bundled SDK telemetry headers the gateway CORS allow-list rejects', async () => {
     const seen: Array<readonly string[]> = [];
     const transportFor = (response: () => Response) =>
@@ -1224,6 +1272,27 @@ describe('createGatewayModelTransport', () => {
     expect(seen).toEqual([
       ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
       ['accept', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
+    ]);
+
+    /* A browser turn's full set: the chat hint and both turn labels join it, each in the CORS allow-list
+     * (`httpHeader.xTauChatId`, `xTauTurnStep`, `xTauTurnGap`). */
+    seen.length = 0;
+    await collect(
+      transportFor(() => byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn)).stream(
+        request({ providerKind: 'anthropic', chatId: 'chat_fixture', turn: { step: 'continuation', gap: 'lt_5m' } }),
+      ),
+    );
+    expect(seen).toEqual([
+      [
+        'accept',
+        'anthropic-version',
+        'content-type',
+        'user-agent',
+        'x-tau-attempt-id',
+        'x-tau-chat-id',
+        'x-tau-turn-gap',
+        'x-tau-turn-step',
+      ],
     ]);
   });
 

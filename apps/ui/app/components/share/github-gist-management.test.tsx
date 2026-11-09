@@ -44,7 +44,7 @@ vi.mock('#lib/share-providers.js', () => ({
   },
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({ toast }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast }));
 
 const snapshot: ShareProjectSnapshot = { entryPath: 'main.ts', files: [], warnings: [] };
 const context = {

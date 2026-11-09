@@ -23,7 +23,7 @@ import { getMetalMorphSpinnerService } from '#components/geometry/loader/metal-m
 import type { MetalMorphSpinnerDiagnostics } from '#components/geometry/loader/metal-morph-spinner-service.js';
 import { metalMorphShapeIds, metalMorphShapeLabels } from '#components/geometry/loader/metal-morph-shapes.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
-import { LazySection } from '#components/ui/lazy-section.js';
+import { LazySection } from '@taucad/ui-kit/components/lazy-section';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';

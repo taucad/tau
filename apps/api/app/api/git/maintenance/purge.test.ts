@@ -12,9 +12,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getEnvironment } from '@taucad/api-core';
 import { storageTombstone, user } from '@taucad/api-database/schema';
 import * as schema from '@taucad/api-database/schema';
-import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { StorageModule } from '#storage/storage.module.js';
+import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/testing/destructive-test-bucket-guard';
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import { StorageModule } from '@taucad/api-object-storage/module';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
@@ -388,14 +388,16 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
   it('should keep prefix deletion unreachable from application callers', () => {
     // D31: exactly one caller outside the driver that defines it. Test files are
     // excluded because D32 confines them to disposable buckets by the guard.
-    const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-    const listed = execFileSync('grep', ['-rl', 'deleteEntirePrefixForPurgeJob', apiRoot], { encoding: 'utf8' });
+    // The driver lives in the object-storage library, so the search covers it and the API.
+    const appsRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+    const searched = [path.join(appsRoot, 'api'), path.join(appsRoot, 'libs/api-object-storage/src')];
+    const listed = execFileSync('grep', ['-rl', 'deleteEntirePrefixForPurgeJob', ...searched], { encoding: 'utf8' });
     const callers = listed
       .split('\n')
       .filter((file) => file.endsWith('.ts') && !file.includes('.test.') && !file.includes('/conformance/'))
-      .map((file) => path.relative(apiRoot, file))
+      .map((file) => path.relative(appsRoot, file))
       .sort();
 
-    expect(callers).toStrictEqual(['storage/object-storage.service.ts']);
+    expect(callers).toStrictEqual(['libs/api-object-storage/src/object-storage.service.ts']);
   });
 });

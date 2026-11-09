@@ -22,7 +22,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Field, FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { NewApiKeyDialog } from '#components/auth/api-key/new-api-key-dialog.js';
 

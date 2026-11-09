@@ -13,7 +13,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useDraftActions } from '#hooks/use-chat.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { randomUuid } from '@taucad/utils/id';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';

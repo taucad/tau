@@ -43,7 +43,7 @@ import {
   findMainFile,
   handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';

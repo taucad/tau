@@ -25,7 +25,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';

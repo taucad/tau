@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { MessageSquare, Camera, Folder, Blocks, X, Box, FileX } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type ChipType = 'file' | 'folder' | 'chat' | 'screenshot' | 'skill' | 'geometry';

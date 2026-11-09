@@ -17,7 +17,7 @@ import type { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 /** Real controller queries and access authority; billing/rate-limit boundaries are deterministic. */

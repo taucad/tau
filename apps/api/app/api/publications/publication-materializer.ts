@@ -38,10 +38,10 @@ import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
-import { isS3ObjectMissing } from '#storage/object-storage.service.js';
-import type { ObjectStorageService, StorageTier } from '#storage/object-storage.service.js';
-import type { StorageNamespace } from '#storage/storage.constants.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import { isS3ObjectMissing } from '@taucad/api-object-storage';
+import type { ObjectStorageService, StorageTier } from '@taucad/api-object-storage';
+import type { StorageNamespace } from '@taucad/api-object-storage/constants';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 
 /** Everything this module logs: an over-release, and nothing else. */
 const logger = new Logger('PublicationMaterializer');

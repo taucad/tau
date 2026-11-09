@@ -13,7 +13,7 @@ import {
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { PreviewProjectContext } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import type { PreviewProjectContextValue } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /** Project details live in tau.json, which Tau refuses to write while it needs repair (R4). */
 const reportDetailsError = (error: unknown): void => {

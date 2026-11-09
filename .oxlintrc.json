@@ -1101,10 +1101,11 @@
       }
     },
     {
-      "files": ["apps/ui/app/**/*.{ts,tsx}"],
+      "files": ["apps/ui/app/**/*.{ts,tsx}", "apps/libs/project-workspace/src/**/*.{ts,tsx}"],
       // Tests and route entries retain the uncompiled React Router/Vitest transform paths.
       "excludeFiles": [
         "apps/ui/app/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/project-workspace/src/**/*.{test,spec}.{ts,tsx}",
         "apps/ui/app/root.{ts,tsx}",
         "apps/ui/app/routes/*.{ts,tsx}",
         "apps/ui/app/routes/**/route.{ts,tsx}"
@@ -1437,20 +1438,8 @@
       }
     },
     {
-      // Current UI primitive/component inversions. -- W2
-      "files": [
-        "apps/ui/app/hooks/active-chat-provider.test.tsx",
-        "apps/ui/app/hooks/use-draft-image-error-toast.ts",
-        "apps/ui/app/hooks/use-favicon.ts",
-        "apps/ui/app/hooks/use-models.tsx",
-        "apps/ui/app/hooks/use-project-creation-location-error.test.ts",
-        "apps/ui/app/hooks/use-project-creation-location-error.ts",
-        "apps/ui/app/hooks/use-project-creation-location.test.ts",
-        "apps/ui/app/hooks/use-project-creation-location.ts",
-        "apps/ui/app/hooks/use-service-worker.tsx",
-        "apps/ui/app/utils/at-reference.utils.ts",
-        "apps/ui/app/utils/magic-link-plugin.ts"
-      ],
+      // Current auth component inversion. -- W5
+      "files": ["apps/ui/app/utils/magic-link-plugin.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {
@@ -1478,6 +1467,7 @@
         "apps/ui/app/lib/skill-resolver.ts",
         "apps/ui/app/lib/system-skills-catalog.test.ts",
         "apps/ui/app/services/chat-session-store.ts",
+        "apps/ui/app/utils/at-reference.utils.ts",
         "apps/ui/app/utils/chat.utils.test.ts",
         "apps/ui/app/utils/chat.utils.ts"
       ],
@@ -1685,7 +1675,7 @@
       // Revisions-policy Rule 1: engineering vocabulary never reaches product copy.
       // Scoped to the UI app, the only place that authors words a person reads.
       // See docs/policy/revisions-policy.md Rule 1.
-      "files": ["apps/ui/app/**/*.{ts,tsx}"],
+      "files": ["apps/ui/app/**/*.{ts,tsx}", "apps/libs/project-workspace/src/**/*.{ts,tsx}"],
       "rules": {
         "tau-lint/no-engineering-vocabulary-in-copy": "error"
       }
@@ -1693,7 +1683,11 @@
     {
       // Overlays share z-50 and stack by open order (each portals to the end of <body> as it opens). A surface raised
       // above that layer forces everything opened from it to be raised too, and the one that is missed opens behind it.
-      "files": ["apps/ui/app/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
+      "files": [
+        "apps/ui/app/**/*.{ts,tsx}",
+        "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "packages/ui/src/**/*.{ts,tsx}"
+      ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}"],
       "rules": {
         "tau-lint/no-raised-overlay-layer": "error"
@@ -1710,7 +1704,7 @@
       // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
       // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
       // Autofixable rules are errors; judgment rules warn for one release, then become errors.
-      "files": ["apps/ui/app/**/*.tsx", "packages/ui/src/**/*.tsx"],
+      "files": ["apps/ui/app/**/*.tsx", "apps/libs/project-workspace/src/**/*.tsx", "packages/ui/src/**/*.tsx"],
       "excludeFiles": ["**/*.{test,spec}.tsx", "apps/ui/app/routes/?__e2e?.*/**"],
       "rules": {
         "tau-lint/no-ascii-ellipsis": "error",

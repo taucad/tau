@@ -7,15 +7,14 @@
   "targets": {
     "render-plates": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["cli"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["cli"],
+          "target": "build"
+        }
+      ],
       "options": {
         "command": "node --import @oxc-node/core/register packages/plugins/bambu/scripts/render-plates.mts"
-      }
-    },
-    "qualify-x1c": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "node --import @oxc-node/core/register packages/plugins/bambu/scripts/qualify-x1c.mts"
       }
     }
   }

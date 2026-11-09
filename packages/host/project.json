@@ -17,7 +17,9 @@
     "formal:nightly": {
       "options": {
         "command": "vitest run --root packages/host src/acp/run.integration.test.ts src/acp/run.interrupts.integration.test.ts && node tools/formal/src/cli.ts logs host && node tools/formal/src/cli.ts nightly packages/host && vitest run --root packages/host src/acp/acp-sessions.machine.conformance.test.ts",
-        "env": { "FORMAL_SIMULATED": "out/test-results/formal/packages/host/simulated" }
+        "env": {
+          "FORMAL_SIMULATED": "out/test-results/formal/packages/host/simulated"
+        }
       }
     },
     "test:acp-live": {
@@ -60,6 +62,12 @@
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
         }
+      }
+    },
+    "qualify-x1c": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register packages/host/scripts/qualify-x1c.mts"
       }
     }
   }

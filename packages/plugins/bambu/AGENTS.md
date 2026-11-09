@@ -37,7 +37,6 @@ pnpm nx build bambu
 pnpm nx pkgcheck bambu
 pnpm nx size bambu
 pnpm nx run bambu:render-plates   # after editing either model family; the unit tests fail until re-rendered
-pnpm nx run bambu:qualify-x1c -- --stage=self-check   # hardware stages need the operator's consent; see README
 ```
 
 ## Local maintenance

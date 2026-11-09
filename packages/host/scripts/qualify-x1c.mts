@@ -12,15 +12,15 @@
  *   TAU_X1C_LIVE_VIEW_PORT — loopback port for the read-only live-view bridge.
  *
  * Usage:
- *   pnpm nx run bambu:qualify-x1c -- --stage=self-check
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=discover-read-only
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=probe-discovered-read-only
- *   TAU_X1C_STAGE_CONSENT=read-only TAU_X1C_APPROVED_MQTT_PIN=sha256:... TAU_X1C_APPROVED_CAMERA_PIN=sha256:... pnpm nx run bambu:qualify-x1c -- --stage=prepare-read-only
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=probe-read-only
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=camera-read-only
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=read-only
- *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=serve-read-only
- *   TAU_X1C_STAGE_CONSENT=upload-and-start pnpm nx run bambu:qualify-x1c -- --stage=print-cube
+ *   pnpm nx run host:qualify-x1c -- --stage=self-check
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=discover-read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=probe-discovered-read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only TAU_X1C_APPROVED_MQTT_PIN=sha256:... TAU_X1C_APPROVED_CAMERA_PIN=sha256:... pnpm nx run host:qualify-x1c -- --stage=prepare-read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=probe-read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=camera-read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=read-only
+ *   TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=serve-read-only
+ *   TAU_X1C_STAGE_CONSENT=upload-and-start pnpm nx run host:qualify-x1c -- --stage=print-cube
  *
  * Exit codes:
  *   0 — qualification stage succeeded.
@@ -46,8 +46,6 @@ import type { PeerCertificate } from 'node:tls';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Repository-only hardware qualification drives the real host launcher; the published package never imports host.
-import { createMachineSecretStore, createMemorySecretVault, createNodeMachineRuntime } from '@taucad/host';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type {
@@ -74,10 +72,8 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { Client as FtpClient } from 'basic-ftp';
 import { z } from 'zod';
 
-import { bambuCandidateAddress } from '#bambu.host.js';
-import { bambuMachine } from '#bambu.machine.js';
-import { bambuFtpsPort, bambuServicePort, bambuX1cManifest } from '#bambu.manifest.js';
-import { parseBambuDiscoveryDatagram } from '#bambu.protocol.js';
+import { createMachineSecretStore, createNodeMachineRuntime } from '#machine-host.js';
+import { createMemorySecretVault } from '#secret-vault.js';
 
 // oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
 import { printCubeOutcome } from './print-cube-outcome.mjs';
@@ -85,6 +81,11 @@ import { printCubeOutcome } from './print-cube-outcome.mjs';
 import { tapProjectFileReplies } from './project-file-reply.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The same sibling module's reply type.
 import type { ProjectFileReply } from './project-file-reply.mjs';
+
+// The host loads machine providers lazily (`machine-host.ts`); the qualifier follows the same boundary.
+const { bambuMachine, bambuX1cManifest } = await import('@taucad/bambu');
+const { bambuCandidateAddress, bambuFtpsPort, bambuServicePort, parseBambuDiscoveryDatagram } =
+  await import('@taucad/bambu/lan');
 
 const execFileAsync = promisify(execFile);
 // The X1C's ports, read from its manifest as the provider reads them.

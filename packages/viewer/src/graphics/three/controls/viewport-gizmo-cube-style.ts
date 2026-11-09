@@ -1,6 +1,7 @@
 import { Color, SRGBColorSpace } from 'three';
 import { axesHelperColors } from '#graphics/three/overlay-colors.constants.js';
 import { sectionPlaneTileTints } from '#constants/axes-colors.js';
+import { timeViewerCanvas2d } from '#lib/viewer-load-timing.js';
 
 /** The cube's dimensions and texture density, independent of canvas pixel ratio. @internal */
 export const viewportGizmoMetrics = { radius: 0.3, segments: 4, textureSize: 256, fontSize: 64 } as const;
@@ -30,7 +31,7 @@ const neutral = (lightness: number): number => new Color().setScalar(lightness *
  * @internal
  * @returns The host's neutral surfaces, accent, and legible label colors.
  */
-export const readViewportGizmoStyle = ({
+const resolveViewportGizmoStyle = ({
   container,
   colorScheme,
   isHighContrast,
@@ -93,3 +94,13 @@ export const readViewportGizmoStyle = ({
     planeTiles: { x: planeTile('x'), y: planeTile('y'), z: planeTile('z') },
   };
 };
+
+/**
+ * Read the gizmo's display colors from the host's tokens, through a 1×1 2D canvas, timed as a viewer 2D context.
+ *
+ * @param input - The container whose tokens apply, its color scheme, contrast preference and accent.
+ * @returns The resolved style.
+ * @internal
+ */
+export const readViewportGizmoStyle = (input: Parameters<typeof resolveViewportGizmoStyle>[0]): ViewportGizmoStyle =>
+  timeViewerCanvas2d('gizmo.style', () => resolveViewportGizmoStyle(input));

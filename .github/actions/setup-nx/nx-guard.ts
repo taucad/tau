@@ -12,7 +12,8 @@
  *
  * 3. Nx talks to the remote cache through a relay on 127.0.0.1 that this guard runs for the command's lifetime, so Nx
  *    only ever sees answers it accepts (GET 200/404, PUT 200/403/409) and a cache fault costs a miss, not a rerun:
- *    - an entry over the Workers request body limit is not sent (the edge would answer 413 or reset the upload);
+ *    - an entry over the edge request body limit (100 MB on workers.dev; the edge answers 413 or resets the upload
+ *      before the Worker runs) is written through the Worker's multipart routes in 64 MiB parts instead;
  *    - after the first PUT refused with 403 (a read token, as on pull requests) no further entry is uploaded;
  *    - an unreachable server, a timeout or an unexpected status is a GET miss or a refused PUT.
  *    The rerun in 2 stays as the fallback if the relay itself fails. A nested Nx call reuses its parent's relay.
@@ -87,12 +88,15 @@ const runOnceMoreOnSegfault = async (env: NodeJS.ProcessEnv, scan: boolean): Pro
   return run(env, scan);
 };
 
-// Cloudflare refuses request bodies over 100 MB on the workers.dev route; stay clear of it.
-const maxEntryBytes = 90 * 1024 * 1024;
+// Cloudflare refuses request bodies over 100 MB on the workers.dev route, so larger entries go in parts.
+const singleRequestBytes = 90 * 1024 * 1024;
+const partBytes = 64 * 1024 * 1024;
+// The relay holds an entry in memory; past this it is not uploaded at all.
+const maxEntryBytes = 2 * 1024 * 1024 * 1024;
 const relayHost = '127.0.0.1';
 const cachePath = /^\/v1\/cache\/[\dA-Za-z]{1,128}$/;
 
-type Tally = Record<'hits' | 'misses' | 'stored' | 'present' | 'oversize' | 'refused' | 'faults', number>;
+type Tally = Record<'hits' | 'misses' | 'stored' | 'multipart' | 'present' | 'oversize' | 'refused' | 'faults', number>;
 
 const readBody = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> => {
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
@@ -112,7 +116,7 @@ const readBody = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffe
 };
 
 const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: Tally; close: () => void }> => {
-  const tally: Tally = { hits: 0, misses: 0, stored: 0, present: 0, oversize: 0, refused: 0, faults: 0 };
+  const tally: Tally = { hits: 0, misses: 0, stored: 0, multipart: 0, present: 0, oversize: 0, refused: 0, faults: 0 };
   let writesRefused = false;
   const base = upstream.replace(/\/+$/, '');
 
@@ -122,7 +126,11 @@ const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: 
   };
 
   /** `requestTimeout` is in milliseconds. */
-  const forward = async (request: IncomingMessage, init: RequestInit, requestTimeout: number): Promise<Response> => {
+  const forward = async (
+    request: IncomingMessage,
+    path: string,
+    { requestTimeout, ...init }: RequestInit & { requestTimeout: number },
+  ): Promise<Response> => {
     const headers = new Headers();
     if (request.headers.authorization) {
       headers.set('authorization', request.headers.authorization);
@@ -130,12 +138,83 @@ const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: 
     for (const [name, value] of new Headers(init.headers ?? {})) {
       headers.set(name, value);
     }
-    return fetch(`${base}${request.url ?? ''}`, { ...init, headers, signal: AbortSignal.timeout(requestTimeout) });
+    return fetch(`${base}${path}`, { ...init, headers, signal: AbortSignal.timeout(requestTimeout) });
   };
 
-  const handleGet = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+  /** Writes one entry through the Worker's multipart routes; returns the status Nx gets. */
+  const putInParts = async (request: IncomingMessage, path: string, body: Uint8Array<ArrayBuffer>): Promise<number> => {
+    const created = await forward(request, `${path}/multipart`, { method: 'POST', requestTimeout: 60_000 });
+    if (created.status !== 200) {
+      await created.arrayBuffer();
+      if (created.status === 409) {
+        tally.present += 1;
+        return 409;
+      }
+      if (created.status === 403) {
+        writesRefused = true;
+        tally.refused += 1;
+        return 403;
+      }
+      tally.faults += 1;
+      return 403;
+    }
+    const { uploadId } = (await created.json()) as { uploadId?: unknown };
+    if (typeof uploadId !== 'string') {
+      tally.faults += 1;
+      return 403;
+    }
     try {
-      const reply = await forward(request, { method: 'GET' }, 120_000);
+      const offsets = Array.from({ length: Math.ceil(body.byteLength / partBytes) }, (_, index) => index * partBytes);
+      const parts = await Promise.all(
+        offsets.map(async (offset, index) => {
+          const reply = await forward(request, `${path}/multipart/${index + 1}`, {
+            method: 'PUT',
+            body: body.subarray(offset, offset + partBytes),
+            headers: { 'content-type': 'application/octet-stream', 'x-upload-id': uploadId },
+            requestTimeout: 300_000,
+          });
+          if (reply.status !== 200) {
+            throw new Error(`part ${index + 1}: ${reply.status}`);
+          }
+          return (await reply.json()) as { partNumber: number; etag: string };
+        }),
+      );
+      const done = await forward(request, `${path}/multipart/complete`, {
+        method: 'POST',
+        body: JSON.stringify({ uploadId, parts }),
+        headers: { 'content-type': 'application/json' },
+        requestTimeout: 120_000,
+      });
+      await done.arrayBuffer();
+      if (done.status === 200) {
+        tally.stored += 1;
+        tally.multipart += 1;
+        return 200;
+      }
+      if (done.status === 409) {
+        tally.present += 1;
+        return 409;
+      }
+      throw new Error(`complete: ${done.status}`);
+    } catch {
+      tally.faults += 1;
+      try {
+        const aborted = await forward(request, `${path}/multipart`, {
+          method: 'DELETE',
+          headers: { 'x-upload-id': uploadId },
+          requestTimeout: 30_000,
+        });
+        await aborted.arrayBuffer();
+      } catch {
+        // R2 drops an incomplete upload on its own; the bucket lifecycle aborts it after a day.
+      }
+      return 403;
+    }
+  };
+
+  const handleGet = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {
+    try {
+      const reply = await forward(request, path, { method: 'GET', requestTimeout: 300_000 });
       if (reply.status === 200) {
         // Buffered, so a dropped download is a miss rather than a truncated entry.
         const body = new Uint8Array(await reply.arrayBuffer());
@@ -154,7 +233,7 @@ const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: 
     answer(response, 404);
   };
 
-  const handlePut = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+  const handlePut = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {
     const declared = Number(request.headers['content-length'] ?? Number.NaN);
     const body = await readBody(request);
     if (writesRefused) {
@@ -162,17 +241,28 @@ const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: 
       answer(response, 403);
       return;
     }
-    if (Number.isNaN(declared) ? body.byteLength > maxEntryBytes : declared > maxEntryBytes) {
+    const size = Number.isNaN(declared) ? body.byteLength : Math.max(declared, body.byteLength);
+    if (size > maxEntryBytes) {
       tally.oversize += 1;
       answer(response, 403);
       return;
     }
+    if (size > singleRequestBytes) {
+      try {
+        answer(response, await putInParts(request, path, body));
+      } catch {
+        tally.faults += 1;
+        answer(response, 403);
+      }
+      return;
+    }
     try {
-      const reply = await forward(
-        request,
-        { method: 'PUT', body, headers: { 'content-type': 'application/octet-stream' } },
-        300_000,
-      );
+      const reply = await forward(request, path, {
+        method: 'PUT',
+        body,
+        headers: { 'content-type': 'application/octet-stream' },
+        requestTimeout: 300_000,
+      });
       await reply.arrayBuffer();
       if (reply.status === 200) {
         tally.stored += 1;
@@ -203,9 +293,9 @@ const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: 
       if (!cachePath.test(path)) {
         answer(response, 404);
       } else if (request.method === 'GET') {
-        await handleGet(request, response);
+        await handleGet(request, path, response);
       } else if (request.method === 'PUT') {
-        await handlePut(request, response);
+        await handlePut(request, path, response);
       } else {
         answer(response, 405);
       }

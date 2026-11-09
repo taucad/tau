@@ -142,7 +142,8 @@ export const picogkOccurrenceSchema = z
 
 /**
  * Adaptive display meshing for one build: OpenVDB adaptivity in (0, 1) and its relax pass. The host sends it
- * only above 0, and a worker that applied it echoes it in the build result.
+ * only above 0, always with `relax: false`, and a worker that applied it echoes it in the build result. `relax`
+ * stays on the wire so published worker layers keep their protocol; it can go with the next layer rebuild.
  */
 export const picogkMeshingSchema = z.object({ adaptivity: z.number().gt(0).lt(1), relax: z.boolean() }).strict();
 

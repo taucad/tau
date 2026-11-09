@@ -24,6 +24,7 @@ export const cta: (label?: string, path?: string, placement?: string) => ReactNo
     className='button primary'
     href={path === '/download/' ? path : appHref(path as `/${string}`)}
     isAppLink={path !== '/download/'}
+    data-open-app={path === '/' ? '' : undefined}
     data-event='cta'
     data-placement={placement}
     data-host-download={path === '/download/' ? 'page' : undefined}
@@ -466,6 +467,7 @@ export const planCards = (compact = false): React.JSX.Element => (
             className={`button${plan.id === 'pro' ? ' primary' : ''}`}
             href={appHref(plan.cta[1] as `/${string}`)}
             isAppLink
+            data-open-app={plan.cta[1] === '/' ? '' : undefined}
             data-event='cta'
             data-placement={`pricing-${plan.id}`}
           >

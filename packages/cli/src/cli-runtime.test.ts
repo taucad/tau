@@ -87,7 +87,6 @@ describe('createCliRuntime', () => {
           '@taucad/camera',
           '@taucad/filesystem',
           '@taucad/host',
-          '@taucad/jobs-solvers',
           // The worker launcher `tau serve` brokers native kernels with, not a runtime plugin.
           '@taucad/native-process-core',
           '@taucad/parameters',

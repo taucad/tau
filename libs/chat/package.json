@@ -81,6 +81,16 @@
       "import": "./src/schemas/tools/shell.tool.schema.ts",
       "default": "./src/schemas/tools/shell.tool.schema.ts"
     },
+    "./schemas/tools/web-search": {
+      "types": "./src/schemas/tools/web-search.tool.schema.ts",
+      "import": "./src/schemas/tools/web-search.tool.schema.ts",
+      "default": "./src/schemas/tools/web-search.tool.schema.ts"
+    },
+    "./schemas/tools/web-browser": {
+      "types": "./src/schemas/tools/web-browser.tool.schema.ts",
+      "import": "./src/schemas/tools/web-browser.tool.schema.ts",
+      "default": "./src/schemas/tools/web-browser.tool.schema.ts"
+    },
     "./schemas/rpc": {
       "types": "./src/schemas/rpc.schema.ts",
       "import": "./src/schemas/rpc.schema.ts",

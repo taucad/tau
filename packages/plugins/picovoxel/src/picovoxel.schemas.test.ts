@@ -107,11 +107,10 @@ describe('lane schemas', () => {
   it('should render in the fast lane by default', () => {
     // The installed PicoVoxel meshes adaptively, so an unset adaptivity resolves to the Balanced preview
     // default on the fast lane and to the uniform mesh on the exact lane.
-    expect(picovoxelRenderSchema.parse({})).toEqual({ lane: 'fast', meshAdaptivity: 0.25, meshRelax: false });
+    expect(picovoxelRenderSchema.parse({})).toEqual({ lane: 'fast', meshAdaptivity: 0.25 });
     expect(picovoxelRenderSchema.parse({ lane: 'exact' })).toEqual({
       lane: 'exact',
       meshAdaptivity: 0,
-      meshRelax: false,
     });
   });
 
@@ -121,7 +120,6 @@ describe('lane schemas', () => {
     expect(picovoxelExportSchemas.stl.parse({})).toEqual({
       lane: 'exact',
       meshAdaptivity: 0,
-      meshRelax: false,
       unit: 'mm',
       scale: 1,
       offset: [0, 0, 0],
@@ -130,19 +128,18 @@ describe('lane schemas', () => {
 
   it('should resolve an unset view adaptivity, keep an explicit one and mesh every export uniformly unless it asks', () => {
     expect(picovoxelRenderSchema.parse({ lane: 'exact', meshAdaptivity: 0.5 })).toMatchObject({ meshAdaptivity: 0.5 });
-    expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
+    // The removed meshRelax option is dropped from older saved options, so relax stays off.
+    expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toEqual({
+      lane: 'fast',
       meshAdaptivity: 0.5,
-      meshRelax: true,
     });
     for (const meshAdaptivity of [-0.1, 1]) {
       expect(picovoxelRenderSchema.safeParse({ meshAdaptivity }).success).toBe(false);
     }
     for (const schema of Object.values(picovoxelExportSchemas)) {
-      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
-      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
-        meshAdaptivity: 0.5,
-        meshRelax: true,
-      });
+      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0 });
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({ meshAdaptivity: 0.5 });
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).not.toHaveProperty('meshRelax');
       for (const meshAdaptivity of [-0.1, 1]) {
         expect(schema.safeParse({ meshAdaptivity }).success).toBe(false);
       }
@@ -175,7 +172,6 @@ describe('region schema', () => {
       lane: 'fast',
       region,
       meshAdaptivity: 0.25,
-      meshRelax: false,
     });
     for (const schema of Object.values(picovoxelExportSchemas)) {
       expect(schema.parse({ region })).toMatchObject({ lane: 'exact', region });

@@ -37,6 +37,8 @@ export const initializeDesktopErrorReporting = (channel: 'staging' | 'production
     Sentry.init({
       dsn: tauSentryDsn,
       environment: automated ? `${channel}-e2e` : channel,
+      /* The release workflow's one name per tag, which desktop-promote gives its commits; never `Tau-Staging@<version>`. */
+      ...(tauSentryRelease ? { release: tauSentryRelease } : {}),
       sendDefaultPii: false,
       beforeSend: scrubDesktopEvent,
       /* Renderer events arrive over IPC from the preload's own hookup (SB11): no privileged `sentry-ipc://` scheme

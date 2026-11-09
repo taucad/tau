@@ -6,12 +6,12 @@ Run from the workspace root with pnpm and the actual Nx project name:
 
 ```bash
 pnpm nx show projects
-pnpm nx show project <project> # Owners, targets and configuration
+pnpm nx show project <project>
 pnpm nx lint <project> # oxlint then ESLint
-pnpm nx lint <project> --files=<path> # Focused lint
+pnpm nx lint <project> --files=<path>
 pnpm nx test <project> --watch=false
 pnpm nx typecheck <project>
-pnpm nx build <project> # When the project has this target
+pnpm nx build <project>
 pnpm nx affected -t lint test build typecheck
 pnpm docs:validate # Policy/research frontmatter
 pnpm nx run scripts:validate-agent-config
@@ -79,7 +79,7 @@ Read the owners for each touched concern:
 
 Use relevant shared skills and required helpers for authorized work. Model invocation is on by default; loading grants no publication, external messaging, destructive action or expanded scope.
 
-Use `create-research`, `create-charter`, `superplan`, `work-charter`, `create-cloud-project` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers.
+Use `create-research`, `create-charter`, `superplan`, `work-charter`, `create-cloud-project` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers. Land `main` PRs only via merge-queue auto-merge; never merge directly or bypass it.
 
 ## Repository and evidence boundaries
 

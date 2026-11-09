@@ -24,7 +24,7 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['openai-gpt-5.5', adapter],
     ['anthropic-claude-opus-5', adapter],
     ['together-glm-5.2', adapter],
-    ['morph-minimax-m2.7', adapter],
+    ['morph-kimi-k3.1-pro', adapter],
     ['google-gemini-3.5-flash', adapter],
     ['xai-grok-4.6', adapter],
   ]),
@@ -43,11 +43,11 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(27);
-    expect(new Set(billableModelRouteIds).size).toBe(27);
+    expect(billableModelRouteIds).toHaveLength(29);
+    expect(new Set(billableModelRouteIds).size).toBe(29);
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
-    expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
+    expect(billableModelRouteIds).toContain('morph-kimi-k3.1-pro');
   });
 
   it('should qualify a configured provider without a manual account map', () => {
@@ -390,10 +390,10 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
   });
 
-  it('should qualify Morph as uncached input plus output within its combined context', () => {
+  it('should qualify Morph as uncached input, cache read and output within its combined context', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'morph-minimax-m2.7',
+        model: 'morph-kimi-k3.1-pro',
         messages: [{ role: 'user', content: 'hello' }],
         stream: true,
         max_tokens: 512,
@@ -402,7 +402,8 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
 
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 4268n },
+      { dimension: 'uncached_input', tier: null, quantity: 4269n },
+      { dimension: 'cache_read', tier: null, quantity: 4269n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
   });

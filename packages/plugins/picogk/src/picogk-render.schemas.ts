@@ -25,10 +25,6 @@ export const picogkRenderSchema = z.object({
     .describe(
       'OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels: 0 is the uniform marching-cubes mesh; higher values merge flat regions into fewer, larger triangles. It changes only the display mesh, never the voxels; an export meshes at its own meshAdaptivity, 0 unless it sets one. Unset, a view meshes at 0.25 (Balanced) where the PicoGK runtime meshes adaptively and uniformly where it does not; the tessellation report says which. An explicit value above 0 on a runtime that cannot mesh adaptively is refused.',
     ),
-  meshRelax: z
-    .boolean()
-    .default(false)
-    .describe('Relax disoriented triangles of an adaptive mesh (meshAdaptivity above 0). Default false.'),
 });
 
 /** PicoGK view construction options. @public */
@@ -44,10 +40,6 @@ const exportMeshingSchema = z.object({
     .describe(
       'OpenVDB mesh adaptivity in [0, 1) for the exported mesh. 0 (default) is the uniform mesh; higher values merge flat regions into fewer, larger triangles, so the file is lighter and no longer the exact marching-cubes surface. A runtime that cannot mesh adaptively refuses a value above 0.',
     ),
-  meshRelax: z
-    .boolean()
-    .default(false)
-    .describe('Relax disoriented triangles of an adaptive export (meshAdaptivity above 0). Default false.'),
 });
 
 /** Direct export formats implemented by the PicoGK kernel; each meshes uniformly by default. @public */

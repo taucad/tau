@@ -16,6 +16,12 @@ import {
   isAptLockRefusal,
   waitForScheduledAptCompletion,
 } from './qualification-linux.mjs';
+import {
+  assertConsumerAgentHost,
+  handleConsumerReply,
+  linuxAccount,
+  linuxConsumerEnvironment,
+} from './qualification-linux-consumer-protocol.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
@@ -220,7 +226,66 @@ const main = async (): Promise<void> => {
     await rm(root, { recursive: true, force: true });
   }
 };
+/** The clean-host consumer agent's boundary: an allowlisted environment without credentials, and no service elsewhere. */
+const consumerBoundary = (): void => {
+  const environment = linuxConsumerEnvironment({ name: 'consumer', uid: 1001, home: '/home/consumer' });
+  assert.deepEqual(Object.keys(environment).toSorted(), [
+    'DBUS_SESSION_BUS_ADDRESS',
+    'DISPLAY',
+    'HOME',
+    'LANG',
+    'LOGNAME',
+    'PATH',
+    'PLAYWRIGHT_BROWSERS_PATH',
+    'TAU_QUALIFICATION_DISPOSABLE_HOST',
+    'USER',
+    'XAUTHORITY',
+    'XDG_RUNTIME_DIR',
+    'XDG_SESSION_TYPE',
+  ]);
+  assert.equal(environment['XDG_RUNTIME_DIR'], '/run/user/1001');
+  assert.equal(environment['XAUTHORITY'], '/home/consumer/.Xauthority');
+  for (const name of ['root;id', '../consumer', 'Consumer', '', 'a'.repeat(33)]) {
+    assert.throws(() => linuxAccount(name), /Invalid consumer account name/u);
+  }
+  // Replies settle their own request; a malformed line fails the agent instead of throwing from the stream handler.
+  const settled: unknown[] = [];
+  const failures: Error[] = [];
+  const waiting = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>([
+    [1, { resolve: (value) => settled.push(value), reject: (error) => settled.push(error) }],
+    [2, { resolve: (value) => settled.push(value), reject: (error) => settled.push(error) }],
+  ]);
+  const context = { waiting, account: 'consumer', fail: (error: Error) => failures.push(error) };
+  handleConsumerReply('{"id":1,"ok":true,"result":42}', context);
+  handleConsumerReply('{"id":2,"ok":false,"error":"denied"}', context);
+  assert.equal(settled[0], 42);
+  assert.match(String(settled[1]), /Consumer consumer: denied/u);
+  assert.equal(failures.length, 0);
+  for (const line of ['not json', '{"id":3,"ok":true}', '{"id":"3","ok":false,"error":"x"}', '[]']) {
+    assert.doesNotThrow(() => {
+      handleConsumerReply(line, context);
+    });
+  }
+  assert.equal(failures.length, 4);
+  assert.match(failures[0]!.message, /malformed reply/u);
+  // Outside a disposable host, and never as root, the agent refuses to serve.
+  assert.doesNotThrow(() => {
+    assertConsumerAgentHost(1001, '1');
+  });
+  for (const [uid, disposable] of [
+    [0, '1'],
+    [undefined, '1'],
+    [1001, undefined],
+    [1001, '0'],
+  ] as const) {
+    assert.throws(() => {
+      assertConsumerAgentHost(uid, disposable);
+    }, /ordinary account on a disposable host/u);
+  }
+  console.log('PASS Linux clean-host consumer agent environment allowlist, account-name refusal and serve guard');
+};
 try {
+  consumerBoundary();
   await main();
 } catch (error) {
   console.error(error);

@@ -16,7 +16,11 @@ export const workspaceRoot = path.resolve(import.meta.dirname, '../../..');
 
 const pluginsRoot = path.join(workspaceRoot, 'packages/plugins');
 const definitionSymbol = Symbol.for('@taucad/runtime/plugin-definition');
-const capabilityKinds = ['kernels', 'middleware', 'bundlers', 'transcoders', 'jobs', 'machines'] as const;
+/**
+ * The capability kinds the derivation reads. A kind `PluginCapabilities` adds is refused by
+ * {@link deriveRuntimeVocabulary} until it is listed here and classified by the T33 contract test.
+ */
+export const capabilityKinds = ['kernels', 'middleware', 'bundlers', 'transcoders', 'jobs', 'machines'] as const;
 type CapabilityKind = (typeof capabilityKinds)[number];
 
 /** What one registry capability contributes to the vocabularies. */
@@ -158,11 +162,32 @@ const unionLiterals = (file: string, name: string): string[] => {
 };
 
 /**
+ * The capability kinds `PluginCapabilities` declares, read from its source (the kinds exist as a type alone).
+ *
+ * @returns The kinds in declaration order.
+ */
+export const declaredCapabilityKinds = (): string[] => {
+  const file = 'packages/runtime/src/plugins/plugin.ts';
+  const text = read(file);
+  const start = text.indexOf('export type PluginCapabilities = {');
+  if (start === -1) {
+    throw new Error(`${file} no longer declares PluginCapabilities`);
+  }
+  const body = text.slice(start, text.indexOf('\n};', start));
+  return [...body.matchAll(/^\s+readonly (?<kind>\w+)\??:/gmu)].map(({ groups }) => groups?.['kind'] ?? '');
+};
+
+/**
  * Derive every registry-generated runtime vocabulary.
  *
  * @returns The vocabularies, sorted.
+ * @throws Error when `PluginCapabilities` declares a capability kind the derivation does not read.
  */
 export const deriveRuntimeVocabulary = async (): Promise<RuntimeRegistryVocabulary> => {
+  const unread = declaredCapabilityKinds().filter((kind) => !(capabilityKinds as readonly string[]).includes(kind));
+  if (unread.length > 0) {
+    throw new Error(`PluginCapabilities declares capability kinds no vocabulary reads: ${unread.join(', ')}`);
+  }
   const capabilities = await registryCapabilities();
   const of = (kind: CapabilityKind): readonly Capability[] => capabilities.filter((entry) => entry.kind === kind);
   const kernels = of('kernels');

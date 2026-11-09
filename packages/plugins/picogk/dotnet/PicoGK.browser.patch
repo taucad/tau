@@ -17,25 +17,28 @@
      internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
      {
          // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
-@@ -47,6 +50,23 @@
+@@ -47,6 +50,26 @@
      {
          ArgumentNullException.ThrowIfNull(implicitFunction);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +#if PICOGK_BROWSER
-+        // A registered tape crosses the boundary once as data and then fills on every thread, while a
-+        // field the generator could not lift exactly keeps the per-voxel callback. Only the ordinary
-+        // upstream-compatible tape operations are used, never the narrow-band-changing fast ones.
++        // A tape crosses the boundary once as data and then fills on every thread: the generator's
++        // registration where there is one, else one lifted from the method's own IL and admitted only
++        // after a bit check, else the per-voxel callback. Only the ordinary upstream-compatible tape
++        // operations are used, never the narrow-band-changing fast ones.
 +        if (intersect)
 +        {
-+            if (!SdfTapeRegistry.TryIntersect(lib.hThis, hThis, implicitFunction))
-+                BrowserCallbacks.Intersect(lib.hThis, hThis, implicitFunction);
++            BrowserImplicit.Intersect(lib.hThis, hThis, implicitFunction);
 +        }
-+        else
++        else if (bIsEmpty())
 +        {
 +            // The tape render fills a fresh grid, which is the only tape render the browser archive
 +            // exports; composing an implicit into occupied voxels stays on the callback.
-+            if (!bIsEmpty() || !SdfTapeRegistry.TryRender(lib.hThis, hThis, in bounds, implicitFunction))
-+                BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
++            BrowserImplicit.Render(lib.hThis, hThis, in bounds, implicitFunction);
++        }
++        else
++        {
++            BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
 +        }
 +#else
          ExceptionDispatchInfo? failure = null;

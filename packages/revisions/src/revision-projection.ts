@@ -15,7 +15,8 @@ import type { RevisionStatusProjection } from '#project-revisions.types.js';
 /**
  * The versioned paths one content-change event touches inside one project.
  *
- * One call per bus event, whatever its path count: the root mints one
+ * One call per bus event, whatever its path count — a changeset envelope
+ * included: the root mints one
  * `generation` per `changed`, and the checkout compares that counter across a
  * mint, so a seam that split an event into several would make a write that
  * landed during a mint invisible (F9, F4). Paths are returned
@@ -36,6 +37,11 @@ export const versionedChangePaths = (
   projectRoot: string,
   policy: PathPolicy,
 ): readonly string[] => {
+  if (event.type === 'changeSet') {
+    /* One changeset is one event here too (I4): its facts' paths, once each. */
+    const paths = new Set(event.entries.flatMap((entry) => versionedChangePaths(entry, projectRoot, policy)));
+    return paths.has('') ? [''] : [...paths];
+  }
   if (event.type === 'backendChanged') {
     return [''];
   }

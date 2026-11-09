@@ -206,92 +206,40 @@
   "uncovered": [],
   "excluded": [
     {
-      "path": "simulation/import_async",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/import_foreign",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_glb",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_glb_no_assign",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_gltf_embedded",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_gltf_with_bin",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_mesh_clone",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_obj_with_mtl",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_obj_with_mtl_units",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_stl",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/import_transform",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/multiple-foreign-imports-all-render",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/named_views_hide_imported",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
       "path": "simulation/nested_windows_main_kcl",
-      "reason": "imports a Windows-style backslash path, which the host filesystem rejects"
+      "reason": "stays excluded: imports a Windows-style backslash path (nested\\foo\\bar\\main.kcl), which the host filesystem rejects by design"
     },
     {
       "path": "examples/prelude-clone-9",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/prelude-clone-11",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/solid-appearance-9",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-translate-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-translate-2",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-rotate-3",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-scale-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-hide-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     }
   ],
   "fixtures": [
@@ -360,7 +308,7 @@
         "area": 144409.80323955856
       },
       "offline": {
-        "solids": 49,
+        "solids": 50,
         "volume": 121950.778,
         "area": 144435.1193
       }
@@ -760,8 +708,8 @@
       },
       "offline": {
         "solids": 18,
-        "volume": 462544.8397,
-        "area": 103969.5758
+        "volume": 463216.2864,
+        "area": 104006.3569
       }
     },
     {
@@ -2086,8 +2034,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 3639.528207,
-        "area": 2350.127448
+        "volume": 3665.343012,
+        "area": 2330.931496
       }
     },
     {
@@ -2673,8 +2621,8 @@
       },
       "offline": {
         "solids": 6,
-        "volume": 10969.84988,
-        "area": 9666.179161
+        "volume": 11044.72092,
+        "area": 9648.149603
       }
     },
     {
@@ -4218,8 +4166,8 @@
       },
       "offline": {
         "solids": 5,
-        "volume": 243249992.4,
-        "area": 80069374.37
+        "volume": 667807824.4,
+        "area": 105485812.2
       }
     },
     {
@@ -4298,7 +4246,9 @@
         "area": 199.82450477051827
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 29.83243511,
+        "area": 199.8306256
       }
     },
     {
@@ -4350,7 +4300,9 @@
         "area": 104.018373162873
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.125,
+        "area": 104.0183712
       }
     },
     {
@@ -4373,7 +4325,9 @@
         "area": 104.018373162873
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.125,
+        "area": 104.0183712
       }
     },
     {
@@ -4499,7 +4453,9 @@
         "area": 59.45246310368191
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 6,
+        "volume": 0.0,
+        "area": 93.74484141
       }
     },
     {
@@ -4775,7 +4731,9 @@
         "area": 200.0000074531272
       },
       "offline": {
-        "gap": "argument: The input argument of `appearance` requires one or more `Solid`s or a value with type `Imp"
+        "solids": 2,
+        "volume": 112.0,
+        "area": 200.0
       }
     },
     {
@@ -4945,8 +4903,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 184.3526266,
-        "area": 257.9112003
+        "volume": 131.3821902,
+        "area": 222.2347374
       }
     },
     {
@@ -4974,8 +4932,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 184.3526266,
-        "area": 257.9112003
+        "volume": 131.3821902,
+        "area": 222.2347374
       }
     },
     {
@@ -5169,7 +5127,9 @@
         "area": 26.55635023529612
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 6.156854249,
+        "area": 26.55634919
       }
     },
     {
@@ -5244,7 +5204,9 @@
         "area": 7.953293033706888
       },
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 2,
+        "volume": 1.196349541,
+        "area": 7.963495408
       }
     },
     {
@@ -5529,7 +5491,9 @@
         "area": 9301.034241962823
       },
       "offline": {
-        "gap": "engine: [object WebAssembly.Exception]"
+        "solids": 5,
+        "volume": 4528.75219,
+        "area": 9301.349511
       }
     },
     {
@@ -5542,7 +5506,9 @@
         "area": 287.393831916824
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdgeReferences resulted in errors: No edge matches the edge reference"
+        "solids": 1,
+        "volume": 303.0871644,
+        "area": 285.6842516
       }
     },
     {
@@ -5617,7 +5583,9 @@
         "area": 105.44365082587603
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.339048623,
+        "area": 105.500414
       }
     },
     {
@@ -5640,7 +5608,9 @@
         "area": 105.44365082587603
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.339048623,
+        "area": 105.500414
       }
     },
     {
@@ -5771,7 +5741,9 @@
         "area": 940.1672868989408
       },
       "offline": {
-        "gap": "engine: command EntityMakeHelixFromEdge resulted in errors: Unknown edge undefined"
+        "solids": 1,
+        "volume": 1486.668,
+        "area": 940.1672
       }
     },
     {
@@ -5969,8 +5941,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 16618.88353,
-        "area": 12758.98713
+        "volume": 15858.26408,
+        "area": 11906.88134
       }
     },
     {
@@ -6019,6 +5991,44 @@
       }
     },
     {
+      "path": "simulation/import_async",
+      "upstream": "rust/kcl-lib/tests/import_async",
+      "functions": [
+        "acos",
+        "arc",
+        "asin",
+        "atan",
+        "close",
+        "cos",
+        "involuteCircular",
+        "line",
+        "loft",
+        "offsetPlane",
+        "patternCircular2d",
+        "polar",
+        "segEndX",
+        "segEndY",
+        "sin",
+        "startProfile",
+        "startSketchOn",
+        "subtract2d",
+        "tan",
+        "translate",
+        "xLine",
+        "yLine"
+      ],
+      "kclVersion": "1.0",
+      "zoo": {
+        "volume": 8701.953493954936,
+        "area": 4134.0832415657505
+      },
+      "offline": {
+        "solids": 2,
+        "volume": 6647.142436,
+        "area": 1818.075587
+      }
+    },
+    {
       "path": "simulation/import_constant",
       "upstream": "rust/kcl-lib/tests/import_constant",
       "functions": [],
@@ -6049,6 +6059,16 @@
       }
     },
     {
+      "path": "simulation/import_foreign",
+      "upstream": "rust/kcl-lib/tests/import_foreign",
+      "functions": [],
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
       "path": "simulation/import_function_not_sketch",
       "upstream": "rust/kcl-lib/tests/import_function_not_sketch",
       "functions": ["close", "line", "revolve", "startProfile", "startSketchOn"],
@@ -6064,11 +6084,87 @@
       }
     },
     {
+      "path": "simulation/import_glb",
+      "upstream": "rust/kcl-lib/tests/import_glb",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_glb_no_assign",
+      "upstream": "rust/kcl-lib/tests/import_glb_no_assign",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
       "path": "simulation/import_glob",
       "upstream": "rust/kcl-lib/tests/import_glob",
       "functions": [],
       "offline": {
         "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_gltf_embedded",
+      "upstream": "rust/kcl-lib/tests/import_gltf_embedded",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_gltf_with_bin",
+      "upstream": "rust/kcl-lib/tests/import_gltf_with_bin",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_mesh_clone",
+      "upstream": "rust/kcl-lib/tests/import_mesh_clone",
+      "functions": ["appearance", "clone", "translate"],
+      "offline": {
+        "solids": 4,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_obj_with_mtl",
+      "upstream": "rust/kcl-lib/tests/import_obj_with_mtl",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_obj_with_mtl_units",
+      "upstream": "rust/kcl-lib/tests/import_obj_with_mtl_units",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
         "volume": 0.0,
         "area": 0.0
       }
@@ -6080,6 +6176,27 @@
       "kclVersion": "1.0",
       "offline": {
         "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_stl",
+      "upstream": "rust/kcl-lib/tests/import_stl",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_transform",
+      "upstream": "rust/kcl-lib/tests/import_transform",
+      "functions": ["rotate", "scale", "translate"],
+      "offline": {
+        "solids": 1,
         "volume": 0.0,
         "area": 0.0
       }
@@ -6190,8 +6307,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 26048.85093,
-        "area": 19373.74247
+        "volume": 26579.88291,
+        "area": 19636.4596
       }
     },
     {
@@ -6570,7 +6687,7 @@
         "area": 74083.34756934209
       },
       "offline": {
-        "solids": 2,
+        "solids": 4,
         "volume": 365805.1423,
         "area": 73441.37961
       }
@@ -6599,7 +6716,7 @@
         "area": 425.0045553709329
       },
       "offline": {
-        "solids": 2,
+        "solids": 3,
         "volume": 234.605479,
         "area": 425.0070237
       }
@@ -6617,6 +6734,20 @@
         "solids": 3,
         "volume": 4800.0,
         "area": 3360.0
+      }
+    },
+    {
+      "path": "simulation/multiple-foreign-imports-all-render",
+      "upstream": "rust/kcl-lib/tests/multiple-foreign-imports-all-render",
+      "functions": ["appearance", "clone", "translate"],
+      "zoo": {
+        "volume": 3000000000.0,
+        "area": 18000000.0
+      },
+      "offline": {
+        "solids": 3,
+        "volume": 3000000000.0,
+        "area": 18000000.0
       }
     },
     {
@@ -6738,6 +6869,21 @@
         "solids": 1,
         "volume": 1000.0,
         "area": 600.0
+      }
+    },
+    {
+      "path": "simulation/named_views_hide_imported",
+      "upstream": "rust/kcl-lib/tests/named_views_hide_imported",
+      "functions": ["coincident", "extrude", "hide", "line", "named", "oriented", "region"],
+      "kclVersion": "2.0",
+      "zoo": {
+        "volume": 125000000.0,
+        "area": 1500000.0
+      },
+      "offline": {
+        "solids": 1,
+        "volume": 125000000.0,
+        "area": 1500000.0
       }
     },
     {
@@ -7148,8 +7294,8 @@
       },
       "offline": {
         "solids": 100,
-        "volume": 7195872614.0,
-        "area": 113218718.2
+        "volume": 116202062.8,
+        "area": 24171220.14
       }
     },
     {
@@ -7511,9 +7657,9 @@
         "area": 22.02414154339749
       },
       "offline": {
-        "solids": 0,
-        "volume": 0.0,
-        "area": 0.0
+        "solids": 1,
+        "volume": 5.322297095,
+        "area": 22.02191925
       }
     },
     {
@@ -7556,7 +7702,9 @@
         "area": 3704.7582509730505
       },
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 12587.0055,
+        "area": 3705.719631
       }
     },
     {
@@ -8018,7 +8166,9 @@
         "area": 211317.99854558153
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8045,7 +8195,9 @@
         "area": 211317.99854558153
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8372,7 +8524,9 @@
         "area": 211317.9984249882
       },
       "offline": {
-        "gap": "engine: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8398,7 +8552,9 @@
         "area": 211317.9984249882
       },
       "offline": {
-        "gap": "engine: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8437,7 +8593,9 @@
         "area": 252.75696079951615
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 63.93987322,
+        "area": 252.7720169
       }
     },
     {
@@ -9221,7 +9379,9 @@
         "area": 115.19538975335308
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 115.2000439
       }
     },
     {
@@ -9234,7 +9394,9 @@
         "area": 98.43875113801914
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 98.44340313
       }
     },
     {
@@ -9247,7 +9409,9 @@
         "area": 133.833418176188
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 133.8504295
       }
     },
     {
@@ -9260,7 +9424,9 @@
         "area": 102.5343431138026
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -9273,7 +9439,9 @@
         "area": 172.55707777596996
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 172.5740887
       }
     },
     {
@@ -9286,7 +9454,9 @@
         "area": 133.833418176188
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity undefined"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 133.8504295
       }
     },
     {
@@ -9299,7 +9469,9 @@
         "area": 102.5343431138026
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -9318,7 +9490,7 @@
       ],
       "kclVersion": "2.0",
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Unknown entity <id>"
+        "gap": "engine: command ExtrudeToReference resulted in errors: The edge extrudes parallel to the reference p"
       }
     },
     {
@@ -9345,7 +9517,9 @@
         "area": 12.513541133074568
       },
       "offline": {
-        "gap": "engine: command EntityMirrorAcross resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 0.7608582859,
+        "area": 12.51513047
       }
     },
     {
@@ -9358,8 +9532,8 @@
       },
       "offline": {
         "solids": 2,
-        "volume": 6283.185307,
-        "area": 3150.326076
+        "volume": 7068.583471,
+        "area": 3303.038997
       }
     },
     {
@@ -9592,8 +9766,8 @@
       },
       "offline": {
         "solids": 11,
-        "volume": 21890014.68,
-        "area": 7900167.636
+        "volume": 31518246.05,
+        "area": 9077398.086
       }
     },
     {
@@ -10402,8 +10576,8 @@
       "functions": ["helical"],
       "offline": {
         "solids": 1,
-        "volume": 2399.26712,
-        "area": 1492.666237
+        "volume": 2471.504058,
+        "area": 1504.6169
       }
     },
     {
@@ -10425,8 +10599,8 @@
       ],
       "offline": {
         "solids": 1,
-        "volume": 2117.243045,
-        "area": 1579.828137
+        "volume": 2189.479982,
+        "area": 1591.778799
       }
     },
     {
@@ -10435,8 +10609,8 @@
       "functions": ["spur"],
       "offline": {
         "solids": 1,
-        "volume": 4933.362558,
-        "area": 2611.656564
+        "volume": 4962.722747,
+        "area": 2616.700127
       }
     },
     {
@@ -10445,8 +10619,8 @@
       "functions": ["herringbone"],
       "offline": {
         "solids": 1,
-        "volume": 1711.191696,
-        "area": 1261.711548
+        "volume": 1756.689633,
+        "area": 1275.328901
       }
     },
     {
@@ -10455,8 +10629,8 @@
       "functions": ["ring"],
       "offline": {
         "solids": 1,
-        "volume": 3889.267268,
-        "area": 4465.498307
+        "volume": 3840.363575,
+        "area": 4429.277188
       }
     },
     {
@@ -11223,8 +11397,8 @@
       "functions": ["circle", "deleteFace", "extrude", "faceId", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 262.7643803,
-        "area": 233.5968917
+        "volume": 0.0,
+        "area": 181.0440156
       }
     },
     {
@@ -11242,7 +11416,9 @@
       "upstream": "rust/kcl-lib/std/prelude.kcl#edgeId",
       "functions": ["edgeId", "extrude", "fillet", "rectangle", "startSketchOn"],
       "offline": {
-        "gap": "semantic: Engine didn't find any edges near this point"
+        "solids": 1,
+        "volume": 199.4634954,
+        "area": 277.7466807
       }
     },
     {
@@ -11515,7 +11691,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 6,
+        "volume": 3.25801972,
+        "area": 26.02765317
       }
     },
     {
@@ -11544,7 +11722,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 4,
+        "volume": 51.64213562,
+        "area": 157.7279221
       }
     },
     {
@@ -11552,7 +11732,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#extrude",
       "functions": ["appearance", "close", "extrude", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 6.156854249,
+        "area": 26.55634919
       }
     },
     {
@@ -11573,7 +11755,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 57.13274123,
+        "area": 130.2654825
       }
     },
     {
@@ -11623,7 +11807,7 @@
       "offline": {
         "solids": 3,
         "volume": 79.11104887,
-        "area": 198.6486564
+        "area": 197.7901947
       }
     },
     {
@@ -11631,7 +11815,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#extrude",
       "functions": ["circle", "extrude", "getOppositeEdge", "hide", "horizontal", "line", "region", "vertical"],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -11689,7 +11875,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -11697,7 +11885,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -11775,7 +11965,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["coincident", "line", "revolve", "translate"],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 873.5897228
       }
     },
     {
@@ -11793,7 +11985,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["line", "revolve"],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 167.3718178
       }
     },
     {
@@ -11889,8 +12083,8 @@
       "functions": ["blend", "coincident", "extrude", "getBoundedEdge", "line", "region"],
       "offline": {
         "solids": 3,
-        "volume": 22.44,
-        "area": 86.18679845
+        "volume": 0.0,
+        "area": 63.74679845
       }
     },
     {
@@ -11985,7 +12179,7 @@
       "offline": {
         "solids": 1,
         "volume": 0.0,
-        "area": 202063.9053
+        "area": 122063.9053
       }
     },
     {
@@ -11993,7 +12187,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#sweep",
       "functions": ["line", "startProfile", "startSketchOn", "sweep", "tangentialArc"],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 25234.28463
       }
     },
     {
@@ -12001,7 +12197,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#sweep",
       "functions": ["line", "startProfile", "startSketchOn", "sweep", "tangentialArc"],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 25234.28463
       }
     },
     {
@@ -12059,7 +12257,9 @@
         "tangent"
       ],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 112.6194684
       }
     },
     {
@@ -12081,7 +12281,9 @@
         "vertical"
       ],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 1705.76677,
+        "area": 1598.331201
       }
     },
     {
@@ -12149,7 +12351,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["line", "loft", "offsetPlane", "startProfile", "startSketchOn", "tangentialArc", "xLine"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 97.7173045
       }
     },
     {
@@ -12157,7 +12361,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["arc", "loft", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 51.89234586
       }
     },
     {
@@ -12185,7 +12391,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["arc", "coincident", "loft"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 52.26176034
       }
     },
     {
@@ -12454,8 +12662,8 @@
       ],
       "offline": {
         "solids": 1,
-        "volume": 4906.170695,
-        "area": 2610.707792
+        "volume": 4953.00739,
+        "area": 2626.186316
       }
     },
     {
@@ -12653,7 +12861,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#hyperbolic",
       "functions": ["close", "hyperbolic", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command ExtendPath resulted in errors: [object WebAssembly.Exception]"
+        "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
       }
     },
     {
@@ -12816,7 +13026,9 @@
         "verticalDistance"
       ],
       "offline": {
-        "gap": "type: Tag `seg01` refers to a sketch edge, but this operation requires a face tag"
+        "solids": 1,
+        "volume": 4406881.426,
+        "area": 339635.5137
       }
     },
     {
@@ -12837,7 +13049,9 @@
         "verticalDistance"
       ],
       "offline": {
-        "gap": "type: Tag `seg01` refers to a sketch edge, but this operation requires a face tag"
+        "solids": 1,
+        "volume": 4411598.567,
+        "area": 340474.222
       }
     },
     {
@@ -12965,7 +13179,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#chamfer",
       "functions": ["chamfer", "close", "extrude", "getNextAdjacentEdge", "line", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 192.0,
+        "area": 439.3137085
       }
     },
     {
@@ -12985,7 +13201,7 @@
       "offline": {
         "solids": 1,
         "volume": 7040.0,
-        "area": 2270.842712
+        "area": 2262.842712
       }
     },
     {
@@ -13084,7 +13300,7 @@
         "translate"
       ],
       "offline": {
-        "solids": 1,
+        "solids": 2,
         "volume": 5.6875,
         "area": 25.0
       }
@@ -13125,8 +13341,8 @@
       "functions": ["close", "extrude", "line", "patternTransform", "pow", "startProfile", "startSketchOn"],
       "offline": {
         "solids": 25,
-        "volume": 9414406.31,
-        "area": 616286.9641
+        "volume": 667637.3668,
+        "area": 478942.3078
       }
     },
     {
@@ -13145,8 +13361,8 @@
       "functions": ["abs", "circle", "cos", "extrude", "patternTransform", "startSketchOn"],
       "offline": {
         "solids": 100,
-        "volume": 7195872614.0,
-        "area": 113218718.2
+        "volume": 116202062.8,
+        "area": 24171220.14
       }
     },
     {
@@ -13481,8 +13697,8 @@
       "functions": ["appearance", "deleteFace", "extrude", "offsetPlane", "rectangle", "split", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 1000.0,
-        "area": 920.0
+        "volume": 0.0,
+        "area": 696.0
       }
     },
     {
@@ -13515,7 +13731,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSolid",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {
@@ -13523,7 +13741,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSurface",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {
@@ -13532,8 +13752,8 @@
       "functions": ["close", "deleteFace", "extrude", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
         "solids": 1,
-        "volume": 80.0,
-        "area": 141.6124969
+        "volume": 0.0,
+        "area": 81.61249695
       }
     },
     {
@@ -13542,8 +13762,8 @@
       "functions": ["deleteFace", "extrude", "polygon", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 400.0,
-        "area": 513.137085
+        "volume": 0.0,
+        "area": 284.8528137
       }
     },
     {
@@ -13553,7 +13773,7 @@
       "offline": {
         "solids": 1,
         "volume": 0.0,
-        "area": 96.0
+        "area": 64.0
       }
     },
     {
@@ -13562,8 +13782,8 @@
       "functions": ["coincident", "deleteFace", "extrude", "horizontal", "line", "region", "vertical"],
       "offline": {
         "solids": 1,
-        "volume": 100.0,
-        "area": 130.0
+        "volume": 0.0,
+        "area": 105.0
       }
     },
     {
@@ -13601,8 +13821,8 @@
       "functions": ["blend", "coincident", "extrude", "line", "region"],
       "offline": {
         "solids": 3,
-        "volume": 22.44,
-        "area": 86.18679845
+        "volume": 0.0,
+        "area": 63.74679845
       }
     },
     {
@@ -13622,7 +13842,9 @@
         "translate"
       ],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 3,
+        "volume": 0.0,
+        "area": 233192.3716
       }
     },
     {
@@ -14229,7 +14451,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#scale",
       "functions": ["arc", "circle", "coincident", "line", "region", "scale", "sweep"],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 1,
+        "volume": 455.0199823,
+        "area": 1663.943597
       }
     },
     {
@@ -14253,7 +14477,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 2715825.701,
+        "area": 244203.5778
       }
     },
     {
@@ -14493,6 +14719,152 @@
       }
     },
     {
+      "path": "tau/bearing-boss-plate",
+      "functions": ["circle", "extrude", "rectangle", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 47865.76261,
+        "area": 13018.24095
+      }
+    },
+    {
+      "path": "tau/bottle",
+      "functions": ["circle", "close", "extrude", "shell", "startProfile", "startSketchOn", "tangentialArc", "xLine"],
+      "offline": {
+        "solids": 1,
+        "volume": 64399.58551,
+        "area": 64567.13712
+      }
+    },
+    {
+      "path": "tau/cable-clip",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "subtract2d",
+        "union",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 578.571962,
+        "area": 894.2278167
+      }
+    },
+    {
+      "path": "tau/compression-spring",
+      "functions": ["circle", "helix", "startSketchOn", "sweep"],
+      "offline": {
+        "solids": 1,
+        "volume": 532.9582652,
+        "area": 1428.279
+      }
+    },
+    {
+      "path": "tau/countersunk-plate",
+      "functions": ["blind", "countersink", "extrude", "flat", "holes", "rectangle", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 35479.72398,
+        "area": 14087.25552
+      }
+    },
+    {
+      "path": "tau/dovetail-rail",
+      "functions": [
+        "circle",
+        "extrude",
+        "line",
+        "mirror2d",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 39334.76776,
+        "area": 12977.62647
+      }
+    },
+    {
+      "path": "tau/drawer-handle",
+      "functions": [
+        "circle",
+        "extrude",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "sweep",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 13920.2342,
+        "area": 6000.942315
+      }
+    },
+    {
+      "path": "tau/electronics-enclosure",
+      "functions": [
+        "circle",
+        "extrude",
+        "map",
+        "offsetPlane",
+        "rectangle",
+        "shell",
+        "startSketchOn",
+        "subtract2d",
+        "translate",
+        "union"
+      ],
+      "offline": {
+        "solids": 2,
+        "volume": 31563.01401,
+        "area": 32939.5007
+      }
+    },
+    {
+      "path": "tau/heatsink",
+      "functions": ["concat", "extrude", "offsetPlane", "patternLinear3d", "rectangle", "startSketchOn", "union"],
+      "offline": {
+        "solids": 1,
+        "volume": 11280.0,
+        "area": 14804.0
+      }
+    },
+    {
+      "path": "tau/hinge-leaf",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "patternLinear3d",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "union",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3458.813935,
+        "area": 3041.341045
+      }
+    },
+    {
       "path": "tau/holes-linear",
       "functions": [
         "blind",
@@ -14508,6 +14880,29 @@
       ],
       "offline": {
         "gap": "argument: axis requires a value with type `Axis3d` or a value with type `Point3d` (`Axis3d | Point3d"
+      }
+    },
+    {
+      "path": "tau/knurled-knob",
+      "functions": [
+        "arc",
+        "chamfer",
+        "circle",
+        "close",
+        "extrude",
+        "getOppositeEdge",
+        "offsetPlane",
+        "patternCircular3d",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 11470.55234,
+        "area": 3721.823946
       }
     },
     {
@@ -14531,6 +14926,250 @@
         "solids": 1,
         "volume": 12000.0,
         "area": 4000.0
+      }
+    },
+    {
+      "path": "tau/lofted-vase",
+      "functions": ["circle", "loft", "offsetPlane", "shell", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 119623.9002,
+        "area": 96200.40594
+      }
+    },
+    {
+      "path": "tau/machined-block",
+      "functions": [
+        "chamfer",
+        "close",
+        "extrude",
+        "fillet",
+        "getNextAdjacentEdge",
+        "getOppositeEdge",
+        "startProfile",
+        "startSketchOn",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 59133.63103,
+        "area": 9368.24801
+      }
+    },
+    {
+      "path": "tau/mounting-bracket",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "fillet",
+        "getCommonEdge",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 19120.30986,
+        "area": 10663.82737
+      }
+    },
+    {
+      "path": "tau/pcb-standoff-assembly",
+      "functions": [
+        "circle",
+        "extrude",
+        "map",
+        "polygon",
+        "rectangle",
+        "sqrt",
+        "startSketchOn",
+        "subtract2d",
+        "translate"
+      ],
+      "offline": {
+        "solids": 5,
+        "volume": 21755.03147,
+        "area": 16322.8672
+      }
+    },
+    {
+      "path": "tau/phone-stand",
+      "functions": [
+        "close",
+        "cos",
+        "extrude",
+        "line",
+        "sin",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 49242.86771,
+        "area": 26625.02712
+      }
+    },
+    {
+      "path": "tau/pipe-elbow",
+      "functions": [
+        "circle",
+        "startProfile",
+        "startSketchOn",
+        "subtract2d",
+        "sweep",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 44394.03826,
+        "area": 26755.02506
+      }
+    },
+    {
+      "path": "tau/pipe-flange",
+      "functions": ["circle", "extrude", "patternCircular2d", "startSketchOn", "subtract2d"],
+      "offline": {
+        "solids": 1,
+        "volume": 355229.3061,
+        "area": 57428.31371
+      }
+    },
+    {
+      "path": "tau/pipe-tee",
+      "functions": ["circle", "extrude", "startSketchOn", "subtract", "union"],
+      "offline": {
+        "solids": 1,
+        "volume": 22820.38717,
+        "area": 15839.90113
+      }
+    },
+    {
+      "path": "tau/sheet-metal-z-bracket",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3492.699082,
+        "area": 3941.230047
+      }
+    },
+    {
+      "path": "tau/spur-gear",
+      "functions": [
+        "arc",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "spur",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 17902.97025,
+        "area": 6531.643838
+      }
+    },
+    {
+      "path": "tau/standoffs",
+      "functions": ["circle", "extrude", "polygon", "sqrt", "startSketchOn", "subtract2d"],
+      "offline": {
+        "solids": 2,
+        "volume": 314.0445829,
+        "area": 496.6194405
+      }
+    },
+    {
+      "path": "tau/storage-bin",
+      "functions": [
+        "close",
+        "extrude",
+        "fillet",
+        "getNextAdjacentEdge",
+        "shell",
+        "startProfile",
+        "startSketchOn",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 77688.46718,
+        "area": 63107.85338
+      }
+    },
+    {
+      "path": "tau/threaded-bolt",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "helix",
+        "line",
+        "offsetPlane",
+        "polygon",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "sweep",
+        "union"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3310.588848,
+        "area": 2005.935294
+      }
+    },
+    {
+      "path": "tau/v-belt-pulley",
+      "functions": ["close", "line", "revolve", "startProfile", "startSketchOn", "tan", "xLine", "yLine"],
+      "offline": {
+        "solids": 1,
+        "volume": 79024.58302,
+        "area": 19229.67556
+      }
+    },
+    {
+      "path": "tau/wall-hook",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "map",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 11120.42579,
+        "area": 5565.524281
       }
     }
   ]

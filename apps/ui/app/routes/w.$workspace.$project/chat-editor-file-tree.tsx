@@ -46,6 +46,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import { toast } from '#components/ui/sonner.js';
 import {
   FloatingPanelContent,
@@ -91,18 +92,20 @@ import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
+import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
+import { useRowWindow } from '#routes/w.$workspace.$project/use-row-window.js';
 
 import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
 import {
-  getItemData,
+  buildFileTreeIndex,
+  indexedItemData,
   isEditorSystemArtifactPath,
-  isPathFolder,
 } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
 import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
 import type { FileProvenanceLabel } from '#lib/file-provenance-labels.js';
@@ -609,6 +612,9 @@ export const ChatEditorFileTree = memo(function ({
   const [focusedItem, setFocusedItem] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const treeContainerRef = useRef<HTMLDivElement>(null);
+  const [treeContainer, setTreeContainer] = useState<HTMLDivElement | undefined>(undefined);
+  /* Set after each render to the visible row list's scroll; headless-tree calls it to bring a focused row into the window. */
+  const scrollToRowRef = useRef<(itemId: string) => void>(() => undefined);
   const [uploadTargetPath, setUploadTargetPath] = useState<string | undefined>(undefined);
   const [pendingFolder, setPendingFolder] = useState<PendingFolder | undefined>(undefined);
   const [pendingFile, setPendingFile] = useState<PendingFile | undefined>(undefined);
@@ -795,75 +801,23 @@ export const ChatEditorFileTree = memo(function ({
     }
   }, [activeFilePath, treeService, setExpandedItems]);
 
-  // Build virtual folder structure from flat file paths
-  const allPaths = useMemo(() => {
-    const paths = new Set<string>();
-    paths.add(rootId);
-
-    for (const file of fileTree) {
-      const parts = file.path.split('/');
-      let currentPath = '';
-
-      for (const part of parts) {
-        if (!part) {
-          continue;
-        }
-
-        currentPath = currentPath ? `${currentPath}/${part}` : part;
-        paths.add(currentPath);
-      }
-    }
-
-    return paths;
-  }, [fileTree]);
+  /* One index per snapshot: the loader answers a row in O(1) and a folder's
+   * children in O(children), not a scan of every path per row (D18). */
+  const treeIndex = useMemo(() => buildFileTreeIndex(fileTree, rootId), [fileTree]);
+  const { allPaths } = treeIndex;
 
   // Data loader for headless-tree
   const dataLoader = useMemo(
     () => ({
       getItem(itemId: string): TreeItemData {
-        return getItemData(fileTree, rootId, itemId);
+        return indexedItemData(treeIndex, rootId, itemId);
       },
 
       getChildren(itemId: string): string[] {
-        const prefix = itemId === rootId ? '' : `${itemId}/`;
-        const children = [...allPaths].filter((path) => {
-          if (path === rootId || path === itemId) {
-            return false;
-          }
-
-          const relativePath = prefix ? path.slice(prefix.length) : path;
-          if (!relativePath || path === prefix) {
-            return false;
-          }
-
-          // Check if this is an immediate child
-          const isImmediateChild = prefix
-            ? path.startsWith(prefix) && !relativePath.includes('/')
-            : !path.includes('/');
-
-          return isImmediateChild;
-        });
-
-        // Sort folders first, then alphabetically
-        return children.sort((a, b) => {
-          const aName = a.split('/').pop() ?? a;
-          const bName = b.split('/').pop() ?? b;
-          const aIsFolder = isPathFolder(a, fileTree, allPaths);
-          const bIsFolder = isPathFolder(b, fileTree, allPaths);
-
-          if (aIsFolder && !bIsFolder) {
-            return -1;
-          }
-
-          if (!aIsFolder && bIsFolder) {
-            return 1;
-          }
-
-          return aName.localeCompare(bName, undefined, { sensitivity: 'base' });
-        });
+        return [...treeIndex.childrenOf(itemId)];
       },
     }),
-    [fileTree, allPaths],
+    [treeIndex],
   );
 
   const handleRename = useCallback(
@@ -1113,6 +1067,9 @@ export const ChatEditorFileTree = memo(function ({
       }
 
       await processDroppedEntries(ingestion, targetDirectory);
+    },
+    scrollToItem(item) {
+      scrollToRowRef.current(item.getId());
     },
     features: [
       syncDataLoaderFeature,
@@ -1449,11 +1406,12 @@ export const ChatEditorFileTree = memo(function ({
       const name = path.split('/').pop() ?? path;
 
       if (isFolder) {
+        const ceiling = zipDownloadCeiling();
         toast.promise(
           async () => {
             let zipBlob: Blob;
             try {
-              zipBlob = await getZippedDirectory(path);
+              zipBlob = await getZippedDirectory(path, ceiling);
             } catch (error) {
               throw createFileTreeDownloadError({
                 code: 'zip-generation-failed',
@@ -1474,7 +1432,7 @@ export const ChatEditorFileTree = memo(function ({
           {
             loading: `Downloading ${name}...`,
             success: `Downloaded ${name}.zip`,
-            error: getFileTreeDownloadErrorMessage,
+            error: (error: unknown) => getFileTreeDownloadErrorMessage(error, ceiling),
           },
         );
       } else {
@@ -1572,7 +1530,7 @@ export const ChatEditorFileTree = memo(function ({
       let createdDirectoryCount = 0;
 
       for (const directoryPath of directoryPaths) {
-        if (allPaths.has(directoryPath) && isPathFolder(directoryPath, fileTree, allPaths)) {
+        if (treeIndex.isFolder(directoryPath)) {
           continue;
         }
 
@@ -1657,16 +1615,7 @@ export const ChatEditorFileTree = memo(function ({
         });
       }
     },
-    [
-      allPaths,
-      canCreate,
-      createDirectory,
-      fileTree,
-      mutationErrorMessage,
-      requestOpenFile,
-      requestOverwriteConfirm,
-      writeFile,
-    ],
+    [canCreate, createDirectory, mutationErrorMessage, requestOpenFile, requestOverwriteConfirm, treeIndex, writeFile],
   );
 
   const handleFileUpload = useCallback(
@@ -1739,9 +1688,29 @@ export const ChatEditorFileTree = memo(function ({
     [isReadOnlyPath, processDroppedEntries, readOnly],
   );
 
+  /* A long expanded listing renders a viewport of rows, not one per entry (D18). */
+  const rowItems = tree.getItems().filter((item) => item.getId() !== rootId);
+  /* Rows that render outside the window: the focused row (focus and the arrow keys must survive a scroll), the row
+   * being renamed, and a folder holding an inline new-file or new-folder input (a11y, D18). */
+  const { renamingItem } = tree.getState();
+  const pinnedRowIds = new Set<string>(
+    [focusedItem, renamingItem, pendingFolder?.parentPath, pendingFile?.parentPath].filter(
+      (id): id is string => typeof id === 'string',
+    ),
+  );
+  const pinnedRows = rowItems.flatMap((item, index) => (pinnedRowIds.has(item.getId()) ? [index] : []));
+  const rowWindow = useRowWindow(treeContainer, rowItems.length, pinnedRows);
+  const openFilePaths = useMemo(() => new Set(openFiles.map((file) => file.path)), [openFiles]);
+  useEffect(() => {
+    scrollToRowRef.current = (itemId) => {
+      rowWindow.scrollToIndex(rowItems.findIndex((item) => item.getId() === itemId));
+    };
+  });
+
   const setTreeContainerElement: React.RefCallback<HTMLDivElement> = useCallback(
     (element) => {
       treeContainerRef.current = element;
+      setTreeContainer(element ?? undefined);
       tree.registerElement(element);
     },
     [tree],
@@ -1949,7 +1918,7 @@ export const ChatEditorFileTree = memo(function ({
           </FloatingPanelContentHeader>
         ) : null}
         <FloatingPanelContentBody className='group/filetree flex min-h-0 flex-col'>
-          <div
+          <PaneSearchRegion
             className={cn(
               'flex w-full shrink-0 items-center gap-1 border-b bg-sidebar p-2',
               borderless && 'border-0 bg-transparent',
@@ -1964,7 +1933,7 @@ export const ChatEditorFileTree = memo(function ({
                 tree.setSearch('');
               }}
             />
-          </div>
+          </PaneSearchRegion>
 
           <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
@@ -2047,90 +2016,110 @@ export const ChatEditorFileTree = memo(function ({
                   // Root-level file case is handled by highlightAllItems above
                 }
 
+                /* Row height is measured from the first plain row: one with an inline input beneath it is taller. */
+                let measuring = true;
                 return (
                   <>
-                    {items
-                      .filter((item) => item.getId() !== rootId)
-                      .map((item) => {
-                        const itemId = item.getId();
-                        const itemLevel = item.getItemMeta().level;
-
-                        // Item is highlighted if:
-                        // 1. highlightAllItems is true (dropping at root - ALL items highlighted), OR
-                        // 2. It IS the drag target folder, OR
-                        // 3. It's inside the drag target folder
-                        const isInsideDragTarget =
-                          highlightAllItems ||
-                          (dragTargetFolderPath !== undefined &&
-                            (itemId === dragTargetFolderPath || itemId.startsWith(`${dragTargetFolderPath}/`)));
-
+                    {rowWindow.slots.map((slot) => {
+                      if (slot.kind === 'space') {
                         return (
-                          <div key={itemId}>
-                            <TreeItem
-                              item={item}
-                              presentation={presentationFor(itemId)}
-                              isReadOnly={readOnly}
-                              isActive={activeFilePath === itemId}
-                              isOpen={openFiles.some((f) => f.path === itemId)}
-                              searchQuery={tree.getState().search ?? ''}
-                              isInsideDragTarget={isInsideDragTarget}
-                              activeFileLevel={activeFileLevel}
-                              onDelete={handleDelete}
-                              onDuplicate={handleDuplicate}
-                              onUpload={handleUploadClick}
-                              onOpenInEditor={handleOpenInEditor}
-                              onOpenInViewer={handleOpenInViewer}
-                              onQuickLook={desktopBridge()?.quickLook ? handleQuickLook : undefined}
-                              revealInFileManager={revealInFileManager}
-                              onDownload={handleDownload}
-                              onCopyPath={handleCopyPath}
-                              onCopyToProject={handleCopyToProject}
-                              onForeignDrop={handleForeignDrop}
-                            />
-                            {/* Pending folder inside this folder */}
-                            {pendingFolder?.parentPath === itemId && item.isFolder() ? (
-                              <PendingFolderInput
-                                parentPath={pendingFolder.parentPath}
-                                isReadOnlyPath={isReadOnlyPath}
-                                error={pendingFolder.error}
-                                allPaths={allPaths}
-                                level={itemLevel + 1}
-                                onSubmit={(name) => {
-                                  void submitCreateFolder(pendingFolder.parentPath, name);
-                                }}
-                                onCancel={() => {
-                                  setPendingFolder(undefined);
-                                }}
-                                onError={(error) => {
-                                  setPendingFolder((previous) => (previous ? { ...previous, error } : undefined));
-                                }}
-                              />
-                            ) : null}
-                            {/* Pending file inside this folder */}
-                            {pendingFile?.parentPath === itemId && item.isFolder() ? (
-                              <PendingFileInput
-                                inputRef={pendingFileInputRef}
-                                parentPath={pendingFile.parentPath}
-                                isReadOnlyPath={isReadOnlyPath}
-                                extension={pendingFile.extension}
-                                defaultName={pendingFile.defaultName}
-                                error={pendingFile.error}
-                                allPaths={allPaths}
-                                level={itemLevel + 1}
-                                onSubmit={(filename) => {
-                                  void submitCreateFile(pendingFile.parentPath, filename, pendingFile.content);
-                                }}
-                                onCancel={() => {
-                                  setPendingFile(undefined);
-                                }}
-                                onError={(error) => {
-                                  setPendingFile((previous) => (previous ? { ...previous, error } : undefined));
-                                }}
-                              />
-                            ) : null}
-                          </div>
+                          <div
+                            key={`space-${String(slot.from)}`}
+                            aria-hidden='true'
+                            data-row-window-space
+                            style={{ height: slot.height }}
+                          />
                         );
-                      })}
+                      }
+                      const item = rowItems[slot.index]!;
+                      const itemId = item.getId();
+                      const itemLevel = item.getItemMeta().level;
+
+                      // Item is highlighted if:
+                      // 1. highlightAllItems is true (dropping at root - ALL items highlighted), OR
+                      // 2. It IS the drag target folder, OR
+                      // 3. It's inside the drag target folder
+                      const isInsideDragTarget =
+                        highlightAllItems ||
+                        (dragTargetFolderPath !== undefined &&
+                          (itemId === dragTargetFolderPath || itemId.startsWith(`${dragTargetFolderPath}/`)));
+
+                      const plain =
+                        pendingFolder?.parentPath !== itemId &&
+                        pendingFile?.parentPath !== itemId &&
+                        !item.isRenaming();
+                      const measures = measuring && plain;
+                      if (measures) {
+                        measuring = false;
+                      }
+
+                      return (
+                        <div key={itemId} ref={measures ? rowWindow.measureRow : undefined}>
+                          <TreeItem
+                            item={item}
+                            presentation={presentationFor(itemId)}
+                            isReadOnly={readOnly}
+                            isActive={activeFilePath === itemId}
+                            isOpen={openFilePaths.has(itemId)}
+                            searchQuery={tree.getState().search ?? ''}
+                            isInsideDragTarget={isInsideDragTarget}
+                            activeFileLevel={activeFileLevel}
+                            onDelete={handleDelete}
+                            onDuplicate={handleDuplicate}
+                            onUpload={handleUploadClick}
+                            onOpenInEditor={handleOpenInEditor}
+                            onOpenInViewer={handleOpenInViewer}
+                            onQuickLook={desktopBridge()?.quickLook ? handleQuickLook : undefined}
+                            revealInFileManager={revealInFileManager}
+                            onDownload={handleDownload}
+                            onCopyPath={handleCopyPath}
+                            onCopyToProject={handleCopyToProject}
+                            onForeignDrop={handleForeignDrop}
+                          />
+                          {/* Pending folder inside this folder */}
+                          {pendingFolder?.parentPath === itemId && item.isFolder() ? (
+                            <PendingFolderInput
+                              parentPath={pendingFolder.parentPath}
+                              isReadOnlyPath={isReadOnlyPath}
+                              error={pendingFolder.error}
+                              allPaths={allPaths}
+                              level={itemLevel + 1}
+                              onSubmit={(name) => {
+                                void submitCreateFolder(pendingFolder.parentPath, name);
+                              }}
+                              onCancel={() => {
+                                setPendingFolder(undefined);
+                              }}
+                              onError={(error) => {
+                                setPendingFolder((previous) => (previous ? { ...previous, error } : undefined));
+                              }}
+                            />
+                          ) : null}
+                          {/* Pending file inside this folder */}
+                          {pendingFile?.parentPath === itemId && item.isFolder() ? (
+                            <PendingFileInput
+                              inputRef={pendingFileInputRef}
+                              parentPath={pendingFile.parentPath}
+                              isReadOnlyPath={isReadOnlyPath}
+                              extension={pendingFile.extension}
+                              defaultName={pendingFile.defaultName}
+                              error={pendingFile.error}
+                              allPaths={allPaths}
+                              level={itemLevel + 1}
+                              onSubmit={(filename) => {
+                                void submitCreateFile(pendingFile.parentPath, filename, pendingFile.content);
+                              }}
+                              onCancel={() => {
+                                setPendingFile(undefined);
+                              }}
+                              onError={(error) => {
+                                setPendingFile((previous) => (previous ? { ...previous, error } : undefined));
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
 
                     {/* Root item as spacer to capture empty space drops */}
                     <div

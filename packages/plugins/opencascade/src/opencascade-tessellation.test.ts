@@ -11,7 +11,7 @@ import type { OpenCascadeInstance } from 'libcascade/init';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { Primitive } from '@gltf-transform/core';
 import { extractShapeEdges } from '#opencascade-edges.js';
-import { countGlbMesh, measureShapesDiagonal, renderShapesWithinBudget, toMeshTolerances } from '#opencascade-mesh.js';
+import { countGlbMesh, measureShapesDiagonal, renderShapesTessellated, toMeshTolerances } from '#opencascade-mesh.js';
 
 const sphere = (radius: number): string =>
   `import { BRepPrimAPI_MakeSphere } from 'libcascade';
@@ -94,7 +94,8 @@ describe('OpenCascade tessellation request (R1)', () => {
 describe('OpenCascade tessellation presets (P2)', () => {
   it('reports the requested form and the effective tolerances', async () => {
     const report = reportOf(await renderModel(sphere(5)));
-    expect(report).toMatchObject({ requested: 'medium', angularTolerance: 20, downgraded: 0 });
+    expect(report).toMatchObject({ requested: 'medium', angularTolerance: 20 });
+    expect(report).not.toHaveProperty('downgraded');
     // Bounding-box diagonal of a radius-5 sphere is 10 * sqrt(3) mm; medium divides it by 2000.
     expect(report.linearTolerance).toBeCloseTo((10 * Math.sqrt(3)) / 2000, 6);
     expect(report.triangles).toBeGreaterThan(0);
@@ -114,14 +115,14 @@ describe('OpenCascade tessellation presets (P2)', () => {
     // The radius 500 case is evidence-only (about 45 s); a tenfold scale shows the same law.
     const small = reportOf(await renderModel(sphere(5), { tessellation: { linearTolerance: 0.01 } }));
     const large = reportOf(await renderModel(sphere(50), { tessellation: { linearTolerance: 0.01 } }));
-    expect(small).toMatchObject({ requested: 'explicit', linearTolerance: 0.01, angularTolerance: 20, downgraded: 0 });
+    expect(small).toMatchObject({ requested: 'explicit', linearTolerance: 0.01, angularTolerance: 20 });
     expect(large.linearTolerance).toBe(0.01);
     expect(large.triangles / small.triangles).toBeGreaterThan(8);
     expect(large.triangles / small.triangles).toBeLessThan(12);
   }, 60_000);
 });
 
-describe('OpenCascade preview budget (P4)', () => {
+describe('OpenCascade preview tessellation', () => {
   let oc: OpenCascadeInstance;
 
   beforeAll(async () => {
@@ -129,45 +130,26 @@ describe('OpenCascade preview budget (P4)', () => {
     oc = await initOcct(new URL(import.meta.resolve('libcascade/wasm')).href, bindings.default);
   });
 
-  it('coarsens an over-budget preview one step at a time and reports the downgrade', async () => {
+  it('tessellates once at the requested tolerances, with no budget and no downgrade', async () => {
     const maker = new oc.BRepPrimAPI_MakeSphere(50);
     const shape = maker.Shape();
     const shapes = [{ name: 'Sphere', shape }];
     const request = { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview } as const;
-    const fitted = await renderShapesWithinBudget(oc, shapes, { request, budget: Number.POSITIVE_INFINITY });
-    const budget = Math.floor(fitted.tessellation.triangles / 3);
-    const budgeted = await renderShapesWithinBudget(oc, shapes, { request, budget });
+    const rendered = await renderShapesTessellated(oc, shapes, { request });
 
-    expect(fitted.issues).toEqual([]);
-    expect(fitted.tessellation.downgraded).toBe(0);
-    expect(budgeted.tessellation.downgraded).toBeGreaterThanOrEqual(1);
-    expect(budgeted.tessellation.downgraded).toBeLessThanOrEqual(3);
-    expect(budgeted.tessellation.triangles).toBeLessThan(fitted.tessellation.triangles);
-    const steps = budgeted.tessellation.downgraded!;
-    expect(budgeted.tessellation.linearTolerance).toBeCloseTo(fitted.tessellation.linearTolerance! * 2 ** steps, 9);
-    expect(budgeted.tessellation.angularTolerance).toBe(20 + 4 * steps);
-    expect(budgeted.issues).toEqual([
-      expect.objectContaining({
-        code: 'TESSELLATION_DOWNGRADED',
-        severity: 'warning',
-        details: expect.objectContaining({
-          producer: 'opencascade',
-          requested: { form: 'medium', linearTolerance: fitted.tessellation.linearTolerance, angularTolerance: 20 },
-          effective: {
-            linearTolerance: budgeted.tessellation.linearTolerance,
-            angularTolerance: budgeted.tessellation.angularTolerance,
-          },
-          downgraded: steps,
-          triangles: budgeted.tessellation.triangles,
-          budget,
-        }),
-      }),
-    ]);
+    expect(rendered.tessellation).toMatchObject({
+      requested: 'medium',
+      linearTolerance: measureShapesDiagonal(oc, shapes) / 2000,
+      angularTolerance: 20,
+    });
+    expect(rendered.tessellation).not.toHaveProperty('downgraded');
+    expect(rendered.tessellation.triangles).toBe(countGlbMesh(rendered.content).triangles);
+    expect(rendered).not.toHaveProperty('issues');
     shape.delete();
     maker.delete();
   });
 
-  it('should sample edges at the downgraded tolerances and keep lines out of the triangle count', async () => {
+  it('should sample edges at the requested tolerances and keep lines out of the triangle count', async () => {
     const maker = new oc.BRepPrimAPI_MakeSphere(50);
     const sphere = maker.Shape();
     const axis = new oc.gp_Ax2();
@@ -179,21 +161,18 @@ describe('OpenCascade preview budget (P4)', () => {
       { name: 'Ring', shape: ring },
     ];
     const request = { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview } as const;
-    const fitted = await renderShapesWithinBudget(oc, shapes, { request, budget: Number.POSITIVE_INFINITY });
-    const budget = Math.floor(fitted.tessellation.triangles / 3);
-    const plain = await renderShapesWithinBudget(oc, shapes, { request, budget });
-    const budgeted = await renderShapesWithinBudget(oc, shapes, { request, budget, includeEdges: true });
-    const effective = {
-      linearTolerance: budgeted.tessellation.linearTolerance!,
-      angularTolerance: budgeted.tessellation.angularTolerance!,
+    const plain = await renderShapesTessellated(oc, shapes, { request });
+    const drawn = await renderShapesTessellated(oc, shapes, { request, includeEdges: true });
+    const requested = {
+      linearTolerance: drawn.tessellation.linearTolerance!,
+      angularTolerance: drawn.tessellation.angularTolerance!,
     };
 
-    expect(budgeted.tessellation.downgraded).toBeGreaterThanOrEqual(1);
     // Lines never count as triangles: the report matches the same render without edges.
-    expect({ ...budgeted.tessellation, elapsed: 0 }).toEqual({ ...plain.tessellation, elapsed: 0 });
-    expect(countGlbMesh(budgeted.content).triangles).toBe(budgeted.tessellation.triangles);
+    expect({ ...drawn.tessellation, elapsed: 0 }).toEqual({ ...plain.tessellation, elapsed: 0 });
+    expect(countGlbMesh(drawn.content).triangles).toBe(drawn.tessellation.triangles);
 
-    const delivered = await glbToDocument(budgeted.content);
+    const delivered = await glbToDocument(drawn.content);
     const meshes = delivered.getRoot().listMeshes();
     const points = (name: string, mode: number): number[][] =>
       meshes
@@ -204,19 +183,17 @@ describe('OpenCascade preview budget (P4)', () => {
           const positions = primitive.getAttribute('POSITION')!;
           return Array.from({ length: positions.getCount() }, (_, index) => positions.getElement(index, []));
         });
-    // The sphere seam lies on the admitted, coarser surface mesh.
+    // The sphere seam lies on the delivered surface mesh.
     const surface = points('Sphere', Primitive.Mode['TRIANGLES']!);
     const seam = points('Sphere', Primitive.Mode['LINES']!);
     expect(seam.length).toBeGreaterThan(0);
     for (const [x, y, z] of seam) {
       expect(Math.min(...surface.map(([u, v, w]) => Math.hypot(x! - u!, y! - v!, z! - w!)))).toBeLessThan(1e-9);
     }
-    // The free ring is sampled from its curve at the effective tolerances, not the requested ones.
+    // The free ring is sampled from its curve at the requested tolerances.
     const ringLines = points('Ring', Primitive.Mode['LINES']!);
-    const atEffective = extractShapeEdges(oc, ring, toMeshTolerances(effective));
-    const atRequested = extractShapeEdges(oc, ring, toMeshTolerances(fitted.tessellation as typeof effective));
-    expect(ringLines).toHaveLength(atEffective.lines.length / 3);
-    expect(atRequested.lines.length).toBeGreaterThan(atEffective.lines.length);
+    const atRequested = extractShapeEdges(oc, ring, toMeshTolerances(requested));
+    expect(ringLines).toHaveLength(atRequested.lines.length / 3);
     for (const handle of [ring, edgeMaker, circle, axis, sphere, maker]) {
       handle.delete();
     }

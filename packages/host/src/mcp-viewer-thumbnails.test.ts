@@ -54,12 +54,35 @@ describe('createMcpViewerPartThumbnails', () => {
         width: 256,
         height: 256,
         lineWidth: 1,
+        lineColor: '#000000',
+        toneMapping: 'neutral',
+        lighting: { ambient: 0.1 / Math.PI },
         views: [
           { id: 'part-0', visiblePrimitives: primitives, camera: { framing: 'fit', up: [0, 0, 1] } },
           { id: 'part-1', visiblePrimitives: primitives },
         ],
       },
     });
+  });
+
+  it('should keep at least a one-pixel edge on the smallest thumbnail', async () => {
+    const transcode = vi.fn<ViewerThumbnailRuntime['transcode']>(
+      async () =>
+        ({
+          success: true,
+          data: [{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1]) }],
+          issues: [],
+        }) as unknown as Awaited<ReturnType<ViewerThumbnailRuntime['transcode']>>,
+    );
+    const render = createMcpViewerPartThumbnails(async () => ({ transcode }));
+
+    await render({
+      root,
+      source: { absolutePath: join(root, 'gear.glb') },
+      request: { modelId: 'm1', parts: [{ id: 'gear', primitives }], size: 64 },
+    });
+
+    expect(transcode.mock.calls[0]![0]).toMatchObject({ options: { width: 64, lineWidth: 1 } });
   });
 
   it('should refuse an SVG and pass a render failure through', async () => {

@@ -33,7 +33,7 @@ describe('paseo deletion', () => {
           '**/build/**',
           '**/out-tsc/**',
           '**/package-out/**',
-          'apps/api/app/database/migrations/**',
+          'apps/libs/api-database/src/migrations/**',
         ],
       },
     ).filter((path) => statSync(join(repositoryRoot, path)).isFile());

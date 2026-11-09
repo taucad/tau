@@ -1,0 +1,30 @@
+// Mounting plate with four countersunk holes for M4 flat-head screws.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+plateLength = 100
+plateWidth = 60
+plateThickness = 6
+edgeInset = 10
+clearanceDiameter = 4.5
+countersinkDiameter = 8.4
+countersinkAngle = 90deg
+
+holeX = plateLength / 2 - edgeInset
+holeY = plateWidth / 2 - edgeInset
+
+plate = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = plateLength, height = plateWidth)
+  |> extrude(length = plateThickness)
+
+// hole::holes sketches each hole on a plane normal to the face, aligned with -Y and offset along X by the second
+// coordinate, so on a top face a cut point is [y, -x] in world terms (despite the docs' "global coordinates").
+// The four holes are symmetric, so listing them as [holeY, holeX] and so on places them at the corners.
+coverPlate = hole::holes(
+  plate,
+  face = END,
+  cutsAt = [[holeY, holeX], [holeY, -holeX], [-holeY, -holeX], [-holeY, holeX]],
+  holeBottom = hole::flat(),
+  holeBody = hole::blind(depth = plateThickness, diameter = clearanceDiameter),
+  holeType = hole::countersink(diameter = countersinkDiameter, angle = countersinkAngle),
+)

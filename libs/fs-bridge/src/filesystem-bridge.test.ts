@@ -15,8 +15,8 @@ import {
 } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import type { WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
-import type { ChangeEvent } from '@taucad/types';
+import type { ChangeSet, WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
+import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
@@ -48,9 +48,9 @@ function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
   return wrapped;
 }
 
-it('rejects shallow metadata from an exact bridge listing', async () => {
+it('carries metadata rows that hold only the facts already known (I3)', async () => {
   const channel = new MessageChannel();
-  const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' };
+  const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1 };
   const server = createBridgeServer(
     { readdirWithStats: async () => [row], stat: async () => row },
     fsBridgePort(channel.port1, 'listing-server'),
@@ -70,10 +70,8 @@ it('rejects shallow metadata from an exact bridge listing', async () => {
     },
   });
   try {
-    await expect(proxy.readdirWithStats('')).rejects.toThrow('missing required metadata');
-    await expect(proxy.readdirWithStats('', { content: 'head' })).resolves.toEqual([row]);
-    await expect(proxy.stat('large.txt')).rejects.toThrow('missing required metadata');
-    await expect(proxy.stat('large.txt', { content: 'head' })).resolves.toEqual(row);
+    await expect(proxy.readdirWithStats('')).resolves.toEqual([row]);
+    await expect(proxy.stat('large.txt')).resolves.toEqual(row);
   } finally {
     proxy.dispose();
     server.dispose();
@@ -81,13 +79,27 @@ it('rejects shallow metadata from an exact bridge listing', async () => {
   }
 });
 
-/** A proxy over a bridge server that answers only `commitPendingProjectDirectory`. */
+/**
+ * A proxy over a bridge server that answers only `commitPendingProjectDirectory`.
+ * `silence` makes the server hang the way a wedged authority does: its port
+ * stays open and it sends nothing more, heartbeats included.
+ */
 function pendingCommitBridge(
   label: string,
   commitPendingProjectDirectory: (input: unknown) => Promise<unknown>,
-): { proxy: FileSystemBridgeProxy; close: () => void } {
+): { proxy: FileSystemBridgeProxy; close: () => void; silence: () => void } {
   const channel = new MessageChannel();
-  createBridgeServer({ commitPendingProjectDirectory }, fsBridgePort(channel.port1, `${label}-server`), {
+  const served = fsBridgePort(channel.port1, `${label}-server`);
+  let silent = false;
+  const serverPort: Port<unknown> = {
+    ...served,
+    postMessage(data, transfer) {
+      if (!silent) {
+        served.postMessage(data, transfer);
+      }
+    },
+  };
+  createBridgeServer({ commitPendingProjectDirectory }, serverPort, {
     hello: createFileSystemBridgeHello({
       state: 'ready',
       capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
@@ -104,7 +116,13 @@ function pendingCommitBridge(
     channel.port1.close();
     vi.useRealTimers();
   };
-  return { proxy, close };
+  return {
+    proxy,
+    close,
+    silence() {
+      silent = true;
+    },
+  };
 }
 
 function firstFailedBulkMoveError(result: unknown): unknown {
@@ -754,10 +772,55 @@ describe('createFileSystemBridgeProxy', () => {
     }
   });
 
-  it('should time out a project commit that never answers', async () => {
+  /*
+   * A commit is a long call (W10, I10): no wall-clock deadline classifies it
+   * failed while the authority still works on it, however long that takes,
+   * and an authority that stops answering fails it after one liveness window.
+   */
+  it('should keep a commit pending while its authority heartbeats, past the old five-minute deadline', async () => {
     vi.useFakeTimers();
-    // `Promise.race([])` never settles: the peer accepted the call and died.
-    const { proxy, close } = pendingCommitBridge('fs-bridge-stalled-commit', async () => Promise.race<never>([]));
+    let resolveCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => {
+      resolveCommit = resolve;
+    });
+    const { proxy, close } = pendingCommitBridge('fs-bridge-long-commit', async () => {
+      await commitGate;
+      return { status: 'committed' };
+    });
+
+    try {
+      await proxy.ready;
+      let outcome: 'pending' | 'settled' = 'pending';
+      const pending = proxy.commitPendingProjectDirectory({
+        projectId: 'proj_ppppppppppppppppppppp',
+        providerBasePath: 'pending',
+        scope: { backend: 'indexeddb' },
+        files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
+        manifest: new Uint8Array([4, 5, 6]),
+      });
+      const observe = async (): Promise<void> => {
+        try {
+          await pending;
+        } finally {
+          outcome = 'settled';
+        }
+      };
+      void observe();
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(outcome).toBe('pending');
+      resolveCommit();
+      await expect(pending).resolves.toEqual({ status: 'committed' });
+    } finally {
+      close();
+    }
+  });
+
+  it('should fail a commit whose authority stops answering with PEER_UNRESPONSIVE', async () => {
+    vi.useFakeTimers();
+    // `Promise.race([])` never settles; `silence` then wedges the whole authority.
+    const { proxy, close, silence } = pendingCommitBridge('fs-bridge-stalled-commit', async () =>
+      Promise.race<never>([]),
+    );
 
     try {
       // `ready` first, or the channel's 30 s hello deadline closes it instead.
@@ -772,8 +835,10 @@ describe('createFileSystemBridgeProxy', () => {
 
       // Attached before the clock moves: an unhandled rejection inside
       // `advanceTimersByTimeAsync` fails the run.
-      const rejection = expect(pending).rejects.toThrow("Bridge call 'commitPendingProjectDirectory' timed out");
-      await vi.advanceTimersByTimeAsync(300_001);
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+      await vi.advanceTimersByTimeAsync(45_000);
+      silence();
+      await vi.advanceTimersByTimeAsync(30_001);
       await rejection;
     } finally {
       close();
@@ -929,9 +994,15 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', { type: 'backendChanged', backend: 'memory' });
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', { type: 'backendChanged', backend: 'opfs' });
+    /* One message per port per delivery (D6): both loss signals travel together. */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [
+        { type: 'backendChanged', backend: 'memory' },
+        { type: 'backendChanged', backend: 'opfs' },
+      ],
+    });
 
     handle.cleanup();
     channel.port2.close();
@@ -990,12 +1061,47 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     vi.advanceTimersByTime(100);
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', written('/a.txt'));
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', written('/b.txt'));
+    /* The window's facts arrive by its deadline as one message (D6). */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [written('/a.txt'), written('/b.txt')],
+    });
 
     handle.cleanup();
     channel.port2.close();
+  });
+
+  it('should deliver a fifty-fact changeset to each port as one message (S8, D6)', () => {
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem({}, { policy: tauPathPolicy, changeEventBus: bus });
+    const channels = [new MessageChannel(), new MessageChannel()];
+    for (const channel of channels) {
+      for (const handler of messageHandlers) {
+        handler(
+          new MessageEvent('message', {
+            data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          }),
+        );
+      }
+    }
+    const spies = [...handle.serverHandles.values()].map((serverHandle) => vi.spyOn(serverHandle, 'emit'));
+    const facts = Array.from({ length: 50 }, (_, index) =>
+      written(`/agent/file-${String(index)}.ts`),
+    ) as PathChangeEvent[];
+
+    bus.emit({ type: 'changeSet', entries: facts });
+
+    expect(spies).toHaveLength(2);
+    for (const spy of spies) {
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledWith('fileChanged', { type: 'changeSet', entries: facts });
+    }
+
+    handle.cleanup();
+    for (const channel of channels) {
+      channel.port2.close();
+    }
   });
 });
 
@@ -1623,6 +1729,34 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       expect(handlerForRoot.mock.calls[0]?.[1].originClientId).toMatch(/^port_/u);
       expect(handlerForRoot.mock.calls[1]?.[0]).toBe(`/projects/${betaProjectId}`);
       expect(handlerForRoot.mock.calls[1]?.[1].originClientId).toMatch(/^port_/u);
+
+      /* D6: the change-set form crosses the rooted wire as one frame per
+       * committed changeset, however many paths it wrote. */
+      const sets: ChangeSet[] = [];
+      const changeSetWatch = alpha.watchChangeSets({ paths: [''], recursive: true }, (set) => sets.push(set));
+      await changeSetWatch.ready;
+      await service.writeFiles(
+        Object.fromEntries(
+          Array.from({ length: 50 }, (_, index) => [
+            `/projects/${alphaProjectId}/turn/file-${String(index)}.ts`,
+            { content: `export const value = ${String(index)};` },
+          ]),
+        ),
+      );
+      await vi.waitFor(() => {
+        expect(sets).toHaveLength(1);
+      });
+      expect(sets[0]!.entries.filter((entry) => entry.kind === 'file')).toHaveLength(50);
+      expect(sets[0]!.entries.every((entry) => entry.path.startsWith('turn'))).toBe(true);
+      changeSetWatch.unsubscribe();
+
+      /* D23: a fenced append crosses the rooted wire as one call, and its
+       * refusal keeps its code and writes nothing. */
+      await alpha.appendFileFenced('log.jsonl', 'a\n', { expectedLength: 0, token: 1 });
+      await expect(
+        alpha.appendFileFenced('log.jsonl', 'late\n', { expectedLength: 0, token: 1 }),
+      ).rejects.toMatchObject({ code: 'EAPPENDSTALE' });
+      await expect(alpha.readFile('log.jsonl', 'utf8')).resolves.toBe('a\n');
     } finally {
       stopWatch();
       stopBroadcast();

@@ -1,9 +1,9 @@
 ---
 title: 'Language Contribution Policy'
-description: 'CodeMirror and Shiki language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
+description: 'CodeMirror and Lezer language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-10-26'
+updated: '2026-11-07'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -13,7 +13,7 @@ related:
 
 # Language Contribution Policy
 
-Language contributions share one workspace filesystem contract and activate only when their language is needed. CodeMirror, Shiki, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
+Language contributions share one workspace filesystem contract and activate only when their language is needed. CodeMirror, the Lezer grammar registry, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
 
 ## Rationale
 
@@ -33,17 +33,20 @@ Do not send ambiguous raw paths or probe multiple guessed workspace keys.
 
 ### 3. Use the defined read tiers
 
-- Tier 0 reads a copy from the shared file pool when available.
-- Tier 1 uses the `fs/*` JSON-RPC bridge when Tier 0 misses.
+- Tier 1 uses the `fs/*` JSON-RPC bridge. (There is no Tier 0: the shared file pool it read from was removed.)
 - Tier 2 uses the `@taucad/lsp-fs/sync` SharedArrayBuffer request channel for synchronous TypeScript language-service probes.
 
 Tier 2 is TypeScript-worker infrastructure. Other language contributions must not add blocking reads without an explicit architecture change and cross-origin-isolation support.
+
+Tier 2 answers `fileExists`, `directoryExists` and script versions from the worker's mirror of the root's Project Index (filesystem capability charter D13). The file manager sends the whole index once on attach and then the index's own changes after each change set, so these probes make no slot round trip and read no bytes. File content and directory listings still go over the slot. So does any probe of a path the index never holds, because a miss in the mirror says nothing about those paths. Those paths are `node_modules` at any depth, the other policy rows nothing watches, the index's reserved paths, and each nested mount below the root, which the feed names in every message.
+
+The mirror is eventually consistent. It applies a change set only after the file manager's next `changedSince` answer reaches the worker, and the worker reads its port between requests. One guard keeps that ordering from caching a stale answer. Every mirror message names the D6 change-set generation it reflects. The feed also posts an `ahead` notice with a change set's generation as soon as it hears it, before it asks the index. Any other change notice that reaches the worker must pass its generation to the client's `noteChangeSet`. While the worker has heard of a change set newer than the one the mirror reflects, `fromMirror` declines and the slot answers every presence and version probe. A language request that runs before any notice of a write reaches the worker can still see the old state. Once the change set arrives the next request sees it, because the TypeScript service asks every script's version and presence again on each program update. Code must not rely on a probe seeing a write within the same request that caused it. If the feed fails to ask the index, it sends `stale` and the slot answers every probe until the feed, retrying with backoff, sends the index whole again.
 
 ### 4. Keep the file manager authoritative
 
 `serveLanguageFileSystemRequests` and `LanguageFsBridge` delegate to the current `FileManagerApi`, `FileTreeService`, and filesystem search owner. They must not fetch workspace files independently or maintain a second tree.
 
-Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback.
+Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback. The Tier 2 index mirror is not a second tree: it holds only what the authority's index sends it, and the authority's change sets drive every update.
 
 ### 5. Keep the TypeScript worker entry explicit
 
@@ -65,11 +68,11 @@ Before admission, request no editor-only JavaScript, CSS, grammar, worker or dec
 
 Share backend services per project session and mirror each document once. Abort pending acquisition on pane closure; dispose per-view extensions and release the backend when its last view closes. Cached code modules do not justify keeping workers alive.
 
-### 8. Keep editor and documentation grammars aligned
+### 8. Highlight every code surface through one grammar registry
 
-Precompile shared TextMate grammars in `libs/grammars`. CodeMirror syntax adapters and the docs Shiki highlighter must use the same canonical language ID, extensions, aliases, and upstream grammar revision.
+Every code surface in the app (the editor, hover, signature and completion documentation, chat code blocks, the code and diff viewers, and the conflict editor) highlights through the Lezer registry in `libs/grammars`: `loadLanguage` and `peekLanguage` for parsers, `tauHighlighter` for `tok-*` token classes, and `apps/ui/app/styles/syntax-highlight.css` for the one palette. A surface never resolves languages or paints tokens on its own; `apps/ui/app/components/code/code-surfaces.test.tsx` checks every surface against every language's fixture.
 
-Do not fetch grammars at runtime. Follow the `add-editor-language` skill for a new language.
+Grammars are committed with their generated parser tables; do not fetch or compile grammars at runtime. Documentation code takes the source document's language for untagged fences, and an adapter maps fence tags its server uses loosely (KCL documentation fences KCL as `js`). Highlighting a code block never starts a language service. Follow the `add-editor-language` skill for a new language.
 
 ### 9. Fail visibly without breaking basic editing
 
@@ -83,7 +86,7 @@ Before applying a semantic workspace edit, verify every target against the exact
 
 ### 11. Test each boundary
 
-Cover URI normalization, Tier 0 and Tier 1 fallback, Tier 2 closed-file reads, version lookup, synthetic dependency directories, worker boot ordering, lazy activation, and disposal. Use the smallest real worker integration needed to prove the browser boundary.
+Cover URI normalization, Tier 1 reads, Tier 2 closed-file reads, version lookup, synthetic dependency directories, worker boot ordering, lazy activation, and disposal. Use the smallest real worker integration needed to prove the browser boundary.
 
 ## Ownership
 

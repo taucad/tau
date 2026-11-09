@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxDebKinds } from '#shared/linux-installation.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
@@ -11,6 +12,7 @@ import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 import { readDesktopAptSnapshot } from './desktop-apt-publication.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 import type { QualificationCandidate } from './qualification-platform-types.mjs';
+import { isAptLockRefusal } from './qualification-linux.mjs';
 import type { AptQualificationRepository } from './qualification-linux.mjs';
 /* oxlint-enable no-restricted-imports */
 const hashSchema = z.string().regex(/^[a-f\d]{64}$/u);
@@ -179,6 +181,18 @@ const admitSnapshot = async (options: {
   }
   return repository;
 };
+/**
+ * The `Date` of a signed APT pointer, in milliseconds. APT treats an `InRelease` dated before the one it already holds
+ * as unchanged and never reads its index (run 41342285729: snapshot B, signed before A, was never fetched).
+ */
+const aptReleaseDate = (inRelease: Uint8Array<ArrayBuffer>): number => {
+  const [message = ''] = Buffer.from(inRelease).toString('utf8').split('\n-----BEGIN PGP SIGNATURE-----');
+  const date = Date.parse(/^Date: (.+)$/mu.exec(message)?.[1] ?? '');
+  if (Number.isNaN(date)) {
+    throw new TypeError('Signed APT pointer has no Date');
+  }
+  return date;
+};
 export type QualificationAptEnrollment = {
   repositories: AptQualificationRepository[];
   snapshotDirectories: string[];
@@ -235,6 +249,10 @@ export const prepareQualificationAptEnrollment = async (options: {
     }
     return result.value;
   });
+  const dates = repositories.map((repository) => aptReleaseDate(repository.inRelease));
+  if (!(dates[0]! < dates[1]! && dates[1]! < dates[2]!)) {
+    throw new Error('APT snapshots must be signed in candidate order: InRelease Date A < B < C');
+  }
   const id = createHash('sha256').update(runDirectory).digest('hex').slice(0, 16);
   const owned = new Map<string, string>();
   const sudo = (args: string[]): string => command('sudo', ['-n', ...args]);
@@ -291,16 +309,34 @@ export const prepareQualificationAptEnrollment = async (options: {
         `APT::Periodic::Update-Package-Lists "always";\nAPT::Periodic::Unattended-Upgrade "always";\nUnattended-Upgrade::Origins-Pattern { "origin=Tau,label=${label},codename=${suite},component=main"; };\n`,
       );
       /* oxlint-disable no-await-in-loop -- Timer enrollment and cleanup have ordered system side effects. */
+      // OnUnitActiveSec counts from the service's last start, and a guest whose boot-time APT service never became
+      // active has no such start, so its timer never fires again (run 41841972307 Debian rows: both timers last fired
+      // at boot and the mirror saw no request for 15 minutes). OnActiveSec counts from the timer restart below.
       for (const timer of ['apt-daily.timer', 'apt-daily-upgrade.timer']) {
         await install(
           `/etc/systemd/system/${timer}.d/90-tau-qualification-${id}.conf`,
-          '[Timer]\nOnCalendar=\nOnBootSec=30s\nOnUnitActiveSec=30s\nRandomizedDelaySec=0\nPersistent=false\n',
+          '[Timer]\nOnCalendar=\nOnActiveSec=30s\nOnBootSec=30s\nOnUnitActiveSec=30s\nRandomizedDelaySec=0\nPersistent=false\n',
         );
       }
       /* oxlint-enable no-await-in-loop */
       sudo(['systemctl', 'daemon-reload']);
       sudo(['systemctl', 'restart', 'apt-daily.timer', 'apt-daily-upgrade.timer']);
-      sudo(['apt-get', 'update', '--error-on=any']);
+      // The timers just restarted take the package-list lock within seconds; wait for it rather than fail on it.
+      const deadline = Date.now() + 600_000;
+      /* oxlint-disable no-await-in-loop -- one update at a time until the lock is free. */
+      for (;;) {
+        try {
+          sudo(['apt-get', 'update', '--error-on=any']);
+          break;
+        } catch (error) {
+          const { stderr } = error as { stderr?: string };
+          if (!isAptLockRefusal(stderr ?? '') || Date.now() >= deadline) {
+            throw error;
+          }
+        }
+        await delay(5000);
+      }
+      /* oxlint-enable no-await-in-loop */
     },
     async cleanup() {
       guard();

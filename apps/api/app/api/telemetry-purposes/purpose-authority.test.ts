@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PurposeAuthorityInput, RecordedPurposeDecision } from '#api/telemetry-purposes/purpose-authority.js';
 import { purposeEpoch, resolvePurposeAuthority } from '#api/telemetry-purposes/purpose-authority.js';
-import type { PurposeRefusal, TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
-import { telemetryPurposes } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { PurposeRefusal } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
+import { telemetryPurposes } from '@taucad/api-database/schema/telemetry-purpose.types';
 
 const notice = 'observability-notice-2026-10-29';
 const superseded = 'observability-notice-2026-09-01';
@@ -82,17 +83,38 @@ describe('resolvePurposeAuthority', () => {
     expect(refusalOf(input, 'summary')).toBe('withdrawn');
   });
 
+  it('says when the allowing decision was taken, and only for an allowed purpose', () => {
+    const states = resolvePurposeAuthority(
+      authority({
+        decisions: [
+          { purpose: 'summary', granted: true, noticeVersion: notice, sequence: 1, decidedAt: 1000 },
+          { purpose: 'summary', granted: true, noticeVersion: notice, sequence: 2, decidedAt: 2000 },
+          { purpose: 'feedback', granted: false, noticeVersion: notice, sequence: 3, decidedAt: 3000 },
+        ],
+      }),
+    );
+
+    expect(states.find((state) => state.purpose === 'summary')).toMatchObject({ allowed: true, allowedSince: 2000 });
+    expect(states.find((state) => state.purpose === 'feedback')).not.toHaveProperty('allowedSince');
+  });
+
   describe('tier', () => {
     const granted = telemetryPurposes.map((purpose) => decided(purpose, true));
 
-    it('excludes a paid tier from reuse and training however the account answered', () => {
+    it('lets a paid tier that granted reuse and training use them', () => {
       for (const tier of ['pro', 'enterprise'] as const) {
-        const input = authority({ decisions: granted, tier });
-
-        expect(allowed(input)).toEqual(['summary', 'feedback', 'content', 'diagnosis']);
-        expect(refusalOf(input, 'reuse')).toBe('tier-excluded');
-        expect(refusalOf(input, 'training')).toBe('tier-excluded');
+        expect(allowed(authority({ decisions: granted, tier }))).toEqual([...telemetryPurposes]);
       }
+    });
+
+    it('keeps a paid tier out of reuse and training until it decides', () => {
+      const capture = telemetryPurposes
+        .filter((purpose) => purpose !== 'reuse' && purpose !== 'training')
+        .map((purpose) => decided(purpose, true));
+      const input = authority({ decisions: capture, tier: 'pro' });
+
+      expect(refusalOf(input, 'reuse')).toBe('no-decision');
+      expect(refusalOf(input, 'training')).toBe('no-decision');
     });
 
     it('refuses reuse when the free tier is only the unrecognised-plan fallback', () => {
@@ -106,14 +128,8 @@ describe('resolvePurposeAuthority', () => {
       expect(refusalOf(input, 'training')).toBe('tier-unverified');
     });
 
-    it('allows reuse and training only for an assured free tier that granted them', () => {
+    it('allows reuse and training for an assured free tier that granted them', () => {
       expect(allowed(authority({ decisions: granted }))).toEqual([...telemetryPurposes]);
-    });
-
-    it('withdraws reuse on upgrade and restores it on downgrade without touching the decisions', () => {
-      expect(allowed(authority({ decisions: granted, tier: 'free' }))).toContain('reuse');
-      expect(allowed(authority({ decisions: granted, tier: 'pro' }))).not.toContain('reuse');
-      expect(allowed(authority({ decisions: granted, tier: 'free' }))).toContain('reuse');
     });
   });
 

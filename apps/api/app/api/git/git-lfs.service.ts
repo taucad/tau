@@ -3,10 +3,10 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Optional } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
-import { DatabaseService } from '#database/database.service.js';
-import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
-import { withOwnerLock } from '#database/owner-lock.js';
-import { projectGitLfsObject } from '#database/schema.js';
+import { DatabaseService } from '@taucad/api-database';
+import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { projectGitLfsObject } from '@taucad/api-database/schema';
 import { FileLinksService } from '#storage/file-links.service.js';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import type { LfsObjectLocation } from '#api/git/lfs-keys.js';
@@ -274,48 +274,48 @@ export class GitLfsService {
     }));
   }
 
-  /** Verify exact stored bytes before making the reserved object readable. */
+  /**
+   * Verify exact stored bytes before making the reserved object readable.
+   *
+   * At the tenant key the store has already verified them (D11, EQ12): every
+   * writer of that key — the presigned PUT this batch signs, relocation and the
+   * mirror restore — pins `x-amz-checksum-sha256` to the oid as a signed header,
+   * and the store refuses a body that does not hash to it. So the HEAD asks for
+   * that stored checksum, and when it is the oid's own digest the bytes are not
+   * read back; a different one refuses. An object at a pre-D24 legacy key is
+   * always read and hashed, whatever checksum it reports, and so is a tenant
+   * object the store holds no whole SHA-256 for (a store that does not report
+   * one, a multipart composite).
+   */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
     await this.repositories.resolveActiveLocator(args.access);
     if (args.size > projectFileLimitBytes) {
       return false;
     }
-    // Hash without occupying a pooled database connection or the owner's retirement lock.
+    // Verified without occupying a pooled database connection or the owner's retirement lock.
     const signal = AbortSignal.timeout(120_000);
-    const stored = await this.#storedAt(args.access, args.oid, signal);
+    const stored = await this.#storedAt(args.access, args.oid, { signal, checksum: true });
     if (stored === undefined || stored.size !== args.size) {
       return false;
     }
-    const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
-    const hash = createHash('sha256');
-    let size = 0;
-    try {
-      if (blob.etag === '') {
-        return false;
-      }
-      for await (const chunk of blob.body) {
-        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
-        size += bytes.byteLength;
-        if (size > args.size) {
-          return false;
-        }
-        hash.update(bytes);
-      }
-      if (size !== args.size || hash.digest('hex') !== args.oid) {
-        return false;
-      }
-    } finally {
-      blob.body.destroy();
+    /* Only a tenant key's writers pin the checksum; a legacy key's is never trusted. */
+    const checksumSha256 = stored.location.namespace === 'tenants' ? stored.checksumSha256 : undefined;
+    if (checksumSha256 !== undefined && checksumSha256 !== Buffer.from(args.oid, 'hex').toString('base64')) {
+      return false;
+    }
+    const etag = checksumSha256 === undefined ? await this.#hashedEtag(stored, args, signal) : stored.etag;
+    if (etag === undefined || etag === '') {
+      return false;
     }
     const outcome = await this.repositories.finalizeLfsObject({
       ...args,
       verifyContent: async () => {
         // Re-resolve under the lock: a tenant copy may now shadow the hashed legacy object.
-        const current = await this.#storedAt(args.access, args.oid, AbortSignal.timeout(5000));
+        const current = await this.#storedAt(args.access, args.oid, { signal: AbortSignal.timeout(5000) });
         return (
           current !== undefined &&
           current.size === args.size &&
-          current.etag === blob.etag &&
+          current.etag === etag &&
           current.location.namespace === stored.location.namespace &&
           current.location.key === stored.location.key &&
           current.location.tier === stored.location.tier
@@ -323,6 +323,40 @@ export class GitLfsService {
       },
     });
     return outcome === 'finalized' || outcome === 'already-finalized';
+  }
+
+  /**
+   * The identity of a legacy object whose bytes hash to its oid, or `undefined`.
+   *
+   * @param stored - Where the bytes are.
+   * @param args - The object's oid and declared size.
+   * @param signal - Bounds the read.
+   * @returns The GET response's ETag when the bytes verify.
+   */
+  async #hashedEtag(
+    stored: { location: LfsObjectLocation },
+    args: { oid: string; size: number },
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
+    const hash = createHash('sha256');
+    let size = 0;
+    try {
+      if (blob.etag === '') {
+        return undefined;
+      }
+      for await (const chunk of blob.body) {
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
+        size += bytes.byteLength;
+        if (size > args.size) {
+          return undefined;
+        }
+        hash.update(bytes);
+      }
+      return size === args.size && hash.digest('hex') === args.oid ? blob.etag : undefined;
+    } finally {
+      blob.body.destroy();
+    }
   }
 
   /**
@@ -363,18 +397,21 @@ export class GitLfsService {
    *
    * @param access - The authorized request, which names the owner and project.
    * @param oid - git-lfs's own SHA-256 object identity.
+   * @param options - `signal` bounds the lookups; `checksum` also asks the store
+   *   for the SHA-256 it verified on write.
    * @returns The location holding the bytes and their stored length.
    */
   async #storedAt(
     access: GitAccess,
     oid: string,
-    signal?: AbortSignal,
-  ): Promise<{ location: LfsObjectLocation; size: number; etag: string } | undefined> {
+    options: { signal?: AbortSignal; checksum?: boolean } = {},
+  ): Promise<{ location: LfsObjectLocation; size: number; etag: string; checksumSha256?: string } | undefined> {
     return resolveLfsObjectLocation(this.objectStorage, {
       ownerId: access.ownerId,
       projectId: access.projectId,
       oid,
-      ...(signal === undefined ? {} : { signal }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.checksum === true ? { checksum: true } : {}),
     });
   }
 

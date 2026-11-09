@@ -42,6 +42,8 @@ const { projectRoot } = workerData as { readonly projectRoot: string };
 await nodeWorkerHost({ worker: createRuntimeWorker({ runtime: await runtimeFor(projectRoot) }) }).open();
 ```
 
+A worker entry reads the project through `@taucad/runtime/worker`'s `createWorkerFileSystemProxy(port)`; its `WorkerFileSystemProxy` reads, writes and watches by change set until `dispose()`.
+
 ## Exports by Subpath
 
 Concrete topology imports stay isolated per environment:

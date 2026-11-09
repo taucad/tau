@@ -2,7 +2,11 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { asKnownArtifact } from '@taucad/runtime';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import type { Rendering } from '@taucad/runtime';
-import { canonicalCaptureViews, captureFilesToDataUrls as encodeCaptureDataUrls } from '@taucad/agent-tools/capture';
+import {
+  buildViewerCaptureImageOptions,
+  canonicalCaptureViews,
+  captureFilesToDataUrls as encodeCaptureDataUrls,
+} from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
 import type { CameraState } from '@taucad/camera';
 import { toNanorasterCamera } from '@taucad/image/camera';
@@ -270,7 +274,8 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const common = {
     width,
     height,
-    lineWidth: 3,
+    // The light-scheme viewer's look, chosen by the operator on 2026-11-05 for black edges, on the dark capture background.
+    ...buildViewerCaptureImageOptions({ width, height, colorScheme: 'light' }),
     background: captureBackground,
     ...(presentation?.enableSurfaces === false ? { surfaces: false } : {}),
     ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),

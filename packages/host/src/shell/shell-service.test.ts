@@ -191,29 +191,30 @@ describe('admission (A03, F5)', () => {
 });
 
 describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
-  it('should mask future reserved children while reopening existing authored roots', async () => {
+  it('should open the whole checkout and keep records read-only and control rows denied', async () => {
     await writeFile(join(project, '.tau', 'AGENTS.md'), 'instructions');
     const { service, provider } = harness();
     await service.run(call({ command: 'true' }));
-    expect(provider.launches[0]!.filesystem.masked).toEqual([join(project, '.tau')]);
-    expect(provider.launches[0]!.filesystem.writable).toEqual(
-      expect.arrayContaining([project, join(project, '.tau', 'parameters'), join(project, '.tau', 'AGENTS.md')]),
+    const { filesystem } = provider.launches[0]!;
+    expect(filesystem).not.toHaveProperty('masked');
+    expect(filesystem.writable).toContain(project);
+    expect(filesystem.writable).not.toContain(join(project, '.tau'));
+    expect(filesystem.readOnly).toContain(join(project, '.tau', 'chats'));
+    expect(filesystem.denied).toEqual(
+      expect.arrayContaining([join(project, '.tau', 'binding.json'), join(project, '.tau', 'project.json')]),
     );
-    expect(provider.launches[0]!.filesystem.readOnly).toContain(join(project, '.tau', 'chats'));
-    expect(provider.launches[0]!.filesystem.writable).not.toContain(join(project, '.tau', 'machines'));
+    expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(project, '.tau', 'AGENTS.md'));
   });
 
-  it('should compile existing reserved case aliases and refuse authored symlink grants', async () => {
+  it('should protect the records of an existing reserved case alias', async () => {
     const alias = join(project, '.TAU');
-    await mkdir(join(alias, 'Parameters'), { recursive: true });
-    await symlink(outside, join(project, '.tau', 'machines'));
+    await mkdir(join(alias, 'chats'), { recursive: true });
+    await mkdir(join(alias, 'future'), { recursive: true });
     const { service, provider } = harness();
     await service.run(call({ command: 'true' }));
     const { filesystem } = provider.launches[0]!;
-    expect(filesystem.masked).toContain(await realpath(alias));
-    expect(filesystem.writable).toContain(await realpath(join(alias, 'Parameters')));
-    expect(filesystem.writable).not.toContain(join(project, '.tau', 'machines'));
-    expect(filesystem.denied).toContain(join(project, '.tau', 'machines'));
+    expect(filesystem.readOnly).toContain(join(await realpath(alias), 'chats'));
+    expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(await realpath(alias), 'future'));
   });
 
   it('runs one fresh contained process in the checkout with closed stdin and an allowlisted environment', async () => {
@@ -332,6 +333,72 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
       status: 'not-started',
       code: 'launch-failed',
     });
+  });
+
+  it('runs a command once more, from a fresh launch, after a sandbox setup failure that ran nothing', async () => {
+    let attempts = 0;
+    const { service, provider } = harness(() => {
+      attempts += 1;
+      return attempts === 1
+        ? { status: 'sandbox-unavailable', message: "bwrap: Can't find source path", retryable: true }
+        : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } };
+    });
+
+    await expect(service.run(call({ command: 'ls' }))).resolves.toMatchObject({
+      status: 'completed',
+      exitCode: 0,
+      stdout: { text: 'ok\n' },
+    });
+    const [first, second] = provider.launches;
+    expect(provider.launches).toHaveLength(2);
+    expect(second!.executionId).not.toBe(first!.executionId);
+    // The refused attempt was recovered and released before the retry was prepared.
+    expect(provider.released).toEqual([first!.executionId, second!.executionId]);
+  });
+
+  it('retries a sandbox setup failure at most once, and never one that was not proven harmless', async () => {
+    const twice = harness(() => ({
+      status: 'sandbox-unavailable',
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp",
+      retryable: true,
+    }));
+    const refused = await twice.service.run(call({ command: 'ls' }));
+    expect(refused).toMatchObject({
+      status: 'not-started',
+      code: 'shell-unavailable',
+      message: expect.stringContaining('could not be set up') as unknown as string,
+    });
+    /* The sandbox's own output names paths: it reaches the host log, never the person or the model. */
+    expect(JSON.stringify(refused)).not.toContain('thumbnail.webp');
+    expect(twice.provider.launches).toHaveLength(2);
+
+    const plain = harness(() => ({ status: 'sandbox-unavailable', message: 'socat is missing' }));
+    await expect(plain.service.run(call({ command: 'ls' }))).resolves.toMatchObject({ status: 'not-started' });
+    expect(plain.provider.launches).toHaveLength(1);
+
+    const exited = harness(() => ({
+      status: 'started',
+      stderr: "bwrap: Can't find source path\n",
+      exit: { exitCode: 1 },
+    }));
+    await expect(exited.service.run(call({ command: 'ls' }))).resolves.toMatchObject({
+      status: 'completed',
+      exitCode: 1,
+    });
+    expect(exited.provider.launches).toHaveLength(1);
+  });
+
+  it('never retries a sandbox setup failure once the call is cancelled', async () => {
+    const controller = new AbortController();
+    const { service, provider } = harness(() => {
+      controller.abort();
+      return { status: 'sandbox-unavailable', message: 'bwrap: setup failed', retryable: true };
+    });
+    await expect(service.run(call({ command: 'ls' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(provider.launches).toHaveLength(1);
   });
 
   it('keeps output bounded and saves the full log in the records row only once it is written (A08)', async () => {
@@ -611,6 +678,58 @@ describe('human Terminal sessions (D6, D21)', () => {
     expect(provider.resized[0]).toEqual([{ columns: 120, rows: 40 }]);
     await opened.session[Symbol.asyncDispose]();
     await expect(opened.session.exited).resolves.toEqual({ signal: 'SIGKILL' });
+  });
+
+  it('runs the verified macOS Zsh with the startup files for the Terminal only, never for an agent', async () => {
+    const terminalZsh = { path: '/bin/zsh', realPath: '/bin/zsh', digest: `sha256:${'b'.repeat(64)}` } as const;
+    const { service, provider } = harness(
+      (launch) =>
+        launch.stdio.kind === 'terminal'
+          ? { status: 'started', stdout: '$ ' }
+          : { status: 'started', stdout: 'hi\n', exit: { exitCode: 0 } },
+      { terminalZsh },
+    );
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    await service.run(call({ command: 'echo hi' }));
+
+    expect(provider.launches[0]).toMatchObject({
+      executablePath: '/bin/zsh',
+      arguments: ['-l', '-i'],
+      startupFiles: 'zsh',
+      environment: { SHELL: '/bin/zsh' },
+    });
+    expect(provider.launches[0]!.environment).not.toHaveProperty('ZDOTDIR');
+    expect(provider.launches[1]).toMatchObject({ executablePath: executable.path });
+    expect(provider.launches[1]).not.toHaveProperty('startupFiles');
+    expect(provider.launches[1]!.arguments.slice(0, 2)).toStrictEqual(['--noprofile', '--norc']);
+    await opened.session[Symbol.asyncDispose]();
+  });
+
+  it('opens the Terminal once more after a sandbox setup failure that ran nothing, and only once', async () => {
+    let attempts = 0;
+    const { service, provider } = harness(() => {
+      attempts += 1;
+      return attempts === 1
+        ? { status: 'sandbox-unavailable', message: "bwrap: Can't find source path", retryable: true }
+        : { status: 'started', stdout: '$ ' };
+    });
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    expect(provider.launches).toHaveLength(2);
+    expect(provider.released).toEqual([provider.launches[0]!.executionId]);
+    await opened.session[Symbol.asyncDispose]();
+
+    const twice = harness(() => ({ status: 'sandbox-unavailable', message: 'bwrap: setup failed', retryable: true }));
+    await expect(
+      twice.service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal }),
+    ).resolves.toMatchObject({ status: 'refused', code: 'sandbox-unavailable' });
+    expect(twice.provider.launches).toHaveLength(2);
+    expect(twice.provider.released).toHaveLength(2);
   });
 
   it('maps a provider that cannot give a terminal to pty-unavailable', async () => {

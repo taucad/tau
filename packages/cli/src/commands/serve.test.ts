@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { defaultPayloadStore } from '@taucad/host';
+import type { PreparationReport } from '@taucad/host/telemetry';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -219,6 +220,35 @@ describe('serveNativeKernels', () => {
     });
   });
 
+  it('T19: should report each prepare_kernel it settles, the refusal of an unshipped kernel included', async () => {
+    const report = vi.fn<PreparationReport>();
+    const kernels = serveNativeKernels(report);
+    await reported(kernels);
+
+    await expect(kernels.prepareKernel({ kernel: 'rustcad' }, context)).resolves.toMatchObject({
+      code: 'KERNEL_NOT_SHIPPED',
+    });
+    await expect(kernels.prepareKernel({ kernel: 'build123d' }, context)).resolves.toMatchObject({ status: 'ready' });
+    await kernels.dispose();
+
+    expect(report.mock.calls.map(([state]) => state)).toEqual([
+      { status: 'failed', code: 'KERNEL_NOT_SHIPPED' },
+      { status: 'ready' },
+    ]);
+  });
+
+  it('T19: should answer as before when the report throws', async () => {
+    const throwing = serveNativeKernels(() => {
+      throw new Error('report fault');
+    });
+    const silent = serveNativeKernels();
+    await reported(throwing);
+    await reported(silent);
+
+    const answer = await silent.prepareKernel({ kernel: 'rustcad' }, context);
+    await expect(throwing.prepareKernel({ kernel: 'rustcad' }, context)).resolves.toEqual(answer);
+  });
+
   it('should re-verify a closure for a child in this process, where the store is readable (X35)', async () => {
     const kernels = serveNativeKernels();
     const { signal } = new AbortController();
@@ -395,6 +425,17 @@ describe('prepareStoreUi', () => {
     } finally {
       stderr.mockRestore();
     }
+  });
+
+  it('T19: should hand the cloud host reporter to the preparation, and none otherwise', async () => {
+    const report = vi.fn<PreparationReport>();
+    const prepare = vi.fn<typeof prepareServeUi>(async () => ({ status: 'ready', root: '/r', closureIntegrity: 'a' }));
+
+    await prepareStoreUi({ prepare, report });
+    await prepareStoreUi({ prepare });
+
+    expect(prepare.mock.calls[0]?.[0].report).toBe(report);
+    expect(prepare.mock.calls[1]?.[0]).not.toHaveProperty('report');
   });
 
   it('should say nothing for a layer already sealed, and hand back why there is none', async () => {

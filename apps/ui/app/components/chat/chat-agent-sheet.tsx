@@ -398,6 +398,8 @@ type Level = Option & { readonly description?: string | undefined };
 type SheetModel = {
   readonly glyph: React.ReactNode;
   readonly name: string;
+  /** The model's display name is not known yet: the trigger holds a fixed-width placeholder instead of a label. */
+  readonly isNamePending: boolean;
   readonly levels: readonly Level[];
   readonly level: Level | undefined;
   /** An agent's own "Default" effort means the agent decides, so the trigger does not print it. */
@@ -501,6 +503,9 @@ const settingsOf = (agentConfig: AgentConfig): readonly Setting[] =>
     ];
   });
 
+/** The accessible name of a Tau model whose display name is not known yet. */
+const pendingModelName = 'Model';
+
 /**
  * The trigger's and the sheet's reading of the chat's model, from one place so
  * the two can never disagree.
@@ -518,7 +523,9 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
     const level = levels.find((entry) => entry.id === effort);
     return {
       glyph: <SvgIcon id={model.family} className={glyphClass} aria-hidden='true' />,
-      name: model.name,
+      // Never the raw id or an empty label: a neutral name until the catalog names the model.
+      name: model.isNamePending ? pendingModelName : model.name,
+      isNamePending: model.isNamePending,
       levels,
       level,
       isLevelShown: level !== undefined,
@@ -545,6 +552,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   return {
     glyph: <AgentGlyph agentId={current.agentId} className={glyphClass} />,
     name,
+    isNamePending: false,
     levels,
     level,
     isLevelShown: level !== undefined && !isDefaultValue(level),
@@ -982,7 +990,7 @@ function ModelList({
   };
   const tauGroups = useTauModelGroups(modelId);
   /* F1: pinned models, read and written where the model overrides live (F2). */
-  const { pinnedIds, setPinned } = useModels();
+  const { isPinningEnabled, pinnedIds, setPinned } = useModels();
   const pinOf = (entry: Model): { readonly isOn: boolean; readonly toggle: () => void } => ({
     isOn: pinnedIds.includes(entry.id),
     toggle: () => {
@@ -991,7 +999,7 @@ function ModelList({
   });
   /* F1: Shift+Enter toggles the highlighted model's pin; Enter alone still chooses it (cmdk defers to a prevented key). */
   const onKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
+    if (isPinningEnabled && event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
       const highlighted = event.currentTarget.querySelector<HTMLElement>('[cmdk-item][data-selected=true]');
       const entry = tauGroups
         .flatMap((group) => group.items)
@@ -1057,7 +1065,7 @@ function ModelList({
                       name={entry.name}
                       isInUse={isInUse}
                       level={isInUse ? sheetModel.level?.name : undefined}
-                      pinned={pinOf(entry)}
+                      pinned={isPinningEnabled ? pinOf(entry) : undefined}
                     />
                   </CommandItem>
                 );
@@ -1509,9 +1517,6 @@ export function ChatAgentSheet({
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
-  const {
-    execution: { isPending = false },
-  } = useChatComposer();
   const closedOutside = useRef(false);
   const backRef = useRef<(() => void) | undefined>(undefined);
 
@@ -1526,23 +1531,23 @@ export function ChatAgentSheet({
       size='sm'
       data-slot='agent-trigger'
       data-chat-textarea-focustrap
-      aria-label={isPending ? 'Agent and model' : `Agent and model: ${name}`}
-      aria-busy={isPending}
+      aria-label={`Agent and model: ${name}`}
       aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination, platform)}
       className={cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground')}
     >
-      {/* Until the chat's own choice is known, the control shows itself loading, not a model it may replace. */}
-      {isPending ? (
-        <span data-slot='trigger-pending' className='h-3 w-24 animate-pulse rounded-full bg-muted' />
+      {sheetModel.glyph}
+      {sheetModel.isNamePending ? (
+        <span
+          data-slot='trigger-model-placeholder'
+          aria-hidden='true'
+          className='h-3 w-20 shrink-0 rounded-sm bg-muted'
+        />
       ) : (
-        <>
-          {sheetModel.glyph}
-          <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
-            {sheetModel.name}
-          </span>
-        </>
+        <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
+          {sheetModel.name}
+        </span>
       )}
-      {!isPending && sheetModel.isLevelShown && sheetModel.level ? (
+      {sheetModel.isLevelShown && sheetModel.level ? (
         <span
           data-slot='trigger-level'
           className='shrink-0 text-xs text-muted-foreground group-data-[hide-level]/bar:hidden'
@@ -1550,9 +1555,7 @@ export function ChatAgentSheet({
           {sheetModel.level.name}
         </span>
       ) : null}
-      {!isPending && sheetModel.isFast ? (
-        <Zap aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' />
-      ) : null}
+      {sheetModel.isFast ? <Zap aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' /> : null}
       <ChevronDown aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' />
     </Button>
   );

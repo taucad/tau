@@ -1,4 +1,11 @@
-import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import {
+  ChangeEventBus,
+  lineCountByteCap,
+  MountTable,
+  ProviderRegistry,
+  ResourceQueue,
+  WorkspaceFileService,
+} from '@taucad/filesystem';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,9 +49,14 @@ class RacedProvider extends MemoryProvider {
   public async writeFileChecked(input: Parameters<CheckedWrite>[0]): ReturnType<CheckedWrite> {
     await this._race();
     const conflicts = [];
-    for (const { path, expected } of input.preconditions) {
+    for (const precondition of input.preconditions) {
+      const { path } = precondition;
       // oxlint-disable-next-line no-await-in-loop -- A test double over one in-memory file.
       const actual = (await this.exists(path)) ? await this.readFile(path) : null;
+      if (!('expected' in precondition)) {
+        throw new Error('This test double checks byte preconditions only.');
+      }
+      const { expected } = precondition;
       const wanted = typeof expected === 'string' ? new TextEncoder().encode(expected) : expected;
       if (actual === null || wanted === null ? actual !== wanted : decoder.decode(actual) !== decoder.decode(wanted)) {
         conflicts.push({ path, actual });
@@ -78,6 +90,20 @@ describe('createProviderRpcFileSystem', () => {
     read[1] = 0;
     expect(await provider.readFile('part.glb')).toEqual(original);
     await expect(fileSystemFor().readBinaryFile('../foreign.glb')).rejects.toThrow();
+  });
+
+  it('should answer pending paths from the view’s index, and offer none over a view without one (D9)', async () => {
+    expect(fileSystemFor().pendingPaths).toBeUndefined();
+    const pendingPaths = vi.fn(async (paths: readonly string[]) => paths.filter((path) => path.endsWith('.step')));
+    const indexed = createProviderRpcFileSystem({
+      provider: composeView(
+        { filesystem: Object.assign(Object.create(provider) as MemoryProvider, { pendingPaths }) },
+        { consumer: 'agent', policy: tauPathPolicy },
+      ),
+      mutations: new ResourceQueue(),
+    });
+    expect(await indexed.pendingPaths!(['main.scad', 'models/part.step'])).toStrictEqual(['models/part.step']);
+    expect(pendingPaths).toHaveBeenCalledWith(['main.scad', 'models/part.step']);
   });
 
   it('should refuse oversized byte reads before asking the provider for content', async () => {
@@ -187,6 +213,32 @@ describe('createProviderRpcFileSystem', () => {
     expect(entries.map((entry) => entry.name).toSorted()).toStrictEqual(['a.ts', 'nested']);
     expect(entries.find((entry) => entry.name === 'nested')).toMatchObject({ type: 'dir' });
     expect(entries.find((entry) => entry.name === 'a.ts')).toMatchObject({ type: 'file', contentKind: 'text' });
+  });
+
+  /* W3 a3: a walk that reads every file anyway lists without measuring any. */
+  it('lists without measuring content when the caller asks for no content facts', async () => {
+    await provider.writeFile('src/a.ts', 'a\n');
+    const reads = vi.spyOn(provider, 'readFile');
+
+    const entries = await fileSystemFor().readdir('src', { contentFacts: false });
+
+    expect(entries).toStrictEqual([expect.objectContaining({ name: 'a.ts', type: 'file', size: 2 })]);
+    expect(entries[0]).not.toHaveProperty('contentKind');
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  /* D4, EQ15: a listing counts lines only within its byte cap and never calls an unmeasured file binary. */
+  it('lists a file above the line-count cap by kind and size alone', async () => {
+    await provider.writeFile('logs/large.log', 'line\n'.repeat(lineCountByteCap / 4));
+    await provider.writeFile('logs/part.glb', Uint8Array.from([0, 1, 2, 3]));
+
+    const entries = await fileSystemFor().readdir('logs');
+    const large = entries.find((entry) => entry.name === 'large.log');
+    /* A memory checkout has no ranged read, so above the cap it measures nothing and reports the size. */
+    expect(large).toMatchObject({ type: 'file', size: lineCountByteCap * 1.25 });
+    expect(large).not.toHaveProperty('contentKind');
+    expect(large).not.toHaveProperty('lineCount');
+    expect(entries.find((entry) => entry.name === 'part.glb')).toMatchObject({ type: 'file', contentKind: 'binary' });
   });
 
   it('edits a file by exact replacement and reports the occurrence count', async () => {

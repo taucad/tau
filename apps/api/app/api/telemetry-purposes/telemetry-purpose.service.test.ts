@@ -2,28 +2,34 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { BadRequestException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { DatabaseService } from '#database/database.service.js';
+import type { DatabaseService } from '@taucad/api-database';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
-import type { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
+import type {
+  project,
+  projectDeletion,
+  projectInvitation,
+  telemetryPurposeDecision,
+} from '@taucad/api-database/schema';
 import { TelemetryPurposeService, grantAt } from '#api/telemetry-purposes/telemetry-purpose.service.js';
-import type { TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
 
 const notice = 'observability-notice-2026-10-29';
 
 type DecisionRow = typeof telemetryPurposeDecision.$inferSelect;
 
-/** The four columns the service actually selects; the rest of the row is never read. */
-type SelectedDecision = Pick<DecisionRow, 'id' | 'purpose' | 'granted' | 'noticeVersion'>;
+/** The five columns the service actually selects; the rest of the row is never read. */
+type SelectedDecision = Pick<DecisionRow, 'id' | 'purpose' | 'granted' | 'noticeVersion' | 'decidedAt'>;
 
 const row = (id: number, purpose: TelemetryPurpose, granted: boolean): SelectedDecision => ({
   id,
   purpose,
   granted,
   noticeVersion: notice,
+  decidedAt: new Date(Date.UTC(2026, 9, 29) + id * 1000),
 });
 
 /* `findMany` is typed against the whole row, but the service narrows the query with
- * `columns`, so the fixtures carry only the four columns it can see. */
+ * `columns`, so the fixtures carry only the five columns it can see. */
 const resolvesTo = (decisions: readonly SelectedDecision[]): DecisionRow[] => [...decisions] as DecisionRow[];
 
 const createService = (
@@ -103,6 +109,18 @@ describe('TelemetryPurposeService', () => {
       const effective = await service.getEffectivePurposes('user-a');
 
       expect(effective.purposes.find((state) => state.purpose === 'summary')?.refusal).toBe('withdrawn');
+    });
+
+    it('answers when the allowing decision was taken', async () => {
+      const { service } = createService({ noticeVersion: notice, decisions: [row(1, 'summary', true)] });
+
+      const effective = await service.getEffectivePurposes('user-a');
+
+      expect(effective.purposes.find((state) => state.purpose === 'summary')?.allowedSince).toBe(
+        Date.UTC(2026, 9, 29) + 1000,
+      );
+      /* Its own clock beside it, so a host can read that time on the host's clock. */
+      expect(effective.answeredAt).toEqual(expect.any(Number));
     });
 
     it('binds the answer to the principal and the project', async () => {
@@ -204,17 +222,17 @@ describe('TelemetryPurposeService', () => {
       expect(allowedPurposes(effective.purposes)).toEqual([]);
     });
 
-    it('excludes a paid tier from reuse and training', async () => {
+    it('lets a paid tier use reuse and training only once it granted them', async () => {
       const { service } = createService({
         noticeVersion: notice,
         tier: 'pro',
-        decisions: [row(1, 'content', true), row(2, 'reuse', true), row(3, 'training', true)],
+        decisions: [row(1, 'content', true), row(2, 'reuse', true)],
       });
 
       const effective = await service.getEffectivePurposes('user-a');
 
-      expect(allowedPurposes(effective.purposes)).toEqual(['content']);
-      expect(effective.purposes.find((state) => state.purpose === 'training')?.refusal).toBe('tier-excluded');
+      expect(allowedPurposes(effective.purposes)).toEqual(['content', 'reuse']);
+      expect(effective.purposes.find((state) => state.purpose === 'training')?.refusal).toBe('no-decision');
     });
 
     it('refuses reuse when the free tier is only the unrecognised-plan fallback', async () => {

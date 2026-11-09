@@ -18,11 +18,16 @@ the hosted surface-normal batch callback. Do not link both adapters.
 
 For managed source, apply `PicoGK.hosted.patch`, then PicoVoxel's
 `browser-handles.patch`, then `PicoGK.browser.patch`, and include PicoVoxel's
-`BrowserCallbacks.cs` and `SdfTape.cs`. The latter is the signed-distance tape
+`BrowserCallbacks.cs`, `SdfTape.cs`, `SdfParallel.cs` and `SdfIlTape.cs`. `SdfParallel.cs` proves a callback field pure
+from its IL and, on a threaded build, precomputes its samples on every core without changing a byte.
+`SdfTape.cs` is the signed-distance tape
 registry the browser boundary consults before falling back to a per-voxel
-callback; it is reached only from `PICOGK_BROWSER` branches and needs the
-archive's ordinary `Voxels_IntersectImplicitTape` and `Voxels_RenderImplicitTape`
-exports. The host resolves no analyzer assemblies from disk, so
+callback. `SdfIlTape.cs` holds `BrowserImplicit`, the dispatch `PicoGK.browser.patch` calls: the
+registered tape, else a tape lifted from the method's own IL and admitted only after it matches the
+method's bits at the bounds' corners and 256 fixed points, else the callback. A field the lift cannot
+model keeps the callback, so coverage changes speed, never bytes. Both are reached only from
+`PICOGK_BROWSER` branches and need the archive's ordinary `Voxels_IntersectImplicitTape` and
+`Voxels_RenderImplicitTape` exports, plus the checked variants and `Tape_EvaluatePoints` the lift uses. The host resolves no analyzer assemblies from disk, so
 `CompilationService` drives PicoVoxel's signed-distance generator explicitly.
 Apply the build-time `stl-normal-canonicalization.patch`
 to the parity library on both targets; it writes historical NaN normal bits after

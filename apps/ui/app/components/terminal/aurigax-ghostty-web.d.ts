@@ -41,11 +41,20 @@ export type TerminalOptions = {
   readonly rows?: number;
   readonly fontFamily: string;
   readonly fontSize: number;
+  readonly fontWeight?: 'normal' | 'bold' | number;
   readonly theme: TerminalTheme;
   readonly scrollback: number;
   readonly renderer: 'webgl' | 'canvas';
   readonly cursorBlink?: boolean;
   readonly minimumContrastRatio?: number;
+  /** Tau's patch (tools/pnpm/patches): how the WebGL renderer blends text, after Ghostty's `alpha-blending`. */
+  readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
+  /** Tau's patch: exponent on glyph coverage in the WebGL renderer; above 1 thins text. */
+  readonly textWeight?: number;
+  /** Tau's patch: keep the font's advance as the cell width instead of flooring it to device pixels. */
+  readonly exactCellWidth?: boolean;
+  /** Tau's patch: line pitch in CSS pixels, overriding lineHeight. */
+  readonly cellHeight?: number;
   readonly macOptionIsMeta?: boolean;
   readonly smoothScrollDuration?: number;
   readonly linkHandler?: { activate(event: MouseEvent, uri: string): void };

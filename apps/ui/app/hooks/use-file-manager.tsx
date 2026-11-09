@@ -24,6 +24,7 @@ import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client'
 import { createRootedContentClient, rootedPathOf } from '@taucad/fs-client/rooted-content-client';
 import type { RootedContentClient, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
+import { watchByChangeSets } from '@taucad/filesystem';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { pathRegistry } from '@taucad/filesystem/path-registry';
@@ -302,7 +303,18 @@ type FileManagerContextType = {
    * for a bootstrap outside this FM's root (mount-write-unmount transactions).
    */
   writeFiles: (files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>;
+  /**
+   * Text bytes through the editor's content cache: refuses a binary file or one
+   * past the open-time limit. A caller that wants a file's bytes as they are
+   * (an export, an artifact, an agent read) uses `readRawBytes`.
+   */
   readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * A file's bytes as they are, text or binary (charter D17, L3 D-3), up to
+   * `sizeLimit` (the open-time limit when omitted). An incidental read: it
+   * never enters or reorders the editor's content cache.
+   */
+  readRawBytes: (path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>;
   renameFile: (oldPath: string, newPath: string) => Promise<void>;
   /**
    * Move a file or directory through the per-FM `FileContentService` cache.
@@ -457,14 +469,6 @@ type FileManagerContextType = {
 const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
 
 const SharedWorkerContext = createContext<Worker | undefined>(undefined);
-
-/**
- * Carries the root FileManagerProvider's file-pool SharedArrayBuffer down to
- * nested providers. Nested machines reuse this SAB instead of allocating
- * their own 50 MiB pool, avoiding duplicate `postMessage({ type: 'filePool' })`
- * traffic to the shared worker.
- */
-const SharedFilePoolBufferContext = createContext<SharedArrayBuffer | undefined>(undefined);
 
 const HomeStorageBackendContext = createContext<
   | { readonly backend: HomeStorageBackend | undefined; readonly error: Error | undefined; readonly retry: () => void }
@@ -740,7 +744,6 @@ function FileManagerProviderCore({
   readonly projectId?: string;
 }): React.JSX.Element {
   const parentWorker = useContext(SharedWorkerContext);
-  const parentFilePoolBuffer = useContext(SharedFilePoolBufferContext);
 
   const workspaceTelemetry = useWorkspaceTelemetry();
 
@@ -751,7 +754,6 @@ function FileManagerProviderCore({
       ...(initialBackend === undefined ? { backendResolution: 'pending' } : { initialBackend }),
       projectId,
       sharedWorker: parentWorker,
-      sharedFilePoolBuffer: parentFilePoolBuffer,
       onExternalPollTelemetry: workspaceTelemetry.workspaceExternalPoll,
       onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
     },
@@ -1060,7 +1062,8 @@ function FileManagerProviderCore({
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
           abort.signal.throwIfAborted();
           const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
-          let watch = proxy.watchReady({ paths: [path], ...options }, listener);
+          /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
+          let watch = watchByChangeSets(proxy, { paths: [path], ...options }, listener);
           disposeConnection = () => {
             if (!disposedConnection) {
               disposedConnection = true;
@@ -1176,6 +1179,14 @@ function FileManagerProviderCore({
     async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
       const { contentService } = await whenServicesReady();
       return contentService.resolveBytes(path);
+    },
+    [whenServicesReady],
+  );
+
+  const readRawBytes = useCallback(
+    async (path: string, options?: { sizeLimit?: number }): Promise<Uint8Array<ArrayBuffer>> => {
+      const { contentService } = await whenServicesReady();
+      return contentService.readRawBytes(path, options);
     },
     [whenServicesReady],
   );
@@ -1528,6 +1539,7 @@ function FileManagerProviderCore({
       writeFile,
       writeFiles,
       readFile,
+      readRawBytes,
       renameFile,
       moveFile,
       bulkMove,
@@ -1571,6 +1583,7 @@ function FileManagerProviderCore({
       writeFile,
       writeFiles,
       readFile,
+      readRawBytes,
       renameFile,
       moveFile,
       bulkMove,
@@ -1603,18 +1616,11 @@ function FileManagerProviderCore({
 
   const isRoot = parentWorker === undefined;
   const workerForChildren = useSelector(fileManagerRef, (state) => state.context.worker);
-  const filePoolBufferForChildren = useSelector(fileManagerRef, (state) => state.context.filePoolBuffer);
 
   const provider = <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
 
   if (isRoot) {
-    return (
-      <SharedWorkerContext.Provider value={workerForChildren}>
-        <SharedFilePoolBufferContext.Provider value={filePoolBufferForChildren}>
-          {provider}
-        </SharedFilePoolBufferContext.Provider>
-      </SharedWorkerContext.Provider>
-    );
+    return <SharedWorkerContext.Provider value={workerForChildren}>{provider}</SharedWorkerContext.Provider>;
   }
 
   return provider;

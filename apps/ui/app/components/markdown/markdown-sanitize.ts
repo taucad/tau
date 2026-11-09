@@ -92,8 +92,8 @@ const publicationSanitizeSchema: Schema = {
     a: [...(defaultSchema.attributes?.['a'] ?? []), 'target', 'rel'],
     code: [['className', /^language-./u]],
     pre: [['className', /^language-./u]],
-    span: [...(defaultSchema.attributes?.['span'] ?? []), ['className', /^(?:katex|hljs|shiki)/u], ['style']],
-    div: [...(defaultSchema.attributes?.['div'] ?? []), ['className', /^(?:katex|hljs|shiki)/u]],
+    span: [...(defaultSchema.attributes?.['span'] ?? []), ['className', /^(?:katex|hljs)/u], ['style']],
+    div: [...(defaultSchema.attributes?.['div'] ?? []), ['className', /^(?:katex|hljs)/u]],
     ...Object.fromEntries(katexTagAllowList.map((tag) => [tag, katexAttributeAllowList])),
   },
   protocols: {

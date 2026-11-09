@@ -232,7 +232,7 @@ export const createCanvasConfig = (
     resolve: {
       alias: [
         { find: '@taucad/ui', replacement: resolve(repoRoot, 'packages/ui/src') },
-        // Tau's precompiled Shiki grammars, which a guide passes for languages Shiki does not bundle (KCL).
+        // Tau's Lezer grammars, which highlight every sketch language in the API guide renderer.
         // Exact match: a string alias would also rewrite the app's `@taucad/grammars/openscad` imports.
         { find: /^@taucad\/grammars$/, replacement: resolve(repoRoot, 'libs/grammars/src/index.ts') },
         // The shared API design guide renderer (create-api skill).

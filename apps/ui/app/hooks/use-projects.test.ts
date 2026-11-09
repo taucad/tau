@@ -30,6 +30,7 @@ const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(
   };
   return {
     projectManager: {
+      getProjectListing: vi.fn(async (): Promise<unknown> => undefined),
       getChatsForResource: vi.fn(async (): Promise<Array<{ id: string }>> => []),
       deleteProject: vi.fn(async (projectId: string) => {
         operations.push(`trash:${projectId}`);
@@ -76,7 +77,7 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
-    getProjectListing: vi.fn(),
+    getProjectListing: projectManager.getProjectListing,
     getChatsForResource: projectManager.getChatsForResource,
     updateProject: vi.fn(),
     getProject: vi.fn(),
@@ -101,6 +102,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 
 const { useProjects } = await import('#hooks/use-projects.js');
+const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
 
 const listingQueryOptions = (): Record<string, unknown> => {
   useQuery.mockClear();
@@ -256,5 +258,33 @@ describe('useProjects listing query', () => {
     expect(visible.result.current.projects.map(({ id }) => id)).toEqual(['proj_live']);
     expect(all.result.current.projects.map(({ id }) => id)).toEqual(['proj_live', 'proj_trashed']);
     query.data = undefined;
+  });
+
+  /* R5: the next load reserves this many rows and cards, server-side through the cookie. */
+  it('remembers the live list shape, newest first, after every listing', async () => {
+    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
+      projectId: id,
+      manifest: { name: `Name ${id}` },
+      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
+      locator: { backend: 'indexeddb' },
+    });
+    projectManager.getProjectListing.mockResolvedValueOnce({
+      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    });
+    const { queryFn } = listingQueryOptions() as { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> };
+
+    await queryFn({ signal: new AbortController().signal });
+
+    expect(projectListShapeStore.get()).toEqual({
+      count: 2,
+      projects: [
+        { id: 'newer', name: 'Name newer' },
+        { id: 'older', name: 'Name older' },
+      ],
+    });
+    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
   });
 });

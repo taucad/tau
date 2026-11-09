@@ -1,7 +1,7 @@
 {
   "name": "@taucad/grammars",
   "version": "0.0.1",
-  "description": "Precompiled Shiki grammars for Tau CAD languages",
+  "description": "Lezer grammars and the shared syntax highlighting registry for Tau code surfaces",
   "type": "module",
   "sideEffects": false,
   "private": true,
@@ -23,7 +23,9 @@
   ],
   "keywords": [
     "cad",
-    "typescript"
+    "lezer",
+    "codemirror",
+    "syntax-highlighting"
   ],
   "author": "Richard Fontein",
   "license": "Apache-2.0",
@@ -32,12 +34,16 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./kcl": "./src/kcl.ts",
-    "./openscad": "./src/openscad.ts",
-    "./stepfile": "./src/stepfile.ts",
-    "./stl": "./src/stl.ts",
-    "./sysml": "./src/sysml.ts",
-    "./usd": "./src/usd.ts",
+    "./bash": "./src/bash/index.ts",
+    "./csharp": "./src/csharp/index.ts",
+    "./jsonc": "./src/jsonc/index.ts",
+    "./kcl": "./src/kcl/index.ts",
+    "./openscad": "./src/openscad/index.ts",
+    "./stepfile": "./src/stepfile/index.ts",
+    "./stl": "./src/stl/index.ts",
+    "./sysml": "./src/sysml/index.ts",
+    "./usd": "./src/usd/index.ts",
+    "./fixtures": "./src/fixtures.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -48,35 +54,55 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./bash": {
+        "types": "./dist/bash/index.d.mts",
+        "import": "./dist/bash/index.mjs",
+        "default": "./dist/bash/index.mjs"
+      },
+      "./csharp": {
+        "types": "./dist/csharp/index.d.mts",
+        "import": "./dist/csharp/index.mjs",
+        "default": "./dist/csharp/index.mjs"
+      },
+      "./jsonc": {
+        "types": "./dist/jsonc/index.d.mts",
+        "import": "./dist/jsonc/index.mjs",
+        "default": "./dist/jsonc/index.mjs"
+      },
       "./kcl": {
-        "types": "./dist/kcl.d.mts",
-        "import": "./dist/kcl.mjs",
-        "default": "./dist/kcl.mjs"
+        "types": "./dist/kcl/index.d.mts",
+        "import": "./dist/kcl/index.mjs",
+        "default": "./dist/kcl/index.mjs"
       },
       "./openscad": {
-        "types": "./dist/openscad.d.mts",
-        "import": "./dist/openscad.mjs",
-        "default": "./dist/openscad.mjs"
+        "types": "./dist/openscad/index.d.mts",
+        "import": "./dist/openscad/index.mjs",
+        "default": "./dist/openscad/index.mjs"
       },
       "./stepfile": {
-        "types": "./dist/stepfile.d.mts",
-        "import": "./dist/stepfile.mjs",
-        "default": "./dist/stepfile.mjs"
+        "types": "./dist/stepfile/index.d.mts",
+        "import": "./dist/stepfile/index.mjs",
+        "default": "./dist/stepfile/index.mjs"
       },
       "./stl": {
-        "types": "./dist/stl.d.mts",
-        "import": "./dist/stl.mjs",
-        "default": "./dist/stl.mjs"
+        "types": "./dist/stl/index.d.mts",
+        "import": "./dist/stl/index.mjs",
+        "default": "./dist/stl/index.mjs"
       },
       "./sysml": {
-        "types": "./dist/sysml.d.mts",
-        "import": "./dist/sysml.mjs",
-        "default": "./dist/sysml.mjs"
+        "types": "./dist/sysml/index.d.mts",
+        "import": "./dist/sysml/index.mjs",
+        "default": "./dist/sysml/index.mjs"
       },
       "./usd": {
-        "types": "./dist/usd.d.mts",
-        "import": "./dist/usd.mjs",
-        "default": "./dist/usd.mjs"
+        "types": "./dist/usd/index.d.mts",
+        "import": "./dist/usd/index.mjs",
+        "default": "./dist/usd/index.mjs"
+      },
+      "./fixtures": {
+        "types": "./dist/fixtures.d.mts",
+        "import": "./dist/fixtures.mjs",
+        "default": "./dist/fixtures.mjs"
       },
       "./package.json": "./package.json"
     },
@@ -87,6 +113,21 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "shiki": "catalog:"
+    "@codemirror/lang-javascript": "catalog:",
+    "@codemirror/lang-json": "catalog:",
+    "@codemirror/lang-markdown": "catalog:",
+    "@codemirror/lang-python": "catalog:",
+    "@codemirror/lang-yaml": "catalog:",
+    "@codemirror/language": "catalog:",
+    "@lezer/common": "catalog:",
+    "@lezer/highlight": "catalog:",
+    "@lezer/lr": "catalog:",
+    "@taucad/types": "workspace:*"
+  },
+  "scripts": {
+    "generate": "node src/generate-parsers.ts"
+  },
+  "devDependencies": {
+    "@lezer/generator": "catalog:"
   }
 }

@@ -12,9 +12,9 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { link as hardLink, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { loadPlaywright } from '#tools/tooling.js';
@@ -212,6 +212,20 @@ check(expected === 'zip' || catalog !== undefined, `${catalogUrl} returned ${cat
 const catalogArtifacts = new Map(
   (catalog?.routes ?? []).flatMap((route) => route.artifacts.map((artifact) => [artifact.name, artifact] as const)),
 );
+// A DMG cutover covers exactly the Mac architectures the catalog publishes a disk image for; the archive baseline
+// offers Apple silicon only, because Intel Macs are unlisted until a catalog qualifies an Intel route.
+const macArchitectures =
+  expected === 'dmg'
+    ? (['arm64', 'x64'] as const).filter((architecture) =>
+        (catalog?.routes ?? []).some(
+          (route) =>
+            route.target === `darwin-${architecture}` &&
+            route.artifacts.some((artifact) => artifact.kind === 'macos-dmg'),
+        ),
+      )
+    : (['arm64'] as const);
+const macPlatforms = macArchitectures.map((architecture) => (architecture === 'arm64' ? 'mac' : 'macIntel'));
+check(expected === 'zip' || macArchitectures.includes('arm64'), `${catalogUrl} publishes no Apple silicon DMG`);
 const releaseBase = catalog ? `${downloadsOrigin}/releases/${encodeURIComponent(catalog.tag)}` : undefined;
 
 /**
@@ -302,10 +316,20 @@ try {
   }
 
   const primary = buttons.filter((button) => !button.role.startsWith('alternative:') && button.visible);
-  for (const role of ['host', 'list:mac', 'list:macIntel', 'hero:macIntel']) {
+  for (const role of [
+    'host',
+    'list:mac',
+    ...(macPlatforms.includes('macIntel') ? ['list:macIntel', 'hero:macIntel'] : []),
+  ]) {
     check(
       primary.some((button) => button.role === role),
       `No visible Mac button ${role}`,
+    );
+  }
+  if (!macPlatforms.includes('macIntel')) {
+    check(
+      !primary.some((button) => button.role.endsWith(':macIntel')),
+      'An Intel Mac button is visible although the catalog publishes no Intel route',
     );
   }
   for (const button of primary) {
@@ -332,7 +356,7 @@ try {
         /eject/iu.test(instructions ?? ''),
       `Installation instructions do not describe a disk image: "${instructions}"`,
     );
-    for (const platform of ['mac', 'macIntel']) {
+    for (const platform of macPlatforms) {
       check(
         buttons.some(
           (button) =>
@@ -348,10 +372,10 @@ try {
   }
 
   // The real buttons, clicked as a visitor clicks them; the browser's own downloads are qualified in place.
-  const clicks = [
-    { architecture: 'arm64', selector: '#downloads a[data-download-platform="mac"]' },
-    { architecture: 'x64', selector: '#downloads a[data-download-platform="macIntel"]' },
-  ];
+  const clicks = macArchitectures.map((architecture) => ({
+    architecture,
+    selector: `#downloads a[data-download-platform="${architecture === 'arm64' ? 'mac' : 'macIntel'}"]`,
+  }));
   const downloads: unknown[] = [];
   for (const { architecture, selector } of clicks) {
     const link = page.locator(selector);
@@ -399,13 +423,18 @@ try {
       continue;
     }
     const mount = join(downloadDirectory, `mount-${architecture}`);
+    // Playwright saves under a random extensionless name, which stapler cannot classify. A hard link gives Apple's
+    // tools the visitor's file name over the same bytes and the same quarantine attribute.
+    const image = join(dirname(path), name);
+    // oxlint-disable-next-line no-await-in-loop -- As above.
+    await hardLink(path, image);
     const trust: Array<Awaited<ReturnType<typeof tool>>> = [];
     // oxlint-disable-next-line no-await-in-loop -- Apple's tools inspect the one saved image in order.
-    trust.push(await tool('hdiutil', ['verify', path]));
+    trust.push(await tool('hdiutil', ['verify', image]));
     // oxlint-disable-next-line no-await-in-loop -- As above.
-    trust.push(await tool('spctl', ['-a', '-t', 'open', '--context', 'context:primary-signature', '-vv', path]));
+    trust.push(await tool('spctl', ['-a', '-t', 'open', '--context', 'context:primary-signature', '-vv', image]));
     // oxlint-disable-next-line no-await-in-loop -- As above.
-    trust.push(await tool('xcrun', ['stapler', 'validate', path]));
+    trust.push(await tool('xcrun', ['stapler', 'validate', image]));
     // oxlint-disable-next-line no-await-in-loop -- As above.
     const attach = await tool('hdiutil', [
       'attach',
@@ -414,7 +443,7 @@ try {
       '-noautoopen',
       '-mountpoint',
       mount,
-      path,
+      image,
     ]);
     trust.push(attach);
     if (attach.exitCode === 0) {
@@ -453,7 +482,7 @@ try {
     });
   }
   const updaterFeeds: unknown[] = [];
-  for (const architecture of ['arm64', 'x64']) {
+  for (const architecture of macArchitectures) {
     const url = `${downloadsOrigin}/latest/desktop-update-darwin-${architecture}.json`;
     // oxlint-disable-next-line no-await-in-loop -- Two small sequential reads.
     const result = await fetchInFull(url, true);

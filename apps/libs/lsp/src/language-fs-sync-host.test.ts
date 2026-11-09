@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TauLanguageFileManagerRef } from '#language-fs-sync-host.js';
 import { openTauLanguageHostPort } from '#language-fs-sync-host.js';
 
-const readyRef = (postMessage: () => void, filePoolBuffer?: SharedArrayBuffer): TauLanguageFileManagerRef => {
+const readyRef = (postMessage: () => void): TauLanguageFileManagerRef => {
   const snap = {
     matches: (state: string) => state === 'ready',
-    context: { worker: { postMessage } as unknown as Worker, rootDirectory: '/projects/abc', filePoolBuffer },
+    context: { worker: { postMessage } as unknown as Worker, rootDirectory: '/projects/abc' },
   };
   return { getSnapshot: () => snap } as unknown as TauLanguageFileManagerRef;
 };
@@ -19,13 +19,11 @@ describe('lsp-fs-sync-host', () => {
   it('openTauLanguageHostPort posts languageFsSyncAttach with transferred port when FM is ready', () => {
     vi.stubGlobal('crossOriginIsolated', true);
     const postMessage = vi.fn();
-    const filePoolBuffer = new SharedArrayBuffer(8);
     const snap = {
       matches: (state: string) => state === 'ready',
       context: {
         worker: { postMessage } as unknown as Worker,
         rootDirectory: '/projects/abc',
-        filePoolBuffer,
       },
     };
     const ref = { getSnapshot: () => snap } as unknown as TauLanguageFileManagerRef;
@@ -34,7 +32,6 @@ describe('lsp-fs-sync-host', () => {
 
     expect(init).toBeDefined();
     expect(init?.workspaceRootAbsolute).toBe('/projects/abc');
-    expect(init?.filePoolBuffer).toBe(filePoolBuffer);
     expect(init?.slotSab).toBeInstanceOf(SharedArrayBuffer);
     expect(init?.arenaSab).toBeInstanceOf(SharedArrayBuffer);
     expect(postMessage).toHaveBeenCalledOnce();

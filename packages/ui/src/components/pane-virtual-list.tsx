@@ -33,6 +33,7 @@ export function PaneVirtualList<Item>({
   focusSelector = 'button, input, [role=spinbutton]',
   enableKeyboardNavigation = false,
   scrollParentSelector,
+  increaseViewportBy,
 }: {
   readonly data: readonly Item[];
   readonly getItemKey: (item: Item) => string;
@@ -47,6 +48,8 @@ export function PaneVirtualList<Item>({
   readonly enableKeyboardNavigation?: boolean;
   /** Natural rows reveal within this pane scroller; virtual rows use their own viewport. */
   readonly scrollParentSelector?: string;
+  /** Pixels beyond each edge of the viewport whose virtual rows stay mounted. */
+  readonly increaseViewportBy?: number;
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -307,6 +310,7 @@ export function PaneVirtualList<Item>({
           computeItemKey={computeItemKey}
           itemContent={renderItem}
           itemsRendered={settleFocus}
+          increaseViewportBy={increaseViewportBy ?? 0}
         />
       ) : (
         items.map((item, index) => renderItem(index, item))

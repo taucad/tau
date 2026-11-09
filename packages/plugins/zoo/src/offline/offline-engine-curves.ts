@@ -6,6 +6,7 @@
  */
 import type { Vec3 } from '#offline/offline-math.js';
 import { add, dot, length, normalize, scale, sub, vec3 } from '#offline/offline-math.js';
+import type { TopoDS_Edge } from '#offline/offline-occt.js';
 import { boundingBox, edgePoint, edges, faceCentroid, faces, pnt } from '#offline/offline-occt.js';
 import { wireFromEdges } from '#offline/offline-sweeps.js';
 import { facesOfEdge } from '#offline/offline-topology.js';
@@ -13,6 +14,7 @@ import { entityCenter } from '#offline/offline-transform.js';
 import type { ModelingCommand, WireAngle, WirePoint3d } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import type { OfflineEngine } from '#offline/offline-engine.js';
+import type { EdgeSpecifier } from '#offline/offline-engine-support.js';
 import { point3, tuple, frameFromNormal } from '#offline/offline-engine-support.js';
 
 /**
@@ -123,6 +125,19 @@ export function helixOnCylinder(engine: OfflineEngine, id: string, cmd: Modeling
 }
 
 /**
+ * The edge a command names, either by `edge_id` or, as kcl-lib sends for an `{ sideFaces, endFaces }` axis, by an
+ * `edge_reference` edge specifier.
+ *
+ * @param engine - offline engine
+ * @param cmd - command payload
+ * @returns the edge
+ */
+export function commandEdge(engine: OfflineEngine, cmd: ModelingCommand): TopoDS_Edge {
+  const reference = cmd['edge_reference'] as EdgeSpecifier | undefined;
+  return reference ? engine.edgeFromSpecifier(reference) : engine.anyEdge(cmd['edge_id'] as string);
+}
+
+/**
  * Adds a helix about a straight edge.
  *
  * @param engine - offline engine
@@ -131,7 +146,7 @@ export function helixOnCylinder(engine: OfflineEngine, id: string, cmd: Modeling
  * @returns the response
  */
 export function helixFromEdge(engine: OfflineEngine, id: string, cmd: ModelingCommand): Record<string, unknown> {
-  const edge = engine.anyEdge(cmd['edge_id'] as string);
+  const edge = commandEdge(engine, cmd);
   const start = edgePoint(engine.oc, edge, 0);
   const end = edgePoint(engine.oc, edge, 1);
   const axis = sub(end.point, start.point);

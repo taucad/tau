@@ -14,7 +14,7 @@ Follow the [deployment topology](../docs/architecture/ui-deployment-topology.md)
 
 ## Credentials and environments
 
-Use the existing environment scopes and least-privilege tokens. The current CI grants the `nx-cloud-write` environment only to pushes to `main`; other paths use the repository's configured read-only cache access. Do not restore old duplicated READ_WRITE/READ_ONLY secret names or a hardcoded environment inventory.
+Nx Cloud is disabled (`neverConnectToCloud` in `nx.json`); do not re-enable it or add Nx Cloud agents without operator approval. Use the existing environment scopes and least-privilege tokens. The current CI grants the `nx-cloud-write` environment only to pushes to `main`; other paths use the repository's configured read-only cache access. Do not restore old duplicated READ_WRITE/READ_ONLY secret names or a hardcoded environment inventory.
 
 Fly tokens must match the app and deployment environment. The release App is distinct from IaC automation. Never print secret values, copy tokens into source or change hosted permissions/visibility merely because a workflow skill was selected. External messages, releases and deployments follow current task authorization.
 

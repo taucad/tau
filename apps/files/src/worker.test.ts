@@ -1,13 +1,19 @@
 /* eslint-disable @typescript-eslint/naming-convention -- R2 binding names (tau-cloud's contract) and HTTP header names are spelled by their owners. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { decodeBase64, importFileLinkVerifyKey } from '@taucad/file-links';
+import {
+  decodeBase64,
+  importFileLinkSigningKey,
+  importFileLinkVerifyKey,
+  parseFileLinkSigningSecret,
+  signFileLink,
+} from '@taucad/file-links';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
 import type { FileLinkVector } from '@taucad/file-links/vectors';
 import worker from '#files-worker.js';
 import { createFakeBucket } from '#testing/fake-bucket.js';
 import type { FakeBucket } from '#testing/fake-bucket.js';
-import { createFilesWorker } from '#worker.js';
+import { createFilesWorker, packRangeCeilingBytes } from '#worker.js';
 import type { FilesLogLine } from '#worker.js';
 import type { FilesEnvironment } from '#environment.js';
 import type { FileLinkLocation } from '@taucad/file-links';
@@ -308,6 +314,7 @@ describe('CORS', () => {
     expect(response.headers.get('access-control-expose-headers')).toBe(
       'ETag, Content-Range, Accept-Ranges, X-Tau-Files-Error',
     );
+    expect(response.headers.get('timing-allow-origin')).toBe(allowedOrigin);
     expect(response.headers.get('vary')).toBe('Origin');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
   });
@@ -321,6 +328,7 @@ describe('CORS', () => {
     const response = await fetchAt(tenant.url, { headers: { Origin: 'https://evil.example' } });
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(response.headers.get('timing-allow-origin')).toBeNull();
     expect(response.headers.get('vary')).toBe('Origin');
   });
 
@@ -417,5 +425,116 @@ describe('health and logs', () => {
       expect(log).toHaveBeenCalledOnce();
       expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({ route: 'healthz', status: 200 });
     });
+  });
+});
+
+describe('repository files (D8)', () => {
+  const ownerId = 'user_1';
+  const projectId = 'proj_1';
+  const pack = `pack-${'b'.repeat(40)}-${'c'.repeat(16)}`;
+  const commit = 'd'.repeat(40);
+  const packSize = 4096;
+  const repositoryKey = (file: string): string => `tenants/${ownerId}/repos/${projectId}/${file}`;
+
+  const signedLink = async (location: FileLinkLocation, size: number): Promise<string> => {
+    const [key] = fileLinkVectors.keys;
+    const signing = await importFileLinkSigningKey(
+      parseFileLinkSigningSecret(JSON.stringify({ kid: key?.kid, alg: 'HS256', keyBase64: key?.keyBase64 })),
+    );
+    return signFileLink({ baseUrl: tenant.baseUrl, location, size, expiresAt: tenant.expiresAt, key: signing });
+  };
+
+  beforeEach(() => {
+    bucket.objects.set(repositoryKey(`packs/${pack}.pack`), bytesOf(packSize));
+    bucket.objects.set(repositoryKey(`packs/${pack}.idx`), bytesOf(1100));
+    bucket.objects.set(repositoryKey(`listings/${commit}.tsv.gz`), bytesOf(300));
+  });
+
+  it('should serve one range of a pack with its name as the strong tag', async () => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+    const response = await fetchAt(url, { headers: { Range: 'bytes=12-99' } });
+    expect(response.status).toBe(206);
+    expect(response.headers.get('etag')).toBe(`"pack-${pack}"`);
+    expect(response.headers.get('content-range')).toBe(`bytes 12-99/${String(packSize)}`);
+    expect(await bodyBytes(response)).toEqual(bytesOf(packSize).slice(12, 100));
+    expect(bucket.calls).toEqual([
+      { method: 'get', key: repositoryKey(`packs/${pack}.pack`), range: { offset: 12, length: 88 } },
+    ]);
+  });
+
+  it.each([[{}], [{ headers: { Range: 'bytes=0-1,4-5' } }], [{ headers: { Range: 'bytes=abc' } }]])(
+    'should refuse a whole-pack GET (%o) with 416 before reading storage',
+    async (init: RequestInit) => {
+      const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+      const response = await fetchAt(url, init);
+      expect(response.status).toBe(416);
+      expect(response.headers.get('x-tau-files-error')).toBe('range');
+      expect(bucket.calls).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['bytes=0-'],
+    [`bytes=-${String(packSize)}`],
+    ['bytes=0-999999999999'],
+    [`bytes=0-${String(packSize - 1)}`],
+  ])('should refuse a range that covers the whole pack (%s) with 416 before reading storage', async (range) => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+    const response = await fetchAt(url, { headers: { Range: range } });
+    expect(response.status).toBe(416);
+    expect(response.headers.get('x-tau-files-error')).toBe('range');
+    expect(bucket.calls).toEqual([]);
+  });
+
+  it('should serve a pack range up to the segment ceiling and refuse one past it', async () => {
+    const size = packRangeCeilingBytes + 2048;
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, size);
+    bucket.objects.set(repositoryKey(`packs/${pack}.pack`), new Uint8Array(size));
+    const past = await fetchAt(url, { headers: { Range: `bytes=12-${String(12 + packRangeCeilingBytes)}` } });
+    expect(past.status).toBe(416);
+    expect(bucket.calls).toEqual([]);
+    const at = await fetchAt(url, { headers: { Range: `bytes=12-${String(11 + packRangeCeilingBytes)}` } });
+    expect(at.status).toBe(206);
+    await at.body?.cancel();
+  });
+
+  it('should answer a pack HEAD, which carries no body', async () => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+    const response = await fetchAt(url, { method: 'HEAD' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-length')).toBe(String(packSize));
+  });
+
+  it('should serve a stored index and a head listing whole', async () => {
+    const index = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'index', name: pack }, 1100);
+    const listing = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'listing', name: commit }, 300);
+    const indexResponse = await fetchAt(index);
+    const listingResponse = await fetchAt(listing);
+    expect(indexResponse.status).toBe(200);
+    expect(await bodyBytes(indexResponse)).toEqual(bytesOf(1100));
+    expect(listingResponse.status).toBe(200);
+    expect(listingResponse.headers.get('etag')).toBe(`"listing-${commit}"`);
+    expect(bucket.calls.map((call) => call.key)).toEqual([
+      repositoryKey(`packs/${pack}.idx`),
+      repositoryKey(`listings/${commit}.tsv.gz`),
+    ]);
+  });
+
+  it('should refuse a path to any other repository key, even with a valid signature', async () => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'index', name: pack }, 1100);
+    const forged = url.replace(`packs/${pack}.idx`, 'manifest.json');
+    const response = await fetchAt(forged);
+    expect(response.status).toBe(400);
+    expect(bucket.calls).toEqual([]);
+  });
+
+  it('should log the route, the kind and 12 hex of the pack hash, never the owner or project', async () => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+    await fetchAt(url, { headers: { Range: 'bytes=0-9' } });
+    expect(logs).toEqual([
+      expect.objectContaining({ route: 'git', kind: 'pack', oid: 'b'.repeat(12), status: 206, range: true }),
+    ]);
+    expect(JSON.stringify(logs)).not.toContain(ownerId);
+    expect(JSON.stringify(logs)).not.toContain(projectId);
   });
 });

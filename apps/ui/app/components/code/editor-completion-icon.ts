@@ -39,9 +39,14 @@ const completionSymbols: Readonly<Record<string, string>> = {
   typeParameter: 'type-parameter',
 };
 
-/** Codicon glyph for a symbol kind, shared by suggestions, symbol pickers and breadcrumbs. */
+/** The `codicon-symbol-*` glyph for a symbol kind, shared by suggestions, symbol pickers and breadcrumbs. */
+export function symbolGlyph(kind: string): string {
+  return completionSymbols[kind] ?? 'text';
+}
+
+/** Codicon glyph element for a symbol kind in editor-owned DOM. */
 export function renderSymbolIcon(kind: string, ownerDocument: Document): HTMLElement {
-  const symbol = completionSymbols[kind] ?? 'text';
+  const symbol = symbolGlyph(kind);
   const icon = ownerDocument.createElement('span');
   icon.className = `cm-symbol codicon codicon-symbol-${symbol}`;
   icon.dataset['symbol'] = symbol;

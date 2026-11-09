@@ -12,13 +12,12 @@ import { GithubController } from '#api/github/github.controller.js';
 import { GithubGistController } from '#api/github/github-gist.controller.js';
 import { GithubGistService } from '#api/github/github-gist.service.js';
 import { GithubService } from '#api/github/github.service.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import type { Environment } from '#config/environment.config.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
-import type { DatabaseService } from '#database/database.service.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import type { Environment } from '@taucad/api-core';
+import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
+import type { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import type { RedisService } from '#redis/redis.service.js';
+import type { RedisService } from '@taucad/api-redis';
 
 const frontend = 'https://tau.test';
 const configured: Partial<Environment> = {

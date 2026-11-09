@@ -11,7 +11,7 @@
     "dashboards/profiling.json": "51436f6ad4244dd7db2844aff04eebb04c6c5f414ff80eedb0d2dcb7b9ea39e3",
     "dashboards/redis.json": "b62d94e1b03a4271694ce516674c983aca275de5e4409b6c7d5fbd5a5c8c7d8d",
     "dashboards/runtime-operations.json": "4e83b4053703edb85b260467825a7920903328c59e812a1940e7fd4eb06605da",
-    "dashboards/runtime-product.json": "4efc28aebb1353b76f6525af8e2d1899530ded2728a2baa14dd8719496a2d447",
+    "dashboards/runtime-product.json": "a5b794723bbd452fe457542d15558f6934c5bcd33763ba9967cf5f6b39eaea9f",
     "dashboards/runtime.json": "3cc9701e351d0c30355cb786776faedcc35e2af08746c7b745b1135788facb44",
     "dashboards/slo-executive.json": "0688587613d3ed6948a8e527fd3cbd83889cc6fcff6e95822dcf8fdc3d4ed9f0",
     "dashboards/storage-critical.json": "c4ee80b5c3d5b72d0de405ee0b0bd70c2153f64163b1a63a876497eafdcdb7ad",
@@ -22,6 +22,6 @@
     "alerts/tau-storage-critical.json": "910b07725e2cd4c1ab91be80e074989f3db00be2f4a536e1cc1b4e2dd6ae2914",
     "alerts/tau-storage-triggers.json": "38c6ab3d5e70bfc7bdcf6ac29f4154758534c4ce435f3f9b79914ae9fac8d485",
     "alerts/tau-storage-warning.json": "90dc3104e67cba5c3d1d30a588990ce51af5158cc3add5e518c61b25bc3f81d0",
-    "alerts/tau-warning.json": "c7934af58c31d908d93be492843885d4e166ddb871685074ad0f1d42825136fa"
+    "alerts/tau-warning.json": "cae9f52743daffdc9382055d926d7900e25bf098140c3681b36d1017fa4e79e3"
   }
 }

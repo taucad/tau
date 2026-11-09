@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { useEditor } from '@tiptap/react';
-import type { UseEditorOptions } from '@tiptap/react';
 import { Document } from '@tiptap/extension-document';
 import { Paragraph } from '@tiptap/extension-paragraph';
 import { Text } from '@tiptap/extension-text';
@@ -33,6 +32,7 @@ import {
   getEnabledSlashCommandItems,
 } from '#components/chat/tiptap/slash-command-suggestion.js';
 import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
+import { chatComposerPlaceholder } from '#components/chat/chat-input-styles.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import type {
   ContextSuggestionItem,
@@ -214,17 +214,6 @@ export type UseChatEditorReturn = {
 };
 
 /* oxlint-disable react/refs -- The `use no memo` boundary preserves Tiptap's long-lived editor callbacks while refs expose the latest React inputs. */
-/**
- * `useEditor` as it behaves: its type promises an editor, but while rendering on the server it returns null.
- *
- * @returns The editor, or null outside the browser.
- */
-// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap returns null outside the browser
-const useBrowserEditor = (options: UseEditorOptions): Editor | null => useEditor(options);
-
-/** The composer's empty-state prompt; the served editor area shows the same words. */
-export const chatComposerPlaceholder = 'Ask Tau to build anything...';
-
 export function useChatEditor({
   onSubmit,
   onEscape,
@@ -300,7 +289,7 @@ export function useChatEditor({
         actionItems: actionItemsRef.current,
       });
     }
-    const fileEntries = await service.searchFiles(query, { maxResults: 20 });
+    const fileEntries = await service.searchFilesDebounced(query, { maxResults: 20, caller: 'chat-mention' });
     return buildContextItemsFromSearch({
       fileEntries,
       chats: chatsRef.current,
@@ -334,9 +323,7 @@ export function useChatEditor({
   const handleImagePasteRef = useRef(handleImagePaste);
   handleImagePasteRef.current = handleImagePaste;
 
-  /* There is no editor while rendering on the server: the composer is served with a native input in its
-   * editor area (`ChatEarlyInput`), and the browser creates the editor on its first render. */
-  const editor = useBrowserEditor({
+  const editor = useEditor({
     content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
       Document,
@@ -433,14 +420,13 @@ export function useChatEditor({
   });
 
   const clearEditor = useCallback(() => {
-    editor?.commands.clearContent();
+    editor.commands.clearContent();
   }, [editor]);
 
   // Catalog settlement is external to Tiptap transactions; derive the open menu without mirroring it in state.
   const popupItems = slashCommandState === undefined ? [] : getSlashCommandItems(slashCommandState.query);
-  const triggerPosition = (editor?.state.selection.from ?? 0) - (slashCommandState?.query.length ?? 0) - 1;
-  const trigger =
-    editor === null || triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
+  const triggerPosition = editor.state.selection.from - (slashCommandState?.query.length ?? 0) - 1;
+  const trigger = triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
   const currentSlashCommandState =
     slashCommandState === undefined
       ? undefined

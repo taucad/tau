@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpException } from '@nestjs/common';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { MemoryInFlightRegistry } from '#api/git/routing/in-flight.js';
 import { RouteCache } from '#api/git/routing/route-cache.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';

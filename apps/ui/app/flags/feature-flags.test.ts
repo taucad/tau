@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { isFeatureEnabled, getAllFlags, resetFlagCache, setFlagOverrides } from '#flags/feature-flags.js';
-import { featureFlagDefaults } from '#flags/flag.constants.js';
+import { featureFlagDefaults, resolveTauDebugDefault } from '#flags/flag.constants.js';
 
 function createMockStorage(initial?: Record<string, string>): Storage {
   const store = new Map<string, string>(Object.entries(initial ?? {}));
@@ -156,6 +156,24 @@ describe('tauDebug gate for SectionViewTestBridge', () => {
       'tau:flags': JSON.stringify({ tauDebug: true }),
     });
     expect(isFeatureEnabled('tauDebug', storage)).toBe(true);
+  });
+});
+
+describe('resolveTauDebugDefault', () => {
+  it('should default debug tools on for an undeployed TAU_DEBUG build (local dev, e2e)', () => {
+    expect(resolveTauDebugDefault({ isDebugEnvironment: true, deployContext: undefined })).toBe(true);
+  });
+
+  it.each(['production', 'deploy-preview', 'branch-deploy'])(
+    'should default debug tools off on a deployed site (%s) even when TAU_DEBUG is set',
+    (context) => {
+      expect(resolveTauDebugDefault({ isDebugEnvironment: true, deployContext: context })).toBe(false);
+    },
+  );
+
+  it('should default debug tools off without TAU_DEBUG', () => {
+    expect(resolveTauDebugDefault({ isDebugEnvironment: false, deployContext: undefined })).toBe(false);
+    expect(resolveTauDebugDefault({ isDebugEnvironment: undefined, deployContext: undefined })).toBe(false);
   });
 });
 

@@ -9,7 +9,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { ClientOnly } from '@taucad/ui/components/client-only';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
@@ -120,75 +119,73 @@ export function NavUser(): React.JSX.Element {
     </DropdownMenuItem>,
   ];
 
+  /* Server-rendered at its final 38px height: the account trigger renders its signed-out row
+     until the session is known, so the footer neither appears late nor passes through a skeleton. */
   return (
-    <ClientOnly>
-      <div className='flex w-full items-center gap-1'>
-        <div className='relative min-w-0 flex-1'>
-          <UserButton
-            variant='ghost'
-            size='sm'
-            className='h-7 w-full justify-start px-2.5 select-none'
-            align='start'
-            side='top'
-            sideOffset={8}
-            shouldHideSettings
-            header={<NavCreditsMeter />}
-            links={[
-              ...(isOnline
-                ? []
-                : [
-                    <DropdownMenuItem key='offline' disabled>
-                      <WifiOff />
-                      Offline — online features unavailable
-                    </DropdownMenuItem>,
-                  ]),
-              <NavBillingItem key='billing' />,
-              { label: 'Files', href: '/files', icon: <Files /> },
-              <DropdownMenuItem
-                key='settings'
-                onSelect={() => {
-                  openSettings('general');
-                }}
-              >
-                <Settings />
-                Settings
-              </DropdownMenuItem>,
-            ]}
-          />
-          {isOnline ? null : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  role='status'
-                  aria-label='Offline'
-                  className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-feature'
-                />
-              </TooltipTrigger>
-              <TooltipContent side='top'>Offline — reconnect to access online features</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-        <DropdownMenu isResponsive>
-          <DropdownMenuTrigger asChild>
-            <Button
-              aria-label='Help'
-              variant='ghost'
-              size='icon-sm'
-              className='size-7 text-muted-foreground data-[state=open]:bg-accent/50'
+    <div className='flex w-full items-center gap-1'>
+      <div className='relative min-w-0 flex-1'>
+        <UserButton
+          variant='ghost'
+          size='sm'
+          className='h-7 w-full justify-start px-2.5 select-none'
+          align='start'
+          side='top'
+          sideOffset={8}
+          shouldHideSettings
+          header={<NavCreditsMeter />}
+          links={[
+            ...(isOnline
+              ? []
+              : [
+                  <DropdownMenuItem key='offline' disabled>
+                    <WifiOff />
+                    Offline — online features unavailable
+                  </DropdownMenuItem>,
+                ]),
+            <NavBillingItem key='billing' />,
+            { label: 'Files', href: '/files', icon: <Files /> },
+            <DropdownMenuItem
+              key='settings'
+              onSelect={() => {
+                openSettings('general');
+              }}
             >
-              <CircleHelp />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent drawerTitle='Help' side='top' align='end' sideOffset={8} className='min-w-52'>
-            {helpItems}
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className='font-normal text-muted-foreground'>
-              Tau v{metaConfig.version}
-            </DropdownMenuLabel>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <CookiePreferencesDialog isOpen={isCookiePreferencesOpen} onOpenChange={setIsCookiePreferencesOpen} />
+              <Settings />
+              Settings
+            </DropdownMenuItem>,
+          ]}
+        />
+        {isOnline ? null : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                role='status'
+                aria-label='Offline'
+                className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-feature'
+              />
+            </TooltipTrigger>
+            <TooltipContent side='top'>Offline — reconnect to access online features</TooltipContent>
+          </Tooltip>
+        )}
       </div>
-    </ClientOnly>
+      <DropdownMenu isResponsive>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label='Help'
+            variant='ghost'
+            size='icon-sm'
+            className='size-7 text-muted-foreground data-[state=open]:bg-accent/50'
+          >
+            <CircleHelp />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent drawerTitle='Help' side='top' align='end' sideOffset={8} className='min-w-52'>
+          {helpItems}
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className='font-normal text-muted-foreground'>Tau v{metaConfig.version}</DropdownMenuLabel>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <CookiePreferencesDialog isOpen={isCookiePreferencesOpen} onOpenChange={setIsCookiePreferencesOpen} />
+    </div>
   );
 }

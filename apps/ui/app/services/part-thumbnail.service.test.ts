@@ -253,10 +253,13 @@ describe('PartThumbnailService', () => {
       sourcePath: 'main.ts',
       exportOptions: {
         mode: 'batch',
-        width: 1536,
-        height: 1536,
+        width: 256,
+        height: 256,
         quality: 0.95,
-        lineWidth: 6,
+        lineWidth: 1,
+        lineColor: '#000000',
+        toneMapping: 'neutral',
+        lighting: { ambient: 0.1 / Math.PI },
         views: [
           {
             visiblePrimitives: [
@@ -374,6 +377,74 @@ describe('PartThumbnailService', () => {
     stale.resolve([image(0, 8)]);
     await Promise.resolve();
     expect(service.snapshot().size).toBe(0);
+  });
+
+  it('serves a row scrolled out and back from the cache without rendering it again', async () => {
+    const exportImage = vi
+      .fn()
+      .mockResolvedValueOnce([image(0, 4)])
+      .mockResolvedValueOnce([image(0, 5)]);
+    const service = fixture(exportImage);
+    service.request(source, [part('gear', 1)]);
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
+    service.request(source, [part('bolt', 2)]);
+    await vi.waitFor(() => {
+      expect(service.get('bolt')?.status).toBe('ready');
+    });
+    expect(service.get('gear')).toBeUndefined();
+
+    service.request(source, [part('gear', 1)]);
+    expect(service.get('gear')).toEqual({ status: 'ready', bytes: new Uint8Array([4]) });
+    expect(exportImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('finishes the batch on the GPU when the visible rows change and caches its images', async () => {
+    const first = Promise.withResolvers<ExportFile[]>();
+    const signals: AbortSignal[] = [];
+    const exportImage = vi.fn(async (job: Parameters<HeadlessImageService['export']>[0]) => {
+      signals.push(job.signal!);
+      return signals.length === 1 ? first.promise : [image(0, 6)];
+    });
+    const service = fixture(exportImage);
+    service.request(source, [part('gear', 1)]);
+    await vi.waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+    service.request(source, [part('bolt', 2)]);
+    expect(signals[0]?.aborted).toBe(false);
+    first.resolve([image(0, 5)]);
+    await vi.waitFor(() => {
+      expect(service.get('bolt')?.status).toBe('ready');
+    });
+    service.request(source, [part('gear', 1)]);
+    expect(service.get('gear')).toEqual({ status: 'ready', bytes: new Uint8Array([5]) });
+    expect(exportImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders the gallery at 1536 px over the row image and lets the large image serve the row', async () => {
+    const exportImage = vi
+      .fn<HeadlessImageService['export']>()
+      .mockResolvedValueOnce([image(0, 4)])
+      .mockResolvedValueOnce([image(0, 9)]);
+    const service = fixture(exportImage);
+    const gear = part('gear', 1);
+    service.requestForOwner('explorer', source, [gear]);
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.status).toBe('ready');
+    });
+    service.requestForOwner('gallery', source, [gear], { resolution: 'gallery' });
+    expect(service.get('gear')).toEqual({ status: 'pending', bytes: new Uint8Array([4]) });
+    await vi.waitFor(() => {
+      expect(service.get('gear')?.bytes).toEqual(new Uint8Array([9]));
+    });
+    expect(exportImage.mock.calls[0]?.[0]).toMatchObject({ exportOptions: { width: 256, lineWidth: 1 } });
+    expect(exportImage.mock.calls[1]?.[0]).toMatchObject({ exportOptions: { width: 1536, lineWidth: 6 } });
+
+    service.releaseOwner('gallery');
+    expect(service.get('gear')).toEqual({ status: 'ready', bytes: new Uint8Array([9]) });
+    expect(exportImage).toHaveBeenCalledTimes(2);
   });
 
   it('should reject stale batch results and keep the last good preview while refreshing', async () => {

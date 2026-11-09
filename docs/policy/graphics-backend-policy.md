@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-26'
+updated: '2026-11-02'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -169,26 +169,21 @@ INCORRECT (a `VALIDATION_ERROR`):
 { "tessellation": { "quality": "high", "linearTolerance": 0.01 } }
 ```
 
-### 16. Bound mesh cost by lane and report what was delivered
+### 16. Mesh at the requested resolution and report what was delivered
 
-| Lane                          | Triangle budget                                   | Over budget                                                                                                                                                   |
-| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Preview and capture (renders) | 2,000,000; 400,000 on a memory-constrained device | OCCT kernels re-mesh one step coarser (linear × 2, angular + 4°) up to three times and warn `TESSELLATION_DOWNGRADED` with requested and effective tolerances |
-| Export                        | 20,000,000                                        | Refuse with `RESOURCE_LIMIT` and suggested explicit tolerances; never coarsen a print mesh silently                                                           |
+No lane has a triangle budget. A preview, capture or export meshes once at the requested tessellation (a preset or explicit values) on every device, and is never coarsened or refused for its triangle count. The fallback `gltfEdgeDetection` middleware draws edges at any size. A host may still refuse a load against its own admission limits, such as GeoSpec's subject size, with `RESOURCE_LIMIT`; that limit belongs to the consumer, not the mesher.
 
-Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time; tolerance-meshed kernels add the requested form, the effective `linearTolerance` and `angularTolerance` and the downgrade steps; voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes mesh output reports it here.
+Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time. Tolerance-meshed kernels add the requested form and the `linearTolerance` and `angularTolerance` the mesh was produced at. Voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes its mesh output reports it here and moves its kernel version, so the geometry cache does not serve meshes from before the change. `TESSELLATION_DOWNGRADED` stays declared for stored results and telemetry, and no kernel emits it.
 
-A memory-constrained device is a coarse-pointer or `navigator.deviceMemory` ≤ 4 GB one (`isMemoryConstrainedDevice` in `apps/ui`); the host passes the smaller budget as the kernels' `previewTriangleBudget` and the `displaySimplification` middleware's `maxTriangles`.
+**Why**: a coarsened preview showed a different part from the one the author asked for, and a refused export blocked a legitimate print. The cost of a fine mesh is the author's to choose, and the report shows it to them: the triangle count, the elapsed time and the resolution. The viewer's cost scales with triangles, so a coarser preset or explicit tolerance is how an author lightens a heavy preview (kernel budget program D1 to D3, 2026-11-05).
 
-**Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect. On a phone, 2,000,000 preview triangles cost about 230 MiB in the viewer and over 1 GiB with Section armed.
-
-### 17. Keep a voxel model's grid; simplify only its picture
+### 17. Keep a voxel model's grid; lighten only its display mesh
 
 In voxel kernels (PicoVoxel, PicoGK) the voxel size is the model (ruling R2). No lane of the harness changes `voxelSize`; it is a model parameter, never a tessellation option, and iteration goes through per-call `parameters`. Choose it from the thinnest feature, about one third of the thinnest wall or strut: field evaluation time scales with 1/h³, and memory and triangles with 1/h².
 
-A voxel render over the preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
+A voxel view lightens its display mesh in the kernel, through OpenVDB mesh adaptivity: an unset view `meshAdaptivity` resolves to 0.25 (Balanced) where the kernel can mesh adaptively (PicoVoxel's default `fast` lane, a PicoGK runtime that meshes adaptively), and the tessellation report carries `adaptivity` when the delivered mesh is adaptive. Exports and GeoSpec subjects mesh uniformly unless the caller asks otherwise. No host middleware simplifies a delivered mesh (display simplification was removed on 2026-11-02); a heavy voxel preview is delivered as produced, and `meshAdaptivity` or a coarser per-call `voxelSize` lightens it.
 
-**Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while a simplified display mesh changes only the picture, within half a voxel.
+**Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while adaptive meshing changes only the picture. Meshing coarser at the source is cheaper than simplifying a finished mesh, which delayed the first preview more than it saved downstream.
 
 ## Ownership
 
@@ -199,7 +194,7 @@ A voxel render over the preview budget is delivered through the `displaySimplifi
 - Materials: `packages/viewer/src/graphics/three/materials`
 - Picking and scheduling: `packages/viewer/src/graphics/three/utils`
 - Graphics state: `packages/viewer/src/machines/graphics.machine.ts`
-- Tessellation vocabulary, presets and budgets: `packages/core/occt/src/occt-schemas.ts`, `packages/core/occt/src/occt-tessellation.ts`
+- Tessellation vocabulary and presets: `packages/core/occt/src/occt-schemas.ts`, `packages/core/occt/src/occt-tessellation.ts`
 - Kernel-settings pane: `packages/viewer/src/cad/kernel-settings.tsx`
-- Voxel display simplification: `packages/plugins/middleware/src/display-simplification.middleware.ts`
+- Voxel view adaptivity: `packages/plugins/picovoxel/src/picovoxel-meshing.ts`, `packages/plugins/picogk/src/picogk-render.schemas.ts`
 - Tessellation report on `evaluate_model`: `libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts`

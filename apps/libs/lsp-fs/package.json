@@ -38,8 +38,8 @@
     }
   },
   "dependencies": {
+    "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
-    "@taucad/memory": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
     "uint8array-extras": "catalog:",

@@ -34,6 +34,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { joinPath } from '@taucad/utils/path';
 
 const encoder = new TextEncoder();
@@ -108,13 +109,15 @@ const createBrowserHarness = async (): Promise<{
     // Text on the wire throughout: jsdom's `MessagePort` clones a `Uint8Array`
     // into its own realm, which the bridge's wire schemas reject. The pin is
     // about event visibility, not binary transport.
-    proxy: mock<ComposedViewClient>({
-      readFile: (async (path: string, options?: unknown) => {
-        const text = await viewClient.readFile(paths.toRelativePath(path)!, 'utf8');
-        return options === 'utf8' ? text : encoder.encode(text);
-      }) as ComposedViewClient['readFile'],
-      stat: async (path: string) => viewClient.stat(paths.toRelativePath(path)!),
-    }),
+    proxy: withAuthorityDigest(
+      mock<ComposedViewClient>({
+        readFile: (async (path: string, options?: unknown) => {
+          const text = await viewClient.readFile(paths.toRelativePath(path)!, 'utf8');
+          return options === 'utf8' ? text : encoder.encode(text);
+        }) as ComposedViewClient['readFile'],
+        stat: async (path: string) => viewClient.stat(paths.toRelativePath(path)!),
+      }),
+    ),
     paths,
     channel: new WorkerChangeChannel({ transport: { listen: viewClient.listen } }),
     refreshGuard: new RefreshGenerationGuard(),

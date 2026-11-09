@@ -21,18 +21,22 @@ import type {
 } from '@taucad/agent-host';
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
+import { toolName } from '@taucad/chat/constants';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import type { KernelId } from '@taucad/types/constants';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { httpBodyLimit } from '#constants/http-body.constant.js';
-import { getEnvironment } from '#config/environment.config.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import { ModelInvocationModule } from '#api/llm/model-invocation.module.js';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
-import type { ModelListEntry } from '#api/models/model.constants.js';
+import { authInstanceKey } from '@taucad/api-auth';
+import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
+import { getEnvironment } from '@taucad/api-core';
+import { HostsService } from '@taucad/api-hosts';
+import {
+  isModelListEntryEnabled,
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayService,
+  modelList,
+} from '@taucad/api-llm-gateway';
+import { ModelInvocationModule } from '#composition/model-invocation.module.js';
+import type { ModelListEntry } from '@taucad/api-llm-gateway';
 
 /**
  * In-process live model gateway for provider suites.
@@ -92,6 +96,9 @@ export const liveCredentialName = (modelId: string): string => {
   return name;
 };
 
+/** Variables only `apps/api/.env.test` set, whose values are placeholders (`vitest.live.config.ts`). */
+const testDefaulted = new Set((process.env['TAU_LIVE_TEST_DEFAULTED'] ?? '').split(','));
+
 /**
  * Whether this checkout can run a live turn on one catalog row.
  *
@@ -99,10 +106,12 @@ export const liveCredentialName = (modelId: string): string => {
  * so a skipped run says which credential is missing.
  *
  * @param modelId - Tau catalog model id.
- * @returns True when the row's provider credential is present.
+ * @returns True when the row's provider credential is present and not a `.env.test` placeholder.
  */
-export const hasLiveCredential = (modelId: string): boolean =>
-  (process.env[liveCredentialName(modelId)] ?? '').length > 0;
+export const hasLiveCredential = (modelId: string): boolean => {
+  const name = liveCredentialName(modelId);
+  return (process.env[name] ?? '').length > 0 && !testDefaulted.has(name);
+};
 
 const configuredRepeats = Number(process.env['TAU_LIVE_REPEATS'] ?? '0');
 
@@ -243,6 +252,28 @@ export const createLiveToolRegistry = (options: {
         isError: true,
       },
   };
+};
+
+/**
+ * Tools that only look. A live check that stops before modelling answers these
+ * with {@link emptyProjectRead}, so the turn reaches the decision under test
+ * instead of ending on its first skill or directory read.
+ */
+export const lookingTools: ReadonlySet<string> = new Set<string>([
+  toolName.useSkill,
+  toolName.readFile,
+  toolName.listDirectory,
+  toolName.grep,
+  toolName.globSearch,
+  toolName.getParameters,
+  toolName.revisions,
+  toolName.webSearch,
+]);
+
+/** The answer to a looking tool in a check that starts from an empty project. */
+export const emptyProjectRead: HostToolResult = {
+  content: { success: true, message: 'This check starts from an empty project; there is nothing to read yet.' },
+  isError: false,
 };
 
 /** A booted in-process gateway and the credential its transport authenticates with. */

@@ -35,7 +35,8 @@ const countingProvider = (target: FileSystemProvider): { provider: FileSystemPro
         if (property in counts) {
           counts[property as keyof Counters]++;
         }
-        return (value as (...callArgs: unknown[]) => unknown).apply(object, args);
+        /* The proxy is the receiver, so a provider batch that drives its own primitives is counted too. */
+        return (value as (...callArgs: unknown[]) => unknown).apply(provider, args);
       };
     },
   });
@@ -88,7 +89,8 @@ describe('directory walks use entry kinds', () => {
     await context.service.rmdir('/tree', { recursive: true });
 
     expect(context.source.counts.readFile - before.readFile).toBe(0);
-    expect(context.source.counts.stat - before.stat).toBe(0);
+    /* One kind check of the removal target itself; none per child. */
+    expect(context.source.counts.stat - before.stat).toBe(1);
     expect(context.source.counts.readdirEntries - before.readdirEntries).toBe(3);
     await expect(context.service.exists('/tree')).resolves.toBe(false);
   });

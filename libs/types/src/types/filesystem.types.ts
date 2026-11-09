@@ -28,13 +28,51 @@ export type CheckedFileWrite = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Result of a checked whole-file replacement. @public */
+/**
+ * One digest precondition for a checked whole-file replacement (charter D17):
+ * the file must exist and its bytes must hash to `sha256`. The authority reads
+ * and hashes the file under the write's locks, so the request carries 64
+ * characters where a byte precondition carries the whole file.
+ *
+ * @public
+ */
+export type FileDigestPrecondition = Readonly<{
+  path: string;
+  /** Lowercase hexadecimal SHA-256 of the bytes the caller's change was made from. */
+  expectedSha256: string;
+}>;
+
+/** A precondition the authority checks before a checked write: bytes, absence or a digest. @public */
+export type CheckedWritePrecondition = FileWritePrecondition | FileDigestPrecondition;
+
+/**
+ * A checked whole-file replacement as the authority takes it: its preconditions
+ * may name a digest. A provider's own checked write takes bytes only
+ * ({@link CheckedFileWrite}); the authority reads a digest's bytes first.
+ *
+ * @public
+ */
+export type AuthorityCheckedFileWrite = Readonly<
+  Omit<CheckedFileWrite, 'preconditions'> & { preconditions: readonly CheckedWritePrecondition[] }
+>;
+
+/**
+ * Result of a checked whole-file replacement.
+ *
+ * `sha256` is the authority's digest of `content`, present when a digest
+ * precondition asked for one: what the caller checks its next write against.
+ * A conflict's `sha256` is the digest of its `actual` bytes, likewise.
+ *
+ * @public
+ */
 export type CheckedFileWriteResult =
-  | Readonly<{ status: 'applied' | 'unchanged'; content: Uint8Array<ArrayBuffer> }>
+  | Readonly<{ status: 'applied' | 'unchanged'; content: Uint8Array<ArrayBuffer>; sha256?: string }>
   | Readonly<{
       status: 'conflict';
-      // oxlint-disable-next-line typescript/no-restricted-types -- `null` distinguishes an absent file from empty bytes.
-      conflicts: ReadonlyArray<Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null }>>;
+      conflicts: ReadonlyArray<
+        // oxlint-disable-next-line typescript/no-restricted-types -- `null` distinguishes an absent file from empty bytes.
+        Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null; sha256?: string }>
+      >;
     }>;
 
 /**
@@ -65,7 +103,7 @@ export type ChangeEventStat = {
 };
 
 /**
- * Discriminated union of filesystem change events emitted by the event bus.
+ * One exact filesystem change fact.
  *
  * Per `docs/research/editor-filesystem-surface-audit.md` R2, file and
  * directory operations are emitted under distinct discriminators so
@@ -74,7 +112,7 @@ export type ChangeEventStat = {
  *
  * @public
  */
-export type ChangeEvent =
+export type PathChangeEvent =
   | { type: 'fileWritten'; path: string; backend: FileSystemBackend; target?: ChangeEventStat }
   | { type: 'fileDeleted'; path: string; backend: FileSystemBackend }
   | { type: 'fileRenamed'; oldPath: string; newPath: string; backend: FileSystemBackend; target?: ChangeEventStat }
@@ -91,6 +129,29 @@ export type ChangeEvent =
     }
   | { type: 'directoryChanged'; path: string; backend: FileSystemBackend }
   | { type: 'backendChanged'; backend: FileSystemBackend };
+
+/**
+ * Every fact one changeset committed, delivered as one event (charter D2, I4).
+ *
+ * A changeset of one entry is delivered as that entry's own event; a larger one
+ * arrives once as this envelope, in entry order, so a subscriber does one unit
+ * of work per changeset instead of one per path. A transport that fans events
+ * out to other realms expands it at its edge.
+ *
+ * @public
+ */
+export type ChangeSetEvent = {
+  type: 'changeSet';
+  entries: readonly PathChangeEvent[];
+};
+
+/**
+ * Discriminated union of filesystem change events emitted by the event bus:
+ * one exact path fact, or one changeset's facts together.
+ *
+ * @public
+ */
+export type ChangeEvent = PathChangeEvent | ChangeSetEvent;
 
 /**
  * File Status in the filesystem

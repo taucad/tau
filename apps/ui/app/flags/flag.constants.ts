@@ -22,37 +22,54 @@ export type FlagDefinition = {
 };
 
 /**
- * Resolve the boolean default for `tauDebug` from the runtime environment
- * (`TAU_DEBUG=1|true`). The env var is the source of truth (drives e2e and
- * deployment toggling); a localStorage override still wins because the
+ * Resolve the boolean default for `tauDebug` (the *Debug tools* switch).
+ *
+ * `TAU_DEBUG=1|true` turns the switch on by default only in an undeployed
+ * build (local dev and the e2e suite, which set it). A deployed site
+ * (`TAU_DEPLOY_CONTEXT` set, staging included) may carry `TAU_DEBUG` for its
+ * debug routes and harnesses, but users there start with debug tools off and
+ * opt in from Experimental settings. A stored override always wins because the
  * default only fires when no override is stored.
  */
-const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
+export function resolveTauDebugDefault({
+  isDebugEnvironment,
+  deployContext,
+}: {
+  readonly isDebugEnvironment: boolean | undefined;
+  readonly deployContext: string | undefined;
+}): boolean {
+  return Boolean(isDebugEnvironment) && deployContext === undefined;
+}
+
+const tauDebugDefault = resolveTauDebugDefault({
+  isDebugEnvironment: ENV.TAU_DEBUG,
+  deployContext: ENV.TAU_DEPLOY_CONTEXT,
+});
 
 export const flagRegistry = {
   machines: {
     schema: z.boolean().default(isMachinesFeatureEnabled(ENV.TAU_MACHINES_ENABLED)),
     showInExperimental: false,
     label: 'Machines',
-    description: 'Connect machines and use the Print workbench after deployment qualification.',
+    description: 'Connect machines and use the Print workbench',
   },
   automaticReload: {
     schema: z.boolean().default(false),
     showInExperimental: false,
     label: 'Automatic reload',
-    description: 'Show automatic credit reload controls in Billing.',
+    description: 'Show automatic credit reload controls in Billing',
   },
   partsWarehouse: {
     showInExperimental: false,
     schema: z.boolean().default(false),
     label: 'Parts warehouse',
-    description: 'Browse and remix reusable parametric parts.',
+    description: 'Browse and remix reusable parametric parts',
   },
   webGpu: {
     showInExperimental: true,
     schema: z.boolean().default(true),
     label: 'Prefer WebGPU',
-    description: 'Uses WebGL2 when WebGPU is unavailable or cannot start. Turn off to prefer WebGL2.',
+    description: 'Falls back to WebGL2 when WebGPU is unavailable',
   },
   webGpuShaderStacks: {
     showInExperimental: false,
@@ -64,19 +81,25 @@ export const flagRegistry = {
     showInExperimental: false,
     schema: z.boolean().default(false),
     label: 'WebGPU inspector',
-    description: 'Load the Three.js pipeline inspector for WebGPU diagnostics.',
+    description: 'Load the Three.js pipeline inspector for WebGPU diagnostics',
+  },
+  modelPinning: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Model pinning',
+    description: 'Pin models to the top of the model selector',
   },
   pluginsStore: {
     showInExperimental: false,
     schema: z.boolean().default(false),
-    label: 'Plugins Store',
-    description: 'Expose the plugin and skill store while it is under development.',
+    label: 'Plugin store',
+    description: 'Browse plugins and skills',
   },
   tauDebug: {
     showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),
-    label: 'Tau Debug',
-    description: 'Enable in-app debug surfaces (e2e diagnostic panels, geometry inspectors).',
+    label: 'Debug tools',
+    description: 'Show diagnostic panels and geometry inspectors',
   },
 } as const satisfies Record<string, FlagDefinition>;
 

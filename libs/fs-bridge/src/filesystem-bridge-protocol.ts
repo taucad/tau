@@ -1,9 +1,17 @@
 import type {
+  AppendFence,
+  ChangeSet,
+  Changeset,
+  ChangesetEntry,
+  ChangesetReceipt,
+  ChangeSetWatchRequest,
+  ContentFacts,
+  IndexChanges,
+  IndexEntry,
+  IndexRemoval,
   ProviderCapabilities,
   FileSystemProvider,
-  FileStatOptions,
   FileTreeNode,
-  HeadFileStat,
   ProjectDiscoveryEntry,
   ProjectLocator,
   ProjectRootConfig,
@@ -18,12 +26,12 @@ import type {
   WorkspaceMutationError,
   WorkspaceScope,
 } from '@taucad/filesystem';
-import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
+import { maximumChangesetEntries, pendingProjectCommitInputSchema } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   ChangeEvent,
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileProvenance,
@@ -39,9 +47,10 @@ import type {
 } from '@taucad/types';
 import { projectIdSchema, projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
-import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
+import type { BridgeLongCall, BridgeProgress, BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
+import type { ComputeRestartedEvent } from '#filesystem-bridge-compute-events.js';
 import { z } from 'zod';
 import { cloneBoundedJson } from '@taucad/parameters/json';
 
@@ -61,10 +70,289 @@ const discriminatedResultUnion = <
 /**
  * Current filesystem bridge protocol version.
  *
- * Version 6 adds authoritative stat head mode.
+ * Version 7 makes every stat metadata only: content facts ride along only when
+ * already known (I3), and the head mode is gone. Version 8 delivers one
+ * `fileChanged` message per changeset per port: the fact itself, or every
+ * fact of the changeset as a `changeSet` envelope (charter D6). Version 9 is
+ * wire v3's first slice (charter D14, W10): `readMany` and `readRange`, and
+ * long calls — size-dependent calls that live while the authority heartbeats
+ * instead of dying at 30 s, carry the caller's abort and report progress. No
+ * shim for 8 (D20). The same version carries the second slice: `apply` (one
+ * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
+ * either serves or refuses, so the slices share one bump (D20). So does the
+ * third: the index queries `facts` and `changedSince`, and
+ * `pendingPaths` (D9, W4). Version 10 changes the answer of an existing
+ * call: `changedSince` takes the caller's index `epoch` and answers `epoch`,
+ * `removed` and `rescan` (W6.3), which a v9 authority does not send, so a v9
+ * peer is refused at the handshake rather than failing that call's schema.
+ * Version 11 lets a checked write name a digest precondition and answers the
+ * digest of what it wrote (charter D17), and adds `readFileWithDigest`, which
+ * answers a file's bytes and the authority's SHA-256 of those same bytes
+ * (W12). A v10 authority would refuse the digest as a malformed precondition,
+ * so the two are refused at the handshake.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 6;
+export const fileSystemBridgeProtocolVersion = 11;
+
+/**
+ * Caller-side controls of a long bridge call (charter D14): an `AbortSignal`
+ * that cancels it on the authority, and a progress observer.
+ *
+ * @public
+ */
+export type LongCall = BridgeLongCall;
+
+/**
+ * One progress report of a long bridge call: `done` of `total` units (files),
+ * `bytes` of `totalBytes` content bytes.
+ *
+ * @public
+ */
+export type LongCallProgress = BridgeProgress;
+
+/**
+ * Most paths one `readMany` names, so one reply stays one bounded batch; a
+ * larger set is a sequence of calls.
+ *
+ * @public
+ */
+export const maxReadManyPaths = 4096;
+
+/**
+ * Most bytes one `readMany` answers in all: the authority refuses the call
+ * with `EFBIG` once its files pass it, so one reply never holds an unbounded
+ * set of large files. A larger set is a sequence of calls, or `readRange`.
+ *
+ * @public
+ */
+export const maxReadManyBytes = 512 * 1024 * 1024;
+
+/**
+ * Most bytes one `readRange` returns: a page, not a whole large file. A larger
+ * read is a sequence of ranges.
+ *
+ * @public
+ */
+export const maxReadRangeBytes = 64 * 1024 * 1024;
+
+/**
+ * One file's bytes and the authority's SHA-256 of exactly those bytes, taken
+ * from one read: what a caller checks a later write against without hashing
+ * the bytes itself (charter D17).
+ *
+ * @public
+ */
+export type FileWithDigest = Readonly<{ data: Uint8Array<ArrayBuffer>; sha256: string }>;
+
+/**
+ * What `readMany` answers for each path: its bytes, or `'missing'` when nothing
+ * is there (the runtime's own word for absence, as in `hashFiles`).
+ *
+ * @public
+ */
+export type ReadManyResult = ReadonlyMap<string, Uint8Array<ArrayBuffer> | 'missing'>;
+
+/**
+ * `readMany`'s wire form: `[path, bytes | 'missing']` rows in request order. A
+ * map does not survive every transport the bridge rides; rows do.
+ */
+export type ReadManyWireRows = Array<[string, Uint8Array<ArrayBuffer> | 'missing']>;
+
+/**
+ * One changeset entry as the wire carries it: a write's bytes are in hand or a
+ * `Blob`. A caller's `ReadableStream` is staged into a `Blob` on the caller's
+ * side before the call, because a stream does not cross every transport the
+ * bridge rides (the pipeline stages streams before locking anyway, I11).
+ *
+ * @public
+ */
+export type FileSystemBridgeChangesetEntry =
+  | Exclude<ChangesetEntry, { readonly op: 'write' }>
+  | (Omit<Extract<ChangesetEntry, { readonly op: 'write' }>, 'data'> & {
+      readonly data: Uint8Array<ArrayBuffer> | Blob | string;
+    });
+
+/**
+ * A changeset as the wire carries it. Its `AbortSignal` rides the long call,
+ * not the arguments.
+ *
+ * @public
+ */
+export type FileSystemBridgeChangeset = Readonly<{
+  entries: readonly FileSystemBridgeChangesetEntry[];
+  lifecycle?: boolean;
+}>;
+
+/**
+ * Caller-side controls of `apply`: its abort, and who owns the bytes. An
+ * apply reports no progress: it lives on the authority's heartbeats.
+ *
+ * - `'copy'` (the default): every in-hand buffer is copied before it crosses,
+ *   so the caller's arrays stay usable.
+ * - `'owned'`: the caller hands its buffers over; a buffer an entry fills
+ *   whole is transferred, never copied, and is detached on return (I2). A view
+ *   over part of a larger buffer is still copied, so the rest of that buffer
+ *   is neither sent nor detached.
+ *
+ * @public
+ */
+export type ApplyOptions = { readonly signal?: AbortSignal; readonly transfer?: 'copy' | 'owned' };
+
+/**
+ * Caller-owned shape of a `glob`: where to start and how many rows. It matches
+ * the index's file rows; the index holds no directory rows. The view's mask is
+ * inherited, never re-declared.
+ *
+ * @public
+ */
+export type GlobOptions = {
+  /** Root-relative directory to match under; the whole root when absent. */
+  readonly path?: string;
+  readonly maxResults?: number;
+};
+
+/**
+ * Caller-owned shape of a `grep`.
+ *
+ * @public
+ */
+export type GrepOptions = {
+  /** Root-relative directory to search under; the whole root when absent. */
+  readonly path?: string;
+  /** Only files whose root-relative path matches this glob. */
+  readonly glob?: string;
+  /** Match case exactly; default `false`. */
+  readonly caseSensitive?: boolean;
+  /** Treat the pattern as literal text, not a regular expression. */
+  readonly fixedStrings?: boolean;
+  /** Most matches returned; default {@link defaultGrepResults}, at most {@link maxGrepResults}. */
+  readonly maxResults?: number;
+  /** Skip files larger than this many bytes; default {@link defaultGrepFileBytes}. */
+  readonly maxFileBytes?: number;
+  /** Lines of context on each side of a match, at most {@link maxGrepContext}. */
+  readonly context?: number;
+};
+
+/**
+ * One line a `grep` matched. `line` and `column` count from 1; `text` and the
+ * context lines are cut at {@link maxGrepLineCharacters}.
+ *
+ * @public
+ */
+export type GrepMatch = {
+  readonly path: string;
+  readonly line: number;
+  readonly column: number;
+  readonly text: string;
+  readonly before?: readonly string[];
+  readonly after?: readonly string[];
+};
+
+/**
+ * What a `grep` found, in the index's file order and line order.
+ *
+ * `filesSkipped` counts candidates not searched: binary, over `maxFileBytes`,
+ * or gone between the index and the read. `truncated` says `maxResults` cut
+ * the matches short.
+ *
+ * @public
+ */
+export type GrepResult = {
+  readonly matches: readonly GrepMatch[];
+  readonly filesSearched: number;
+  readonly filesSkipped: number;
+  readonly truncated: boolean;
+};
+
+/**
+ * Totals of one subtree's files, from the root's index (charter D3): no file
+ * is read. Content facts are counted only where the index already knows them
+ * (I3): `textFiles + binaryFiles` can be less than `files`, and `lines` sums
+ * the line counts already measured.
+ *
+ * @public
+ */
+export type IndexStats = {
+  readonly files: number;
+  readonly bytes: number;
+  readonly textFiles: number;
+  readonly binaryFiles: number;
+  readonly lines: number;
+};
+
+/**
+ * What a `facts` call measures beyond each file's kind (charter D4): line
+ * counts of text files, digests, and the largest file read in full to learn
+ * either. The caller's listed head metadata does not cross the wire; the
+ * authority's index holds its own.
+ *
+ * @public
+ */
+export type FactsOptions = Readonly<{
+  lineCount?: boolean;
+  byteCap?: number;
+  digests?: ReadonlyArray<'sha256' | 'blobOid'>;
+  /** `false`: only what the authority's index already holds and trusts, with no file read. */
+  measure?: boolean;
+  /** With `measure: false`: only a committed import's recorded facts, confirmed by a stat at their size and mtime. */
+  recorded?: 'import';
+}>;
+
+/**
+ * `facts`'s wire form: `[path, facts]` rows in request order, a path the
+ * authority has no facts for left out. A map does not survive every transport
+ * the bridge rides; rows do.
+ */
+export type FactsWireRows = Array<[string, ContentFacts]>;
+
+/**
+ * One index entry as `changedSince` carries it: the authority's own record of
+ * when its facts were measured stays on the authority.
+ *
+ * @public
+ */
+export type IndexChangedEntry = Omit<IndexEntry, 'factsAt'>;
+
+/**
+ * What a root's index changed after a generation (charter D3, S10): its
+ * generation and epoch now, which the caller passes back as `since` and
+ * `epoch` next time, every entry it still holds that changed later, and every
+ * path it removed since. `rescan` means the index cannot tell from that
+ * `since` (another epoch, no epoch, or a removal record that no longer reaches
+ * back), so both lists are empty and the caller walks the tree: an empty
+ * answer never means nothing changed while `rescan` is set.
+ *
+ * @public
+ */
+export type IndexChangedSince = Readonly<{
+  generation: number;
+  epoch: string;
+  entries: readonly IndexChangedEntry[];
+  removed: readonly IndexRemoval[];
+  rescan?: true;
+}>;
+
+/** What a `changedSince` caller passes beside `since`: the epoch it was reported in. @public */
+export type IndexChangedSinceOptions = Readonly<{ epoch?: string }>;
+
+/** Matches a `grep` returns when the caller names no cap. @public */
+export const defaultGrepResults = 250;
+/** Most matches one `grep` returns. @public */
+export const maxGrepResults = 5000;
+/** Largest file a `grep` reads when the caller names no cap. @public */
+export const defaultGrepFileBytes = 4 * 1024 * 1024;
+/** Largest file a `grep` may be asked to read: its bytes become one string on the authority. @public */
+export const maxGrepFileBytes = 256 * 1024 * 1024;
+/** Longest glob pattern `glob`, or `grep`'s `glob` option, takes. @public */
+export const maxGlobPatternLength = 4096;
+/** Longest regular expression (or literal) a `grep` takes, the same as a glob's. @public */
+export const maxGrepPatternLength = maxGlobPatternLength;
+/** Largest file a `facts` call may be asked to read in full, to count lines or digest it. @public */
+export const maxFactsByteCap = 1024 * 1024 * 1024;
+/** Most context lines on each side of a `grep` match. @public */
+export const maxGrepContext = 10;
+/** Characters of a matched or context line a `grep` returns. @public */
+export const maxGrepLineCharacters = 500;
 
 const unavailableCapabilities = null;
 
@@ -158,7 +446,10 @@ export type FileSystemBridgeScopedReads = {
   readScopedFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
   readScopedFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
   readScopedShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
-  getScopedZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+  getScopedZippedDirectory(
+    path: string,
+    options: { readonly scope: WorkspaceScope; readonly maxBytes?: number },
+  ): Promise<Blob>;
 };
 
 /** Workspace-wide bridge calls, with signatures derived from the authority service. @public */
@@ -182,11 +473,37 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      */
     search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
     statTree?: (path: string) => Promise<FileStatEntry[]>;
+    pendingPaths?: (paths: readonly string[]) => Promise<readonly string[]>;
     /*
      * A host whose provider can digest without buffering supplies its own; the
      * bridge otherwise derives one from `readFile` on the host's side of the wire.
      */
     hashFiles?: FileSystemBridgeHashFiles;
+    /*
+     * Wire v3 reads (charter D14). A host whose provider batches or seeks
+     * supplies its own; the bridge otherwise derives both from `readFile` (and
+     * `readFileStream` for ranges) on the host's side of the wire.
+     */
+    readMany?: (paths: readonly string[], options?: LongCall) => Promise<ReadManyWireRows>;
+    readRange?: (path: string, offset: number, length: number) => Promise<Uint8Array<ArrayBuffer>>;
+    /* A file and its digest from one read (D17); derived from `readFile` where a host brings none. */
+    readFileWithDigest?: (path: string) => Promise<FileWithDigest>;
+    /*
+     * Pattern and content queries over the root's index (charter D14). A host
+     * whose index answers them supplies its own; the bridge otherwise derives
+     * all three from `statTree` (and `readFile` for `grep`) on the host's side
+     * of the wire, so the view's mask applies to every row.
+     */
+    glob?: (pattern: string, options?: GlobOptions & LongCall) => Promise<FileStatEntry[]>;
+    grep?: (pattern: string, options?: GrepOptions & LongCall) => Promise<GrepResult>;
+    indexStats?: (path: string, options?: LongCall) => Promise<IndexStats>;
+    /*
+     * The index queries (charter D3, D4): the root's own index answers them,
+     * so a host that hands over a bare provider offers neither and the bridge
+     * refuses both with `ENOTSUP`.
+     */
+    facts?: (paths: readonly string[], options?: FactsOptions & LongCall) => Promise<ReadonlyMap<string, ContentFacts>>;
+    changedSince?: (since: number, options?: IndexChangedSinceOptions & LongCall) => Promise<IndexChanges>;
     /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
@@ -230,7 +547,10 @@ export type SearchOptions = { readonly maxResults?: number; readonly includeDire
  *
  * @public
  */
-export type FileSystemBridgeHashFiles = (paths: readonly string[]) => Promise<Record<string, string>>;
+export type FileSystemBridgeHashFiles = (
+  paths: readonly string[],
+  options?: LongCall,
+) => Promise<Record<string, string>>;
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8' }): Promise<string>;
@@ -289,18 +609,80 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
   Pick<WorkspaceFileService, RootedBridgeContentMethodName> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
-    writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+    /**
+     * A fenced record-log append (D23): refused with `EAPPENDSTALE` or
+     * `EFENCED`, writing nothing, when the log is no longer the one the writer read.
+     */
+    appendFileFenced(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    /** A checked write; a precondition may name a digest the authority checks under its locks (D17). */
+    writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     deleteFileChecked(input: {
       path: string;
       preconditions: readonly FileWritePrecondition[];
     }): Promise<CheckedFileWriteResult>;
-    archive(path: string, options?: ArchiveOptions): Promise<Blob>;
-    contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
-    search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
-    statTree(path: string): Promise<FileStatEntry[]>;
-    copyTree(source: string, target: string): Promise<void>;
-    duplicate(source: string, target: string): Promise<void>;
-    hashFiles(paths: readonly string[]): Promise<Record<string, string>>;
+    /**
+     * One file's bytes and the authority's SHA-256 of those same bytes, from one
+     * read (charter D17): the digest a caller's later checked write names. The
+     * bytes arrive transferred where the transport transfers (I2).
+     */
+    readFileWithDigest(path: string): Promise<FileWithDigest>;
+    archive(path: string, options?: ArchiveOptions & LongCall): Promise<Blob>;
+    contents(path: string, options?: ArchiveOptions & LongCall): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+    search(query: string, options?: SearchOptions & LongCall): Promise<FileStatEntry[]>;
+    statTree(path: string, options?: LongCall): Promise<FileStatEntry[]>;
+    copyTree(source: string, target: string, options?: LongCall): Promise<void>;
+    duplicate(source: string, target: string, options?: LongCall): Promise<void>;
+    hashFiles(paths: readonly string[], options?: LongCall): Promise<Record<string, string>>;
+    /**
+     * Read many files in one call (charter D14): each path's bytes, or
+     * `'missing'`. A long call: it lives while the authority works, reports
+     * progress per file and stops on the caller's abort. The bytes arrive
+     * transferred, never copied, on a transport that transfers (I2).
+     */
+    readMany(paths: readonly string[], options?: LongCall): Promise<ReadManyResult>;
+    /**
+     * Bytes `[offset, offset + length)` of one file, clamped to its end; at most
+     * {@link maxReadRangeBytes} per call.
+     */
+    readRange(path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
+    /**
+     * Apply one changeset on the authority (charter D2, D14): every entry
+     * admitted before the first I/O, one lock set, every entry's outcome in the
+     * receipt. A long call: it lives while the authority applies it, so a
+     * transport deadline never reports a changeset failed that is still being
+     * applied (I10). An entry's `error` arrives as an `Error` carrying the
+     * provider's `code`. A masked view (`agent`, `user`) answers every
+     * entry's paths first: one masked entry refuses the whole changeset with
+     * the mask's error (`EPERM`, or `EROFS` for an agent's records path) and
+     * nothing is applied. A connection whose handlers apply no changeset (a
+     * bare provider) refuses with `ENOTSUP`.
+     */
+    apply(changeset: Changeset, options?: ApplyOptions): Promise<ChangesetReceipt>;
+    /** Index rows whose root-relative path matches a glob (`*.ts` matches at any depth). */
+    glob(pattern: string, options?: GlobOptions & LongCall): Promise<FileStatEntry[]>;
+    /** Lines of the root's text files that match a pattern; an invalid expression refuses with `EINVAL`. */
+    grep(pattern: string, options?: GrepOptions & LongCall): Promise<GrepResult>;
+    /** Totals of one subtree from the root's index. */
+    indexStats(path: string, options?: LongCall): Promise<IndexStats>;
+    /**
+     * Content facts of visible files (charter D4): from the index while they
+     * still describe the bytes, otherwise measured on the authority within
+     * `byteCap` and recorded there. A missing path or a directory is left out
+     * of the map; a connection with no index refuses with `ENOTSUP`.
+     */
+    facts(paths: readonly string[], options?: FactsOptions & LongCall): Promise<ReadonlyMap<string, ContentFacts>>;
+    /**
+     * What the root's index changed after `since` (charter D3, S10), masked by
+     * the connection's view: pass the `epoch` the `since` came with, or only
+     * `since` `0` is answered and any other is `rescan`. A connection with no
+     * index refuses with `ENOTSUP`.
+     */
+    changedSince(since: number, options?: IndexChangedSinceOptions & LongCall): Promise<IndexChangedSince>;
+    /**
+     * Which of these files the root's index holds as pending entries (D9),
+     * answered without a read. A long call: a cold index opens first.
+     */
+    pendingPaths(paths: readonly string[], options?: LongCall): Promise<readonly string[]>;
   };
 
 /**
@@ -318,18 +700,18 @@ export type FileSystemBridgeService = FileSystemBridgeUnrootedCalls & FileSystem
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
 type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
   ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8' }]
-  : Name extends 'stat'
-    ? [path: string, options?: FileStatOptions]
-    : Name extends 'readdirWithStats'
-      ? [path: string, options?: { readonly content: 'head' }]
-      : Name extends 'readScopedFile'
-        ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
-        : Parameters<FileSystemBridgeService[Name]>;
+  : Name extends 'readScopedFile'
+    ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
+    : Name extends 'apply'
+      ? [changeset: FileSystemBridgeChangeset]
+      : Parameters<FileSystemBridgeService[Name]>;
 type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
-  : Name extends 'readdirWithStats'
-    ? Array<{ name: string } & (FileStat | HeadFileStat)>
-    : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
+  : Name extends 'readMany'
+    ? ReadManyWireRows
+    : Name extends 'facts'
+      ? FactsWireRows
+      : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
 
 type FileSystemBridgeCallSchemas = {
   readonly [Name in FileSystemBridgeCallName]: {
@@ -366,6 +748,7 @@ const providerCapabilitiesSchema: z.ZodType<ProviderCapabilities> = z.looseObjec
   coalescesWrites: z.boolean().optional(),
 });
 
+/* A stat carries content facts only when the host already knows them (I3). */
 const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {
   const record = plainRecordSchema.safeParse(value);
   if (!record.success || !finiteNumberSchema.safeParse(record.data['size']).success) {
@@ -380,28 +763,11 @@ const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {
   if (record.data['type'] !== 'file') {
     return false;
   }
+  const { contentKind, lineCount } = record.data;
   return (
-    (record.data['contentKind'] === 'binary' && record.data['lineCount'] === undefined) ||
-    (record.data['contentKind'] === 'text' && finiteNumberSchema.safeParse(record.data['lineCount']).success)
-  );
-});
-
-const headFileStatSchema: z.ZodType<HeadFileStat> = z.custom<HeadFileStat>((value) => {
-  const record = plainRecordSchema.safeParse(value);
-  if (
-    !record.success ||
-    !finiteNumberSchema.safeParse(record.data['size']).success ||
-    !finiteNumberSchema.safeParse(record.data['mtimeMs']).success
-  ) {
-    return false;
-  }
-  if (record.data['type'] === 'dir') {
-    return true;
-  }
-  return (
-    record.data['type'] === 'file' &&
-    (record.data['contentKind'] === 'text' || record.data['contentKind'] === 'binary') &&
-    record.data['lineCount'] === undefined
+    (contentKind === undefined && lineCount === undefined) ||
+    (contentKind === 'binary' && lineCount === undefined) ||
+    (contentKind === 'text' && (lineCount === undefined || finiteNumberSchema.safeParse(lineCount).success))
   );
 });
 
@@ -427,30 +793,21 @@ const fileProvenanceSchema: z.ZodType<FileProvenance> = z.looseObject({
   overrides: z.string().optional(),
 });
 
-const composedDirectoryRowSchema: z.ZodType<{ name: string } & (FileStat | HeadFileStat)> = z.custom<
-  { name: string } & (FileStat | HeadFileStat)
->((value) => {
-  const record = plainRecordSchema.safeParse(value);
-  return (
-    record.success &&
-    stringSchema.safeParse(record.data['name']).success &&
-    (fileStatSchema.safeParse(value).success || headFileStatSchema.safeParse(value).success) &&
-    (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
-  );
-});
-
-const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & (FileStat | HeadFileStat)>> = z.custom<
-  Array<{ name: string } & (FileStat | HeadFileStat)>
->((value) => Array.isArray(value) && value.every((row) => composedDirectoryRowSchema.safeParse(row).success));
-
-/** Exact listing postcondition for a call made without the head option. @public */
-export const exactComposedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
-  Array<{ name: string } & FileStat>
->(
-  (value) =>
-    Array.isArray(value) &&
-    value.every((row) => composedDirectoryRowSchema.safeParse(row).success && fileStatSchema.safeParse(row).success),
+const composedDirectoryRowSchema: z.ZodType<{ name: string } & FileStat> = z.custom<{ name: string } & FileStat>(
+  (value) => {
+    const record = plainRecordSchema.safeParse(value);
+    return (
+      record.success &&
+      stringSchema.safeParse(record.data['name']).success &&
+      fileStatSchema.safeParse(value).success &&
+      (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
+    );
+  },
 );
+
+const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
+  Array<{ name: string } & FileStat>
+>((value) => Array.isArray(value) && value.every((row) => composedDirectoryRowSchema.safeParse(row).success));
 
 const mutationErrorCodeValues = [
   'NAME_EXISTS',
@@ -604,11 +961,59 @@ const projectRootDiscoveryStatusSchema: z.ZodType<ProjectRootDiscoveryStatus> = 
   z.looseObject({ status: z.literal('inaccessible'), root: storageRootConfigSchema, reason: z.string() }),
 ]);
 
-const watchRequestSchema: z.ZodType<WatchRequest> = z.looseObject({
+/**
+ * A watch request on the wire. `form: 'change-sets'` asks a rooted connection
+ * for its change-set form (charter D6): one {@link ChangeSet} frame per
+ * committed changeset that reaches the request, instead of a frame per path.
+ *
+ * @public
+ */
+export type FileSystemBridgeWatchRequest = WatchRequest & {
+  readonly form?: 'change-sets' | 'events';
+  readonly coalesce?: ChangeSetWatchRequest['coalesce'];
+};
+
+/**
+ * One frame of a rooted connection's event channel (charter D14): the one
+ * channel per port that carries the root's change sets and the authority's
+ * own news.
+ *
+ * - `changeSet`: one committed changeset as the connection's view sees it.
+ * - `compute-restarted`: the authority's compute worker died, as its
+ *   supervisor reported it: `failedCalls` failed typed, `restarts` within the
+ *   supervisor's window so far, and whether it `abandoned` the worker for its
+ *   fallback. No file state was lost: the compute worker holds none.
+ * - `authority-lost`: the authority itself is gone. Never sent on the wire —
+ *   a dead authority sends nothing — the client says it, once, when the
+ *   connection closes under it or a call finds the authority unresponsive
+ *   (`PEER_UNRESPONSIVE`). Nothing the authority had not receipted may be claimed
+ *   saved; the recovery path is a reload.
+ *
+ * @public
+ */
+export type FileSystemBridgeEvent =
+  | Readonly<{ kind: 'changeSet'; set: ChangeSet }>
+  | ComputeRestartedEvent
+  | Readonly<{ kind: 'authority-lost' }>;
+
+/** The event frames the wire carries: every {@link FileSystemBridgeEvent} but `authority-lost`. @public */
+export type FileSystemBridgeWireEvent = Exclude<FileSystemBridgeEvent, { kind: 'authority-lost' }>;
+
+/**
+ * One frame of a bridge watch: a per-path event, a change set for a
+ * `form: 'change-sets'` request, or an event for a `form: 'events'` request.
+ *
+ * @public
+ */
+export type FileSystemBridgeWatchFrame = WatchEvent | ChangeSet | FileSystemBridgeWireEvent;
+
+const watchRequestSchema: z.ZodType<FileSystemBridgeWatchRequest> = z.looseObject({
   paths: z.array(z.string()),
   recursive: z.boolean().optional(),
   includes: z.array(z.string()).optional(),
   excludes: z.array(z.string()).optional(),
+  form: z.enum(['change-sets', 'events']).optional(),
+  coalesce: z.enum(['immediate', 'frame']).optional(),
 });
 const watchEventSchema: z.ZodType<WatchEvent> = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('reset') }),
@@ -618,6 +1023,41 @@ const watchEventSchema: z.ZodType<WatchEvent> = z.discriminatedUnion('type', [
 ]);
 
 const filesystemBackendSchema = z.enum(filesystemBackends);
+const changeSetEntrySchema = z.looseObject({
+  op: z.enum(['created', 'written', 'deleted', 'moved']),
+  path: z.string(),
+  oldPath: z.string().optional(),
+  kind: z.enum(['file', 'dir']),
+  target: z.looseObject({ type: z.enum(['file', 'dir']), size: z.number(), mtimeMs: z.number() }).optional(),
+});
+const changeSetSchema: z.ZodType<ChangeSet> = z.looseObject({
+  generation: z.number(),
+  origin: z.string().optional(),
+  backend: filesystemBackendSchema.optional(),
+  entries: z.array(changeSetEntrySchema),
+  touchedDirectories: z.array(z.string()),
+  segments: z.array(z.looseObject({ path: z.string(), writes: z.number() })).optional(),
+  reset: z
+    .looseObject({
+      prefix: z.string(),
+      reason: z.enum(['overflow', 'observer-uncertain', 'topology', 'sequence-gap', 'permission-lost']),
+    })
+    .optional(),
+});
+const wireEventSchema: z.ZodType<FileSystemBridgeWireEvent> = z.discriminatedUnion('kind', [
+  z.looseObject({ kind: z.literal('changeSet'), set: changeSetSchema }),
+  z.looseObject({
+    kind: z.literal('compute-restarted'),
+    failedCalls: z.number().int().nonnegative(),
+    restarts: z.number().int().nonnegative(),
+    abandoned: z.boolean(),
+  }),
+]);
+const watchFrameSchema: z.ZodType<FileSystemBridgeWatchFrame> = z.union([
+  watchEventSchema,
+  changeSetSchema,
+  wireEventSchema,
+]);
 const changeEventStatSchema = z.looseObject({
   type: z.enum(['file', 'dir']),
   size: z.number(),
@@ -648,7 +1088,7 @@ const copyChangeEventSchema = (type: 'fileCopied' | 'directoryCopied') =>
     backend: filesystemBackendSchema,
     target: changeEventStatSchema.optional(),
   });
-const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
+const pathChangeEventBranches = [
   pathChangeEventSchema('fileWritten'),
   pathChangeEventSchema('fileDeleted'),
   renameChangeEventSchema('fileRenamed'),
@@ -659,6 +1099,14 @@ const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
   copyChangeEventSchema('directoryCopied'),
   pathChangeEventSchema('directoryChanged'),
   z.looseObject({ type: z.literal('backendChanged'), backend: filesystemBackendSchema }),
+] as const;
+/* One delivery carries one fact, or every fact of one changeset as a `changeSet` envelope (charter D6). */
+const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
+  ...pathChangeEventBranches,
+  z.looseObject({
+    type: z.literal('changeSet'),
+    entries: z.array(z.discriminatedUnion('type', [...pathChangeEventBranches])),
+  }),
 ]);
 
 const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((value) => {
@@ -722,8 +1170,11 @@ const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
 const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema });
+/** A caller's archive byte ceiling: an archive streams and holds none of its own. */
+const archiveCeilingSchema = z.number().int().positive().optional();
+const scopedArchiveOptionsSchema = z.looseObject({ scope: workspaceScopeSchema, maxBytes: archiveCeilingSchema });
 /** The rooted read content operations take the caller's own export filter. */
-const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional() });
+const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional(), maxBytes: archiveCeilingSchema });
 
 const helloVersionProbeSchema = z.looseObject({ v: z.unknown().optional() });
 const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.preprocess(
@@ -765,16 +1216,22 @@ const scopedReadFileOptionsSchema = z.looseObject({
   scope: workspaceScopeSchema,
 });
 const writePayloadSchema = z.union([z.string(), bytesSchema]);
-const checkedWriteInputSchema: z.ZodType<Omit<CheckedFileWrite, 'signal'>> = z.object({
+const sha256Schema = z.string().regex(/^[\da-f]{64}$/u);
+const checkedWriteInputSchema: z.ZodType<Omit<AuthorityCheckedFileWrite, 'signal'>> = z.object({
   path: z.string(),
   data: writePayloadSchema,
-  preconditions: z.array(z.object({ path: z.string(), expected: writePayloadSchema.nullable() })),
+  preconditions: z.array(
+    z.union([
+      z.object({ path: z.string(), expected: writePayloadSchema.nullable() }),
+      z.object({ path: z.string(), expectedSha256: sha256Schema }),
+    ]),
+  ),
 });
 const checkedWriteResultSchema: z.ZodType<CheckedFileWriteResult> = z.discriminatedUnion('status', [
-  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema }),
+  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema, sha256: sha256Schema.optional() }),
   z.object({
     status: z.literal('conflict'),
-    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable() })),
+    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable(), sha256: sha256Schema.optional() })),
   }),
 ]);
 const moveEditSchema = z.looseObject({ source: z.string(), target: z.string() });
@@ -806,6 +1263,136 @@ const permanentDeleteResultSchema = discriminatedResultUnion('status', [
 const searchOptionsSchema = z.looseObject({
   maxResults: z.number().optional(),
   includeDirectories: z.boolean().optional(),
+});
+const countSchema = z.number().int().nonnegative();
+const globOptionsSchema = z.looseObject({
+  path: rootedPathSchema.optional(),
+  maxResults: countSchema.optional(),
+});
+const grepOptionsSchema = z.looseObject({
+  path: rootedPathSchema.optional(),
+  glob: z.string().max(maxGlobPatternLength).optional(),
+  caseSensitive: z.boolean().optional(),
+  fixedStrings: z.boolean().optional(),
+  maxResults: countSchema.max(maxGrepResults).optional(),
+  maxFileBytes: countSchema.max(maxGrepFileBytes).optional(),
+  context: countSchema.max(maxGrepContext).optional(),
+});
+const grepResultSchema: z.ZodType<GrepResult> = z.looseObject({
+  matches: z.array(
+    z.looseObject({
+      path: z.string(),
+      line: z.number().int().positive(),
+      column: z.number().int().positive(),
+      text: z.string(),
+      before: z.array(z.string()).optional(),
+      after: z.array(z.string()).optional(),
+    }),
+  ),
+  filesSearched: countSchema,
+  filesSkipped: countSchema,
+  truncated: z.boolean(),
+});
+const indexStatsSchema: z.ZodType<IndexStats> = z.looseObject({
+  files: countSchema,
+  bytes: countSchema,
+  textFiles: countSchema,
+  binaryFiles: countSchema,
+  lines: countSchema,
+});
+const contentFactsSchema: z.ZodType<ContentFacts> = z.looseObject({
+  contentKind: z.enum(['text', 'binary']),
+  lineCount: countSchema.optional(),
+  sha256: sha256HexSchema.optional(),
+  blobOid: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/u)
+    .optional(),
+});
+const factsOptionsSchema = z.looseObject({
+  lineCount: z.boolean().optional(),
+  byteCap: countSchema.max(maxFactsByteCap).optional(),
+  digests: z.array(z.enum(['sha256', 'blobOid'])).optional(),
+  measure: z.boolean().optional(),
+  recorded: z.literal('import').optional(),
+});
+const indexEpochSchema = z.string().min(1).max(64);
+const indexChangedSinceSchema: z.ZodType<IndexChangedSince> = z.looseObject({
+  generation: countSchema,
+  epoch: indexEpochSchema,
+  rescan: z.literal(true).optional(),
+  removed: z.array(z.looseObject({ path: z.string(), kind: z.enum(['file', 'dir']), generation: countSchema })),
+  entries: z.array(
+    z.looseObject({
+      path: z.string(),
+      kind: z.enum(['file', 'dir']),
+      size: countSchema,
+      mtimeMs: z.number(),
+      generation: countSchema,
+      facts: contentFactsSchema.optional(),
+    }),
+  ),
+});
+const changesetPhaseSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]).optional();
+const changesetEntrySchema: z.ZodType<FileSystemBridgeChangesetEntry> = z.discriminatedUnion('op', [
+  z.strictObject({
+    op: z.literal('write'),
+    path: z.string(),
+    data: z.union([z.string(), bytesSchema, z.instanceof(Blob)]),
+    mode: z.enum(['100644', '100755']).optional(),
+    create: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('append'),
+    path: z.string(),
+    data: writePayloadSchema,
+    fence: z.strictObject({ expectedLength: countSchema, token: z.number().int().optional() }).optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('delete'),
+    path: z.string(),
+    kind: z.enum(['file', 'dir']).optional(),
+    recursive: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('move'),
+    from: z.string(),
+    to: z.string(),
+    replace: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('mkdir'),
+    path: z.string(),
+    recursive: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+]);
+const changesetSchema: z.ZodType<FileSystemBridgeChangeset> = z.strictObject({
+  entries: z.array(changesetEntrySchema).max(maximumChangesetEntries),
+  lifecycle: z.boolean().optional(),
+});
+/* An entry's error crosses as data — an `Error` survives structured clone but
+ * not every codec — and the client stands it back up as an `Error`. */
+const changesetEntryErrorSchema = z.looseObject({ name: z.string(), message: z.string(), code: z.string().optional() });
+const changesetReceiptSchema: z.ZodType<ChangesetReceipt> = z.looseObject({
+  entries: z.array(
+    z.looseObject({
+      index: countSchema,
+      outcome: z.enum(['applied', 'failed', 'uncertain', 'skipped']),
+      error: changesetEntryErrorSchema.optional(),
+      kind: z.enum(['file', 'dir']).optional(),
+      durability: durabilityClassSchema.optional(),
+    }),
+  ),
+  applied: countSchema,
+  failed: countSchema,
+  uncertain: countSchema,
+  skipped: countSchema,
+  state: z.enum(['applied', 'partially-applied', 'known-not-applied', 'potentially-applied']),
 });
 
 const machineSettingsTypeIdSchema = z.custom<MachineSettingsRecord['typeId']>(
@@ -923,18 +1510,24 @@ const callSchemas = {
     result: checkedWriteResultSchema,
   },
   appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
+  appendFileFenced: {
+    args: z.tuple([
+      z.string(),
+      writePayloadSchema,
+      z.strictObject({
+        expectedLength: z.number().int().nonnegative(),
+        token: z.number().int().optional(),
+      }),
+    ]),
+    result: voidResult,
+  },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),
     result: voidResult,
   },
   mkdir: { args: z.tuple([z.string(), recursiveOptionsSchema.optional()]), result: voidResult },
   readdir: { args: oneStringArgument, result: z.array(z.string()) },
-  stat: {
-    args: z.tuple([z.string(), z.object({ content: z.literal('head') }).optional()]),
-    result: z.custom<FileStat | HeadFileStat>(
-      (value) => fileStatSchema.safeParse(value).success || headFileStatSchema.safeParse(value).success,
-    ),
-  },
+  stat: { args: oneStringArgument, result: fileStatSchema },
   lstat: { args: oneStringArgument, result: fileStatSchema },
   move: { args: twoStringArgs, result: fileStatSchema },
   canMove: { args: twoStringArgs, result: mutationResultSchema },
@@ -968,17 +1561,17 @@ const callSchemas = {
     result: z.union([z.string(), bytesSchema]),
   },
   readScopedShallowDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: fileTreeNodesSchema },
-  getScopedZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: z.instanceof(Blob) },
+  getScopedZippedDirectory: {
+    args: z.tuple([z.string(), scopedArchiveOptionsSchema]),
+    result: z.instanceof(Blob),
+  },
   disposeStorageRoot: { args: oneStringArgument, result: voidResult },
   pollExternalChanges: {
     args: z.union([z.tuple([]), z.tuple([z.string().optional()])]),
     result: booleanResult,
   },
   rename: { args: twoStringArgs, result: voidResult },
-  readdirWithStats: {
-    args: z.tuple([z.string(), z.object({ content: z.literal('head') }).optional()]),
-    result: composedDirectoryRowsSchema,
-  },
+  readdirWithStats: { args: oneStringArgument, result: composedDirectoryRowsSchema },
   provenance: { args: oneStringArgument, result: fileProvenanceSchema },
   archive: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: z.instanceof(Blob) },
   contents: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: directoryContentsSchema },
@@ -990,6 +1583,47 @@ const callSchemas = {
   copyTree: { args: twoStringArgs, result: voidResult },
   duplicate: { args: twoStringArgs, result: voidResult },
   hashFiles: { args: z.tuple([z.array(rootedPathSchema)]), result: fileDigestsSchema },
+  readMany: {
+    args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths)]),
+    result: z
+      .array(z.tuple([z.string(), z.union([bytesSchema, z.literal('missing')])]))
+      .refine(
+        (rows) =>
+          rows.reduce((total, [, data]) => total + (data === 'missing' ? 0 : data.byteLength), 0) <= maxReadManyBytes,
+        { message: `readMany answered more than ${String(maxReadManyBytes)} bytes` },
+      ),
+  },
+  readFileWithDigest: {
+    args: z.tuple([rootedPathSchema]),
+    result: z.object({ data: bytesSchema, sha256: sha256Schema }),
+  },
+  readRange: {
+    args: z.tuple([
+      rootedPathSchema,
+      z.number().int().nonnegative(),
+      z.number().int().nonnegative().max(maxReadRangeBytes),
+    ]),
+    result: bytesSchema,
+  },
+  apply: { args: z.tuple([changesetSchema]), result: changesetReceiptSchema },
+  glob: {
+    args: z.tuple([z.string().max(maxGlobPatternLength), globOptionsSchema.optional()]),
+    result: fileStatEntriesSchema,
+  },
+  grep: {
+    args: z.tuple([z.string().max(maxGrepPatternLength), grepOptionsSchema.optional()]),
+    result: grepResultSchema,
+  },
+  indexStats: { args: z.tuple([rootedPathSchema]), result: indexStatsSchema },
+  facts: {
+    args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths), factsOptionsSchema.optional()]),
+    result: z.array(z.tuple([z.string(), contentFactsSchema])),
+  },
+  changedSince: {
+    args: z.tuple([countSchema, z.looseObject({ epoch: indexEpochSchema.optional() }).optional()]),
+    result: indexChangedSinceSchema,
+  },
+  pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
@@ -1001,11 +1635,11 @@ export const fileSystemBridgeSchemas = {
   listens: {
     watch: {
       args: watchRequestSchema,
-      event: watchEventSchema,
+      event: watchFrameSchema,
     },
     broadcast: { event: broadcastValidator },
   },
-} satisfies BridgeProtocolSchemas<FileSystemBridgeHello, WatchRequest, WatchEvent>;
+} satisfies BridgeProtocolSchemas<FileSystemBridgeHello, FileSystemBridgeWatchRequest, FileSystemBridgeWatchFrame>;
 
 type HelloInput =
   | {
@@ -1032,4 +1666,50 @@ export const createFileSystemBridgeHello = (input: HelloInput): FileSystemBridge
     watchable: false,
     error: input.error,
   };
+};
+
+/**
+ * The long calls (charter D14, Rule 32): calls whose work grows with their
+ * input — files, bytes, entries — and so have no honest wall-clock deadline.
+ * Each runs under the `'liveness'` policy: it lives while the authority sends
+ * heartbeats or progress for it and fails `PEER_UNRESPONSIVE` only after a
+ * whole liveness window of silence, so a transport deadline never classifies
+ * a mutation as failed while the authority is still applying it (I10).
+ *
+ * The value is the index of the call's options argument that carries the
+ * caller's {@link LongCall} controls, or `undefined` for a call whose signature
+ * has no slot for them (it still gets the liveness policy). A pending-project
+ * commit is one: it waits for a cross-tab lock, removes a half-written target,
+ * then writes every file and the manifest, so it used to need its own
+ * five-minute deadline.
+ *
+ * Both ends read this one table: the client to split the controls off and pick
+ * the liveness policy, the server to hand them back to the handler at the
+ * same slot. Internal: not part of the package barrel.
+ *
+ * @internal
+ */
+export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> = {
+  readMany: 1,
+  hashFiles: 1,
+  statTree: 1,
+  search: 1,
+  archive: 1,
+  contents: 1,
+  copyTree: 2,
+  duplicate: 2,
+  glob: 1,
+  grep: 1,
+  indexStats: 1,
+  facts: 1,
+  changedSince: 1,
+  pendingPaths: 1,
+  /* Its controls ride `ApplyOptions` and the changeset's own signal;
+   * `prepareApplyCall` takes them out. */
+  apply: undefined,
+  writeFiles: undefined,
+  bulkMove: undefined,
+  commitPendingProjectDirectory: undefined,
+  listProjectManifests: undefined,
+  getScopedZippedDirectory: undefined,
 };

@@ -1,0 +1,1577 @@
+// oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
+import 'fake-indexeddb/auto';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import * as fc from 'fast-check';
+import { sha256Bytes } from '@taucad/utils/hash';
+import type { FileStatEntry } from '@taucad/types';
+import { directoryConcurrency } from '#concurrency.js';
+import { lineCountByteCap } from '#content-metadata.js';
+import { MemoryProvider } from '#backend/memory-provider.js';
+import type { ProviderRegistry } from '#provider-registry.js';
+import type { FileSystemProvider } from '#types.js';
+import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
+import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
+import type { ObservedRow } from '#project-index/project-index.js';
+import { ProjectIndexes } from '#project-index/project-indexes.js';
+import { importFactsFreshMilliseconds } from '#importer/facts.js';
+import { parseIndexSnapshot, readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
+import { tauPathPolicy } from '#path-registry.js';
+import type { WorkspaceFileService } from '#workspace-file-service.js';
+
+const file = (path: string, size: number, mtimeMs: number): ObservedRow => ({ path, kind: 'file', size, mtimeMs });
+const directory = (path: string): ObservedRow => ({ path, kind: 'dir', size: 0, mtimeMs: 0 });
+
+/** An index of a provider whose mtime keys facts, after one complete observation of these rows. */
+const observed = (rows: readonly ObservedRow[]): ProjectIndex => {
+  const index = new ProjectIndex({ trustworthyMtime: true });
+  index.completeObservation(index.beginObservation(), '', rows);
+  return index;
+};
+
+const paths = (rows: readonly FileStatEntry[]): string[] => rows.map((row) => row.path).toSorted();
+
+describe('ProjectIndex', () => {
+  describe('queries', () => {
+    let index: ProjectIndex;
+
+    beforeEach(() => {
+      index = observed([
+        directory('src'),
+        file('src/main.ts', 100, 1000),
+        directory('src/utils'),
+        file('src/utils/helper.ts', 50, 2000),
+        file('README.md', 200, 3000),
+        directory('exports'),
+      ]);
+    });
+
+    it('should be complete after a whole-root observation', () => {
+      expect(index.isComplete).toBe(true);
+      expect(new ProjectIndex().isComplete).toBe(false);
+    });
+
+    it('should answer one entry with head metadata and no unmeasured facts', () => {
+      expect(index.entry('src/main.ts')).toMatchObject({ kind: 'file', size: 100, mtimeMs: 1000 });
+      expect(index.entry('src/main.ts')?.facts).toBeUndefined();
+      expect(index.entry('missing.ts')).toBeUndefined();
+    });
+
+    it('should list one level sorted by name', () => {
+      expect(index.children('').map((entry) => entry.path)).toEqual(['README.md', 'exports', 'src']);
+      expect(index.children('src').map((entry) => entry.path)).toEqual(['src/main.ts', 'src/utils']);
+    });
+
+    it('should stat a subtree relative to it, files only, without content facts it does not know', () => {
+      expect(paths(index.statTree(''))).toEqual(['README.md', 'src/main.ts', 'src/utils/helper.ts']);
+      expect(index.statTree('src')).toEqual([
+        { path: 'main.ts', name: 'main.ts', type: 'file', size: 100, mtimeMs: 1000 },
+        { path: 'utils/helper.ts', name: 'helper.ts', type: 'file', size: 50, mtimeMs: 2000 },
+      ]);
+      expect(index.statTree('missing')).toEqual([]);
+    });
+
+    it('should never descend into what the mask refuses', () => {
+      const asked: string[] = [];
+      const rows = index.statTree('', {
+        admits: (path) => {
+          asked.push(path);
+          return path !== 'src/utils';
+        },
+      });
+      expect(paths(rows)).toEqual(['README.md', 'src/main.ts']);
+      expect(asked).not.toContain('src/utils/helper.ts');
+    });
+
+    it('should count a subtree', () => {
+      expect(index.stats('')).toEqual({ files: 3, dirs: 3, bytes: 350 });
+      expect(index.stats('src')).toEqual({ files: 2, dirs: 1, bytes: 150 });
+    });
+
+    it('should search paths case-insensitively within the cap', () => {
+      expect(index.search('MAIN').map((row) => row.path)).toEqual(['src/main.ts']);
+      expect(index.search('', { maxResults: 2 })).toHaveLength(2);
+      expect(index.search('utils').map((row) => row.path)).toEqual(['src/utils/helper.ts']);
+      expect(index.search('utils', { includeDirectories: true }).map((row) => row.path)).toEqual([
+        'src/utils',
+        'src/utils/helper.ts',
+      ]);
+    });
+
+    it('should match a glob query against names, or against paths when it names a directory (D18)', () => {
+      const searched = (query: string): string[] => index.search(query).map(({ path }) => path);
+
+      expect(searched('*.MD')).toEqual(['README.md']);
+      expect(searched('src/**/*.ts')).toEqual(['src/main.ts', 'src/utils/helper.ts']);
+      expect(searched('src/*.ts')).toEqual(['src/main.ts']);
+      expect(searched('h?lper.ts')).toEqual(['src/utils/helper.ts']);
+    });
+
+    it('should answer only entries changed after a generation', () => {
+      const before = index.generation;
+      index.recordFile('src/new.ts', { size: 1 });
+      expect(index.changedSince(before).map((entry) => entry.path)).toEqual(['src/new.ts']);
+    });
+
+    it('should ask the mask before descending when it answers what changed', () => {
+      const before = index.generation;
+      index.recordFile('src/new.ts', { size: 1 });
+      index.recordFile('docs/new.md', { size: 1 });
+      const admits = (path: string): boolean => path !== 'src';
+      expect(index.changedSince(before, { admits }).map((entry) => entry.path)).toEqual(['docs', 'docs/new.md']);
+    });
+  });
+
+  describe('mutations', () => {
+    it('should equal a fresh observation after a generated mutation sequence', () => {
+      const candidates = ['a.ts', 'src/b.ts', 'src/c.ts', 'lib/d.ts'] as const;
+      const command = fc.record({
+        operation: fc.constantFrom('write', 'delete', 'rename'),
+        path: fc.constantFrom(...candidates),
+        target: fc.constantFrom(...candidates),
+        size: fc.integer({ min: 0, max: 10_000 }),
+      });
+
+      fc.assert(
+        fc.property(fc.array(command, { maxLength: 100 }), (commands) => {
+          const incremental = observed([]);
+          const files = new Map<string, number>();
+          for (const { operation, path, target, size } of commands) {
+            if (operation === 'write') {
+              files.set(path, size);
+              incremental.recordFile(path, { size, mtimeMs: size });
+            } else if (operation === 'delete') {
+              files.delete(path);
+              incremental.remove(path);
+            } else {
+              const previous = files.get(path);
+              if (previous !== undefined && path !== target) {
+                files.delete(path);
+                files.set(target, previous);
+                incremental.move(path, target);
+              }
+            }
+          }
+          const fresh = observed([...files].map(([path, size]) => file(path, size, size)));
+          const comparable = (index: ProjectIndex): Array<{ path: string; size: number }> =>
+            index
+              .statTree('')
+              .map(({ path, size }) => ({ path, size }))
+              .toSorted((left, right) => (left.path < right.path ? -1 : 1));
+          expect(comparable(incremental)).toEqual(comparable(fresh));
+        }),
+      );
+    });
+
+    it('should move a directory with its contents', () => {
+      const index = observed([directory('a'), file('a/x.ts', 1, 1), directory('a/b'), file('a/b/y.ts', 2, 2)]);
+      index.move('a', 'z');
+      expect(paths(index.statTree(''))).toEqual(['z/b/y.ts', 'z/x.ts']);
+    });
+
+    it('should mark a rename target unknown when the source was never indexed', () => {
+      const index = observed([]);
+      index.move('unknown/a', 'known/a');
+      expect(index.stalePaths).toEqual(['known/a']);
+    });
+
+    it('should re-observe a rename target moved while an observation lists the source', () => {
+      const index = observed([directory('dir'), file('dir/x.ts', 4, 1000)]);
+      const start = index.beginObservation();
+      index.move('dir', 'moved');
+      index.completeObservation(start, '', [directory('dir'), file('dir/x.ts', 4, 1000)]);
+
+      expect(index.stalePaths).toEqual(['moved']);
+      expect(index.entry('moved/x.ts')).toBeDefined();
+      expect(index.entry('dir')).toBeUndefined();
+    });
+
+    it('should re-observe a rename target moved before the index is complete', () => {
+      const loaded = ProjectIndex.fromSnapshot(
+        [
+          ['dir', 'd', 0, 0],
+          ['dir/x.ts', 'f', 4, 1000],
+        ],
+        1,
+      );
+      loaded.move('dir', 'moved');
+      expect(loaded.stalePaths).toEqual(['moved']);
+    });
+  });
+
+  describe('observation merge (D5)', () => {
+    it('should keep a write recorded during a scan and the rest of the scan', () => {
+      const index = new ProjectIndex();
+      const start = index.beginObservation();
+      index.recordFile('written.ts', { size: 5 });
+      index.completeObservation(start, '', [file('scanned.ts', 1, 1)]);
+      expect(paths(index.statTree(''))).toEqual(['scanned.ts', 'written.ts']);
+    });
+
+    it('should keep a removal recorded during a scan over what the scan listed', () => {
+      const index = observed([directory('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)]);
+      const start = index.beginObservation();
+      index.remove('src');
+      index.completeObservation(start, '', [directory('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)]);
+      expect(paths(index.statTree(''))).toEqual(['b.ts']);
+    });
+
+    it('should report created, removed and changed entries and drop their facts', () => {
+      const index = observed([file('same.ts', 1, 1), file('edited.ts', 2, 2), file('gone.ts', 3, 3)]);
+      index.recordFacts(
+        'edited.ts',
+        { contentKind: 'text', lineCount: 2 },
+        { size: 2, mtimeMs: 2, observedAt: 10_000 },
+      );
+      index.recordFacts('same.ts', { contentKind: 'text', lineCount: 1 }, { size: 1, mtimeMs: 1, observedAt: 10_000 });
+
+      const result = index.completeObservation(index.beginObservation(), '', [
+        file('same.ts', 1, 1),
+        file('edited.ts', 2, 9),
+        file('new.ts', 4, 4),
+      ]);
+
+      expect(result.checked).toBe(3);
+      expect([...result.mismatched].toSorted()).toEqual(['edited.ts', 'gone.ts', 'new.ts']);
+      expect(index.factsFor('edited.ts')).toBeUndefined();
+      expect(index.factsFor('same.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+    });
+
+    it('should adopt the provider mtime for a write-path fact and keep the facts, untrusted while racy', () => {
+      const index = observed([]);
+      index.recordFile('a.ts', { size: 3, facts: { contentKind: 'text', lineCount: 1 }, observedAt: 5000 });
+      expect(index.factsFor('a.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+
+      const result = index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 4999)]);
+
+      expect(result.mismatched).toEqual([]);
+      expect(index.entry('a.ts')).toMatchObject({ mtimeMs: 4999, factsAt: { mtimeMs: 4999 } });
+      expect(index.factsFor('a.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+      /* Measured within the timestamp granularity of the bytes' own mtime: racy (H12). */
+      expect(result.racy).toEqual(['a.ts']);
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    /* Review E4: a same-size rewrite after the write, before the next compare. */
+    it('should drop write-path facts when the provider mtime is newer than their measurement', () => {
+      const index = observed([]);
+      index.recordFile('a.ts', { size: 4, facts: { contentKind: 'text', lineCount: 1 }, observedAt: 1000 });
+
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 5000)]);
+
+      expect(index.entry('a.ts')).toMatchObject({ mtimeMs: 5000 });
+      expect(index.factsFor('a.ts')).toBeUndefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+  });
+
+  describe('a provider whose mtime cannot key facts', () => {
+    /* Review E5: an mtime that never moves (0) cannot tell a same-size rewrite. */
+    it('should drop facts on an invalidation and its re-observation', () => {
+      const index = new ProjectIndex();
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+      index.recordFacts('a.ts', { contentKind: 'text', lineCount: 1 }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+
+      index.invalidate('a.ts');
+      expect(index.factsFor('a.ts')).toBeUndefined();
+
+      index.recordFacts('a.ts', { contentKind: 'text', lineCount: 1 }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+      index.completePathObservation(index.beginObservation(), 'a.ts', file('a.ts', 4, 0));
+      expect(index.factsFor('a.ts')).toBeUndefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    it('should drop facts on every whole-root re-observation', () => {
+      const index = new ProjectIndex();
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+      index.recordFacts('a.ts', { contentKind: 'binary' }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+
+      expect(index.factsFor('a.ts')).toBeUndefined();
+    });
+  });
+
+  describe('facts and the racy guard (I5)', () => {
+    it('should trust facts measured well after the bytes changed', () => {
+      const index = observed([file('a.ts', 3, 1000)]);
+      index.recordFacts(
+        'a.ts',
+        { contentKind: 'text', lineCount: 1, sha256: 'ab' },
+        { size: 3, mtimeMs: 1000, observedAt: 1000 + timestampGranularityMilliseconds + 1 },
+      );
+      expect(index.trusted('a.ts')).toBe(true);
+    });
+
+    it('should never trust facts measured inside the timestamp granularity', () => {
+      const index = observed([file('a.ts', 3, 1000)]);
+      index.recordFacts(
+        'a.ts',
+        { contentKind: 'text', lineCount: 1 },
+        { size: 3, mtimeMs: 1000, observedAt: 1000 + timestampGranularityMilliseconds },
+      );
+      expect(index.factsFor('a.ts')).toBeDefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    it('should stop answering facts once the size or mtime moves', () => {
+      const index = observed([file('a.ts', 3, 1000)]);
+      index.recordFacts('a.ts', { contentKind: 'binary' }, { size: 3, mtimeMs: 1000, observedAt: 99_999 });
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 1001)]);
+      expect(index.factsFor('a.ts')).toBeUndefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    it('should not trust an entry an external fact left unknown', () => {
+      const index = observed([file('a.ts', 3, 1000)]);
+      index.recordFacts('a.ts', { contentKind: 'binary' }, { size: 3, mtimeMs: 1000, observedAt: 99_999 });
+      index.invalidate('a.ts');
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+  });
+
+  describe('snapshot', () => {
+    it('should round-trip entries and trusted facts, and need a compare before it is complete', () => {
+      const index = observed([directory('src'), file('src/a.ts', 3, 1000), directory('empty')]);
+      index.recordFacts(
+        'src/a.ts',
+        { contentKind: 'text', lineCount: 2 },
+        { size: 3, mtimeMs: 1000, observedAt: 9000 },
+      );
+      index.recordFile('pending.ts', { size: 1, facts: { contentKind: 'text', lineCount: 1 } });
+
+      const loaded = ProjectIndex.fromSnapshot(index.toSnapshot(), index.generation);
+
+      expect(loaded.isComplete).toBe(false);
+      expect(loaded.children('').map((entry) => entry.path)).toEqual(['empty', 'pending.ts', 'src']);
+      expect(loaded.factsFor('src/a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(loaded.trusted('src/a.ts')).toBe(true);
+      /* A fact still waiting for the provider's mtime is not persisted. */
+      expect(loaded.factsFor('pending.ts')).toBeUndefined();
+    });
+  });
+
+  describe('performance', () => {
+    /* The claim is about the walk — one pass, one row per entry — not about this
+     * machine, so it is the best of five runs. */
+    it('should stat a 6,265-file tree under 20 ms', () => {
+      const rows: ObservedRow[] = [];
+      for (let i = 0; i < 6265; i++) {
+        const folder = `dir${Math.floor(i / 100)}`;
+        if (i % 100 === 0) {
+          rows.push(directory(folder));
+        }
+        rows.push(file(`${folder}/file${i}.ts`, i, 1000));
+      }
+      const index = observed(rows);
+
+      let elapsed = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < 5; run++) {
+        const start = performance.now();
+        const stats = index.statTree('');
+        elapsed = Math.min(elapsed, performance.now() - start);
+        expect(stats).toHaveLength(6265);
+      }
+      expect(elapsed).toBeLessThan(20);
+    });
+  });
+});
+
+/**
+ * A memory provider standing in for a durable root whose mtime follows its
+ * bytes (OPFS, a picked folder, a node checkout), with a count of content
+ * reads outside the index's own files.
+ */
+const durableRoot = async (): Promise<{ provider: MemoryProvider; reads: () => number }> => {
+  const provider = new MemoryProvider();
+  Object.defineProperty(provider, 'capabilities', { value: { ...provider.capabilities, trustworthyMtime: true } });
+  await provider.mkdir('project', { recursive: true });
+  const readFile = vi.spyOn(provider, 'readFile');
+  return {
+    provider,
+    reads: () => readFile.mock.calls.filter(([path]) => !String(path).includes('.tau/index')).length,
+  };
+};
+
+const defaultTab = { tabId: 'tab-a', seq: 0 };
+const indexesOver = (provider: FileSystemProvider, tab: { tabId: string; seq: number } = defaultTab): ProjectIndexes =>
+  new ProjectIndexes({
+    resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+    policy: tauPathPolicy,
+    tab: () => tab,
+    persistDelayMilliseconds: 60_000,
+  });
+
+describe('ProjectIndex pending entries (D9)', () => {
+  const object = { oid: 'a'.repeat(64), size: 5_000_000 };
+
+  it('should hold a pending entry until a write or a changed observation ends it, and carry it on a move', () => {
+    const index = observed([file('part.step', 131, 1000), file('other.step', 131, 1000)]);
+    const before = index.generation;
+    index.markPending('part.step', object);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    expect(index.entry('part.step')?.pending).toStrictEqual(object);
+    expect(index.generation).toBeGreaterThan(before);
+    /* Marking again changes nothing; a directory or an unknown path is never pending. */
+    const marked = index.generation;
+    index.markPending('part.step', object);
+    index.markPending('missing.step', object);
+    expect(index.generation).toBe(marked);
+    /* An unchanged observation keeps it; a move carries it. */
+    index.completeObservation(index.beginObservation(), '', [
+      file('part.step', 131, 1000),
+      file('other.step', 131, 1000),
+    ]);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    index.move('part.step', 'moved.step');
+    expect(index.pendingFor('moved.step')).toStrictEqual(object);
+    /* The fill's write of the object, or anyone's, ends it. */
+    index.recordFile('moved.step', { size: object.size });
+    expect(index.pendingFor('moved.step')).toBeUndefined();
+    /* So does an observation that finds the bytes changed. */
+    index.markPending('other.step', object);
+    index.completeObservation(index.beginObservation(), '', [
+      file('moved.step', object.size, 2000),
+      file('other.step', 131, 3000),
+    ]);
+    expect(index.pendingFor('other.step')).toBeUndefined();
+  });
+
+  it('should not mark a pointer read pending when a write landed after the read began (I7)', () => {
+    const index = observed([file('part.step', 131, 1000)]);
+    const before = index.entry('part.step')!.generation;
+    /* The fill writes the object while the pointer's read is in flight. */
+    index.recordFile('part.step', { size: object.size });
+    index.markPending('part.step', object, { size: 131, generation: before });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* A size that is not the read's is not the pointer either. */
+    index.markPending('part.step', object, { size: 131 });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* The read's own observation still marks. */
+    index.recordFile('part.step', { size: 131 });
+    index.markPending('part.step', object, { size: 131, generation: index.entry('part.step')!.generation });
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+  });
+
+  it('should know a tree write’s entries before they land, each placeholder arriving until its object lands (D10)', () => {
+    const index = observed([file('tau.json', 40, 1000), file('held.step', 131, 1000)]);
+    expect(index.expecting).toBe(false);
+    index.expect([
+      { path: 'tau.json', size: 40, arriving: false },
+      { path: 'held.step', size: 131, pending: object, arriving: false },
+      { path: 'main.scad', size: 20, arriving: true },
+      { path: 'models/part.step', size: 131, pending: object, arriving: true },
+    ]);
+    /* An entry the checkout already holds is known now, a placeholder as a pending entry still arriving. */
+    expect(index.expecting).toBe(true);
+    expect(index.pendingFor('held.step')).toStrictEqual(object);
+    expect(index.arriving('held.step')).toBe(true);
+    expect(index.arriving('tau.json')).toBe(false);
+    expect(index.arriving('main.scad')).toBe(true);
+    /* A write lands an entry; a placeholder lands pending when its bytes are its pointer's. */
+    index.recordFile('main.scad', { size: 20 });
+    expect(index.arriving('main.scad')).toBe(false);
+    index.recordFile('models/.part.step.staged', { size: 131 });
+    expect(index.arriving('models/part.step')).toBe(true);
+    index.move('models/.part.step.staged', 'models/part.step');
+    expect(index.pendingFor('models/part.step')).toStrictEqual(object);
+    /* A pointer is not readable bytes: the placeholder lands when its object does. */
+    expect(index.arriving('models/part.step')).toBe(true);
+    index.recordFile('models/part.step', { size: object.size });
+    expect(index.arriving('models/part.step')).toBe(false);
+    expect(index.pendingFor('models/part.step')).toBeUndefined();
+    index.endExpectation();
+    expect(index.expecting).toBe(false);
+  });
+});
+
+describe('ProjectIndexes', () => {
+  it('should open, list and compare a root reading no file content (I3)', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/src/a.ts', 'a\nb');
+    await provider.writeFile('project/.jj/store', 'ref');
+    await provider.writeFile('project/.tau/index/junk', 'x');
+    const indexes = indexesOver(provider);
+
+    const index = await indexes.ready('/p');
+    const compared = await indexes.compare('/p');
+
+    expect(paths(index.statTree(''))).toEqual(['src/a.ts']);
+    expect(compared.mismatched).toEqual([]);
+    expect(reads()).toBe(0);
+  });
+
+  it('should answer lazy facts once, within the byte cap, and cache them by (size, mtime)', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/small.ts', 'one\ntwo');
+    await provider.writeFile('project/large.ts', 'x'.repeat(600));
+    const indexes = indexesOver(provider);
+    /* A measurement inside the racy window is never reused; these files are older than that. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + timestampGranularityMilliseconds + 1000);
+
+    /* No ranged read: a file past both the head and the cap costs a whole read to classify, so it is left out. */
+    const first = await indexes.facts('/p', ['small.ts', 'large.ts', 'missing.ts'], { lineCount: true, byteCap: 50 });
+    const second = await indexes.facts('/p', ['small.ts'], { lineCount: true });
+    vi.useRealTimers();
+
+    expect([...first]).toEqual([['small.ts', { contentKind: 'text', lineCount: 2 }]]);
+    expect(second.get('small.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+    expect(reads()).toBe(1);
+  });
+
+  /* Review I8: a listing's facts never read a binary in full, nor a text file past the cap. */
+  it('should classify from the head and count lines only for text within the cap', async () => {
+    const { provider } = await durableRoot();
+    /* The prototype method: `durableRoot` already spies on the instance one. */
+    const head = MemoryProvider.prototype.readFile.bind(provider) as (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+    let streamed = 0;
+    Object.assign(provider, {
+      readFileStream: (path: string, options?: { position?: number; length?: number }) =>
+        new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async start(controller) {
+            const position = options?.position ?? 0;
+            const whole = await head(path);
+            const bytes = whole.slice(position, position + (options?.length ?? Number.MAX_SAFE_INTEGER));
+            streamed += bytes.byteLength;
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+    });
+    const binary = new Uint8Array(4000);
+    binary.fill(7);
+    binary[3] = 0;
+    await provider.writeFile('project/model.bin', binary);
+    await provider.writeFile('project/large.ts', 'line\n'.repeat(800));
+    await provider.writeFile('project/medium.ts', 'line\n'.repeat(200));
+    const fullReads = vi.spyOn(provider, 'readFile');
+    const indexes = indexesOver(provider);
+
+    const kinds = await indexes.facts('/p', ['model.bin', 'large.ts', 'medium.ts']);
+    expect([...kinds]).toEqual([
+      ['model.bin', { contentKind: 'binary' }],
+      ['large.ts', { contentKind: 'text' }],
+      ['medium.ts', { contentKind: 'text' }],
+    ]);
+    expect(fullReads.mock.calls.filter(([path]) => !String(path).includes('.tau/index'))).toStrictEqual([]);
+    expect(streamed).toBe(3 * 512);
+
+    const counted = await indexes.facts('/p', ['model.bin', 'large.ts', 'medium.ts'], {
+      lineCount: true,
+      byteCap: 2000,
+    });
+    expect([...counted]).toEqual([
+      ['model.bin', { contentKind: 'binary' }],
+      ['large.ts', { contentKind: 'text' }],
+      ['medium.ts', { contentKind: 'text', lineCount: 201 }],
+    ]);
+    expect(fullReads.mock.calls.map(([path]) => String(path)).filter((path) => !path.includes('.tau/index'))).toEqual([
+      'project/medium.ts',
+    ]);
+  });
+
+  it('should record facts from the write path without a read', async () => {
+    const { provider, reads } = await durableRoot();
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/p');
+    await provider.writeFile('project/a.ts', 'a\nb\nc');
+    indexes.addFile('/p/a.ts', { size: 5, facts: { contentKind: 'text', lineCount: 3 } });
+
+    const facts = await indexes.facts('/p', ['a.ts']);
+    expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    expect(reads()).toBe(0);
+  });
+
+  /* W3 a3: a whole read already holds a file's facts, so no listing pays for them again. */
+  describe('facts a whole read measured', () => {
+    /* Files written now are inside the racy window; a read past it is the honest case. */
+    const pastRacyWindow = (): void => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + timestampGranularityMilliseconds + 1000);
+    };
+    const readNow = async (
+      provider: MemoryProvider,
+      path: string,
+    ): Promise<{ bytes: Uint8Array<ArrayBuffer>; observedAt: number }> => {
+      const observedAt = Date.now();
+      return { bytes: await provider.readFile(`project/${path}`), observedAt };
+    };
+    const record = async (indexes: ProjectIndexes, provider: MemoryProvider, path: string): Promise<void> => {
+      indexes.recordRead('/p', path, await readNow(provider, path));
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should answer a cold root from its reads without opening, scanning or reading again', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb\nc');
+      await provider.writeFile('project/b.bin', Uint8Array.from([0, 1, 2]));
+      const indexes = indexesOver(provider);
+      const listings = vi.spyOn(provider, 'readdirWithStats');
+      pastRacyWindow();
+
+      await record(indexes, provider, 'a.ts');
+      await record(indexes, provider, 'b.bin');
+      const before = reads();
+      const facts = await indexes.facts('/p', ['a.ts', 'b.bin'], { lineCount: true, byteCap: lineCountByteCap });
+
+      expect([...facts]).toEqual([
+        ['a.ts', { contentKind: 'text', lineCount: 3 }],
+        ['b.bin', { contentKind: 'binary' }],
+      ]);
+      expect(reads()).toBe(before);
+      expect(listings).not.toHaveBeenCalled();
+      expect(indexes.get('/p')).toBeUndefined();
+    });
+
+    it('should check a cold read against the metadata the caller listed instead of a stat', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const listed = await provider.stat('project/a.ts');
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+      const stats = vi.spyOn(provider, 'stat');
+      const before = reads();
+
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true, listed: [listed] });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(stats).not.toHaveBeenCalled();
+      expect(reads()).toBe(before);
+    });
+
+    /* Review M1: a read in flight while a write commits resolves after the write's hook. */
+    it('should never serve a cold read a write overtook, whichever order its hook ran in', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'one');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      const overtaken = await readNow(provider, 'a.ts');
+      await provider.writeFile('project/a.ts', 'one\ntwo\nthree');
+      indexes.addFile('/p/a.ts', { size: 13, facts: { contentKind: 'text', lineCount: 3 } });
+      indexes.recordRead('/p', 'a.ts', overtaken);
+
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    });
+
+    /* Review M2: a rewrite no hook reports still leaves its size or mtime behind. */
+    it('should notice a rewrite that reached no hook by its size and mtime', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'one');
+      await provider.writeFile('project/b.ts', '\u0000\u0001binary now, and longer');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+      await record(indexes, provider, 'b.ts');
+      await provider.writeFile('project/a.ts', 'two');
+      await provider.writeFile('project/b.ts', 'text again');
+
+      const facts = await indexes.facts('/p', ['a.ts', 'b.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+      expect(facts.get('b.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+    });
+
+    it('should forget a cold read once the path is written or invalidated', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+
+      await provider.writeFile('project/a.ts', 'a\nb');
+      indexes.addFile('/p/a.ts', { size: 3 });
+      const written = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+      await provider.writeFile('project/a.ts', 'a\nb\nc');
+      indexes.invalidate('/p/a.ts');
+      const before = reads();
+      const invalidated = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(written.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(invalidated.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+      expect(reads()).toBe(before + 1);
+    });
+
+    it('should record a warm index entry from a whole read at its own metadata', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+      pastRacyWindow();
+
+      await record(indexes, provider, 'a.ts');
+      const before = reads();
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(index.entry('a.ts')?.factsAt).toMatchObject({ size: 3, mtimeMs: index.entry('a.ts')?.mtimeMs });
+      expect(reads()).toBe(before);
+    });
+
+    /* Review M3: a read of a path another tab's notice left unknown must not settle it at the old metadata. */
+    it('should leave a warm path an external fact left unknown for its own re-observation', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'abc');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+      pastRacyWindow();
+      await provider.writeFile('project/a.ts', 'a\nc');
+      indexes.invalidate('/p/a.ts');
+
+      await record(indexes, provider, 'a.ts');
+
+      expect(index.stalePaths).toEqual(['a.ts']);
+      await indexes.ready('/p');
+      const disk = await provider.stat('project/a.ts');
+      expect(index.entry('a.ts')?.mtimeMs).toBe(disk.mtimeMs);
+    });
+
+    /* Review M4: a provider whose mtime stays 0 (direct IndexedDB) keys nothing on it. */
+    it('should keep no read facts where the provider does not declare a trustworthy mtime', async () => {
+      const provider = new MemoryProvider();
+      const stat = provider.stat.bind(provider);
+      vi.spyOn(provider, 'stat').mockImplementation(async (path) => ({
+        ...(await stat(path)),
+        mtimeMs: 0,
+      }));
+      await provider.writeFile('project/a.ts', 'abc\n');
+      const indexes = new ProjectIndexes({
+        resolve: () => ({ provider, path: 'project' }),
+        persistDelayMilliseconds: 60_000,
+      });
+      await record(indexes, provider, 'a.ts');
+      const first = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      await provider.writeFile('project/a.ts', 'a\nb\n');
+      indexes.addFile('/p/a.ts', { size: 4, facts: { contentKind: 'text', lineCount: 3 } });
+      const rewritten = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(provider.capabilities.trustworthyMtime).toBeUndefined();
+      expect(first.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(rewritten.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    });
+
+    it('should not record a warm read inside the racy window', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+
+      await record(indexes, provider, 'a.ts');
+
+      expect(index.factsFor('a.ts')).toBeUndefined();
+    });
+  });
+
+  /* W3 a4: a root only Tau writes learns every change from its hooks; a poll compares only what others edit. */
+  it('should compare on a poll only the warm roots other programs edit', async () => {
+    const { provider: tauOnly } = await durableRoot();
+    const { provider: picked } = await durableRoot();
+    Object.defineProperty(picked, 'capabilities', { value: { ...picked.capabilities, externallyEdited: true } });
+    const indexes = new ProjectIndexes({
+      resolve: (root) => ({ provider: root === '/picked' ? picked : tauOnly, path: 'project' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/opfs');
+    await indexes.ready('/picked');
+    const tauListings = vi.spyOn(tauOnly, 'readdirWithStats');
+    const pickedListings = vi.spyOn(picked, 'readdirWithStats');
+
+    await indexes.compareExternallyEdited();
+    await indexes.compareExternallyEdited('/opfs');
+
+    expect(tauListings).not.toHaveBeenCalled();
+    expect(pickedListings).toHaveBeenCalled();
+  });
+
+  /* W3 a3: no caller waits behind a snapshot write another holder has started. */
+  it('should defer a persist whose lock another holder has instead of waiting for it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let granted = (): void => undefined;
+    const holding = new Promise<void>((resolve) => {
+      granted = resolve;
+    });
+    const holder = navigator.locks.request('tau-index:test:project', async () => {
+      granted();
+      await held;
+    });
+    await holding;
+
+    const result = await indexes.persist('/p');
+    release();
+    await holder;
+
+    expect(result).toBe('busy');
+    expect(await indexes.persist('/p')).toBe('written');
+  });
+
+  it('should survive a reload and detect an external edit by its compare', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/kept.ts', 'kept');
+    await provider.writeFile('project/edited.ts', 'before');
+    const first = indexesOver(provider);
+    /* Facts never open a cold root's index: the reload this test needs starts from an open one. */
+    await first.ready('/p');
+    await first.facts('/p', ['kept.ts', 'edited.ts']);
+    expect(await first.persist('/p')).toBe('written');
+    await provider.writeFile('project/edited.ts', 'after!!');
+    await provider.writeFile('project/added.ts', 'new');
+    const readsBefore = reads();
+
+    const second = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    const index = await second.ready('/p');
+    const facts = await second.facts('/p', ['kept.ts']);
+
+    expect(paths(index.statTree(''))).toEqual(['added.ts', 'edited.ts', 'kept.ts']);
+    expect(index.entry('edited.ts')).toMatchObject({ size: 7 });
+    expect(index.factsFor('edited.ts')).toBeUndefined();
+    expect(facts.get('kept.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+    expect(reads()).toBe(readsBefore);
+  });
+
+  it('should store the provider mtime a compare adopted, so the next load matches every write (W3.2)', async () => {
+    const { provider } = await durableRoot();
+    const first = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await first.ready('/p');
+    await provider.writeFile('project/a.ts', 'a');
+    const { mtimeMs } = await provider.stat('project/a.ts');
+    /* The write path records its file before the provider's mtime is known. */
+    await vi.waitFor(() => {
+      expect(Date.now()).toBeGreaterThan(mtimeMs);
+    });
+    first.addFile('/p/a.ts', { size: 1 });
+    expect(await first.persist('/p')).toBe('written');
+    const written = vi.spyOn(provider, 'writeFile');
+
+    /* The compare adopts the provider's mtime and stores it. */
+    const adopted = await first.compare('/p');
+    expect(adopted.mismatched).toEqual([]);
+    await vi.waitFor(() => {
+      expect(written.mock.calls.some(([path]) => String(path).includes('.tau/index'))).toBe(true);
+    });
+    written.mockRestore();
+
+    const reload = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    /* A cold root's compare is its load's. */
+    const loaded = await reload.compare('/p');
+    expect(loaded.mismatched).toEqual([]);
+    expect(reload.get('/p')?.entry('a.ts')).toMatchObject({ size: 1, mtimeMs });
+  });
+
+  it('should never let a tab that is behind overwrite a newer snapshot', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const tabA = { tabId: 'tab-a', seq: 0 };
+    const tabB = { tabId: 'tab-b', seq: 0 };
+    const a = indexesOver(provider, tabA);
+    const b = indexesOver(provider, tabB);
+    await a.ready('/p');
+    await b.ready('/p');
+
+    /* Tab A publishes a change notice tab B never receives. */
+    await provider.writeFile('project/b.ts', 'b');
+    a.addFile('/p/b.ts', { size: 1 });
+    tabA.seq = 1;
+    expect(await a.persist('/p')).toBe('written');
+
+    expect(await b.persist('/p')).toBe('stale');
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.vector.seqByTab).toEqual({ 'tab-a': 1 });
+    expect(stored?.entries.map(([path]) => path)).toContain('b.ts');
+
+    /* Once B accounts for A's notice it is no longer behind. */
+    b.noteNotice('tab-a', 1, false);
+    expect(await b.persist('/p')).toBe('written');
+  });
+
+  /* D9, I3: a reload knows its pending entries from the snapshot, reading no file to find them. */
+  it('should keep pending entries across a reload without reading a file', async () => {
+    const { provider, reads } = await durableRoot();
+    const object = { oid: 'b'.repeat(64), size: 5_000_000 };
+    await provider.writeFile('project/part.step', 'p'.repeat(131));
+    await provider.writeFile('project/main.scad', 'cube(1);');
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    before.markPending('/p/part.step', object);
+    expect(await before.persist('/p')).toBe('written');
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.pending).toEqual({ 'part.step': object });
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+    expect(reloaded.pendingAt('/p/main.scad')).toBeUndefined();
+    expect(reads()).toBe(0);
+  });
+
+  /* D9: a tree write's placeholder is recorded before the provider reports its mtime; the snapshot stores the provider's. */
+  it('should keep a placeholder a write landed pending across a reload, its mtime observed before storing', async () => {
+    const { provider } = await durableRoot();
+    const object = { oid: 'd'.repeat(64), size: 5_000_000 };
+    const pointer = 'p'.repeat(131);
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    await before.expect('/p', [{ path: 'part.step', size: 131, pending: object, arriving: true }]);
+    await provider.writeFile('project/part.step', pointer);
+    /* The write's bracket records its size, never the provider's mtime, which a later clock makes differ. */
+    vi.useFakeTimers({ now: Date.now() + 60_000 });
+    try {
+      before.addFile('/p/part.step', { size: pointer.length });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(before.pendingAt('/p/part.step')).toBeDefined();
+    expect(await before.persist('/p')).toBe('written');
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+  });
+
+  it('should keep each well-formed pending entry when another in the stored map is malformed', () => {
+    const object = { oid: 'c'.repeat(64), size: 7 };
+    const parsed = parseIndexSnapshot(
+      JSON.stringify({
+        format: 'tau-project-index',
+        version: 1,
+        vector: { generation: 1, seqByTab: {} },
+        rescan: false,
+        writtenAt: 1,
+        entries: [],
+        pending: { 'part.step': object, 'bad.step': { oid: 'not-an-oid', size: 7 }, 'odd.step': 3 },
+      }),
+    );
+    expect(parsed?.pending).toEqual({ 'part.step': object });
+  });
+
+  it('should re-observe what a notice left unknown before storing a snapshot that claims it', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    /* Another tab's notice names b.ts: the index knows only that it is unknown. */
+    await provider.writeFile('project/b.ts', 'bb');
+    indexes.noteNotice('tab-b', 1, false);
+    indexes.invalidate('/p/b.ts');
+
+    expect(await indexes.persist('/p')).toBe('written');
+
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.vector.seqByTab).toMatchObject({ 'tab-b': 1 });
+    expect(stored?.entries.find(([path]) => path === 'b.ts')?.slice(0, 3)).toEqual(['b.ts', 'f', 2]);
+    expect(reads()).toBe(0);
+  });
+
+  it('should mark a snapshot from two incomparable tabs for a rescan', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const a = indexesOver(provider, { tabId: 'tab-a', seq: 1 });
+    const b = indexesOver(provider, { tabId: 'tab-b', seq: 1 });
+    await a.ready('/p');
+    await b.ready('/p');
+    expect(await a.persist('/p')).toBe('written');
+    expect(await b.persist('/p')).toBe('written');
+
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored).toMatchObject({ rescan: true, vector: { seqByTab: { 'tab-a': 1, 'tab-b': 1 } } });
+    const loads = vi.spyOn(ProjectIndex, 'fromSnapshot');
+    await indexesOver(provider, { tabId: 'tab-c', seq: 0 }).ready('/p');
+    expect(loads).not.toHaveBeenCalled();
+    expect(snapshotPath('project')).toBe('project/.tau/index/snapshot.json');
+  });
+
+  /* Review E1. */
+  it('should clear the rescan mark once a later tab has scanned and stored its view', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const a = indexesOver(provider, { tabId: 'tab-a', seq: 1 });
+    const b = indexesOver(provider, { tabId: 'tab-b', seq: 1 });
+    await a.ready('/p');
+    await b.ready('/p');
+    await a.persist('/p');
+    await b.persist('/p');
+
+    const tabC = { tabId: 'tab-c', seq: 0 };
+    const c = indexesOver(provider, tabC);
+    await c.ready('/p');
+    expect(await c.persist('/p')).toBe('written');
+    expect(await readIndexSnapshot(provider, 'project')).toMatchObject({ rescan: false });
+
+    await provider.writeFile('project/b.ts', 'b');
+    c.addFile('/p/b.ts', { size: 1 });
+    tabC.seq = 1;
+    expect(await c.persist('/p')).toBe('written');
+
+    expect(await readIndexSnapshot(provider, 'project')).toMatchObject({
+      rescan: false,
+      vector: { seqByTab: { 'tab-a': 1, 'tab-b': 1, 'tab-c': 1 } },
+    });
+  });
+
+  /* Review E2. */
+  it('should re-observe a subtree renamed while the load compare lists it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/dir/x.ts', 'one\n');
+    const first = indexesOver(provider);
+    await first.facts('/p', ['dir/x.ts'], { digests: ['sha256'] });
+    expect(await first.persist('/p')).toBe('written');
+    /* Edited while closed: same size, new mtime. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    await provider.writeFile('project/dir/x.ts', 'two\n');
+
+    const second = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    const listRoot = provider.readdirWithStats.bind(provider);
+    let renamed = false;
+    vi.spyOn(provider, 'readdirWithStats').mockImplementation(async (path: string) => {
+      const rows = await listRoot(path);
+      if (!renamed && path === 'project') {
+        renamed = true;
+        await provider.rename('project/dir', 'project/moved');
+        second.rename('/p/dir', '/p/moved');
+      }
+      return rows;
+    });
+
+    const index = await second.ready('/p');
+    const onDisk = await provider.stat('project/moved/x.ts');
+    const hashed = await second.facts('/p', ['moved/x.ts'], { digests: ['sha256'] });
+
+    expect(index.entry('moved/x.ts')?.mtimeMs).toBe(onDisk.mtimeMs);
+    expect(index.stalePaths).toStrictEqual([]);
+    expect(hashed.get('moved/x.ts')?.sha256).toBe(await sha256Bytes(new TextEncoder().encode('two\n')));
+  });
+
+  /* Review E3: what an observer reports after the index stores its own snapshot. */
+  it('should drop facts about its own snapshot instead of rewriting it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await indexes.ready('/p');
+    await vi.waitFor(async () => {
+      expect(await readIndexSnapshot(provider, 'project')).toBeDefined();
+    });
+    const writes = vi.spyOn(provider, 'writeFile');
+
+    for (let echo = 0; echo < 3; echo += 1) {
+      indexes.invalidate('/p/.tau/index/snapshot.json');
+      indexes.rename('/p/.tau/index/snapshot.json.tmp', '/p/.tau/index/snapshot.json');
+      // oxlint-disable-next-line no-await-in-loop -- each echo is answered before the next.
+      await indexes.ready('/p');
+      // oxlint-disable-next-line no-await-in-loop -- past the persist delay.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    }
+
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('should not rewrite its snapshot when a re-observed path is unchanged', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await indexes.ready('/p');
+    await vi.waitFor(async () => {
+      expect(await readIndexSnapshot(provider, 'project')).toBeDefined();
+    });
+    const writes = vi.spyOn(provider, 'writeFile');
+
+    indexes.invalidate('/p/a.ts');
+    await indexes.ready('/p');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('should compare in full after a sequence gap', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    /* Another tab wrote; its notice was lost. */
+    await provider.writeFile('project/b.ts', 'b');
+    indexes.noteNotice('tab-z', 5, true);
+
+    const index = await indexes.ready('/p');
+
+    expect(paths(index.statTree(''))).toEqual(['a.ts', 'b.ts']);
+  });
+
+  it('should re-observe only the path an external fact names', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    await provider.writeFile('project/b.ts', 'b');
+    const indexes = new ProjectIndexes({ resolve: () => ({ provider, path: 'project' }) });
+    await indexes.ready('/p');
+    await provider.writeFile('project/a.ts', 'grown');
+    await provider.unlink('project/b.ts');
+    const listings = vi.spyOn(provider, 'readdirWithStats');
+
+    indexes.invalidate('/p/a.ts');
+    const index = await indexes.ready('/p');
+
+    expect(index.entry('a.ts')?.size).toBe(5);
+    /* Not named, so not re-observed: the scoped refresh lists nothing. */
+    expect(index.entry('b.ts')).toBeDefined();
+    expect(listings).not.toHaveBeenCalled();
+  });
+
+  /* G7: one index holds one mount's tree. */
+  it('should not answer or record past a nested mount', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/main.ts', 'm');
+    const indexes = new ProjectIndexes({
+      mountPrefixes: () => ['/p', '/p/nested'],
+      resolve: () => ({ provider, path: 'project' }),
+    });
+    await indexes.ready('/p');
+
+    indexes.addFile('/p/nested/added.ts', { size: 1 });
+
+    expect(indexes.statTree('/p/nested')).toBeUndefined();
+    expect(indexes.statType('/p/nested/added.ts')).toBeUndefined();
+    expect(indexes.statTree('/p')?.map((row) => row.path)).toEqual(['main.ts']);
+  });
+
+  /* W7c: a topology change drops the changed prefix and the root covering it, and no sibling. */
+  it('should evict the changed prefix and the root that covers it, leaving every sibling warm', async () => {
+    const { provider } = await durableRoot();
+    const indexes = new ProjectIndexes({ resolve: () => ({ provider, path: 'project' }) });
+    await indexes.ready('/');
+    await indexes.ready('/previews/x');
+    await indexes.ready('/projects/p');
+
+    indexes.evict('/previews/x');
+
+    expect(indexes.get('/previews/x')).toBeUndefined();
+    expect(indexes.get('/')).toBeUndefined();
+    expect(indexes.get('/projects/p')).toBeDefined();
+  });
+});
+
+/**
+ * `ProjectIndexes` bookkeeping as the authority drives it: every mutation must
+ * leave the per-root index answering the next `statTree`. W5 moved these rows
+ * here byte-for-byte from the Service spec because the index owns them.
+ */
+describe('WorkspaceFileService', () => {
+  let service: WorkspaceFileService;
+  let provider: FileSystemProvider;
+  let providerRegistry: ProviderRegistry;
+
+  beforeEach(async () => {
+    ({ service, provider, providerRegistry } = await createWorkspaceFileService());
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cold index build
+  // ---------------------------------------------------------------------------
+
+  describe('cold build', () => {
+    it('should merge a cold scan with a concurrent rename instead of discarding it', async () => {
+      await service.writeFile('/old.ts', 'old');
+      const scanned = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const readdirWithStats = provider.readdirWithStats!.bind(provider);
+      vi.spyOn(provider, 'readdirWithStats').mockImplementation((async (path: string) => {
+        const entries = await readdirWithStats(path);
+        if (path === '') {
+          scanned.resolve();
+          await release.promise;
+        }
+        return entries;
+      }) as typeof readdirWithStats);
+
+      const rooted = service.createRootedFileSystem('/');
+      const pending = rooted.statTree!('');
+      await scanned.promise;
+      await service.move('/old.ts', '/new.ts');
+      release.resolve();
+
+      await expect(pending).resolves.toMatchObject([{ path: 'new.ts' }]);
+      await expect(rooted.statTree!('')).resolves.toMatchObject([{ path: 'new.ts' }]);
+    });
+
+    it('should discard a cold scan when its captured mount is replaced', async () => {
+      const projectId = 'proj_coldcoldcoldcoldcoldc';
+      const root = `/projects/${projectId}`;
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:project:old', providerBasePath: projectId }],
+        roots: [],
+      });
+      const oldRoot = service.createRootedFileSystem(root);
+      await oldRoot.writeFile('old.ts', 'old');
+      const oldProvider = await providerRegistry.getProvider({
+        backend: 'memory',
+        storageRootKey: 'memory:project:old',
+      });
+      const scanned = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const readdirWithStats = oldProvider.readdirWithStats!.bind(oldProvider);
+      vi.spyOn(oldProvider, 'readdirWithStats').mockImplementation((async (path: string) => {
+        const entries = await readdirWithStats(path);
+        if (path === projectId) {
+          scanned.resolve();
+          await release.promise;
+        }
+        return entries;
+      }) as typeof readdirWithStats);
+
+      const pending = oldRoot.statTree!('');
+      await scanned.promise;
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:project:new', providerBasePath: projectId }],
+        roots: [],
+      });
+      const replacement = service.createRootedFileSystem(root);
+      await replacement.writeFile('new.ts', 'new');
+      release.resolve();
+
+      await expect(pending).rejects.toMatchObject({ code: 'ESTALE' });
+      await expect(replacement.statTree!('')).resolves.toMatchObject([{ path: 'new.ts' }]);
+    });
+
+    /* Budget row (W7b): the walk lists sibling directories from one bounded
+     * pool. Fully sequential, a 500-directory project pays 500 round trips in
+     * series, which is the whole cold-index latency on a port or on IndexedDB. */
+    it('should list sibling directories from one bounded pool', async () => {
+      const directories = directoryConcurrency * 3;
+      for (let directory = 0; directory < directories; directory++) {
+        // oxlint-disable-next-line no-await-in-loop -- Fixture writes, one directory at a time.
+        await service.writeFile(`/dir${directory}/a.txt`, 'a');
+      }
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const listings = provider.readdirWithStats!.bind(provider);
+      vi.spyOn(provider, 'readdirWithStats').mockImplementation((async (path: string) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          return await listings(path);
+        } finally {
+          inFlight -= 1;
+        }
+      }) as typeof listings);
+
+      const stats = await service.createRootedFileSystem('/').statTree!('');
+
+      expect(stats).toHaveLength(directories);
+      expect(maxInFlight).toBeGreaterThan(1);
+      expect(maxInFlight).toBeLessThanOrEqual(directoryConcurrency);
+    });
+
+    /* The policy's `statTree` (6,265 files) row, asserted where a consumer pays
+     * it — through the authority's rooted surface, not on a bare index. A
+     * ceiling, not a target (EQ5), and the best of five runs for the reason the
+     * index's own row gives. */
+    it('should answer a warm statTree over 6,265 files inside its 10 ms budget', async () => {
+      const files = 6265;
+      /* Straight at the provider: this measures the read path, and 6,265 trips
+       * through the mutation pipeline would measure the write one. */
+      await Promise.all(
+        Array.from({ length: files }, async (_, file) =>
+          provider.writeFile(`dir${Math.floor(file / 100)}/file${file}.ts`, 'export {};\n'),
+        ),
+      );
+      const rooted = service.createRootedFileSystem('/');
+      expect(await rooted.statTree!('')).toHaveLength(files);
+
+      let elapsed = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < 5; run++) {
+        const start = performance.now();
+        // oxlint-disable-next-line no-await-in-loop -- Runs are measured one at a time, by definition.
+        const stats = await rooted.statTree!('');
+        elapsed = Math.min(elapsed, performance.now() - start);
+        expect(stats).toHaveLength(files);
+      }
+
+      expect(elapsed).toBeLessThan(10);
+    });
+
+    /* Budget row (W7c): mounting one prefix used to drop every index, so the
+     * next query on each open root paid a full cold walk again. */
+    it('should leave a warm sibling index warm when an unrelated prefix is mounted', async () => {
+      await service.mount('/previews/a', {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:preview:a',
+      });
+      const preview = service.createRootedFileSystem('/previews/a');
+      await preview.writeFile('main.ts', 'a');
+      expect(await preview.statTree!('')).toHaveLength(1);
+      const previewProvider = await providerRegistry.getProvider({
+        backend: 'memory',
+        storageRootKey: 'memory:preview:a',
+      });
+      const rebuilds = vi.spyOn(previewProvider, 'readdirWithStats');
+
+      await service.mount('/previews/b', {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:preview:b',
+      });
+
+      expect(await preview.statTree!('')).toHaveLength(1);
+      expect(rebuilds).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // In-memory tree integration
+  // ---------------------------------------------------------------------------
+
+  describe('in-memory tree integration', () => {
+    /* The index is read through the rooted surface since W12d, where the view
+     * masks its rows; the invalidation the authority owns is what these pin. */
+    const statTree = async (path: string): Promise<FileStatEntry[]> =>
+      service.createRootedFileSystem('/').statTree!(path);
+
+    it('should reflect writeFile in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'aaa');
+      await statTree('root');
+
+      await service.writeFile('/root/b.txt', 'bb');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['a.txt', 'b.txt']);
+    });
+
+    it('should reflect mkdir in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'a');
+      await statTree('root');
+
+      await service.mkdir('/root/sub');
+      await service.writeFile('/root/sub/x.txt', 'x');
+
+      const stats = await statTree('root/sub');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('x.txt');
+    });
+
+    it('should reflect unlink in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'a');
+      await service.writeFile('/root/b.txt', 'b');
+      await statTree('root');
+
+      await service.unlink('/root/a.txt');
+
+      const stats = await statTree('root');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('b.txt');
+    });
+
+    it('should reflect a move in subsequent statTree', async () => {
+      await service.writeFile('/root/old.txt', 'data');
+      await statTree('root');
+
+      await service.move('/root/old.txt', '/root/new.txt');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path);
+      expect(paths).toContain('new.txt');
+      expect(paths).not.toContain('old.txt');
+    });
+
+    it('should reflect rmdir in subsequent statTree', async () => {
+      await service.mkdir('/root/sub', { recursive: true });
+      await service.writeFile('/root/a.txt', 'a');
+      await statTree('root');
+
+      await service.rmdir('/root/sub');
+
+      const stats = await statTree('root');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('a.txt');
+    });
+
+    it('should reflect duplicateFile in subsequent statTree', async () => {
+      await service.writeFile('/root/src.txt', 'copy');
+      await statTree('root');
+
+      await service.createRootedFileSystem('/').duplicate!('root/src.txt', 'root/dst.txt');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['dst.txt', 'src.txt']);
+    });
+
+    it('should reflect a rooted copyTree in subsequent statTree', async () => {
+      await service.writeFile('/root/src/a.txt', 'aaa');
+      await service.writeFile('/root/src/sub/b.txt', 'bb');
+      await statTree('root');
+
+      await service.createRootedFileSystem('/').copyTree!('root/src', 'root/dest');
+
+      const stats = await statTree('root/dest');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['a.txt', 'sub/b.txt']);
+    });
+  });
+});
+
+describe('ProjectIndexes import facts (D12)', () => {
+  const sha256 = (character: string): string => character.repeat(64);
+  const recordOf = (
+    at: number,
+    entries: ReadonlyArray<Readonly<{ path: string; size: number; oid: string; mtimeMs?: number }>>,
+  ): string =>
+    JSON.stringify({
+      version: 1,
+      operationId: 'req_import',
+      pin: { kind: 'zip', name: 'x', size: 1, entries: entries.length },
+      at,
+      entries: entries.map(({ path, size, oid, mtimeMs = 1_000_000 }) => ({
+        path,
+        size,
+        mtimeMs,
+        facts: { contentKind: 'text', blobOid: oid, sha256: sha256('e') },
+      })),
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should take the facts a committed import recorded for every file they still describe, without reading it', async () => {
+    const { provider, reads } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    await provider.writeFile('project/edited.txt', 'edit');
+    await provider.writeFile('project/resized.txt', 'size');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [
+        { path: 'kept.txt', size: 4, oid: 'a'.repeat(40) },
+        { path: 'edited.txt', size: 4, oid: 'b'.repeat(40) },
+        { path: 'resized.txt', size: 99, oid: 'c'.repeat(40) },
+        { path: 'malformed.txt', size: 4, oid: 'not-an-oid' },
+      ]),
+    );
+    /* Edited after the import, at the same size. */
+    vi.setSystemTime(1_020_000);
+    await provider.writeFile('project/edited.txt', 'EDIT');
+    const before = reads();
+
+    const indexes = indexesOver(provider);
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid', 'sha256'] });
+
+    expect(facts.get('kept.txt')).toMatchObject({ blobOid: 'a'.repeat(40), sha256: sha256('e') });
+    /* The record and nothing else was read. */
+    expect(reads() - before).toBe(1);
+
+    const measured = await indexes.facts('/project', ['edited.txt', 'resized.txt'], { digests: ['blobOid'] });
+    expect(measured.get('edited.txt')?.blobOid).not.toBe('b'.repeat(40));
+    expect(measured.get('resized.txt')?.blobOid).not.toBe('c'.repeat(40));
+  });
+
+  it('should measure a same-size replacement that carries an older mtime (cp -p, rsync -t, unzip)', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    /* Replaced at the same size with an mtime older than the one the commit observed. */
+    vi.setSystemTime(990_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).toBeDefined();
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should seed from a record once, never again on a later rescan', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    const indexes = indexesOver(provider);
+    const seeded = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+    expect(seeded.get('kept.txt')?.blobOid).toBe('a'.repeat(40));
+    /* Rewritten to other bytes at the very (size, mtime) recorded, then rescanned. */
+    vi.setSystemTime(1_000_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+    indexes.evict('/project');
+
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should take nothing from a record written longer ago than the first open after an import', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    vi.setSystemTime(1_010_000 + importFactsFreshMilliseconds + 1);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should take nothing from a record whose mtime disagrees with when it says it was written', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    /* Rewritten long after the time it carries. */
+    vi.setSystemTime(2_000_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_000_500, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+});

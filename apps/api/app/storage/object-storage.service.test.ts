@@ -5,7 +5,7 @@ import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { getEnvironment } from '#config/environment.config.js';
+import { getEnvironment } from '@taucad/api-core';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
@@ -371,7 +371,13 @@ describe('ObjectStorageService', () => {
         completed = true;
 
         const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
-        await expect(collectReadable(stored.body)).resolves.toStrictEqual(payload);
+        const bytes = await collectReadable(stored.body);
+        // Compared by length and digest: `toStrictEqual` walks a typed array
+        // element by element, and over 8 MiB that exhausts the worker's heap.
+        expect({ length: bytes.byteLength, sha256: sha256HexFromBytes(bytes) }).toStrictEqual({
+          length: payload.byteLength,
+          sha256: sha256HexFromBytes(payload),
+        });
       } finally {
         if (!completed) {
           await service.abortMultipartUpload({ namespace: 'blobs', key, uploadId, tier: 'private' });

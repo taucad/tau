@@ -1,20 +1,27 @@
 /**
- * The files Worker's fetch handler: `files.<zone>` serves API-signed links to private LFS objects from R2 (blueprint §3).
+ * The files Worker's fetch handler: `files.<zone>` serves API-signed links to private LFS objects from R2 (blueprint §3),
+ * and a repository's cold-open files — a live pack read by Range, its stored `.idx`, its head listing (charter D8).
  *
  * The API decides who may read an object and mints a short-lived HMAC link
  * bound to one object, one size, one expiry and one key id. This Worker only
  * checks that link and streams the bytes. It reads the bucket and never
  * writes it, never buffers a body, and never logs a URL.
+ *
+ * A pack's body is served by single ranges only: a GET of a pack link without
+ * one is refused (`416 range`), so a cold open can never download a whole pack
+ * through this host (S1's count gate, D8) — desktop and native git fetch over
+ * smart HTTP instead.
  */
 
 /* eslint-disable @typescript-eslint/naming-convention -- R2 binding names (tau-cloud's contract) and HTTP header names are spelled by their owners. */
 
-import { fileLinkObjectKey, verifyFileLink } from '@taucad/file-links';
+import { fileLinkEntityTag, fileLinkObjectKey, verifyFileLink } from '@taucad/file-links';
 import type { VerifiedFileLink } from '@taucad/file-links';
 import { allowedOrigins, applyCors, preflight } from '#cors.js';
 import { verifyKeys } from '#environment.js';
 import type { FilesEnvironment } from '#environment.js';
 import { resolveRange } from '#range.js';
+import type { RangeRequest } from '#range.js';
 import {
   jsonResponse,
   methodNotAllowedCode,
@@ -29,11 +36,13 @@ import type { FilesErrorReason } from '#respond.js';
 export type FilesLogLine = Readonly<{
   event: 'files.request';
   method: string;
-  route: 'lfs' | 'lfs-legacy' | 'healthz' | 'other';
+  route: 'lfs' | 'lfs-legacy' | 'git' | 'healthz' | 'other';
   status: number;
   error?: FilesErrorReason | 'method';
   /** The first 12 hex digits of the oid, enough to correlate with a client report. */
   oid?: string;
+  /** A repository file's kind: `pack`, `index` or `listing`. */
+  kind?: string;
   /** Bytes the response carries (its `Content-Length`). */
   bytes?: number;
   range?: boolean;
@@ -64,7 +73,40 @@ const routeOf = (path: string): FilesLogLine['route'] => {
   if (path.startsWith('/v1/lfs/')) {
     return 'lfs';
   }
+  if (path.startsWith('/v1/git/')) {
+    return 'git';
+  }
   return path.startsWith('/v1/lfs-legacy/') ? 'lfs-legacy' : 'other';
+};
+
+/* What a log line may say of a link: 12 hex of the oid or the pack's git hash, and a repository file's kind. Never an owner or project. */
+const logIdentity = (link: VerifiedFileLink): Pick<FilesLogLine, 'oid' | 'kind'> => {
+  const { location } = link;
+  if (location.layout !== 'repository') {
+    return { oid: location.oid.slice(0, 12) };
+  }
+  const hash = location.kind === 'listing' ? location.name : location.name.slice('pack-'.length);
+  return { oid: hash.slice(0, 12), kind: location.kind };
+};
+
+/** The longest range of a pack one request may read: the compute worker's segment ceiling (D7). Bytes. */
+export const packRangeCeilingBytes = 64 * 1024 * 1024;
+
+/*
+ * A pack is read by ranges, never whole (D8): a GET with no range, a range
+ * that covers the whole pack in any spelling (`bytes=0-`, `bytes=-<size>`,
+ * `bytes=0-<huge>`), or one longer than the segment ceiling is refused. A
+ * HEAD carries no body and is answered.
+ */
+const wholePackGet = (request: Request, link: VerifiedFileLink, range: RangeRequest): boolean => {
+  if (request.method !== 'GET' || link.location.layout !== 'repository' || link.location.kind !== 'pack') {
+    return false;
+  }
+  return (
+    range.kind !== 'partial' ||
+    range.length > packRangeCeilingBytes ||
+    (range.offset === 0 && range.length >= link.size)
+  );
 };
 
 const refuse = (reason: FilesErrorReason, link?: VerifiedFileLink): Outcome => ({
@@ -83,12 +125,12 @@ const refuse = (reason: FilesErrorReason, link?: VerifiedFileLink): Outcome => (
  * @returns The response parts.
  */
 const serve = async (request: Request, environment: FilesEnvironment, link: VerifiedFileLink): Promise<Outcome> => {
-  const { oid } = link.location;
+  const oid = fileLinkEntityTag(link.location);
   if (notModified(request.headers.get('If-None-Match') ?? undefined, oid)) {
     return { parts: { status: 304, headers: notModifiedHeaders(oid), body: null }, link };
   }
   const range = resolveRange(request.headers.get('Range') ?? undefined, link.size);
-  if (range.kind === 'unsatisfiable') {
+  if (range.kind === 'unsatisfiable' || wholePackGet(request, link, range)) {
     return refuse('range', link);
   }
   const key = fileLinkObjectKey(link.location);
@@ -184,7 +226,7 @@ export const createFilesWorker = (
       route: routeOf(new URL(request.url).pathname),
       status,
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
-      ...(outcome.link === undefined ? {} : { oid: outcome.link.location.oid.slice(0, 12) }),
+      ...(outcome.link === undefined ? {} : logIdentity(outcome.link)),
       ...(outcome.bytes === undefined ? {} : { bytes: outcome.bytes }),
       ...(outcome.range === undefined ? {} : { range: outcome.range }),
       ...(typeof colo === 'string' ? { colo } : {}),

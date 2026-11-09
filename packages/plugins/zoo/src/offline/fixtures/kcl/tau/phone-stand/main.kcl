@@ -1,0 +1,51 @@
+// Desk phone stand: base, front lip with a cable slot, and a back rest leaning at 65 degrees.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+thickness = 4
+standWidth = 70
+baseDepth = 80
+lipHeight = 12
+ledgeDepth = 14
+restAngle = 65deg
+restLength = 90
+slotWidth = 12
+slotFloor = 5
+
+// Back rest geometry: the front face starts behind the ledge and rises at restAngle;
+// the back face is offset by the thickness.
+restStartY = thickness + ledgeDepth
+dirY = cos(restAngle)
+dirZ = sin(restAngle)
+backFootY = restStartY + thickness * dirZ + thickness * dirY * dirY / dirZ
+frontTopY = restStartY + restLength * dirY
+frontTopZ = thickness + restLength * dirZ
+backTopY = frontTopY + thickness * dirZ
+backTopZ = frontTopZ - thickness * dirY
+
+// Side profile on YZ (sketch x is world Y, sketch y is world Z); YZ extrudes along X.
+profile = startSketchOn(YZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = baseDepth)
+  |> yLine(length = thickness)
+  |> xLine(endAbsolute = backFootY)
+  |> line(endAbsolute = [backTopY, backTopZ])
+  |> line(endAbsolute = [frontTopY, frontTopZ])
+  |> line(endAbsolute = [restStartY, thickness])
+  |> xLine(endAbsolute = thickness)
+  |> yLine(endAbsolute = lipHeight)
+  |> xLine(endAbsolute = 0)
+  |> close()
+
+stand = extrude(profile, length = standWidth, symmetric = true)
+
+// Cable slot through the middle of the lip.
+slot = startSketchOn(YZ)
+  |> startProfile(at = [-1, slotFloor])
+  |> xLine(length = thickness + 2)
+  |> yLine(endAbsolute = lipHeight + 1)
+  |> xLine(length = -(thickness + 2))
+  |> close()
+  |> extrude(length = slotWidth, symmetric = true)
+
+phoneStand = subtract([stand], tools = [slot])

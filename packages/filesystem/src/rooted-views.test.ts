@@ -105,22 +105,22 @@ afterEach(() => {
 });
 
 describe('rooted porcelain', () => {
-  it('forwards FSA head listings through the confined root', async () => {
+  it('forwards FSA metadata listings without content facts through the confined root', async () => {
     const provider = new FileSystemAccessProvider(createMockRootHandle() as unknown as FileSystemDirectoryHandle);
     await provider.writeFile('large.txt', `${'x'.repeat(1024)}\nend`);
-    const rows = await composeRootedProvider(provider, 'webaccess').readdirWithStats('', { content: 'head' });
-    expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+    const rows = await composeRootedProvider(provider, 'webaccess').readdirWithStats('');
+    expect(rows[0]).toMatchObject({ name: 'large.txt', type: 'file', size: 1028 });
+    expect(rows[0]).not.toHaveProperty('contentKind');
     expect(rows[0]).not.toHaveProperty('lineCount');
   });
 
-  it('forwards Node head listings through the confined root', async () => {
+  it('forwards Node metadata listings without content facts through the confined root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tau-rooted-head-'));
     try {
       writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
-      const rows = await composeRootedProvider(new NodeFsProvider(root), 'node').readdirWithStats('', {
-        content: 'head',
-      });
-      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+      const rows = await composeRootedProvider(new NodeFsProvider(root), 'node').readdirWithStats('');
+      expect(rows[0]).toMatchObject({ name: 'large.txt', type: 'file', size: 1028 });
+      expect(rows[0]).not.toHaveProperty('contentKind');
       expect(rows[0]).not.toHaveProperty('lineCount');
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -154,6 +154,33 @@ describe('rooted porcelain', () => {
 
     await expect(rooted.copyTree!('src', '/projects/other/backup')).rejects.toThrow();
     await expect(rooted.copyTree!('../elsewhere', 'backup')).rejects.toThrow();
+  });
+
+  it('should stop a copy whose signal aborts while it reads the source, writing nothing', async () => {
+    const controller = new AbortController();
+    const copied = view().copyTree!('src', 'backup', {
+      admits: () => {
+        controller.abort();
+        return true;
+      },
+      signal: controller.signal,
+    });
+
+    await expect(copied).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(view().exists('backup')).resolves.toBe(false);
+  });
+
+  it('should honour an aborted signal on duplicate, the index queries and the read content operations', async () => {
+    const signal = AbortSignal.abort();
+    const rooted = withReadContentOps(view(), tauPathPolicy);
+    const aborted = { name: 'AbortError' };
+
+    await expect(rooted.duplicate!('src/main.ts', 'copy.ts', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.exists('copy.ts')).resolves.toBe(false);
+    await expect(rooted.search!('main', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.statTree!('src', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.contents('src', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.archive('src', { signal })).rejects.toMatchObject(aborted);
   });
 
   it('should honour the caller filter on every entry of a copy', async () => {
@@ -237,9 +264,9 @@ describe('rooted porcelain', () => {
     expect((refusal as WorkspaceMutationError).path).toBe('src/absent.ts');
   });
 
-  it('should acquire the mutation locks once for a whole batch', async () => {
+  it('should hold one lock set to read the source and one to land a bounded copy', async () => {
     const queue = new ResourceQueue();
-    const claim = vi.spyOn(queue, 'queueForMany');
+    const claim = vi.spyOn(queue, 'queueForClaims');
     const providerRegistry = new ProviderRegistry();
     const scope = { backend: 'memory', storageRootKey: 'memory:rooted-views-locks' } as const;
     const provider = await providerRegistry.getProvider(scope);
@@ -262,7 +289,7 @@ describe('rooted porcelain', () => {
 
     await rooted.copyTree!('', 'backup');
 
-    expect(claim).toHaveBeenCalledOnce();
+    expect(claim).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -549,14 +576,8 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
           }
           tree = rooted.statTree!('');
           if (mutate) {
-            // A post-invalidation caller starts fresh work, without releasing the obsolete scan.
-            expect(listing).toHaveBeenCalledTimes(2);
-            await expect(tree).resolves.toEqual(
-              expect.arrayContaining([
-                expect.objectContaining({ path: 'entry.txt', lineCount: 3 }),
-                expect.objectContaining({ path: 'added.txt', lineCount: 1 }),
-              ]),
-            );
+            // The writes join the cold scan instead of restarting it (D5: merge, never discard).
+            expect(listing).toHaveBeenCalledTimes(1);
           }
         } finally {
           release.resolve();
@@ -565,62 +586,18 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
         const expectedEntry = {
           path: 'entry.txt',
           type: 'file',
-          lineCount: mutate ? 3 : 1,
+          size: mutate ? 18 : 5,
         };
         await expect(matches).resolves.toMatchObject([expectedEntry]);
         const rows = await tree;
         expect(rows).toEqual(expect.arrayContaining([expect.objectContaining(expectedEntry)]));
         expect(rows.map((row) => row.path).sort()).toEqual(mutate ? ['added.txt', 'entry.txt'] : ['entry.txt']);
-        // The stale generation may finish, but only current metadata may stay warm.
+        // The merged index stays warm: no second scan.
         await expect(rooted.search!('entry')).resolves.toMatchObject([expectedEntry]);
         await expect(rooted.statTree!('')).resolves.toEqual(rows);
-        expect(listing).toHaveBeenCalledTimes(mutate ? 2 : 1);
+        expect(listing).toHaveBeenCalledTimes(1);
       },
     );
-
-    it('keeps a newer pending scan when an obsolete scan fails', async () => {
-      await service.writeFile('/entry.txt', 'old');
-      const rooted = service.createRootedFileSystem('/');
-      const oldCaptured = Promise.withResolvers<void>();
-      const newCaptured = Promise.withResolvers<void>();
-      const oldDelivery = Promise.withResolvers<void>();
-      const newDelivery = Promise.withResolvers<void>();
-      const original = rootProvider.readdirWithStats!.bind(rootProvider);
-      const scans = { started: 0 };
-      const listing = vi.spyOn(rootProvider, 'readdirWithStats').mockImplementation(async (path) => {
-        scans.started += 1;
-        const first = scans.started === 1;
-        const entries = await original(path);
-        if (first) {
-          oldCaptured.resolve();
-          await oldDelivery.promise;
-        } else {
-          newCaptured.resolve();
-          await newDelivery.promise;
-        }
-        return entries;
-      });
-      const oldRead = rooted.search!('entry');
-      const oldFailure = expect(oldRead).rejects.toThrow('obsolete scan failed');
-      await oldCaptured.promise;
-      await service.writeFile('/entry.txt', 'new\ncontents');
-      const newRead = rooted.statTree!('');
-      await newCaptured.promise;
-      try {
-        oldDelivery.reject(new Error('obsolete scan failed'));
-        // Public rejection proves the old owner's finally has run while new delivery is held.
-        await oldFailure;
-        const thirdRead = rooted.search!('entry');
-        expect(listing).toHaveBeenCalledTimes(2);
-        newDelivery.resolve();
-        await expect(thirdRead).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
-        await expect(newRead).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
-        expect(listing).toHaveBeenCalledTimes(2);
-      } finally {
-        oldDelivery.resolve();
-        newDelivery.resolve();
-      }
-    });
 
     it('retries a cold scan after shared provider failure', async () => {
       await service.writeFile('/entry.txt', 'first\nsecond');
@@ -642,7 +619,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       delivery.reject(new Error('listing failed'));
       await Promise.all([matchFailure, treeFailure]);
       expect(listing).toHaveBeenCalledTimes(1);
-      await expect(rooted.statTree!('')).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
+      await expect(rooted.statTree!('')).resolves.toMatchObject([{ path: 'entry.txt', size: 12 }]);
       expect(listing).toHaveBeenCalledTimes(2);
     });
 

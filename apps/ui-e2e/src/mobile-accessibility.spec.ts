@@ -94,7 +94,7 @@ const adjudications: readonly Adjudication[] = [
   {
     rule: 'color-contrast',
     message: /partially overlaps other elements/u,
-    // A phone menu drawer (z-110) lies over the sidebar sheet's footer and the workbench nav. Its last row, the Help
+    // A phone menu drawer lies over the sidebar sheet's footer and the workbench nav. Its last row, the Help
     // menu's version label, sits level with them, and axe gives up there although nothing paints over the label (the
     // same label passes once moved above them). The sweep measures it instead: the label is topmost at its centre, the drawer's fill
     // behind it is opaque, and its text meets 4.5:1 against that fill.

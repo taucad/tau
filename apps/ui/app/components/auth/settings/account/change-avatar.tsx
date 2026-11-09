@@ -14,9 +14,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Field } from '@taucad/ui/components/field';
-import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '#components/ui/spinner.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type ChangeAvatarProps = {
   className?: string;
@@ -87,46 +86,43 @@ export function ChangeAvatar({ className }: ChangeAvatarProps): React.JSX.Elemen
   }
 
   return (
-    <Field className={className}>
-      <Label>{localization.settings.avatar}</Label>
-
+    <div className={cn('flex items-center gap-3', className)}>
       <input ref={fileInputRef} type='file' accept='image/*' className='hidden' onChange={handleFileChange} />
 
-      <div className='flex items-center gap-4'>
-        <Button
-          type='button'
-          variant='ghost'
-          className='h-auto w-auto rounded-full p-0'
-          disabled={isPending}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <UserAvatar className='size-12' isPending={isPending} />
-        </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        className='h-auto w-auto rounded-full p-0'
+        aria-label={localization.settings.uploadAvatar}
+        disabled={isPending}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <UserAvatar className='size-9' isPending={isPending} />
+      </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant='secondary' size='sm' disabled={!session || isPending}>
-              {isPending && <Spinner />}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant='outline' size='sm' disabled={!session || isPending}>
+            {isPending && <Spinner />}
 
-              {localization.settings.changeAvatar}
-            </Button>
-          </DropdownMenuTrigger>
+            {localization.settings.changeAvatar}
+          </Button>
+        </DropdownMenuTrigger>
 
-          <DropdownMenuContent className='min-w-fit'>
-            <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
-              <Upload className='text-muted-foreground' />
+        <DropdownMenuContent align='end' className='min-w-fit'>
+          <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+            <Upload className='text-muted-foreground' />
 
-              {localization.settings.uploadAvatar}
-            </DropdownMenuItem>
+            {localization.settings.uploadAvatar}
+          </DropdownMenuItem>
 
-            <DropdownMenuItem variant='destructive' disabled={!session?.user.image} onClick={handleDelete}>
-              <Trash2 />
+          <DropdownMenuItem variant='destructive' disabled={!session?.user.image} onClick={handleDelete}>
+            <Trash2 />
 
-              {localization.settings.deleteAvatar}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </Field>
+            {localization.settings.deleteAvatar}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }

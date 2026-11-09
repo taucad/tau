@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-18'
+updated: '2026-11-06'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -83,7 +83,7 @@ Concrete option placement MUST be enforced by **per-transport Zod schemas**. The
 
 Third-party transports pick the descriptor row matching their wire. `@taucad/runtime-testing` is a development-only package root; ESLint bans it from production source.
 
-For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus root-relative runtime paths. The capability's root is `''`; it is not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
+For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus root-relative runtime paths. The capability's root is `''`; it is not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, shared buffer of file bytes, or host filesystem path.
 
 ## Entity Model
 
@@ -206,7 +206,7 @@ With the single-worker-per-geometry-unit architecture, only the backend for the 
 - jscad file: ~5 MB
 - smlib file: ~6.5 MB (SMLib NURBS WASM from `@classcad/smlibwasm`, loaded by the library's own Emscripten glue; selected only for files importing `@classcad/smlibwasm`)
 - kcl file: ~3 MB (KCL WASM)
-- STEP/STL/3DM/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/rhino`, `@taucad/gltf` after the converter dissolution)
+- STEP/STL/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/gltf` after the converter dissolution)
 
 Runtime itself must not import these concrete backends from its root or engine subpaths. Previously, all five kernels were loaded eagerly (~90 MB per CadMachine).
 

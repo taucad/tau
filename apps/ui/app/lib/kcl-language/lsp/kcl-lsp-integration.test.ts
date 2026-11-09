@@ -15,7 +15,10 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { highlightLines, loadLanguage } from '@taucad/grammars';
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
+import type { PublishDiagnosticsParams } from 'vscode-languageserver-protocol';
+import { kclRangeOffsets } from '#lib/kcl-language/kcl-codemirror.js';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { encodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
@@ -212,6 +215,21 @@ describe('KCL LSP Integration (Real WASM)', () => {
     // If the WASM LSP returns hover content, verify its structure.
     if (result) {
       expect(result.contents).toBeDefined();
+      // Hover code is untagged or fenced `js`; tooltips highlight it as KCL, so the KCL grammar must read it.
+      const markdown = [result.contents]
+        .flat()
+        .map((content) => (typeof content === 'string' ? content : content.value))
+        .join('\n');
+      const fences = [...markdown.matchAll(/```(?:js|kcl)?\n([\s\S]*?)```/gu)].map((match) => match[1] ?? '');
+      const kcl = await loadLanguage('kcl');
+      for (const fence of fences) {
+        expect(
+          highlightLines(fence, kcl)
+            .flat()
+            .some((segment) => segment.className !== ''),
+          fence,
+        ).toBe(true);
+      }
     }
   }, 10_000);
 
@@ -296,6 +314,36 @@ describe('KCL LSP Integration (Real WASM)', () => {
     // Should respond without hanging — proves didChange → hover pipeline works
     expect(result).toBeDefined();
   }, 10_000);
+
+  it('places lint diagnostics that start at column 0 on their own row', async () => {
+    const uri = 'file:///rows.kcl';
+    const text = ['pinChamfer = 0.5mm', 'needleOD = 10mm', 'washerOD = 13mm', ''].join('\n');
+    lspNotify('textDocument/didOpen', { textDocument: { uri, languageId: 'kcl', version: 1, text } });
+    let published: PublishDiagnosticsParams | undefined;
+    for await (const notification of fromServer.notifications) {
+      const parameters = notification.params as PublishDiagnosticsParams;
+      if (notification.method === 'textDocument/publishDiagnostics' && parameters.uri === uri) {
+        published = parameters;
+        if (parameters.diagnostics.length > 0) {
+          break;
+        }
+      }
+    }
+    const lints = published?.diagnostics.filter((diagnostic) => diagnostic.code === 'Z0001') ?? [];
+    expect(lints.map((diagnostic) => diagnostic.range.start)).toEqual([
+      { line: 1, character: 0 },
+      { line: 2, character: 0 },
+    ]);
+    const rows = lints.map((diagnostic) => {
+      const { from, to } = kclRangeOffsets(text, diagnostic.range);
+      return { row: text.slice(0, from).split('\n').length, text: text.slice(from, to) };
+    });
+    expect(rows).toEqual([
+      { row: 2, text: 'needleOD' },
+      { row: 3, text: 'washerOD' },
+    ]);
+    lspNotify('textDocument/didClose', { textDocument: { uri } });
+  }, 15_000);
 
   it('should handle textDocument/didClose without error', () => {
     lspNotify('textDocument/didClose', {

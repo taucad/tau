@@ -6,6 +6,9 @@ import type { PicogkBrowserSnapshot } from '#picogk-browser-session.js';
 
 // Match the native workspace mirror and its .NET/PicoGK exclusions.
 const excludedDirectories = new Set(['.git', '.hg', '.svn', '.tau', 'node_modules', 'bin', 'obj', '.vs']);
+// The UI composes its read-only system skills here and fetches each one on first read. A C# build never
+// reads them, and mirroring them cost a cold browser hundreds of sequential requests before the worker started.
+const excludedPaths = new Set(['.agents/skills']);
 const excludedSuffixes = ['.dll', '.exe', '.pdb'];
 const encoder = new TextEncoder();
 
@@ -39,7 +42,7 @@ export const createPicogkBrowserSnapshot = async (options: {
       }
       folded.set(key, path);
       if (entry.type === 'dir') {
-        if (!excludedDirectories.has(entry.name)) {
+        if (!excludedDirectories.has(entry.name) && !excludedPaths.has(path)) {
           await visit(path);
         }
         continue;

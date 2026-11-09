@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
-import { environmentSchema } from '#config/environment.config.js';
+import { environmentSchema } from '@taucad/api-core';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys */
 
@@ -188,6 +188,29 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it.each([
+    ['accepts', 'bpc_staging', true],
+    ['rejects', 'pc_wrong', false],
+  ])('%s a portal configuration id by its prefix', (_verb, id, accepted) => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'rk_test_create_scope',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read_scope',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+      STRIPE_PORTAL_CONFIGURATION_ID: id,
+    });
+
+    expect(result.success).toBe(accepted);
+  });
+
   describe('files service', () => {
     const [key] = fileLinkVectors.keys;
     const signingKey = JSON.stringify({ kid: key?.kid, alg: 'HS256', keyBase64: key?.keyBase64 });
@@ -280,33 +303,6 @@ describe('environmentSchema', () => {
       expect(
         failedPaths(cloud({ ...test, BILLING_ENVIRONMENT: 'staging', BILLING_LIVE_COLLECTION_ENABLED: 'true' })),
       ).toContain('BILLING_LIVE_COLLECTION_ENABLED');
-    });
-
-    it('should accept an optional restricted refund key of the deployment mode', () => {
-      expect(cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us' }).success).toBe(true);
-      const result = cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us', STRIPE_REFUND_SECRET_KEY: 'rk_live_refund' });
-      expect(result.success && result.data.STRIPE_REFUND_SECRET_KEY).toBe('rk_live_refund');
-      expect(
-        cloud({ ...test, BILLING_ENVIRONMENT: 'staging', STRIPE_REFUND_SECRET_KEY: 'rk_test_refund' }).success,
-      ).toBe(true);
-    });
-
-    it('should reject a refund key of the other mode, a full key, or one shared with the create or read key', () => {
-      const production = { ...live, BILLING_ENVIRONMENT: 'prod-us' };
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: 'rk_test_refund' }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: 'sk_live_full_account' }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(failedPaths(cloud({ ...production, STRIPE_REFUND_SECRET_KEY: live.STRIPE_SECRET_KEY }))).toContain(
-        'STRIPE_REFUND_SECRET_KEY',
-      );
-      expect(
-        failedPaths(
-          cloud({ ...test, BILLING_ENVIRONMENT: 'staging', STRIPE_REFUND_SECRET_KEY: test.STRIPE_READ_SECRET_KEY }),
-        ),
-      ).toContain('STRIPE_REFUND_SECRET_KEY');
     });
   });
 
@@ -405,6 +401,36 @@ describe('environmentSchema', () => {
     const result = environmentSchema.safeParse({ ...baseEnvironment(), [key]: value });
 
     expect(result.success).toBe(false);
+  });
+
+  describe('BILLING_INVOCATION_DEADLINE', () => {
+    const parseDeadline = (value: string | undefined) =>
+      environmentSchema.safeParse({ ...baseEnvironment(), BILLING_INVOCATION_DEADLINE: value });
+
+    it('should default to 300 000 ms', () => {
+      const result = parseDeadline(undefined);
+
+      expect(result.success && result.data.BILLING_INVOCATION_DEADLINE).toBe(300_000);
+    });
+
+    it('should accept the 600 000 ms schema maximum', () => {
+      const result = parseDeadline('600000');
+
+      expect(result.success && result.data.BILLING_INVOCATION_DEADLINE).toBe(600_000);
+    });
+
+    it.each(['600001', '0'])('should refuse %s', (value) => {
+      expect(parseDeadline(value).success).toBe(false);
+    });
+
+    it('should leave production on the default while staging sets the maximum', () => {
+      const apiRoot = new URL('../../', import.meta.url);
+
+      expect(readFileSync(new URL('fly.prod.toml', apiRoot), 'utf8')).not.toContain('BILLING_INVOCATION_DEADLINE');
+      expect(readFileSync(new URL('fly.staging.toml', apiRoot), 'utf8')).toMatch(
+        /^BILLING_INVOCATION_DEADLINE = '600000'$/mu,
+      );
+    });
   });
 
   it('should require a de-privileged runtime role in production', () => {

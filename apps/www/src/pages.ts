@@ -4,45 +4,45 @@ import { legalDocuments } from '#www/legal.js';
 export const pages: Array<{ path: string; title: string; description: string; error?: boolean }> = [
   {
     path: '/',
-    title: 'Tau — Design. Verify. Make.',
+    title: 'Tau — Open-source, AI-native CAD',
     description:
-      'Design a useful part, verify its geometry and export for machining, 3D printing or fabrication. Editable parametric CAD, open source and free in your browser.',
+      'Describe a part and get editable parametric CAD, checked against your requirements and ready to export for machining or 3D printing. Open source and free to start.',
   },
   {
     path: '/product/',
-    title: 'Product — Design, verify and make with Tau',
+    title: 'Product — Code-based CAD with an AI agent · Tau',
     description:
       'Design editable parametric parts, verify geometric requirements with GeoSpec and export STEP, STL or 3MF for your machining and fabrication workflow.',
   },
   {
     path: '/use-cases/',
-    title: 'Use cases — Make useful parts with Tau',
+    title: 'Use cases · Tau',
     description:
-      'Design, verify and make prototypes, engineering parts and workshop projects with editable CAD and files for machining and 3D printing.',
+      'Use Tau to prototype mounts and enclosures, design engineering parts and learn how mechanisms work, then export for machining or 3D printing.',
   },
   {
     path: '/use-cases/prototyping/',
-    title: 'For makers & product designers · Tau',
+    title: 'Prototyping · Tau',
     description:
-      'Design an enclosure, a custom mount or a replacement component around a real need. Check the fit in CAD, make a prototype and learn from using it.',
+      'Design enclosures, mounts and replacement parts around measurements you already have. Check the fit in CAD, then print or machine a prototype.',
   },
   {
     path: '/use-cases/engineering/',
-    title: 'For engineers & technical teams · Tau',
+    title: 'Engineering · Tau',
     description:
-      'Develop parts around the interfaces, clearances and dimensions they need in use. Keep requirements beside the CAD source and carry the design into your manufacturing workflow.',
+      'Design parts around their interfaces, clearances and envelope. Keep the requirements next to the CAD source and export STEP for your manufacturing workflow.',
   },
   {
     path: '/use-cases/learning/',
-    title: 'For students & curious minds · Tau',
+    title: 'Learning · Tau',
     description:
-      'Explore a mechanism, change its dimensions and check what happens. Connect the model on screen to a part you can make, assemble and learn from.',
+      'Open an example model, change its dimensions and see what happens. Then make the part and compare it with the model.',
   },
   {
     path: '/vision/',
-    title: 'Vision — Give ideas physical form · Tau',
+    title: 'Vision · Tau',
     description:
-      'Design. Verify. Make. Tau connects editable CAD and geometric evidence to the tools and processes that turn a model into a useful physical part.',
+      'We’re building open-source tools that take a design from an idea to a physical part: editable CAD, geometry checks and exports for manufacturing.',
   },
   {
     path: '/pricing/',
@@ -52,25 +52,23 @@ export const pages: Array<{ path: string; title: string; description: string; er
   },
   {
     path: '/contact/',
-    title: 'Contact — Talk to the Tau team',
-    description:
-      'Talk to Tau about the parts you want to make, your design and manufacturing workflow or a product question.',
+    title: 'Contact · Tau',
+    description: 'Contact the Tau team about enterprise plans, ask the community on Discord or report a bug on GitHub.',
   },
   {
     path: '/download/',
-    title: 'Get Tau — In your browser today · Tau',
-    description: 'Tau runs in your browser today. Tau Desktop is in development; no installer is published yet.',
+    title: 'Download · Tau',
+    description: 'Download Tau Desktop for macOS, Windows and Linux, or use Tau in your browser.',
   },
   {
     path: '/blog/',
-    title: 'Blog — Notes from Tau',
-    description:
-      'Product notes and engineering stories from the people building Tau. Human-authored articles appear here after editorial review.',
+    title: 'Blog · Tau',
+    description: 'Product updates and engineering posts from the Tau team.',
   },
   {
     path: '/privacy/',
     title: 'Privacy on this site · Tau',
-    description: 'How the Tau marketing site handles optional analytics, browser storage and links to the Tau app.',
+    description: 'How the Tau website handles optional analytics and browser storage.',
   },
   {
     path: '/legal/',
@@ -85,7 +83,7 @@ export const pages: Array<{ path: string; title: string; description: string; er
   {
     path: '/404.html',
     title: 'Page not found · Tau',
-    description: 'This page is not available. Return to the Tau homepage or open the workspace.',
+    description: 'This page may have moved or no longer exists.',
     error: true,
   },
 ];

@@ -146,7 +146,6 @@
   "dependencies": {
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
-    "@taucad/memory": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "xstate": "catalog:"

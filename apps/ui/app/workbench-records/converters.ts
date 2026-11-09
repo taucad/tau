@@ -17,6 +17,8 @@ type BuildPosition = Readonly<{ orientation: Orientation; size: number; bounds: 
 export type DockviewProjectionOptions = Readonly<{
   dimensions: Dimensions;
   files?: Readonly<Record<string, FileDeviceState>>;
+  /** A window-local launcher to keep as the first group's trailing tab; records never carry launchers. */
+  launcherId?: string;
 }>;
 
 /** The view record id is portable; the Dockview panel id remains an implementation detail. */
@@ -123,8 +125,10 @@ export function toDockview<L extends Lane>(
       }
       views.push(id);
     }
-    if (views.length === 0) {
-      const id = generatePrefixedId(idPrefix.pane);
+    const activeView = views[current.active ?? views.length - 1];
+    const launcherId = firstGroup === groupId ? options.launcherId : undefined;
+    if (views.length === 0 || launcherId !== undefined) {
+      const id = launcherId ?? generatePrefixedId(idPrefix.pane);
       panels[id] = {
         id,
         contentComponent: 'newTab',
@@ -133,7 +137,7 @@ export function toDockview<L extends Lane>(
       };
       views.push(id);
     }
-    const group = { id: groupId, views, activeView: views[current.active ?? views.length - 1] };
+    const group = { id: groupId, views, activeView: activeView ?? views[0] };
     return { type: 'leaf', data: group, size };
   }
 

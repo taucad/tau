@@ -1,6 +1,8 @@
 export type {
   RpcFileSystem,
   RpcDirectoryEntry,
+  RpcReaddirOptions,
+  RpcIndexedFile,
   RpcFileMetadata,
   RpcFileStat,
   RpcRuntimeClient,

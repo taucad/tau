@@ -14,6 +14,7 @@ import {
   dir,
   edges,
   faces,
+  fromPnt,
   listToArray,
   areaOf,
   pnt,
@@ -112,7 +113,16 @@ const circleEdge = (
   return clockwise ? oc.TopoDS.Edge(edge.Reversed()) : edge;
 };
 
-const bsplineThrough = (oc: Oc, frame: Frame, points: Vec2[]): TopoDS_Edge => {
+const bsplineThrough = (oc: Oc, frame: Frame, fitPoints: Vec2[]): TopoDS_Edge => {
+  // A repeated fit point gives the fit a zero-length knot interval, which libcascade rejects ("Knots interval
+  // values too close"), e.g. a conic whose interior point is its start; drop repeats, and fit two points by a line.
+  const points = fitPoints.filter(
+    (p, index) => index === 0 || Math.hypot(p.x - fitPoints[index - 1]!.x, p.y - fitPoints[index - 1]!.y) > 1e-7,
+  );
+  if (points.length === 2) {
+    return lineEdge(oc, frame, points[0]!, points[1]!);
+  }
+
   const array = new oc.NCollection_Array1_gp_Pnt(1, points.length);
   for (const [index, p] of points.entries()) {
     array.SetValue(index + 1, pnt(oc, toGlobal(frame, p.x, p.y)));
@@ -237,18 +247,27 @@ export function buildSegment(oc: Oc, path: PathEntity, id: string, segment: Wire
       const angle = toRadians(segment.angle);
       const theta = Math.sqrt(Math.max(r1 * r1 - r0 * r0, 0)) / r0;
       const samples = 24;
+      // The involute of the base circle, rotated by `angle`, at roll angle t.
+      const involute = (t: number): Vec2 => {
+        const ix = r0 * (Math.cos(t) + t * Math.sin(t));
+        const iy = r0 * (Math.sin(t) - t * Math.cos(t));
+        return v2(ix * Math.cos(angle) - iy * Math.sin(angle), ix * Math.sin(angle) + iy * Math.cos(angle));
+      };
+
+      const base = involute(0);
+      const tip = involute(theta);
       const points: Vec2[] = [];
       for (let index = 0; index <= samples; index++) {
         const t = (theta * index) / samples;
-        const ix = r0 * (Math.cos(t) + t * Math.sin(t));
-        const iy = r0 * (Math.sin(t) - t * Math.cos(t));
-        let x = ix * Math.cos(angle) - iy * Math.sin(angle) - r0 * Math.cos(angle);
-        const y = ix * Math.sin(angle) + iy * Math.cos(angle) - r0 * Math.sin(angle);
         if (segment.reverse) {
-          x = -x;
+          // Run the mirrored involute from its tip down to its base circle: the curve stays rooted on the base
+          // circle where it ends, so the flank is a true involute (kcl-lib places the end at the same point).
+          const point = involute(theta - t);
+          points.push(v2(from.x - (tip.x - point.x), from.y + (tip.y - point.y)));
+        } else {
+          const point = involute(t);
+          points.push(v2(from.x + point.x - base.x, from.y + point.y - base.y));
         }
-
-        points.push(v2(from.x + x, from.y + y));
       }
 
       to = points.at(-1)!;
@@ -790,16 +809,76 @@ function simpleLoopArrangement(oc: Oc, path: PathEntity, holes: readonly PathEnt
   return { faces: [face], pieces };
 }
 
+/**
+ * A point strictly inside a face, found on a grid over its parameter range.
+ *
+ * @param oc - libcascade instance
+ * @param face - planar face
+ * @returns a point classified inside, or undefined
+ */
+export function interiorPoint(oc: Oc, face: TopoDS_Face): Vec3 | undefined {
+  const surface = new oc.BRepAdaptor_Surface(face, true);
+  const [u0, u1, v0, v1] = [
+    surface.FirstUParameter(),
+    surface.LastUParameter(),
+    surface.FirstVParameter(),
+    surface.LastVParameter(),
+  ];
+  for (const steps of [4, 12, 40]) {
+    for (let i = 1; i < steps; i++) {
+      for (let j = 1; j < steps; j++) {
+        const u = u0 + ((u1 - u0) * i) / steps;
+        const v = v0 + ((v1 - v0) * j) / steps;
+        const classifier = new oc.BRepClass_FaceClassifier(face, new oc.gp_Pnt2d(u, v), 1e-7, true);
+        if (classifier.State() === oc.TopAbs_State.TopAbs_IN) {
+          return fromPnt(surface.Value(u, v));
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
 const dropHoleFaces = (oc: Oc, arrangement: Arrangement, holes: readonly PathEntity[]): Arrangement => {
   const holePieces = holes.flatMap((hole) =>
     hole.segments.flatMap((segment) => arrangement.pieces.get(segment.id) ?? []),
   );
+  // A hole may cross the profile's boundary, which splits the area it covers into pieces bounded partly by profile
+  // edges; every piece inside the hole's own loop goes, as a 2D subtraction removes it.
+  const holeFaces = holes.flatMap((hole) => pathFaces(oc, hole, []).faces);
+  const insideHole = (face: TopoDS_Face): boolean | undefined => {
+    const point = interiorPoint(oc, face);
+    if (!point) {
+      return undefined;
+    }
+
+    const p = pnt(oc, point);
+    const inside = holeFaces.some((holeFace) => {
+      const classifier = new oc.BRepClass_FaceClassifier(holeFace, p, 1e-6, false, 1e-6);
+      const state = classifier.State();
+      classifier.delete();
+      return state === oc.TopAbs_State.TopAbs_IN;
+    });
+    p.delete();
+    return inside;
+  };
+
   const kept = arrangement.faces.filter((face) => {
     const faceEdges = edges(oc, face);
+    if (faceEdges.length === 0) {
+      return true;
+    }
+
+    const inside = insideHole(face);
+    if (inside !== undefined) {
+      return !inside;
+    }
+
     // A hole's own face has only hole edges on its outer boundary.
     const outerWire = oc.BRepTools.OuterWire(face);
     const outerEdges = edges(oc, outerWire);
-    return !outerEdges.every((edge) => holePieces.some((piece) => piece.IsSame(edge))) || faceEdges.length === 0;
+    return !outerEdges.every((edge) => holePieces.some((piece) => piece.IsSame(edge)));
   });
   return { faces: kept, pieces: arrangement.pieces };
 };

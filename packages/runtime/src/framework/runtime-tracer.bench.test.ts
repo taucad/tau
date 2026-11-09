@@ -116,14 +116,12 @@ const shapes: readonly Shape[] = [
   },
   {
     name: 'render',
-    spans: 6,
+    spans: 5,
     run(tracer) {
       wrap(tracer, 'kernel.mesh', () => {
         wrap(tracer, 'middleware.wrap(GeometryCache)', () => {
           wrap(tracer, 'middleware.wrap(GltfEdgeDetection)', () => {
-            wrap(tracer, 'middleware.wrap(DisplaySimplification)', () => {
-              tracer.startSpan('kernel.mesh-compute').end();
-            });
+            tracer.startSpan('kernel.mesh-compute').end();
           });
         });
       });

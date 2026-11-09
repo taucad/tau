@@ -19,7 +19,8 @@ import {
   terminalRegion,
   terminalAction,
   expectTerminalRunning,
-  answerUnloadQuestion,
+  expectTerminalScreen,
+  recordNativeQuestions,
   nativeQuestionsAsked,
   pasteIntoTerminal,
   copyTerminalSelection,
@@ -106,27 +107,19 @@ describe('production Electron Terminal keyboard qualification', () => {
       String.raw`bind 'set enable-bracketed-paste on'; printf ready > paste-ready.txt; printf 'readline-%s\n' ready`,
     );
     await expectTerminalFile(root, 'paste-ready.txt', 'ready');
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
-      .toContain('readline-ready');
+    await expectTerminalScreen(page, 'readline-ready');
     await application.evaluate(({ clipboard }) => {
       clipboard.writeText("printf '%s' 'λ東京' > pasted-one.txt\nprintf '%s' '$literal' > pasted-two.txt");
     });
     await pasteIntoTerminal(desktop);
-    /* A clipboard round trip, a bracketed paste and the mirror's own refresh interval, not an echo already on screen:
-     * the default poll window is shorter than that and the pasted line arrived just after the row gave up. */
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
-      .toContain('pasted-two.txt');
+    await expectTerminalScreen(page, 'pasted-two.txt');
     await expect(stat(join(root, 'pasted-one.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(join(root, 'pasted-two.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     await page.keyboard.press('Enter');
     await expectTerminalFile(root, 'pasted-one.txt', 'λ東京');
     await expectTerminalFile(root, 'pasted-two.txt', '$literal');
     await typeTerminalCommand(page, String.raw`stty size > copy-size.txt; printf 'copy%s\n' fixture`);
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
-      .toContain('copyfixture');
+    await expectTerminalScreen(page, 'copyfixture');
     const word = await terminalWordPosition(page, { root, sizeFile: 'copy-size.txt', word: 'copyfixture' });
     await page.mouse.dblclick(word.x, word.y);
     await application.evaluate(({ clipboard }) => {
@@ -174,12 +167,10 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed >> reload-count.txt');
     // Wait for the ordinary layout write before the renderer goes away.
     await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
-    /* A running session holds the window's unload (T15), so the reload asks before it stops the session. */
-    await answerUnloadQuestion(desktop, 'Close and stop');
+    /* Reloading stops the running session without asking (T15). */
+    await recordNativeQuestions(desktop);
     await page.reload();
-    expect(await nativeQuestionsAsked(desktop)).toEqual([
-      { message: 'A Terminal session is running in this window.', buttons: ['Keep open', 'Close and stop'] },
-    ]);
+    expect(await nativeQuestionsAsked(desktop)).toEqual([]);
     /* The restored pane starts a session of its own; the typed-but-unsent line is not carried into it. */
     await expectTerminalRunning(page);
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
@@ -195,11 +186,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed > close-replay.txt');
     await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
-    /* Closing a running Terminal asks in the pane first (T15); nothing stops until the person answers. */
-    const closeDecision = page.locator('[data-slot="terminal-close-decision"]');
-    await expect.poll(async () => closeDecision.textContent()).toContain('Close the Terminal in shell-qualification?');
-    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
-    await closeDecision.getByRole('button', { name: 'Close and stop', exact: true }).click();
+    /* Closing a running Terminal stops it without asking (T15). */
     await terminalRegion(page).waitFor({ state: 'detached' });
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
@@ -214,12 +201,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     const { page } = desktop;
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf stale > project-replay.txt');
-    /* Leaving the project the session belongs to asks first (T15), on the route a person actually takes. */
-    await page.getByRole('link', { name: 'Projects', exact: true }).click();
-    const guard = page.locator('[data-slot="terminal-navigation-guard"]');
-    await expect.poll(async () => guard.textContent()).toContain('Close the Terminal in shell-qualification?');
-    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
-    await guard.getByRole('button', { name: 'Close and stop', exact: true }).click();
+    /* Leaving the project the session belongs to stops it without asking (T15), on the route a person takes. */
+    await page.getByRole('link', { name: 'All projects', exact: true }).click();
     await page.locator('[data-slot="new-project-link"]').first().click();
     await page.getByLabel('Project Name *').fill('Other shell project');
     await page.getByRole('button', { name: /^Create Project/u }).click();
@@ -309,9 +292,7 @@ describe('production Electron Terminal keyboard qualification', () => {
       String.raw`stty size > output-size.txt; printf '\033]52;c;cmVwbGFjZWQ=\007\033]0;spoofed title\007'; printf '\033]8;;https://fixture.invalid/osc8\007untrusted-link\033]8;;\007\n'; printf '\033]8;;file:///tmp/tau-shell-output-canary\007file-link\033]8;;\007\n'; printf '<script>window.open("https://fixture.invalid")</script>\n'; for ((i=0; i<256; i++)); do printf '\033]0;'; printf '%4096s' x; printf '\007'; done; printf done > output-done.txt; printf 'escape-stream-%s\n' drained`,
     );
     await expectTerminalFile(root, 'output-done.txt', 'done');
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
-      .toContain('escape-stream-drained');
+    await expectTerminalScreen(page, 'escape-stream-drained');
     expect(await application.evaluate(({ clipboard }) => clipboard.readText())).toBe('fixture clipboard');
     expect(await page.title()).toBe(title);
     expect(page.url()).toBe(location);
@@ -333,9 +314,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     );
     await expectTerminalFile(root, 'flood.txt', 'flood-finished');
     await typeTerminalCommand(page, String.raw`printf 'after-focus-%s\n' 'visible'`);
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
-      .toContain('after-focus-visible');
+    await expectTerminalScreen(page, 'after-focus-visible');
     expect(await page.locator('[data-terminal-announcer] > div').count()).toBeLessThanOrEqual(100);
     await page.keyboard.press('Shift+Escape');
     await expect
@@ -365,9 +344,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
     await typeTerminalCommand(page, String.raw`printf 'zoom-%s\n' visible; printf zoomed > zoom.txt`);
     await expectTerminalFile(root, 'zoom.txt', 'zoomed');
-    await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
-      .toContain('zoom-visible');
+    await expectTerminalScreen(page, 'zoom-visible');
     await page.keyboard.press('Shift+Escape');
     await expect
       .poll(async () => terminalRegion(page).evaluate((element) => element === document.activeElement))

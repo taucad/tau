@@ -19,17 +19,27 @@ export type TerminalRendererOptions = {
   readonly host: HTMLElement;
   readonly fontFamily: string;
   readonly fontSize: number;
+  /** Line pitch in CSS pixels; the cell width is the font's own advance, as the editor spaces it. */
+  readonly lineHeight: number;
   readonly theme: TerminalTheme;
   /** Lines of scrollback (AurigaX counts lines, as xterm does). */
   readonly scrollback: number;
   readonly screenReaderMode: boolean;
   /** Foreground contrast floor, 1 (off) to 21. */
   readonly minimumContrastRatio: number;
+  /** How the WebGL renderer blends text into its background (Tau's AurigaX patch). Default `native`. */
+  readonly textBlending?: 'native' | 'linear' | 'linear-corrected';
+  /** Exponent on glyph coverage in the WebGL renderer: above 1 thins text. Default 1. */
+  readonly textWeight?: number;
+  /** The regular face's weight. Default 400. */
+  readonly fontWeight?: number;
   readonly reducedMotion: boolean;
   /** Receives an `http(s)` link the person Ctrl/Cmd+clicked; the caller applies Tau's navigation policy. */
   readonly onLinkActivate: (uri: string) => void;
   /** The person pressed the documented leave key (Shift+Escape); the caller moves focus out. */
   readonly onLeave: () => void;
+  /** The cell metrics changed (a face that loaded late, another display); the caller refits and resizes the session. */
+  readonly onMetricsChange?: () => void;
 };
 
 /** @public */
@@ -233,6 +243,22 @@ const createScreenMirror = (
 };
 
 /**
+ * Load the Terminal's face before the canvas measures it. Resolves either way: a missing font set or a failed load
+ * leaves the fallback in the family list.
+ *
+ * @param fontFamily - The CSS font family list.
+ * @param fontSize - The size in pixels.
+ */
+const loadTerminalFont = async (fontFamily: string, fontSize: number): Promise<void> => {
+  const { fonts } = document as Partial<Pick<Document, 'fonts'>>;
+  try {
+    await fonts?.load(`${String(fontSize)}px ${fontFamily}`);
+  } catch {
+    /* The fallback face draws instead. */
+  }
+};
+
+/**
  * Create the Terminal renderer inside `options.host`. One WASM instance per terminal, disposed with it.
  *
  * @param options - Font, theme, scrollback, accessibility and the two trusted callbacks.
@@ -244,15 +270,23 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   /* (1) The selection manager auto-scrolls while a drag is within 30 px of an edge, so a drag along the first rows
    * grows upward. Zero keeps auto-scroll for drags that leave the canvas, as xterm does. */
   Reflect.set(aurigax.SelectionManager, 'AUTO_SCROLL_EDGE_SIZE', 0);
+  /* The canvas measures its cell from whatever face is loaded when it opens, so a webfont that has not loaded yet would
+   * fix the fallback's metrics. Wait for the editor's face first; a face that never loads leaves the fallback. */
+  await loadTerminalFont(options.fontFamily, options.fontSize);
   const terminal = new aurigax.Terminal({
     ghostty: await aurigax.Ghostty.load(wasmUrl),
     fontFamily: options.fontFamily,
     fontSize: options.fontSize,
+    fontWeight: options.fontWeight ?? 400,
     theme: options.theme,
     scrollback: options.scrollback,
     renderer: 'webgl',
     cursorBlink: !options.reducedMotion,
     minimumContrastRatio: options.minimumContrastRatio,
+    textBlending: options.textBlending,
+    textWeight: options.textWeight,
+    exactCellWidth: true,
+    cellHeight: options.lineHeight,
     smoothScrollDuration: options.reducedMotion ? 0 : 100,
     /* Always installed: without a handler AurigaX opens a window itself on Ctrl/Cmd+click. */
     linkHandler: {
@@ -361,6 +395,23 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   disposers.push(() => {
     resolution?.removeEventListener('change', onResolutionChange);
   });
+  /* A face that finishes loading later (the page's first Terminal, a slow disk) re-measures the same way. */
+  const { fonts } = document as Partial<Pick<Document, 'fonts'>>;
+  const onFontsLoaded = (): void => {
+    const { renderer } = terminal;
+    if (renderer) {
+      renderer.remeasureFont();
+      renderer.resize(terminal.cols, terminal.rows);
+      terminal.setPaused(true);
+      terminal.setPaused(false);
+      /* The cells changed size, so the grid that fits the host did too. */
+      options.onMetricsChange?.();
+    }
+  };
+  fonts?.addEventListener('loadingdone', onFontsLoaded);
+  disposers.push(() => {
+    fonts?.removeEventListener('loadingdone', onFontsLoaded);
+  });
 
   /* (6) After a GPU process restart the Canvas 2D fallback's context comes back blank, and only dirty rows repaint. */
   listen(mount, 'contextrestored' as keyof DocumentEventMap, () => {
@@ -370,7 +421,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   });
 
   /* (8) Screen-reader mode: the mirror inside the textbox plus the live region beside it. */
-  let accessibility: { push: (data: string) => void; dispose: () => void } | undefined;
+  let accessibility: { push: (data: string) => void; parsed: () => void; dispose: () => void } | undefined;
   const enableAccessibility = (): void => {
     if (accessibility) {
       return;
@@ -387,6 +438,9 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     mirror.schedule();
     accessibility = {
       push: announcer.push,
+      /* The mirror reads the buffer, not the canvas: a parsed write must refresh it even when no frame is drawn
+       * (a paused, throttled or rebuilding renderer fires no render event, and the mirror would keep stale rows). */
+      parsed: mirror.schedule,
       dispose() {
         for (const subscription of subscriptions) {
           subscription.dispose();
@@ -430,6 +484,7 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     const data = batch.length === 1 ? batch[0]!.data : batch.map((entry) => entry.data).join('');
     accessibility?.push(data);
     terminal.write(data, () => {
+      accessibility?.parsed();
       for (const entry of batch) {
         entry.painted?.();
       }

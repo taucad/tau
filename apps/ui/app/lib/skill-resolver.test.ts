@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createSkillBundleOverlay, createSkillBundleRegistry } from '@taucad/agent-tools/registry';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { systemSkillBundles } from '@taucad/skills/resources';
 import type { SkillResolverDirectoryEntry } from '#lib/skill-resolver.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const encoder = new TextEncoder();
 
@@ -207,5 +213,118 @@ describe('createSkillResolver', () => {
       errorCode: 'SKILL_NOT_FOUND',
       message: 'Skill not found: missing',
     });
+  });
+});
+
+/**
+ * The page's resolver over the user's composed view with the real system-skill
+ * overlay, listing rows with their provenance as the file tree service does.
+ */
+function createComposedResolver(provider: MemoryProvider) {
+  const overlay = createSkillBundleOverlay(
+    createSkillBundleRegistry(systemSkillBundles),
+    vi.fn(async () => {
+      throw new Error('Skill discovery must not fetch overlay resources');
+    }),
+  );
+  const overlayRead = vi.fn(overlay.read);
+  const view = composeView(
+    { filesystem: provider },
+    { consumer: 'user', policy: tauPathPolicy, overlays: [{ ...overlay, read: overlayRead }] },
+  );
+  const readFile = vi.fn(async (path: string) => view.readFile(path));
+  const resolver = createSkillResolver({
+    readFile,
+    listDirectory: async (path) => {
+      const rows = await view.readdirWithStats(path);
+      return rows.map(({ name, type, provenance }) => ({
+        name,
+        isFolder: type === 'dir',
+        ...(provenance === undefined ? {} : { provenance }),
+      }));
+    },
+  });
+  return { resolver, overlayRead, readFile };
+}
+
+const bundleSlug = systemSkillBundles[0]?.slug ?? 'missing-bundle';
+
+describe('createSkillResolver over the composed user view', () => {
+  it('lists every system skill from the compiled catalog without reading overlay bytes', async () => {
+    const { resolver, overlayRead, readFile } = createComposedResolver(new MemoryProvider());
+
+    const listing = await resolver.listSkills();
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(readFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
+    expect(systemSkillsCatalog).toHaveLength(16);
+    expect(listing).toHaveLength(systemSkillsCatalog.length);
+    for (const skill of listing) {
+      expect(skill.source).toBe('system');
+    }
+    const fingerprints = Object.fromEntries(listing.map((skill) => [skill.name, skill.fingerprint]));
+    for (const bundle of systemSkillBundles) {
+      expect(fingerprints[bundle.slug]).toBe(bundle.fingerprint);
+    }
+  });
+
+  it('lets a project skill at a bundle slug replace the bundle', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile(
+      `.agents/skills/${bundleSlug}/SKILL.md`,
+      skillMarkdown({ name: bundleSlug, description: 'Workspace override' }),
+    );
+    const { resolver, overlayRead } = createComposedResolver(provider);
+
+    const listing = await resolver.listSkills();
+    const matches = listing.filter((skill) => skill.name === bundleSlug);
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(matches).toEqual([
+      expect.objectContaining({
+        description: 'Workspace override',
+        source: 'user',
+        resourceUri: `file:.agents/skills/${bundleSlug}/SKILL.md`,
+        shadowedSources: [expect.objectContaining({ source: 'system' })],
+      }),
+    ]);
+  });
+
+  it('lets a project folder without SKILL.md hide the bundle at its slug', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile(`.agents/skills/${bundleSlug}/notes.md`, '# Notes\n');
+    const { resolver, overlayRead } = createComposedResolver(provider);
+
+    const listing = await resolver.listSkills();
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(listing.some((skill) => skill.name === bundleSlug)).toBe(false);
+    expect(listing).toHaveLength(systemSkillsCatalog.length - 1);
+  });
+
+  it('still lists an installed Tau Store skill', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile(
+      '.agents/plugins/installed.json',
+      JSON.stringify({
+        skills: {
+          woodworking: {
+            status: 'shadowed',
+            source: 'tau-store',
+            installedPath: '.agents/skills/woodworking/SKILL.md',
+            version: '1.0.0',
+            updatedAt: '2026-09-02T00:00:00.000Z',
+          },
+        },
+      }),
+    );
+    const { resolver, overlayRead } = createComposedResolver(provider);
+
+    const listing = await resolver.listSkills();
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(listing).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'woodworking', source: 'tau-store' })]),
+    );
   });
 });

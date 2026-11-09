@@ -11,6 +11,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { toast } from 'sonner';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { useFileManager } from '#hooks/use-file-manager.js';
@@ -211,7 +212,7 @@ it('settles physical export preferences after held acknowledgement while preserv
   const oldBytes = new TextEncoder().encode(JSON.stringify({ shouldDownload: true, zipMultiple: false }));
   await provider.writeFile(path, oldBytes);
   const paths = new WorkspacePathResolver('/project');
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   proxy.readFile.mockImplementation(async (absolute) => {
     const relative = paths.toRelativePath(absolute);
     if (relative === undefined) {
@@ -290,7 +291,7 @@ it('clears a successful local patch before a later same-key external change desp
     new TextEncoder().encode(JSON.stringify({ shouldDownload, zipMultiple: false }));
   await provider.writeFile(path, encode(true));
   const paths = new WorkspacePathResolver('/project');
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   proxy.readFile.mockImplementation(async (absolute) => {
     const relative = paths.toRelativePath(absolute);
     if (relative === undefined) {
@@ -393,7 +394,7 @@ it('retries closed export settings in the same mounted toast surface through hel
     new TextEncoder().encode(JSON.stringify({ shouldDownload: true, zipMultiple: false })),
   );
   const paths = new WorkspacePathResolver('/project');
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   proxy.readFile.mockImplementation(async (absolute) => {
     const relative = paths.toRelativePath(absolute);
     if (relative === undefined) {

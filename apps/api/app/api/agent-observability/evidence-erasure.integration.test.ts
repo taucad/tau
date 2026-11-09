@@ -17,13 +17,14 @@ import {
 import { erasureTiming, EvidenceErasureService } from '#api/agent-observability/evidence-erasure.service.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.js';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
-import * as schema from '#database/schema.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
+import * as schema from '@taucad/api-database/schema';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import type { MetricsService } from '@taucad/api-observability/metrics';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 const key = Uint8Array.from(randomBytes(32));
 const environment = 'test';
@@ -136,6 +137,23 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(again).toEqual({ erasureId: first.erasureId, fenced: 0, traces: 0 });
   });
 
+  it("should leave a deleted project's delivered traces to expire, and admit nothing more for it", async () => {
+    const userId = await account();
+    const projectId = await ownedProject(userId);
+    const sent = await admitted(userId, projectId, 1);
+    const traceId = await delivered(sent);
+
+    await requestProjectDeletion({ database, projectId, userId, enabled: true });
+    /* Kept for debugging until Langfuse's retention expires it; only account deletion erases. */
+    expect(await outbox(sent)).toMatchObject({ state: 'confirmed', traceId });
+    const erasures = await database
+      .select()
+      .from(schema.agentEvidenceErasure)
+      .where(eq(schema.agentEvidenceErasure.subjectId, projectId));
+    expect(erasures).toEqual([]);
+    expect(await admit(userId, projectId, 2)).toEqual({ kind: 'fenced' });
+  });
+
   it('should admit nothing under an erased account or project', async () => {
     const userId = await account();
     const erasedProject = await ownedProject(userId);
@@ -213,6 +231,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       vi.stubGlobal('fetch', fetcher);
       return fetcher;
     };
+    /** What every v3 read answers a new organisation; only the v2 observations list is a valid read. */
+    const legacy = () =>
+      Response.json({ error: 'LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION', data: [] }, { status: 410 });
     const completedAt = async (erasureId: string) => {
       const [found] = await database
         .select({ completedAt: schema.agentEvidenceErasure.completedAt })
@@ -233,7 +254,10 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
           deleted.push(JSON.parse(typeof init.body === 'string' ? init.body : ''));
           return new Response('{}', { status: 200 });
         }
-        return new Response('{}', { status: present || !url.pathname.endsWith(traceId) ? 200 : 404 });
+        if (url.pathname !== '/api/public/v2/observations' || url.searchParams.get('traceId') !== traceId) {
+          return legacy();
+        }
+        return Response.json({ data: present ? [{ id: 'o1' }] : [], meta: {} });
       });
       const drainer = service();
       const now = Date.now();
@@ -290,6 +314,38 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       expect(await completedAt(erasureId)).toBeNull();
       expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'retry' });
       expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(1, { outcome: 'recheck' });
+      expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
+        outcome: 'absent',
+      });
+    });
+
+    it('should count every unconfirmed read-back as a recheck and never settle on a legacy 410', async () => {
+      const userId = await account();
+      const projectId = await ownedProject(userId);
+      await delivered(await admitted(userId, projectId));
+      const { erasureId } = await eraseProject(projectId);
+      vendor((_url, init) => (init?.method === 'DELETE' ? Response.json({}, { status: 200 }) : legacy()));
+      const drainer = service();
+      const now = Date.now() + 20 * erasureTiming.maxBackoffMilliseconds;
+
+      await drainer.drain(new Date(now));
+      let at = now + erasureTiming.recheckAfterMilliseconds + 1;
+      for (let read = 0; read < 3; read++) {
+        // oxlint-disable-next-line no-await-in-loop -- each pass reads back after the previous one's recheck delay
+        await drainer.drain(new Date(at));
+        const notBefore = at + erasureTiming.unavailableRecheckMilliseconds;
+        // oxlint-disable-next-line no-await-in-loop -- the journal row after this pass
+        expect(await journal(erasureId)).toEqual([
+          expect.objectContaining({ state: 'requested', leaseOwner: null, dueAt: new Date(notBefore) }) as unknown,
+        ]);
+        at = notBefore + 1;
+      }
+      expect(await completedAt(erasureId)).toBeNull();
+      /* Earlier cases may leave their own traces due, so this pass counts at least this trace's three. */
+      const rechecks = metrics.agentEvidenceErasureTraces.add.mock.calls.filter(
+        ([, attributes]) => attributes?.['outcome'] === 'recheck',
+      );
+      expect(rechecks.length).toBeGreaterThanOrEqual(3);
       expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
         outcome: 'absent',
       });

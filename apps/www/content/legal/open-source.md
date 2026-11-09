@@ -18,7 +18,7 @@ Tau makes use of, and is based in part on, facilities provided by the **Open CAS
 OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these
 components:
 
-- The GeoSpec engine (`geospec-engine` 0.5.0), built from OCCT upstream
+- The GeoSpec engine (`geospec-engine` 0.6.0), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871` ([source](https://github.com/taucad/geospec))
 - libcascade 3.1.0 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))
@@ -29,18 +29,9 @@ corresponding OCCT source and relink kit, these license texts and the GeoSpec en
 carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,
 including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).
 
-## libfuse
-
-On Linux, the desktop app's private shell projection bridge links dynamically against **libfuse** 3
-(`libfuse3.so.4`), Copyright © Miklos Szeredi and the libfuse contributors. The libfuse library is licensed under
-the [GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1), reproduced
-in full below. The bridge is built against unmodified libfuse 3.17.2
-([source](https://github.com/libfuse/libfuse/releases/tag/fuse-3.17.2)) and calls only its public
-interface from a separate shared object.
-
 ## Third-Party Packages
 
-The web and desktop apps include the following 877 packages, with the license each declares.
+The web and desktop apps include the following 862 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -108,7 +99,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@codemirror/lang-python](https://github.com/codemirror/lang-python) | 6.2.1 | MIT |
 | [@codemirror/lang-yaml](https://github.com/codemirror/lang-yaml) | 6.1.3 | MIT |
 | [@codemirror/language](https://code.haverbeke.berlin/codemirror/language) | 6.13.1 | MIT |
-| [@codemirror/legacy-modes](https://code.haverbeke.berlin/codemirror/legacy-modes) | 6.5.5 | MIT |
 | [@codemirror/lint](https://code.haverbeke.berlin/codemirror/lint) | 6.9.7 | MIT |
 | [@codemirror/search](https://code.haverbeke.berlin/codemirror/search) | 6.7.2 | MIT |
 | [@codemirror/state](https://code.haverbeke.berlin/codemirror/state) | 6.7.6 | MIT |
@@ -267,13 +257,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@sentry/replay](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
 | [@sentry/replay-canvas](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
 | [@sentry/server-utils](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
-| [@shikijs/core](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/engine-javascript](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/langs](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/themes](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/types](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/vscode-textmate](https://github.com/shikijs/vscode-textmate) | 10.0.2 | MIT |
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript) | 3.35.2 | Apache-2.0 |
 | [@smithy/credential-provider-imds](https://github.com/smithy-lang/smithy-typescript) | 4.5.2 | Apache-2.0 |
 | [@smithy/fetch-http-handler](https://github.com/smithy-lang/smithy-typescript) | 5.8.0 | Apache-2.0 |
@@ -290,9 +273,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-query](https://github.com/TanStack/query) | 5.104.2 | MIT |
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
-| [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.191 | MIT |
-| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
-| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
+| [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
+| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
+| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 2.2.4 | MIT |
@@ -530,11 +513,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [function-bind](https://github.com/Raynos/function-bind) | 1.1.2 | MIT |
 | [gaxios](https://github.com/googleapis/google-cloud-node) | 7.3.1 | Apache-2.0 |
 | [gcp-metadata](https://github.com/googleapis/google-cloud-node-core) | 8.1.2 | Apache-2.0 |
-| [geospec](https://github.com/taucad/geospec) | 0.5.0 | Apache-2.0 |
-| [geospec-engine](https://github.com/taucad/geospec) | 0.5.0 | Apache-2.0 |
-| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.5.0 | Apache-2.0 |
-| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.5.0 | Apache-2.0 |
-| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.5.0 | Apache-2.0 |
+| [geospec](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
 | [get-east-asian-width](https://github.com/sindresorhus/get-east-asian-width) | 1.7.0 | MIT |
 | [get-intrinsic](https://github.com/ljharb/get-intrinsic) | 1.3.0 | MIT |
 | [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT |
@@ -676,8 +659,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
@@ -700,8 +683,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [on-headers](https://github.com/jshttp/on-headers) | 1.1.0 | MIT |
 | [once](https://github.com/isaacs/once) | 1.4.0 | ISC |
 | [onetime](https://github.com/sindresorhus/onetime) | 5.1.2 | MIT |
-| [oniguruma-parser](https://github.com/slevithan/oniguruma-parser) | 0.12.2 | MIT |
-| [oniguruma-to-es](https://github.com/slevithan/oniguruma-to-es) | 4.3.6 | MIT |
 | [open](https://github.com/sindresorhus/open) | 11.0.4 | MIT |
 | [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
@@ -757,9 +738,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [recharts](https://github.com/recharts/recharts) | 3.10.1 | MIT |
 | [redux](https://github.com/reduxjs/redux) | 5.0.1 | MIT |
 | [redux-thunk](https://github.com/reduxjs/redux-thunk) | 3.1.0 | MIT |
-| [regex](https://github.com/slevithan/regex) | 6.1.0 | MIT |
-| [regex-recursion](https://github.com/slevithan/regex-recursion) | 6.0.2 | MIT |
-| [regex-utilities](https://github.com/slevithan/regex-utilities) | 2.3.0 | MIT |
 | [regexp-tree](https://github.com/DmitrySoshnikov/regexp-tree) | 0.1.27 | MIT |
 | [rehype-sanitize](https://github.com/rehypejs/rehype-sanitize) | 6.0.0 | MIT |
 | [rehype-stringify](https://github.com/rehypejs/rehype/tree/main/packages/rehype-stringify) | 10.0.1 | MIT |
@@ -773,7 +751,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [retry](https://github.com/tim-kos/node-retry) | 0.12.0 | MIT |
 | [retry](https://github.com/tim-kos/node-retry) | 0.13.1 | MIT |
 | [rfdc](https://github.com/davidmarkclements/rfdc) | 1.4.1 | MIT |
-| [rhino3dm](https://github.com/mcneel/rhino3dm) | 8.35.0 | MIT |
 | [rou3](https://github.com/h3js/rou3) | 0.9.2 | MIT |
 | [router](https://github.com/pillarjs/router) | 2.2.0 | MIT |
 | [run-applescript](https://github.com/sindresorhus/run-applescript) | 7.1.0 | MIT |
@@ -798,7 +775,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [sharp](https://github.com/lovell/sharp) | 0.35.5 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
-| [shiki](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
 | [side-channel](https://github.com/ljharb/side-channel) | 1.1.1 | MIT |
 | [side-channel-list](https://github.com/ljharb/side-channel-list) | 1.0.1 | MIT |
 | [side-channel-map](https://github.com/ljharb/side-channel-map) | 1.0.1 | MIT |
@@ -934,7 +910,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @flatten-js/core | 1.6.14 | MIT |
 | @jscad/modeling | 2.13.0 | MIT |
 | @lume/kiwi | 0.4.4 | BSD-3-Clause |
-| @resvg/resvg-wasm | 2.6.2 | MPL-2.0 |
 | @thednp/dommatrix | 3.1.2 | MIT |
 | @tscircuit/alphabet | 0.0.25 | MIT |
 | @tscircuit/alphabet | 0.0.26 | MIT |

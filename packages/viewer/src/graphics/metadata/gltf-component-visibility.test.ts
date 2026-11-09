@@ -5,7 +5,10 @@ import type {
   GeometryComponentNode,
   GeometryComponentPrimitiveRef,
 } from '@taucad/types';
-import { filterVisibleGltfPrimitives } from '#graphics/metadata/gltf-component-visibility.js';
+import {
+  filterVisibleGltfPrimitives,
+  resolvePickableComponentId,
+} from '#graphics/metadata/gltf-component-visibility.js';
 
 const capabilities: GeometryComponentCapabilities = {
   canHide: true,
@@ -86,5 +89,19 @@ describe('filterVisibleGltfPrimitives', () => {
 
   it('should retain primitives with no semantic owner', () => {
     expect(filter(['assembly'], [], [unowned])).toEqual([unowned]);
+  });
+});
+
+describe('resolvePickableComponentId', () => {
+  it('should resolve a picked face to its nearest non-face ancestor', () => {
+    expect(resolvePickableComponentId(manifest, 'face-a')).toBe('assembly');
+  });
+
+  it('should keep a picked component that is not a face', () => {
+    expect(resolvePickableComponentId(manifest, 'instance-b')).toBe('instance-b');
+  });
+
+  it('should keep an unknown component', () => {
+    expect(resolvePickableComponentId(manifest, 'missing')).toBe('missing');
   });
 });

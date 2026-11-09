@@ -23,6 +23,7 @@
     "README.md",
     "CHANGELOG.md",
     "THIRD_PARTY_LICENSES.md",
+    "licenses/kicad-libraries.md",
     "check-vendored-licenses.mjs"
   ],
   "keywords": [
@@ -66,6 +67,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@gltf-transform/functions": "catalog:",
     "@taucad/esbuild": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
@@ -104,6 +106,7 @@
     "graphics-debug": "catalog:",
     "minicssgrid": "catalog:",
     "nanoid": "catalog:",
+    "occt-import-js": "^0.0.23",
     "react": "catalog:",
     "rolldown": "catalog:",
     "schematic-symbols": "catalog:",
@@ -117,7 +120,6 @@
   },
   "dependencies": {
     "@gltf-transform/core": "catalog:",
-    "@resvg/resvg-wasm": "2.6.2",
     "@taucad/geometry-core": "workspace:*",
     "@tscircuit/manifold-2d": "catalog:"
   },

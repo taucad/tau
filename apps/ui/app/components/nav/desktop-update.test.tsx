@@ -52,6 +52,27 @@ describe('desktop update control', () => {
     expect(await screen.findByText(/Quitting normally leaves the update for later/u)).toBeInTheDocument();
     expect(screen.queryByText(/installs when you quit Tau/u)).not.toBeInTheDocument();
   });
+  it('asks to move Tau to Applications and moves it on request', async () => {
+    const source = fixture(
+      Promise.resolve({
+        ...ready,
+        phase: 'move-required',
+        detail: 'Tau is running from a read-only location. Move Tau to Applications to receive updates.',
+      }),
+    );
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Move Tau to Applications' }));
+    expect(await screen.findByText(/Move Tau to Applications to receive updates/u)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to Applications' }));
+    await waitFor(() => {
+      expect(source.bridge.download).toHaveBeenCalledOnce();
+    });
+    expect(source.bridge.install).not.toHaveBeenCalled();
+  });
   it('reveals APT policy without offering an installer action', async () => {
     const source = fixture(Promise.resolve({ ...ready, phase: 'system-managed' }));
     render(

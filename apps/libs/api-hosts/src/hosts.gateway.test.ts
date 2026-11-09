@@ -1,0 +1,601 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { Auth } from 'better-auth';
+import type { HttpAdapterHost } from '@nestjs/core';
+import { WebSocket, WebSocketServer } from 'ws';
+import type { RawData } from 'ws';
+
+import { hostFrameMaxPayload } from '#host-frame-relay.js';
+import { HostsGateway } from '#hosts.gateway.js';
+import { HostsService } from '#hosts.service.js';
+import type { DevWebSocketService, WebSocketConnectionHandler } from '@taucad/api-lifecycle';
+import type { ConfigService } from '@nestjs/config';
+import type { Environment } from '@taucad/api-core';
+import type { DatabaseService } from '@taucad/api-database';
+import type { RedisService } from '@taucad/api-redis';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { UpgradeRouter } from '@taucad/api-lifecycle';
+import { MetricsService } from '@taucad/api-observability/metrics';
+
+/** A `ws` socket as the gateway uses one: it closes, listens, and holds its frames while paused. */
+const routeSocket = (): WebSocket =>
+  ({
+    close: vi.fn(),
+    on: vi.fn(),
+    once: vi.fn(),
+    send: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+  }) as unknown as WebSocket;
+
+/**
+ * Drives the gateway through its dev-mode prefix registration so the admitted prefix and the route
+ * parsing are exercised together: they drifted apart once ('/v1/hosts/...' vs '/v1/agents/...') and
+ * closed every session socket with 'unknown host route'.
+ */
+describe('HostsGateway session routes', () => {
+  it('accepts a host runtime socket on the prefix it admits', async () => {
+    const acceptHostRoute = vi.fn(async () => undefined);
+    const hostsService = { acceptHostRoute } as unknown as HostsService;
+    let prefix: string | undefined;
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn(),
+      registerPrefixHandler: vi.fn((registered: string, register: WebSocketConnectionHandler) => {
+        prefix = registered;
+        handler = register;
+      }),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+
+    await gateway.onModuleInit();
+    expect(prefix).toBe('/v1/agents/sessions/');
+
+    const socket = routeSocket();
+    const request = {
+      url: `${prefix ?? ''}as_abc/host/runtime`,
+      headers: { host: 'localhost', authorization: 'Bearer grant' },
+    } as unknown as IncomingMessage;
+    await handler?.(socket, request);
+
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(acceptHostRoute).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'as_abc', route: 'runtime' }));
+    /* The session routes carry the same drop window as the control socket: the
+     * relay attaches its listener only after a grant read, a device lookup and a
+     * Redis connect. */
+    expect(socket.pause).toHaveBeenCalled();
+    expect(socket.resume).toHaveBeenCalled();
+  });
+
+  it('routes the third channel concern, and still refuses an unknown one', async () => {
+    const acceptHostRoute = vi.fn(async () => undefined);
+    const hostsService = { acceptHostRoute } as unknown as HostsService;
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn(),
+      registerPrefixHandler: vi.fn((_prefix: string, register: WebSocketConnectionHandler) => {
+        handler = register;
+      }),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const metrics = new MetricsService();
+    const rejections = vi.spyOn(metrics.wsUpgradeRejections, 'add');
+    const gateway = new HostsGateway(
+      hostsService,
+      devWebSocketService,
+      { api: { getSession: vi.fn(async () => null) } } as unknown as Auth,
+      {} as HttpAdapterHost,
+      undefined,
+      undefined,
+      metrics,
+    );
+    await gateway.onModuleInit();
+
+    const agentSocket = routeSocket();
+    await handler?.(agentSocket, {
+      url: '/v1/agents/sessions/as_abc/host/agent',
+      headers: { host: 'localhost', authorization: 'Bearer grant' },
+    } as unknown as IncomingMessage);
+    expect(agentSocket.close).not.toHaveBeenCalled();
+    expect(acceptHostRoute).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'as_abc', route: 'agent' }));
+
+    const unknownSocket = routeSocket();
+    await handler?.(unknownSocket, {
+      url: '/v1/agents/sessions/as_abc/host/chat',
+      headers: { host: 'localhost', authorization: 'Bearer grant' },
+    } as unknown as IncomingMessage);
+    expect(unknownSocket.close).toHaveBeenCalledWith(1008, 'unknown host route');
+    expect(rejections).toHaveBeenLastCalledWith(1, { 'ws.gateway': 'hosts', reason: 'unknown_route' });
+
+    const browserSocket = routeSocket();
+    await handler?.(browserSocket, {
+      url: '/v1/agents/sessions/as_abc/browser/agent',
+      headers: { host: 'localhost' },
+    } as unknown as IncomingMessage);
+    expect(browserSocket.close).toHaveBeenCalledWith(4401, 'browser session required');
+    expect(rejections).toHaveBeenLastCalledWith(1, { 'ws.gateway': 'hosts', reason: 'unauthenticated' });
+    expect(rejections).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** Every fake round trip lands on a later macrotask, like the real Postgres and Redis calls. */
+const later = async <T>(value: T): Promise<T> =>
+  new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(value);
+    }, 25);
+  });
+
+const deviceRow = {
+  id: 'device-1',
+  ownerId: 'owner-1',
+  label: 'workshop-mac',
+  credentialHash: 'never-returned',
+  createdAt: new Date(0),
+  lastSeenAt: null,
+  revokedAt: null,
+  cloudProjectId: null,
+};
+
+/** Redis and Postgres doubles whose latency is real enough to lose an unbuffered frame. */
+const presenceHarness = () => {
+  const values = new Map<string, string>();
+  const lastSeenWrites = { count: 0 };
+  const runRows: Array<Record<string, unknown>> = [];
+  const client = {
+    get: async (key: string) => later(values.get(key) ?? null),
+    set: async (key: string, value: string) => {
+      values.set(key, value);
+      return later('OK');
+    },
+    publish: async () => 1,
+    /* The three presence scripts, told apart by the command they run under the
+     * connectionId compare-and-set the real Lua performs. */
+    eval: async (script: string, ...arguments_: unknown[]) => {
+      const [, key, connectionId, replacement] = arguments_ as [number, string, string, unknown];
+      const raw = values.get(key);
+      if (!raw || (JSON.parse(raw) as { connectionId?: string }).connectionId !== connectionId) {
+        return 0;
+      }
+      if (script.includes("redis.call('SET'")) {
+        values.set(key, String(replacement));
+      } else if (script.includes("redis.call('DEL'")) {
+        values.delete(key);
+      }
+      return 1;
+    },
+  };
+  const redis = {
+    client,
+    createDuplicateClient: () => ({
+      status: 'wait',
+      connect: async () => later(undefined),
+      subscribe: async () => later(undefined),
+      on: () => undefined,
+      disconnect: () => undefined,
+    }),
+  } as unknown as RedisService;
+  const database = {
+    database: {
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => later([deviceRow]) }) }) }),
+      insert: () => ({
+        // oxlint-disable-next-line typescript/promise-function-async -- drizzle's builder is a thenable with methods on it, not a promise.
+        values: function values(row: Record<string, unknown>) {
+          const promise = (async (): Promise<void> => {
+            await later(undefined);
+            runRows.push(row);
+          })();
+          return Object.assign(promise, { onConflictDoUpdate: async () => promise });
+        },
+      }),
+      update: () => ({
+        set: () => ({
+          where: async () => {
+            lastSeenWrites.count += 1;
+            return later([deviceRow]);
+          },
+        }),
+      }),
+    },
+  } as unknown as DatabaseService;
+  const config = { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>;
+  return { values, lastSeenWrites, runRows, redis, database, config };
+};
+
+/**
+ * A real daemon sends `ready` in the same turn its socket opens, so the frame is
+ * on the wire while the API is still authenticating the device and registering
+ * the control connection. `ws` buffers nothing: whatever arrives before the
+ * gateway attaches its listener is gone, and with it `online`, the advertised
+ * capabilities and `lastSeenAt` (found live on 2026-09-03: the presence key held
+ * a bare `{connectionId}` for a daemon that had been connected for minutes).
+ */
+describe('HostsGateway control admission', () => {
+  const servers: Array<{ server: Server; sockets: WebSocketServer; client?: WebSocket; service: HostsService }> = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map(async (entry) => {
+        entry.client?.close();
+        entry.service.onModuleDestroy();
+        entry.sockets.close();
+        return new Promise<void>((resolve) => {
+          entry.server.close(() => {
+            resolve();
+          });
+        });
+      }),
+    );
+  });
+
+  const bootControlServer = async (service: HostsService): Promise<number> => {
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn((_path: string, register: WebSocketConnectionHandler) => {
+        handler = register;
+      }),
+      registerPrefixHandler: vi.fn(),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const gateway = new HostsGateway(service, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    await gateway.onModuleInit();
+
+    const sockets = new WebSocketServer({ noServer: true });
+    const server = createServer();
+    /* The same shape both real callers use: the handler runs synchronously
+     * inside the upgrade callback (DevWebSocketService and the Fastify path). */
+    server.on('upgrade', (request, socket, head) => {
+      sockets.handleUpgrade(request, socket, head, (accepted) => {
+        void handler?.(accepted, request);
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    servers.push({ server, sockets, service });
+    return (server.address() as AddressInfo).port;
+  };
+
+  it('writes the presence a ready frame that races registration advertises', async () => {
+    const { values, lastSeenWrites, redis, database, config } = presenceHarness();
+    const service = new HostsService(database, redis, config);
+    const port = await bootControlServer(service);
+
+    const client = new WebSocket(`ws://127.0.0.1:${String(port)}/v1/agents/control`, {
+      headers: { authorization: 'Bearer device-credential' },
+    });
+    servers.at(-1)!.client = client;
+    client.on('open', () => {
+      client.send(
+        JSON.stringify({
+          v: 1,
+          type: 'ready',
+          deviceId: 'device-1',
+          runtimeVersion: '1.0.0',
+          capacity: 2,
+          capabilities: { agent: { workspaceRoot: '/home/tau/projects' } },
+        }),
+      );
+    });
+
+    await vi.waitFor(
+      () => {
+        const raw = values.get('host:online:device-1');
+        expect(raw === undefined ? undefined : JSON.parse(raw)).toMatchObject({
+          runtimeVersion: '1.0.0',
+          capacity: 2,
+          capabilities: { agent: { workspaceRoot: '/home/tau/projects' } },
+        });
+      },
+      { timeout: 5000, interval: 25 },
+    );
+    expect(lastSeenWrites.count).toBe(1);
+  });
+
+  /**
+   * The run directory's whole write path, from the daemon's socket: a `run`
+   * frame is the only way a row is ever created, and it must land through the
+   * same paused-socket admission the `ready` frame needed.
+   */
+  it('files a run frame from the host control socket in the directory', async () => {
+    const { runRows, redis, database, config } = presenceHarness();
+    const service = new HostsService(database, redis, config, {
+      start: async () => ({ reference: 'unused' }),
+      stop: async () => undefined,
+    });
+    const port = await bootControlServer(service);
+
+    const client = new WebSocket(`ws://127.0.0.1:${String(port)}/v1/agents/control`, {
+      headers: { authorization: 'Bearer device-credential' },
+    });
+    servers.at(-1)!.client = client;
+    client.on('open', () => {
+      client.send(
+        JSON.stringify({
+          v: 1,
+          type: 'run',
+          runId: 'run_1',
+          chatId: 'chat_1',
+          state: 'running',
+          updatedAt: new Date(1000).toISOString(),
+        }),
+      );
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(runRows[0]).toMatchObject({
+          runId: 'run_1',
+          chatId: 'chat_1',
+          ownerId: 'owner-1',
+          placement: 'device-1',
+          state: 'running',
+        });
+      },
+      { timeout: 5000, interval: 25 },
+    );
+  });
+
+  it('discards frames from a socket whose credential is rejected', async () => {
+    const { values, redis, config } = presenceHarness();
+    const rejecting = {
+      database: {
+        select: () => ({ from: () => ({ where: () => ({ limit: async () => later([]) }) }) }),
+      },
+    } as unknown as DatabaseService;
+    const service = new HostsService(rejecting, redis, config);
+    const port = await bootControlServer(service);
+
+    const client = new WebSocket(`ws://127.0.0.1:${String(port)}/v1/agents/control`, {
+      headers: { authorization: 'Bearer wrong-credential' },
+    });
+    servers.at(-1)!.client = client;
+    client.on('open', () => {
+      client.send(JSON.stringify({ v: 1, type: 'ready', deviceId: 'device-1', runtimeVersion: '1.0.0', capacity: 1 }));
+    });
+
+    const closed = await new Promise<number>((resolve) => {
+      client.once('close', resolve);
+    });
+    expect(closed).toBe(4401);
+    expect(values.size).toBe(0);
+  });
+
+  /* A replaced control socket closes late; its presence delete must not take out
+   * the successor's key (the compare-and-set in `deleteControlPresence`). */
+  it('keeps the successor presence when the socket it replaced closes', async () => {
+    const { values, redis, database, config } = presenceHarness();
+    const service = new HostsService(database, redis, config);
+    const closeHandlers: Array<() => void> = [];
+    const controlSocket = () =>
+      ({
+        close: vi.fn(),
+        once: vi.fn((event: string, listener: () => void) => {
+          if (event === 'close') {
+            closeHandlers.push(listener);
+          }
+        }),
+        readyState: 1,
+      }) as unknown as WebSocket;
+
+    await service.registerControl('device-1', controlSocket());
+    const first = JSON.parse(values.get('host:online:device-1') ?? '{}') as { connectionId?: string };
+    await service.registerControl('device-1', controlSocket());
+    const second = JSON.parse(values.get('host:online:device-1') ?? '{}') as { connectionId?: string };
+    expect(second.connectionId).not.toBe(first.connectionId);
+
+    closeHandlers[0]?.();
+    await later(undefined);
+    expect(JSON.parse(values.get('host:online:device-1') ?? '{}')).toMatchObject({
+      connectionId: second.connectionId,
+    });
+    service.onModuleDestroy();
+  });
+});
+
+/**
+ * `handleControlMessage` reaches PostgreSQL and Redis, so it can reject for reasons
+ * that have nothing to do with the frame — a dropped pooled connection during the
+ * `lastSeenAt` write is enough. The control chain is assigned synchronously from a
+ * `message` listener, so a rejection nobody catches reaches the process-level
+ * handler, which rethrows it and takes the whole replica down with every device's
+ * socket. Swallowing is not the answer either: a daemon whose `ready` was dropped
+ * believes its presence write landed, so the connection ends and it reconnects.
+ */
+describe('HostsGateway control message failures', () => {
+  const controlGateway = (
+    handleControlMessage: HostsService['handleControlMessage'],
+  ): { open: (deviceId: string) => Promise<{ socket: WebSocket; send: (frame: string) => void }> } => {
+    const hostsService = {
+      authenticateDevice: vi.fn(async (authorization?: string) => ({ id: authorization ?? 'device-1' })),
+      registerControl: vi.fn(async () => undefined),
+      handleControlMessage,
+    } as unknown as HostsService;
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn((_path: string, register: WebSocketConnectionHandler) => {
+        handler = register;
+      }),
+      registerPrefixHandler: vi.fn(),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const started = gateway.onModuleInit();
+
+    return {
+      open: async (deviceId: string) => {
+        await started;
+        const frames: Array<(raw: RawData) => void> = [];
+        const socket = {
+          close: vi.fn(),
+          on: vi.fn((event: string, listener: (raw: RawData) => void) => {
+            if (event === 'message') {
+              frames.push(listener);
+            }
+          }),
+          once: vi.fn(),
+          send: vi.fn(),
+          pause: vi.fn(),
+          resume: vi.fn(),
+        } as unknown as WebSocket;
+        await handler?.(socket, {
+          url: '/v1/agents/control',
+          headers: { host: 'localhost', authorization: deviceId },
+        } as unknown as IncomingMessage);
+        return {
+          socket,
+          send: (frame: string) => {
+            for (const listener of frames) {
+              listener(Buffer.from(frame, 'utf8'));
+            }
+          },
+        };
+      },
+    };
+  };
+
+  /** Let every queued microtask settle, then the macrotask an unhandled rejection is reported on. */
+  const settle = async (): Promise<void> => {
+    for (let turn = 0; turn < 4; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- draining turn by turn is the point.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+  };
+
+  it('closes the control socket and keeps the queue usable when a frame fails', async () => {
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const handleControlMessage = vi
+        .fn<HostsService['handleControlMessage']>()
+        .mockRejectedValueOnce(new Error('connection terminated unexpectedly'))
+        .mockResolvedValue(undefined);
+      const gateway = controlGateway(handleControlMessage);
+
+      const first = await gateway.open('device-1');
+      first.send('{"v":1,"type":"ready","deviceId":"device-1"}');
+      await settle();
+
+      expect(first.socket.close).toHaveBeenCalledWith(1011, expect.any(String));
+      expect(rejections).toEqual([]);
+
+      /* The chain must not stay poisoned: frames already in flight when the close
+       * was issued still reach the service rather than being dropped by a rejected
+       * `previous`. */
+      first.send('{"v":1,"type":"run","runId":"run_1"}');
+      await settle();
+      expect(handleControlMessage).toHaveBeenCalledTimes(2);
+      expect(rejections).toEqual([]);
+
+      /* One device's failure is its own: another device's control socket keeps working. */
+      const second = await gateway.open('device-2');
+      second.send('{"v":1,"type":"ready","deviceId":"device-2"}');
+      await settle();
+      expect(second.socket.close).not.toHaveBeenCalled();
+      expect(handleControlMessage).toHaveBeenCalledTimes(3);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});
+
+describe('HostsGateway in production', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('closes a socket 1012 the moment the process begins to stop, even one still in admission', async () => {
+    vi.stubEnv('DEV', false);
+    const server = createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const shutdown = new ShutdownService();
+    // Admission never finishes, so no service ever registers this socket.
+    const hostsService = {
+      authenticateDevice: vi.fn(async () => Promise.withResolvers<never>().promise),
+    } as unknown as HostsService;
+    const gateway = new HostsGateway(
+      hostsService,
+      {} as DevWebSocketService,
+      {} as Auth,
+      { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
+      new UpgradeRouter(shutdown),
+      shutdown,
+    );
+    try {
+      await gateway.onModuleInit();
+      const { port } = server.address() as AddressInfo;
+      const client = new WebSocket(`ws://127.0.0.1:${port}/v1/agents/control`);
+      await new Promise((resolve) => {
+        client.once('open', resolve);
+      });
+      const closed = new Promise<number>((resolve) => {
+        client.once('close', resolve);
+      });
+
+      shutdown.stop();
+
+      await expect(closed).resolves.toBe(1012);
+    } finally {
+      await gateway.onModuleDestroy();
+      server.closeAllConnections();
+      server.close();
+    }
+    // Well under `ws`'s 30 s close timeout: the close handshake completes, so the socket cannot hold a drain.
+  }, 5000);
+
+  it('closes a socket 1009 when one frame exceeds the host frame bound', async () => {
+    vi.stubEnv('DEV', false);
+    const server = createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const shutdown = new ShutdownService();
+    // Admission completes, so the socket is listening and resumed when the frame arrives.
+    const hostsService = {
+      authenticateDevice: vi.fn(async () => ({ id: 'agent_oversize' })),
+      registerControl: vi.fn(async () => undefined),
+    } as unknown as HostsService;
+    const gateway = new HostsGateway(
+      hostsService,
+      {} as DevWebSocketService,
+      {} as Auth,
+      { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
+      new UpgradeRouter(shutdown),
+      shutdown,
+    );
+    try {
+      await gateway.onModuleInit();
+      const { port } = server.address() as AddressInfo;
+      const client = new WebSocket(`ws://127.0.0.1:${port}/v1/agents/control`);
+      await new Promise((resolve) => {
+        client.once('open', resolve);
+      });
+      const closed = new Promise<number>((resolve) => {
+        client.once('close', resolve);
+      });
+
+      await vi.waitFor(() => {
+        expect(hostsService.registerControl).toHaveBeenCalledOnce();
+      });
+      client.send(new Uint8Array(hostFrameMaxPayload + 1));
+
+      // `ws` refuses the frame with 1009 and emits 'error'; the gateway absorbs it rather than ending the process.
+      await expect(closed).resolves.toBe(1009);
+    } finally {
+      await gateway.onModuleDestroy();
+      server.closeAllConnections();
+      server.close();
+    }
+  }, 10_000);
+});

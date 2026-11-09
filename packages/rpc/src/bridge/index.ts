@@ -2,7 +2,11 @@ export type { MessagePortLike, Port } from '#port.js';
 
 export type {
   BridgeCallOptions,
+  BridgeCallTimeout,
+  BridgeLongCall,
+  BridgeProgress,
   BridgeProtocolSchemas,
+  BridgeServerLongCall,
   BridgeWatchEvent,
   BridgeWatchRequest,
   StringKeyedObject,

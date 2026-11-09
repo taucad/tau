@@ -533,7 +533,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
   await target.expectVisible(chatTrigger, 60_000);
 
   const searchButton = selectors.getByRole('button', { name: 'Search', exact: true });
-  const newProjectButton = selectors.getByRole('link', { name: /New Project/u });
+  const newProjectButton = selectors.getByRole('link', { name: /New project/u });
   await target.expectVisible(searchButton);
   await target.expectVisible(newProjectButton);
   const headerControlMetrics = await target.evaluate(() => {
@@ -541,7 +541,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
       button.textContent.trim().startsWith('Search'),
     );
     const newProject = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')].find((button) =>
-      button.textContent.includes('New Project'),
+      button.textContent.includes('New project'),
     );
     /* `ProjectsLabel` appends a `N live` count beside the word whenever a
      * project is open (`project-navigation.tsx:427-430`), so the label reads
@@ -558,7 +558,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
      * standing destinations live: `navSecondary` — and with it the `Files` row
      * this used to read — moved into the user dropdown in `be3d0eb6e`, and
      * `Project Library` has never been a committed label. */
-    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
+    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'All projects');
     const community = navButtons.find((button) => button.textContent.trim() === 'Community');
     if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
@@ -607,7 +607,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     expect(Math.abs(edges[0]! - headerControlMetrics.horizontalEdges[0]![0]!)).toBeLessThanOrEqual(0.5);
     expect(Math.abs(edges[1]! - headerControlMetrics.horizontalEdges[0]![1]!)).toBeLessThanOrEqual(0.5);
   }
-  await target.expectVisible(selectors.getByRole('link', { name: 'Projects', exact: true }));
+  await target.expectVisible(selectors.getByRole('link', { name: 'All projects', exact: true }));
 
   const paneHeaderHeightDelta = await target.evaluate(() => {
     const chatHeader = document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"]');

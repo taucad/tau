@@ -10,8 +10,15 @@ import {
   isUnhandledAbortRejection,
   scrubSelectorText,
   scrubSentryBreadcrumb,
+  sentryIntegrations,
 } from '#lib/sentry.lib.js';
-import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease, staleBuildFingerprint } from '#lib/sentry-event.lib.js';
+import {
+  automatedRunEnvironment,
+  scrubSentryEvent,
+  sentryEnvelopeUrl,
+  sentryRelease,
+  staleBuildFingerprint,
+} from '#lib/sentry-event.lib.js';
 
 const rejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
 
@@ -67,11 +74,32 @@ describe('beforeSendSentryEvent', () => {
     expect(beforeSendSentryEvent(rejectionEvent(), { originalException: abort })).toBeNull();
   });
 
+  it('groups a transient network failure apart at warning level', () => {
+    const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: new TypeError('Failed to fetch') });
+    expect(sent?.level).toBe('warning');
+    expect(sent?.fingerprint).toStrictEqual(['transient-network-failure']);
+  });
+
   it('scrubs and keeps any other event', () => {
     const event: ErrorEvent = { ...rejectionEvent(), user: { email: 'person@example.com' } };
     const sent = beforeSendSentryEvent(event, { originalException: new Error('boom') });
     expect(sent?.exception).toStrictEqual(rejectionEvent().exception);
     expect(sent?.user).toBeUndefined();
+  });
+});
+
+describe('automatedRunEnvironment', () => {
+  it('marks a deployment environment as an automated run once', () => {
+    expect(automatedRunEnvironment('staging')).toBe('staging-e2e');
+    expect(automatedRunEnvironment('staging-e2e')).toBe('staging-e2e');
+    expect(automatedRunEnvironment(undefined)).toBeUndefined();
+  });
+
+  it('files an event from a browser under automation apart from real use', () => {
+    vi.stubGlobal('navigator', { webdriver: true });
+    expect(scrubSentryEvent({ type: undefined, environment: 'staging' }).environment).toBe('staging-e2e');
+    vi.unstubAllGlobals();
+    expect(scrubSentryEvent({ type: undefined, environment: 'staging' }).environment).toBe('staging');
   });
 });
 
@@ -284,5 +312,38 @@ describe('sentryRelease', () => {
 
   it('should leave the release unset for a bundle without a build id', () => {
     expect(sentryRelease(0)).toBeUndefined();
+  });
+});
+
+describe('sentryIntegrations', () => {
+  it('should count one release-health session per page load, replacing the default per-navigation one', () => {
+    const defaults = Sentry.getDefaultIntegrations({});
+    expect(defaults.some((integration) => integration.name === 'BrowserSession')).toBe(true);
+
+    const integrations = sentryIntegrations(defaults);
+
+    expect(integrations.filter((integration) => integration.name === 'BrowserSession')).toHaveLength(1);
+    expect(integrations.at(-1)?.name).toBe('BrowserSession');
+    expect(integrations).toHaveLength(defaults.length);
+  });
+
+  it('should keep the same session across a client-side navigation', async () => {
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      release: 'test',
+      defaultIntegrations: false,
+      integrations: sentryIntegrations([]),
+      transport: () => ({ send: async () => ({}), flush: async () => true }),
+    });
+    try {
+      const before = Sentry.getIsolationScope().getSession()?.sid;
+      expect(before).toBeDefined();
+
+      globalThis.history.pushState({}, '', '/elsewhere');
+
+      expect(Sentry.getIsolationScope().getSession()?.sid).toBe(before);
+    } finally {
+      await Sentry.close();
+    }
   });
 });

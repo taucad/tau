@@ -70,10 +70,6 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('@taucad/ui/components/client-only', () => ({
-  ClientOnly: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
-}));
-
 vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children?: React.ReactNode }) => <span>{children}</span>,
@@ -161,7 +157,7 @@ describe('NavUser', () => {
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
   });
 
-  /* A phone opens the sidebar as a sheet (z-100) the dropdown would sit behind; the Help menu opens in a drawer there. */
+  /* On a phone the Help menu opens in a drawer. */
   it('should open Help in a drawer titled Help on a phone', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 

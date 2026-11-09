@@ -5,7 +5,9 @@
  * dispose) so concrete providers only implement storage-specific primitives.
  */
 
-import type { FileSystemProvider, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { FileSystemProvider, FileStat, ProviderCapabilities } from '#types.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { applyBatchWithPrimitives } from '#backend/batch.js';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /**
@@ -53,6 +55,38 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
     this._assertRootedPath(path);
     const raw = await this.readFileRaw(path);
     return encoding === 'utf8' ? new TextDecoder().decode(raw) : raw;
+  }
+
+  /**
+   * Write `path` from a stream. This fallback gathers the stream and writes it
+   * once, so the path never holds part of it; a provider that can stage chunks
+   * outside memory overrides it.
+   *
+   * @param path - Absolute file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public async writeFileStream(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    try {
+      this._assertRootedPath(path);
+    } catch (error) {
+      await source.cancel(error).catch(() => undefined);
+      throw error;
+    }
+    const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+    let size = 0;
+    const reader = source.getReader();
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      chunks.push(read.value);
+      size += read.value.byteLength;
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    await this.writeFile(path, bytes);
   }
 
   /**
@@ -125,6 +159,18 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   }
 
   /**
+   * Apply one batch through this provider's primitives (charter D2). A
+   * provider with a native batch overrides it.
+   *
+   * @param entries - One phase's entries for this provider, in provider paths.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  public async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    return applyBatchWithPrimitives(this, entries, options);
+  }
+
+  /**
    * Stat `path` without following symbolic links. Browser backends have no
    * symlinks, so this delegates to {@link stat}.
    *
@@ -145,7 +191,6 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   public abstract writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   public abstract readdir(path: string): Promise<string[]>;
   public abstract stat(path: string): Promise<FileStat>;
-  public abstract stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   public abstract unlink(path: string): Promise<void>;
   public abstract rmdir(path: string): Promise<void>;
   public abstract rename(from: string, to: string): Promise<void>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BillingModule } from '#api/billing/billing.module.js';
+import { BillingModule } from '@taucad/api-billing';
 import { TelemetryPurposeModule } from '#api/telemetry-purposes/telemetry-purpose.module.js';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView, maskedPathCode } from '#composed-view.js';
-import type { ComposedView } from '#composed-view.js';
+import type { ComposedOverlayNode, ComposedView, ComposedViewOverlay } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
 
 /**
@@ -32,6 +32,38 @@ let provider: MemoryProvider;
 /** The executor as every host composes it: one `'agent'` view over the checkout. */
 const executorView = (): ComposedView =>
   composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy });
+
+const skillsRoot = '.agents/skills';
+const skillBody = '---\nname: demo\ndescription: Demo skill\n---\n';
+
+/** A one-skill system bundle, shaped as the producer in `libs/agent-tools` builds it. */
+const skillOverlay = (): ComposedViewOverlay => {
+  const nodes = new Map<string, ComposedOverlayNode>([
+    ['', { type: 'dir', children: ['.agents'] }],
+    ['.agents', { type: 'dir', children: ['skills'] }],
+    [skillsRoot, { type: 'dir', children: ['demo'] }],
+    [`${skillsRoot}/demo`, { type: 'dir', children: ['SKILL.md'] }],
+    [
+      `${skillsRoot}/demo/SKILL.md`,
+      {
+        type: 'file',
+        size: new TextEncoder().encode(skillBody).byteLength,
+        contentKind: 'text',
+        lineCount: skillBody.split('\n').length,
+      },
+    ],
+  ]);
+  return {
+    root: skillsRoot,
+    source: 'system-skills',
+    unit: (path) =>
+      path === `${skillsRoot}/demo` || path.startsWith(`${skillsRoot}/demo/`)
+        ? { root: `${skillsRoot}/demo`, identity: 'skill:demo@1.0.0#demo-fingerprint' }
+        : undefined,
+    node: (path) => nodes.get(path),
+    read: async () => new TextEncoder().encode(skillBody),
+  };
+};
 
 beforeEach(async () => {
   provider = new MemoryProvider();
@@ -104,5 +136,21 @@ describe('the executor view over a project', () => {
     expect(await provider.readFile('src/main.ts', 'utf8')).toBe('export default () => 1;\n');
     expect(await provider.readFile('tau.json', 'utf8')).toBe('{"kernel":"jscad"}\n');
     expect(await provider.readFile('.tau/parameters/main.json', 'utf8')).toBe('{"revision":"r1"}\n');
+  });
+
+  /* Invariant I1: the system skills belong to the agent's tool view, which
+   * composes them as an overlay; an executor composes none, so a project with no
+   * `.agents` of its own shows an executor no `.agents` at all. */
+  it('should not see the system skills the agent tool view composes', async () => {
+    const toolView = composeView(
+      { filesystem: provider },
+      { consumer: 'agent', policy: tauPathPolicy, overlays: [skillOverlay()] },
+    );
+    const view = executorView();
+
+    expect(await toolView.readFile(`${skillsRoot}/demo/SKILL.md`, 'utf8')).toBe(skillBody);
+    expect(await view.exists(skillsRoot)).toBe(false);
+    expect(await view.exists(`${skillsRoot}/demo/SKILL.md`)).toBe(false);
+    expect(await view.readdir('')).not.toContain('.agents');
   });
 });

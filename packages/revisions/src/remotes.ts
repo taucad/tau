@@ -66,6 +66,37 @@ export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string => {
 };
 
 /**
+ * Where the hosted catalogue of a Tau repository is (charter D8).
+ *
+ * Only a project's own Tau Cloud repository on the API's origin has one; any
+ * other URL — a third-party remote, another origin — answers `undefined`, and
+ * a fetch from it goes over smart HTTP as before.
+ *
+ * @param apiBaseUrl - Origin the Tau API is reachable at, or `undefined` before the page has said.
+ * @param remoteUrl - A remote's smart-HTTP URL.
+ * @returns `GET /v1/projects/<projectId>/git/catalogue` on that origin, or `undefined`.
+ * @public
+ *
+ * @example <caption>A project's catalogue, from its remote</caption>
+ * ```typescript
+ * import { tauCatalogueUrl } from '@taucad/revisions';
+ *
+ * tauCatalogueUrl('https://api.tau.new', 'https://api.tau.new/v1/git/p1.git');
+ * // 'https://api.tau.new/v1/projects/p1/git/catalogue'
+ * ```
+ */
+export const tauCatalogueUrl = (apiBaseUrl: string | undefined, remoteUrl: string): string | undefined => {
+  if (apiBaseUrl === undefined || !isTauApiUrl(apiBaseUrl, remoteUrl)) {
+    return undefined;
+  }
+  const base = apiBaseUrl.replace(/\/+$/u, '');
+  const projectId = /\/v1\/git\/([\w-]+)\.git\/?$/u.exec(remoteUrl)?.[1];
+  return projectId === undefined || remoteUrl.replace(/\/+$/u, '') !== tauRemoteUrl(base, projectId)
+    ? undefined
+    : `${base}/v1/projects/${projectId}/git/catalogue`;
+};
+
+/**
  * One remote record from a name and a URL.
  *
  * @param name - Name git's config holds this remote under.
@@ -348,6 +379,8 @@ export type RemoteTransportContext = Readonly<{
   stderr?: string;
   /** A 429's `Retry-After` header, on the leg that can read it. */
   retryAfter?: string;
+  /** A 401's or 403's `WWW-Authenticate` header, on the leg that can read it. */
+  authenticate?: string;
 }>;
 
 /**
@@ -463,6 +496,44 @@ const gitStderrRefusal = (stderr: string): RemoteRefusal => {
   };
 };
 
+/*
+ * The server's own compare-and-set refusing a command: the ref was not at
+ * the old value this push sent, so another writer moved it. What git says
+ * about that ref on the sideband decides: `cannot lock ref '<ref>': is at
+ * <oid> but expected <oid>`, `reference already exists` for a create, a bare
+ * `unable to resolve reference '<ref>'` for a ref removed since, or
+ * reftable's `reference is missing but expected <oid>` and `incorrect old
+ * value provided`. A lock another process holds (`Unable to create
+ * '<ref>.lock': File exists`) is contention, not a moved ref, and so is a ref
+ * the server cannot read (`…: reference broken`, or a permission or I/O
+ * error): both keep git's own text.
+ *
+ * The per-ref status cannot decide while the sideband names the ref: git
+ * 2.43 reports every failed transaction as `failed to update ref`, and the
+ * batched receive-pack of git 2.51 and later reports a held lock as
+ * `reference already exists`, the same words as a create that lost. Only a
+ * server that said nothing about the ref is read from its status, and then
+ * `reference already exists` is not taken as moved.
+ */
+const movedRefSaying =
+  /is at [\da-f]+ but expected [\da-f]+|reference is missing but expected [\da-f]+|reference already exists|reference does not exist|unable to resolve reference '[^']*'$|incorrect old value provided/iu;
+/**
+ * Whether the server's compare-and-set refused one ref because another writer
+ * moved it: a lost lease (D39). Both legs ask it, so they answer alike.
+ *
+ * @internal
+ * @param remoteName - The ref on the remote.
+ * @param reason - The per-ref status the server reported.
+ * @param said - The remote's sideband lines.
+ * @returns Whether the ref moved.
+ */
+export const refMoved = (remoteName: string, reason: string, said: readonly string[]): boolean => {
+  const about = said.filter((line) => line.includes(`'${remoteName}'`));
+  return about.length > 0
+    ? about.some((line) => movedRefSaying.test(line))
+    : movedRefSaying.test(reason) && !/already exists/iu.test(reason);
+};
+
 /**
  * The sentence a refused ref carries, preferring the server's own (N4).
  *
@@ -515,7 +586,9 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
       return 'Syncing files to Tau Cloud is a paid plan feature.';
     }
     case 'REMOTE_FORBIDDEN': {
-      return 'This remote refused this device.';
+      return remote?.startsWith('github-')
+        ? 'GitHub refused access to this repository for the connected account.'
+        : 'This remote refused this device.';
     }
     case 'REMOTE_NOT_FOUND': {
       return 'This remote has no repository at this address for your account.';
@@ -537,6 +610,12 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
     }
   }
 };
+
+/* Whether a refusal says its credential expired: in a `WWW-Authenticate` challenge, a reconnect code, or its own words. */
+const tokenExpired = (answered: RemoteRefusal, authenticate: string | undefined): boolean =>
+  (authenticate !== undefined && /invalid_token|expired/iu.test(authenticate)) ||
+  answered.code === 'GITHUB_RECONNECT_REQUIRED' ||
+  (answered.message !== undefined && /expired|bad credentials/iu.test(answered.message));
 
 /**
  * One remote refusal, classified — the single place either leg turns what a
@@ -636,6 +715,11 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
   /* A remote that is not Tau's own is credited by a token the person granted to
    * *it*, so refusing that token is something they can grant again (W12). */
   const proxied = context.remote !== undefined && remoteKindOf(context.remote) === 'git';
+  /* GitHub answers a token it no longer honours with 401; its 403 to a live
+   * token is this repository's access withdrawn, which no reconnect restores,
+   * unless the answer itself says the token expired. */
+  const githubAccessWithdrawn =
+    status === 403 && context.remote?.startsWith('github-') === true && !tokenExpired(answered, context.authenticate);
   const code: RevisionPortErrorCode =
     status === 401
       ? proxied
@@ -644,7 +728,7 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
       : status === 403
         ? answered.code === 'GIT_SYNC_NOT_ENTITLED'
           ? 'REMOTE_NOT_ENTITLED'
-          : proxied
+          : proxied && !githubAccessWithdrawn
             ? 'REMOTE_REAUTHORIZATION_REQUIRED'
             : 'REMOTE_FORBIDDEN'
         : status === 404 || status === 410
@@ -681,6 +765,7 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
   const sentence = code === 'REMOTE_REAUTHORIZATION_REQUIRED' && status === 401 ? undefined : answered.message;
   return new RevisionPortError(code, sentence ?? refusalSentence(code, context.remote), {
     cause: error,
+    status,
     ...(status === 429
       ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }
       : {}),

@@ -1,4 +1,4 @@
-import { Logger, VersioningType } from '@nestjs/common';
+import { Logger, ServiceUnavailableException, VersioningType } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -7,8 +7,7 @@ import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schema
 import type { Auth } from 'better-auth';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { VoiceController } from '#api/voice/voice.controller.js';
 import { VoiceService } from '#api/voice/voice.service.js';
@@ -154,15 +153,27 @@ describe('VoiceController over HTTP', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('should turn a provider refusal into an HTTP error before the stream commits', async () => {
+  it('should turn a provider refusal of the recording into a 422 before the stream commits', async () => {
     const app = await createApp(stubProvider(refusing(new TranscriptionProviderError('bad audio', 400))).provider);
 
     const response = await post(app);
 
-    expect(response.statusCode).toBe(503);
+    expect(response.statusCode).toBe(422);
     expect(response.json<{ error: string }>().error).toBe(
       'The recording could not be transcribed. Try recording again.',
     );
+  });
+
+  it('should report an upstream refusal as a 503 that carries the provider error as its cause', async () => {
+    const upstream = new TranscriptionProviderError('upstream overloaded', 529);
+    const service = new VoiceService([stubProvider(refusing(upstream)).provider]);
+
+    const refusal = await service
+      .transcribe({ audio: new Uint8Array(4), contentType: 'audio/wav', signal: new AbortController().signal })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(ServiceUnavailableException);
+    expect((refusal as ServiceUnavailableException).cause).toBe(upstream);
   });
 
   it('should end a stream that fails after it started with an error line', async () => {

@@ -3,11 +3,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TauMetrics } from '@taucad/telemetry';
-import { DatabaseService } from '#database/database.service.js';
-import type { Environment } from '#config/environment.config.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '#telemetry/metrics.js';
+import { DatabaseService } from '@taucad/api-database';
+import type { Environment } from '@taucad/api-core';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '@taucad/api-observability/metrics';
 import {
   completeErasures,
   leaseErasureTraces,
@@ -65,9 +65,12 @@ const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) 
  * Each pass first purges backlog payloads past their retention and deletes
  * receipts a day past it, with no vendor call, so it runs whether or not
  * delivery or Langfuse is configured. It then asks Langfuse to delete a batch of journal traces, then, once the
- * recheck window has passed, reads each one back: only a 404 settles it. A
- * trace still present is requested again with backoff, and an unanswered
- * read is retried without counting as absence. That half runs whenever
+ * recheck window has passed, reads each one back from the v2 observations
+ * list: only an empty page settles it. A trace still present is requested
+ * again with backoff, and an unanswered read (a legacy-API 410, any other
+ * non-ok answer, a transport failure) is retried without counting as
+ * absence and counted as `recheck`, so a loop that never confirms alerts
+ * (`agent-evidence-erasure-stuck`). That half runs whenever
  * Langfuse credentials are configured, whether or not delivery is enabled,
  * so pausing delivery never pauses erasure. Each pass also samples the
  * backlog for the health series (T14). Only counts and bounded codes are

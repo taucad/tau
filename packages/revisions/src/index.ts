@@ -8,7 +8,15 @@
 
 export { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 export type { IsomorphicGitCheckoutOptions } from '#isomorphic-git-adapter.js';
+export { createRawObjectReader } from '#object-store/raw-object-reader.js';
+export { createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
+export type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
+export { ComputeWorkerCrashedError } from '#compute-worker/errors.js';
+export type { ComputeMethod } from '#compute-worker/errors.js';
+export { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
+export type { ComputeCrashReport } from '#compute-worker/supervisor.js';
 export { bootstrapRemoteRevisionStore } from '#remote-bootstrap.js';
+export { coveredByIgnoreListing } from '#git-ignore.js';
 export { revisionBranchName } from '#revision-authority.js';
 export type {
   BranchHeadUpdateResult,
@@ -123,6 +131,7 @@ export {
   remoteOf,
   remoteTrackingRef,
   remoteTransportError,
+  tauCatalogueUrl,
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';
@@ -178,11 +187,16 @@ export type {
 export type {
   LargeObjectsFacet,
   LargeObjectsReport,
+  ProjectReadiness,
   RevisionBranchFacet,
   RevisionConflictFacet,
   RevisionLine,
   RevisionStatusProjection,
 } from '#project-revisions.types.js';
+export { reachesReadiness, readinessOf, settleReadiness } from '#open/readiness.js';
+export { PendingError } from '#open/content-reads.js';
+export type { ContentReadOptions, PlaceholderRequest, ReadOutcome } from '#open/content-reads.js';
+export type { ProjectReadinessReading } from '#open/readiness.js';
 export type { BranchOperation } from '#branch.types.js';
 export type { ResolutionSide } from '#resolution.types.js';
 /* W5 RM-S9: the attempt key every turn verb and answer carries (D14); plain data, so the barrel stays free of `xstate`. */

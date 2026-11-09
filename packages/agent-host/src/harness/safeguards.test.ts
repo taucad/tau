@@ -88,4 +88,55 @@ describe('AgentSafeguards', () => {
     expect(result.content[0]).toMatchObject({ type: 'text' });
     expect(JSON.stringify(result.content)).toContain('Please review what was attempted');
   });
+
+  /* Slice (a): a grep that could not search a pending file has not found nothing. */
+  it('does not call a grep empty when it names files it could not search', async () => {
+    const grepCalls = (pendingFiles: readonly string[]): AgentMessage[] =>
+      Array.from({ length: 3 }, (_, index): AgentMessage[] => [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: `grep-${index}`, name: 'grep', arguments: { pattern: 'marker' } }],
+          api: 'openai-responses',
+          provider: 'stub',
+          model: 'stub',
+          usage,
+          stopReason: 'toolUse',
+          timestamp: index,
+        },
+        {
+          role: 'toolResult',
+          toolCallId: `grep-${index}`,
+          toolName: 'grep',
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                matches: [],
+                totalMatches: 0,
+                appliedHeadLimit: 50,
+                appliedOffset: 0,
+                ...(pendingFiles.length === 0 ? {} : { pendingFiles }),
+              }),
+            },
+          ],
+          isError: false,
+          timestamp: index,
+        },
+      ]).flat();
+    const patternsFor = async (messages: AgentMessage[]): Promise<string[]> => {
+      const recorded: SafeguardRecord[] = [];
+      const safeguards = createAgentSafeguards({
+        record: async (entry: SafeguardRecord) => {
+          recorded.push(entry);
+        },
+        recordOutcome: async () => undefined,
+        hash: async (input) => `hash:${input}`,
+      });
+      await safeguards.transformContext(messages);
+      return recorded.flatMap((entry) => (entry.kind === 'nudge' ? [entry.pattern] : []));
+    };
+
+    expect(await patternsFor(grepCalls([]))).toContain('empty_result');
+    expect(await patternsFor(grepCalls(['models/part.step']))).not.toContain('empty_result');
+  });
 });

@@ -22,13 +22,19 @@ type Counted = Readonly<{
   actors: RevisionActors;
   reads: string[];
   treeReads: string[];
+  /** The paths each tree read asked for; `undefined` for a whole tree. */
+  treePaths: Array<readonly string[] | undefined>;
   /** Holds the next read of `path`, once it has its bytes, until the returned release is called. */
   hold: (path: string) => Readonly<{ reached: Promise<void>; release: () => void }>;
 }>;
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
-const fixture = async (files: Readonly<Record<string, string>>, completeChanges: boolean): Promise<Counted> => {
+const fixture = async (
+  files: Readonly<Record<string, string>>,
+  completeChanges: boolean,
+  adapt: (port: RevisionPort) => RevisionPort = (port) => port,
+): Promise<Counted> => {
   const filesystem = await createMemoryProvider();
   for (const [path, content] of Object.entries(files)) {
     // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
@@ -36,6 +42,7 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   }
   const reads: string[] = [];
   const treeReads: string[] = [];
+  const treePaths: Array<readonly string[] | undefined> = [];
   const holds = new Map<string, Readonly<{ reached: () => void; released: Promise<void> }>>();
   const counted = Object.assign(Object.create(filesystem) as RevisionFileSystem, {
     readFile: async (path: string, ...rest: readonly unknown[]): Promise<unknown> => {
@@ -54,10 +61,11 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   });
   const inner = createIsomorphicGitRevisionPort({ filesystem });
   const port: RevisionPort = {
-    ...inner,
-    readTree: async (id) => {
+    ...adapt(inner),
+    readTree: async (id, options) => {
       treeReads.push(String(id));
-      return inner.readTree(id);
+      treePaths.push(options?.paths);
+      return inner.readTree(id, options);
     },
   };
   await port.init({ author });
@@ -73,7 +81,7 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
     holds.set(path, { reached: reached.resolve, released: released.promise });
     return { reached: reached.promise, release: released.resolve };
   };
-  return { filesystem, port, actors, reads, treeReads, hold };
+  return { filesystem, port, actors, reads, treeReads, treePaths, hold };
 };
 
 const asError = (failure: unknown): Error => (failure instanceof Error ? failure : new Error(String(failure)));
@@ -236,6 +244,49 @@ describe('a cut on a complete change feed (E1)', () => {
   });
 });
 
+describe('a comparison a newer write made stale', () => {
+  /* `comparing` re-enters on every write, stopping its capture: the stale walk stops with it, rather than pile up. */
+  it('should stop reading files once its actor is stopped, and leave the next cut to read for itself', async () => {
+    const all = files(40);
+    const counted = await fixture(all, false);
+    await mint(counted);
+    for (const path of Object.keys(all)) {
+      // oxlint-disable-next-line no-await-in-loop -- fixture edits, written in order.
+      await counted.filesystem.writeFile(path, `edited ${path}\n`);
+    }
+
+    counted.reads.length = 0;
+    const held = counted.hold('dir0/f0.txt');
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- the actor logic is the machine's own; this drives it directly.
+    const comparing = createActor(counted.actors.checkout.captureTree as Parameters<typeof createActor>[0], {
+      input: { checkoutId: 'live', generation: 1 },
+    });
+    const outcome = Promise.withResolvers<string>();
+    comparing.subscribe({
+      next: ({ status }: Readonly<{ status: string }>) => {
+        if (status !== 'active') {
+          outcome.resolve(status);
+        }
+      },
+    });
+    comparing.start();
+    await held.reached;
+    comparing.stop();
+    held.release();
+    /* Let whatever the walk had already asked for settle. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    const readWhileStopping = counted.reads.length;
+
+    expect(readWhileStopping).toBeLessThan(Object.keys(all).length);
+    expect(await Promise.race([outcome.promise, Promise.resolve('stopped quietly')])).not.toBe('done');
+
+    const taken = await run<Cut>(counted.actors.checkout.cut, { checkoutId: 'live', trigger: 'save', generation: 1 });
+    expect(taken.treeId).toBe(await walkTreeId(counted.actors));
+  });
+});
+
 describe('the head a capture inherits modes from', () => {
   it('should read the head’s tree once per head, not once per capture', async () => {
     const counted = await fixture(files(20), false);
@@ -251,7 +302,7 @@ describe('the head a capture inherits modes from', () => {
 });
 
 describe('the restore plan (E5)', () => {
-  it('should read one tree, the target’s', async () => {
+  it('should read no tree: an oid diff from the head names what it removes (D10)', async () => {
     const counted = await fixture(files(20), true);
     const first = await mint(counted);
     await counted.filesystem.writeFile('added.txt', 'later\n');
@@ -263,7 +314,65 @@ describe('the restore plan (E5)', () => {
       { checkoutId: 'live', target: first },
     );
 
-    expect(counted.treeReads).toEqual([first]);
+    expect(counted.treeReads).toEqual([]);
     expect(plan).toMatchObject({ revisionNumber: 1, removedPathCount: 1, dirty: false });
+  });
+
+  it('should write a restore by oid diff: only the paths that differ are read from the store (D10, S11)', async () => {
+    const counted = await fixture(files(20), true);
+    const first = await mint(counted);
+    await counted.filesystem.writeFile('dir0/f0.txt', 'changed\n');
+    await counted.filesystem.writeFile('added.txt', 'later\n');
+    await mint(counted, first, ['dir0/f0.txt', 'added.txt']);
+
+    const plan = await run<{ planId: string }>(counted.actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: first,
+    });
+    counted.treeReads.length = 0;
+    counted.treePaths.length = 0;
+    await run(counted.actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+
+    expect(counted.treePaths).toEqual([['dir0/f0.txt']]);
+    expect(await counted.filesystem.readFile('dir0/f0.txt', 'utf8')).toBe('file 0\n');
+    expect(await counted.filesystem.exists('added.txt')).toBe(false);
+    expect(await counted.filesystem.readFile('dir9/f19.txt', 'utf8')).toBe('file 19\n');
+  });
+});
+
+/*
+ * A complete feed names the files that changed, and an ignore source that is
+ * not a file in the checkout (the store's `info/exclude`, its
+ * `core.ignoreCase`, or a bare port's listing) names none: a cut from the
+ * feed after one changed walks, so what it no longer ignores is taken.
+ */
+describe('a complete feed after an ignore source outside the checkout changed', () => {
+  it("should walk, and take a file the store's info/exclude no longer ignores", async () => {
+    const at = await fixture({ 'main.ts': 'export {};\n', 'secret.txt': 'kept out\n' }, true);
+    await at.filesystem.writeFile('.git/info/exclude', 'secret.txt\n');
+    const first = await cut(at.actors);
+    await mint(at);
+    await at.filesystem.writeFile('.git/info/exclude', '');
+
+    const taken = await cut(at.actors, []);
+
+    expect(taken.treeId).not.toBe(first.treeId);
+    expect(taken.treeId).toBe(await walkTreeId(at.actors));
+  });
+
+  it('should walk, and take a file a bare port no longer lists as ignored', async () => {
+    let ignored: readonly string[] = ['secret.txt'];
+    const at = await fixture({ 'main.ts': 'export {};\n', 'secret.txt': 'kept out\n' }, true, (port) => {
+      const { ignoreContext: _context, ...bare } = port;
+      return { ...bare, ignoredPaths: async () => ignored };
+    });
+    const first = await cut(at.actors);
+    await mint(at);
+    ignored = [];
+
+    const taken = await cut(at.actors, []);
+
+    expect(taken.treeId).not.toBe(first.treeId);
+    expect(taken.treeId).toBe(await walkTreeId(at.actors));
   });
 });

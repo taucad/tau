@@ -1,10 +1,11 @@
 import { renderSymbolIcon } from '#components/code/editor-completion-icon.js';
-import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { paintHighlightedCode, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
+import { language as languageFacet } from '@codemirror/language';
 import { Facet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState, Extension, Transaction } from '@codemirror/state';
-import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showPanel, showTooltip } from '@codemirror/view';
-import type { Command, DecorationSet, Panel, Tooltip, ViewUpdate } from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showTooltip } from '@codemirror/view';
+import type { Command, DecorationSet, Tooltip, ViewUpdate } from '@codemirror/view';
 
 /** A symbol in the open document, nested like an LSP `DocumentSymbol`. */
 export type EditorSymbol = Readonly<{
@@ -475,6 +476,137 @@ export const renameSymbol = commandFor('rename', true);
 export const formatDocument = commandFor('format', true);
 export const quickFix = commandFor('quickFix', true);
 
+type RenameSession = Readonly<{ from: number; to: number; tooltip: Tooltip }>;
+
+const setRename = StateEffect.define<RenameSession | undefined>();
+
+const renameTargetMark = Decoration.mark({ class: 'cm-rename-target' });
+
+/** Wrapped so `state.field(renameField, false)` still tells an uninstalled field from a closed box. */
+const renameField = StateField.define<Readonly<{ session?: RenameSession }>>({
+  create: () => ({}),
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setRename)) {
+        return { session: effect.value };
+      }
+    }
+    // An edit under the box invalidates the position the server prepared, so the rename is abandoned like VS Code.
+    return transaction.docChanged ? {} : value;
+  },
+  provide: (field) => [
+    showTooltip.from(field, ({ session }) => session?.tooltip ?? null),
+    EditorView.decorations.from(field, ({ session }) =>
+      session && session.from < session.to
+        ? Decoration.set(renameTargetMark.range(session.from, session.to))
+        : Decoration.none,
+    ),
+  ],
+});
+
+/** Where the inline rename box anchors and what it starts with; both default to the word at the cursor. */
+export type RenamePromptOptions = Readonly<{ from?: number; to?: number; value?: string }>;
+
+/**
+ * Open VS Code's inline rename box under the symbol at the cursor.
+ * Resolves to the trimmed new name, or `undefined` when cancelled, emptied or unchanged.
+ */
+export async function promptRename(view: EditorView, options: RenamePromptOptions = {}): Promise<string | undefined> {
+  const { state } = view;
+  const { head } = state.selection.main;
+  const word = state.wordAt(head);
+  const from = options.from ?? word?.from ?? head;
+  const to = options.to ?? word?.to ?? head;
+  const initial = options.value ?? state.sliceDoc(from, to);
+  const { ownerDocument } = view.dom;
+  const { promise, resolve } = Promise.withResolvers<string | undefined>();
+  let settled = false;
+
+  const dom = ownerDocument.createElement('div');
+  dom.className = 'cm-rename';
+  dom.setAttribute('role', 'dialog');
+  dom.setAttribute('aria-label', 'Rename symbol');
+  const input = ownerDocument.createElement('input');
+  input.className = 'cm-rename-input';
+  input.value = initial;
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'New name');
+  const fit = (): void => {
+    input.size = Math.max(input.value.length + 4, 18);
+  };
+  fit();
+  const hint = ownerDocument.createElement('div');
+  hint.className = 'cm-rename-hint';
+  const key = (label: string): HTMLElement => {
+    const element = ownerDocument.createElement('kbd');
+    element.textContent = label;
+    return element;
+  };
+  hint.append(key('Enter'), ' to rename, ', key('Esc'), ' to cancel');
+  dom.append(input, hint);
+
+  const tooltip: Tooltip = {
+    pos: from,
+    above: false,
+    arrow: false,
+    create: () => ({
+      dom,
+      // Shift left by the box's border and padding so the typed name sits over the original, like VS Code.
+      offset: { x: -9, y: 2 },
+      mount: () => {
+        input.focus();
+        input.select();
+      },
+      destroy: () => {
+        settled = true;
+        resolve(undefined);
+      },
+    }),
+  };
+
+  const finish = (name: string | undefined, refocus: boolean): void => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    const trimmed = name?.trim();
+    resolve(trimmed && trimmed !== initial ? trimmed : undefined);
+    if (view.state.field(renameField, false)?.session?.tooltip === tooltip) {
+      view.dispatch({ effects: setRename.of(undefined) });
+    }
+    if (refocus) {
+      view.focus();
+    }
+  };
+
+  input.addEventListener('input', fit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      finish(input.value, true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(undefined, true);
+    }
+  });
+  // Clicking away cancels; deferred so a blur raised while CodeMirror removes the box never dispatches mid-update.
+  input.addEventListener('blur', () => {
+    queueMicrotask(() => {
+      finish(undefined, false);
+    });
+  });
+
+  const session: RenameSession = { from, to, tooltip };
+  view.dispatch({
+    effects:
+      state.field(renameField, false) === undefined
+        ? StateEffect.appendConfig.of(renameField.init(() => ({ session })))
+        : setRename.of(session),
+  });
+  return promise;
+}
+
 const setSignature = StateEffect.define<Tooltip | undefined>();
 
 const signatureField = StateField.define<Tooltip | undefined>({
@@ -502,19 +634,25 @@ function renderSignature(view: EditorView, signature: EditorSignature): HTMLElem
     overload.textContent = `${String(signature.overload.index + 1)}/${String(signature.overload.count)}`;
     line.append(overload);
   }
+  // The signature is code in the document's own language, so it highlights like the editor.
+  const languageId = view.state.facet(languageFacet)?.name;
   const range = signature.parameters[signature.activeParameter];
-  if (range) {
-    const active = ownerDocument.createElement('span');
-    active.className = 'cm-signature-active-parameter';
-    active.textContent = signature.label.slice(range[0], range[1]);
-    line.append(signature.label.slice(0, range[0]), active, signature.label.slice(range[1]));
-  } else {
-    line.append(signature.label);
-  }
+  const label = ownerDocument.createElement('span');
+  paintHighlightedCode(label, {
+    text: signature.label,
+    languageId,
+    emphasis: range ? { from: range[0], to: range[1], className: 'cm-signature-active-parameter' } : undefined,
+  });
+  line.append(label);
   dom.append(line);
   for (const markdown of [signature.parameterDocumentation, signature.documentation]) {
     if (markdown) {
-      dom.append(renderEditorDocumentation(markdown, ownerDocument, signature.onDefinitionLink));
+      dom.append(
+        renderEditorDocumentation(markdown, ownerDocument, {
+          onDefinitionLink: signature.onDefinitionLink,
+          languageId,
+        }),
+      );
     }
   }
   return dom;
@@ -670,95 +808,103 @@ const occurrenceHighlighter = ViewPlugin.fromClass(
   { decorations: (value) => value.decorations },
 );
 
-/** The symbol path at the cursor above the editor; each crumb jumps to its symbol, the last opens the outline. */
-function breadcrumbsPanel(view: EditorView): Panel {
-  const { ownerDocument } = view.dom;
-  const dom = ownerDocument.createElement('nav');
-  dom.className = 'cm-breadcrumbs';
-  dom.setAttribute('aria-label', 'Symbol breadcrumbs');
-  let symbols: readonly EditorSymbol[] = [];
-  let rendered = '';
-  let generation = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const render = (): void => {
-    const path = symbolPathAt(symbols, view.state.selection.main.head);
-    const key = path.map((symbol) => `${symbol.kind}:${symbol.name}:${String(symbol.selectionFrom)}`).join('/');
-    if (key === rendered && dom.childElementCount > 0) {
-      return;
+/** One symbol in the cursor's path; `reveal` moves the cursor to its name and focuses the editor. */
+export type EditorSymbolCrumb = Readonly<{ name: string; kind: string; reveal: () => void }>;
+
+/**
+ * Receives the outermost-first symbol path at the cursor whenever it changes, so the host shows it in its own
+ * breadcrumbs, as VS Code does, instead of a panel stacked inside the editor.
+ */
+export const symbolPathListener = Facet.define<(path: readonly EditorSymbolCrumb[]) => void>();
+
+const symbolPathReporter = ViewPlugin.fromClass(
+  class {
+    private symbols: readonly EditorSymbol[] = [];
+    private reported: string | undefined;
+    private generation = 0;
+    private timer: ReturnType<typeof setTimeout> | undefined;
+    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly rejects parameter properties.
+    private readonly view: EditorView;
+    public constructor(view: EditorView) {
+      this.view = view;
+      this.load();
     }
-    rendered = key;
-    dom.replaceChildren();
-    dom.hidden = symbols.length === 0;
-    if (path.length === 0) {
-      const outline = ownerDocument.createElement('button');
-      outline.type = 'button';
-      outline.className = 'cm-breadcrumb';
-      outline.textContent = 'Go to symbol…';
-      outline.addEventListener('click', () => goToSymbolInEditor(view));
-      dom.append(outline);
-      return;
-    }
-    for (const [index, symbol] of path.entries()) {
-      if (index > 0) {
-        const separator = ownerDocument.createElement('span');
-        separator.className = 'cm-breadcrumb-separator codicon codicon-chevron-right';
-        separator.setAttribute('aria-hidden', 'true');
-        dom.append(separator);
+    public update(update: ViewUpdate): void {
+      if (update.startState.facet(symbolPathListener) !== update.state.facet(symbolPathListener)) {
+        this.reported = undefined;
       }
-      const crumb = ownerDocument.createElement('button');
-      crumb.type = 'button';
-      crumb.className = 'cm-breadcrumb';
-      crumb.append(renderSymbolIcon(symbol.kind, ownerDocument), symbol.name);
-      crumb.addEventListener('click', () => {
-        if (index === path.length - 1) {
-          goToSymbolInEditor(view);
-        } else {
-          moveTo(view, symbol.selectionFrom);
+      if (update.docChanged || update.startState.facet(languageFeatures) !== update.state.facet(languageFeatures)) {
+        this.load();
+      } else if (update.selectionSet || this.reported === undefined) {
+        this.report();
+      }
+    }
+    public destroy(): void {
+      clearTimeout(this.timer);
+      this.generation++;
+      if (this.reported) {
+        for (const listener of this.view.state.facet(symbolPathListener)) {
+          listener([]);
         }
-      });
-      dom.append(crumb);
-    }
-  };
-  const reload = async (current: number): Promise<void> => {
-    const provider = featuresOf(view.state).documentSymbols;
-    if (!provider) {
-      return;
-    }
-    try {
-      const next = await provider(view);
-      if (current === generation) {
-        symbols = next;
-        render();
       }
-    } catch (error) {
-      report(error);
     }
-  };
-  const load = (): void => {
-    clearTimeout(timer);
-    const current = ++generation;
-    timer = setTimeout(() => {
-      void reload(current);
-    }, 300);
-  };
-  dom.hidden = true;
-  load();
-  return {
-    dom,
-    top: true,
-    update(update) {
-      if (update.docChanged) {
-        load();
-      } else if (update.selectionSet) {
-        render();
+    private load(): void {
+      clearTimeout(this.timer);
+      const current = ++this.generation;
+      if (!featuresOf(this.view.state).documentSymbols) {
+        this.symbols = [];
+        this.report();
+        return;
       }
-    },
-    destroy() {
-      clearTimeout(timer);
-      generation++;
-    },
-  };
-}
+      this.timer = setTimeout(() => {
+        void this.reload(current);
+      }, 300);
+    }
+    private async reload(current: number): Promise<void> {
+      const provider = featuresOf(this.view.state).documentSymbols;
+      if (!provider) {
+        return;
+      }
+      try {
+        const next = await provider(this.view);
+        if (current === this.generation) {
+          this.symbols = next;
+          this.report();
+        }
+      } catch (error) {
+        report(error);
+        // The old symbols describe text that has since changed; show no path rather than a stale one.
+        if (current === this.generation) {
+          this.symbols = [];
+          this.report();
+        }
+      }
+    }
+    private report(): void {
+      const listeners = this.view.state.facet(symbolPathListener);
+      if (listeners.length === 0) {
+        return;
+      }
+      const path = symbolPathAt(this.symbols, this.view.state.selection.main.head);
+      const key = path.map((symbol) => `${symbol.kind}:${symbol.name}:${String(symbol.selectionFrom)}`).join('/');
+      if (key === this.reported) {
+        return;
+      }
+      this.reported = key;
+      const { view } = this;
+      const crumbs = path.map((symbol) => ({
+        name: symbol.name,
+        kind: symbol.kind,
+        reveal: () => {
+          moveTo(view, Math.min(symbol.selectionFrom, view.state.doc.length));
+        },
+      }));
+      for (const listener of listeners) {
+        listener(crumbs);
+      }
+    }
+  },
+);
 
 type LanguageAction = Readonly<{
   id: string;
@@ -874,7 +1020,7 @@ export function languageFeatureNavigation(): Extension {
     signatureField,
     signatureHelpPlugin,
     occurrenceHighlighter,
-    showPanel.compute([languageFeatures], (state) => (featuresOf(state).documentSymbols ? breadcrumbsPanel : null)),
+    symbolPathReporter,
     keymap.of([
       { key: 'Escape', run: closeParameterHints },
       ...languageActions.flatMap((action) => action.keys.map((key) => ({ key, run: action.run }))),

@@ -817,6 +817,20 @@ describe('createBrowserAgentHostClient', () => {
     await client.close();
   });
 
+  /* W5: a worker reads neither the define nor `window.ENV`, so the page's release travels in the provide message. */
+  it('should provide the page release so host evidence reports the build, not the unknown label', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the host contract names window.ENV and its keys.
+    vi.stubGlobal('window', { ENV: { TAU_RELEASE: 'abc1234' } });
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+
+    await attachChat(client, 'chat-release');
+
+    expect(requestsNamed(worker, 'provide')[0]?.args['release']).toBe('abc1234');
+    await client.close();
+    vi.unstubAllGlobals();
+  });
+
   /* W8 TS-S6: the transport's wait for a settlement row ends on this fact, never on a clock. */
   it('should tell a follower its follow ended when a read fails, and not when it unsubscribes', async () => {
     const worker = new FakeResidentWorker();

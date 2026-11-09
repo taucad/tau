@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
-import { KernelSelector } from '#components/chat/kernel-selector.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '#components/ui/sonner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { useModels } from '#hooks/use-models.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -15,14 +17,23 @@ import { projectUrl } from '#utils/project-url.utils.js';
 type NewProjectChatComposerProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableEarlyInput?: boolean;
+  /** An early edit the route already adopted, when the route owns the native input. */
+  readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
+  /**
+   * Draw the kernel chips above the box. A host that serves the chips itself, before this module
+   * arrives, passes `false` so they are not drawn twice and do not remount on the swap (R2).
+   */
+  readonly enableKernelChips?: boolean;
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
 export function NewProjectChatComposer({
   enableAutoFocus = true,
   enableEarlyInput = false,
+  adoptedEarlyInput,
   className,
+  enableKernelChips = true,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
   const { kernel, setKernel } = useKernel();
@@ -30,6 +41,7 @@ export function NewProjectChatComposer({
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
   const textareaRef = useRef<ChatTextareaHandle>(null);
+  const { withCatalogDefaultModel } = useModels();
   const {
     draftActorRef,
     attachmentSource,
@@ -106,7 +118,7 @@ export function NewProjectChatComposer({
            * daemon. Both providers keep this execution's Tau model in step with
            * the model chip, so there is nothing left to override here. Project
            * creation keeps a device-relative host for this device only (XD2). */
-          activeExecution: execution,
+          activeExecution: await withCatalogDefaultModel(execution),
           initialMessage: { content, attachments, ...(attachmentSource === undefined ? {} : { attachmentSource }) },
           editorState: {
             panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
@@ -136,25 +148,30 @@ export function NewProjectChatComposer({
       navigate,
       presentLocationError,
       projectManager,
+      withCatalogDefaultModel,
     ],
   );
 
-  return (
+  const textarea = (
+    <ChatTextarea
+      enableEarlyInput={enableEarlyInput}
+      adoptedEarlyInput={adoptedEarlyInput}
+      ref={textareaRef}
+      enableAutoFocus={enableAutoFocus}
+      enableContextActions={false}
+      enableKernelSelector={false}
+      creationLocationControl={creationLocationControl}
+      isSubmitDisabled={!location.canCreate}
+      className={className}
+      onSubmit={onSubmit}
+    />
+  );
+  return enableKernelChips ? (
     <div className='space-y-4'>
-      <div className='flex justify-center'>
-        <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
-      </div>
-      <ChatTextarea
-        enableEarlyInput={enableEarlyInput}
-        ref={textareaRef}
-        enableAutoFocus={enableAutoFocus}
-        enableContextActions={false}
-        enableKernelSelector={false}
-        creationLocationControl={creationLocationControl}
-        isSubmitDisabled={!location.canCreate}
-        className={className}
-        onSubmit={onSubmit}
-      />
+      <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
+      {textarea}
     </div>
+  ) : (
+    textarea
   );
 }

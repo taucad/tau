@@ -1,10 +1,10 @@
 import { storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import type { DatabaseType } from '#database/database.service.js';
-import { billingOwnerBinding, subscription, subscriptionExtension } from '#database/schema.js';
-import { subscriptionTierOf } from '#api/billing/subscription-tier.js';
-import type { TierSubscription } from '#api/billing/subscription-tier.js';
+import type { DatabaseType } from '@taucad/api-database';
+import { billingOwnerBinding, subscription, subscriptionExtension } from '@taucad/api-database/schema';
+import { subscriptionTierOf } from '@taucad/api-billing';
+import type { TierSubscription } from '@taucad/api-billing';
 
 /**
  * Each owner's plan and storage allowance for the usage pass (W14 OB3, N43–N47), read in batched SQL.

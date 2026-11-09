@@ -4,6 +4,7 @@ import { compileParameterManifest, resolveParameterSnapshot } from '@taucad/para
 import type { ParameterChange, ParameterSetRequest } from '@taucad/parameters';
 import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors } from '@taucad/parameters/set-machine';
+import type { CheckedFileWriteResult } from '@taucad/types';
 
 const target = { authority: 'process-fixture', root: '/project', entry: 'main.ts' };
 const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
@@ -46,7 +47,7 @@ const delayedInvalidDraftClose = async () => {
       actors: {
         loadParameterSet: createAsyncLogic({ run: async () => initial }),
         commitParameterSet: createAsyncLogic({
-          run: async ({ input }) => {
+          run: async ({ input }): Promise<CheckedFileWriteResult> => {
             started.resolve();
             await release.promise;
             return { status: 'applied', content: input.proposed.bytes! };

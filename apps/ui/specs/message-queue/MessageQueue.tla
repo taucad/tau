@@ -50,6 +50,7 @@
 \* elsewhere goes stale by this device's clock; queue paths unchanged.
 \* Each segment also carries when it last changed on this device (its modification time), the one
 \* time the page and the agent host both measure a foreign run from; queue paths unchanged.
+\* That modification time comes from a metadata-only stat, which never reads segment content; queue paths unchanged.
 \* A foreign run goes stale only once this device's last pull, read beside the segments, came past
 \* the bound after that time with nothing newer, and the page asks for that pull; queue paths unchanged.
 \* That pull answers whether this device can pull the chat at all; where it cannot, a run quiet past the
@@ -63,10 +64,14 @@
 \* Rating an ended run's reply (agent observability T12) only reads the ledger
 \* and notifies the host, once the run's lifecycle ended (a pause resumes); queue
 \* paths unchanged.
-\* Home serves the composer itself, with a native input in its editor area that stays live until the
-\* rich editor exists; its edit enters the existing draft owner through one setDraftText, and that
-\* input carries no submit path, so nothing enqueues, prepares or acknowledges before the editor takes
-\* over; queue paths unchanged.
+\* Home's server-rendered composer input stays live until the rich composer hydrates; its edit
+\* enters the existing draft owner through one setDraftText, and that early input carries no submit
+\* path, so nothing enqueues, prepares or acknowledges before hydration; queue paths unchanged.
+\* Home and the library now host that early input themselves and fetch the rich composer on
+\* demand, so the composer's own module is no longer in the entry route's eager closure. The
+\* host withholds adoption until the composer is loaded, the composer receives the adopted
+\* snapshot as a prop instead of mounting its own early input, and no submit, admission,
+\* enqueue or acknowledgement path can run before it arrives; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

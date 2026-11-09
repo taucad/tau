@@ -15,9 +15,10 @@
 #     `.github/workflows/deploy-production.yml` with a release tag.
 # There are no PR deploy previews.
 #
-# SOURCE MAPS: GitHub Actions supplies and validates a separate PostHog personal
-# key/project ID per environment. Netlify stores no source-map credentials.
-# Actions requires both PostHog and Sentry uploads in both environments.
+# SOURCE MAPS: GitHub Actions supplies the Sentry auth token per environment and
+# requires the Sentry upload in both environments; the client maps are deleted
+# after upload. Netlify stores no source-map credentials. PostHog receives no
+# source maps: errors go to Sentry only.
 # Public analytics keys are independent.
 #
 # Actions installs the workspace's development dependencies before this build.
@@ -26,11 +27,14 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/retain-previous-assets.mts"
 publish = "build/client"
 
-# The last step keeps the previous two deploys' `/assets/*` in this one, so a page
-# loaded just before a deploy can still lazy-load its chunks (TAU-UI-6). It runs
+# The last step keeps the previous deploys' `/assets/*` in this one, so a page
+# loaded just before a deploy can still lazy-load its chunks (TAU-UI-6), and the
+# content-addressed runtime bundles (`/picogk-browser/<sha256>/`,
+# `/csharp-language/<sha256>/`, listed in their own `tau-served-runtimes.json` so a
+# rollback to an older build still deploys), so it can still start PicoGK or the C# service. It runs
 # after source-map injection, reads the live deploy's `tau-served-assets.json`
 # from `TAU_RETAIN_ASSETS_FROM` (set by `deploy-ui.yml`), verifies every byte
 # against it, and writes this deploy's index. Unset, it writes the index only.
@@ -48,7 +52,7 @@ NX_NO_CLOUD = "true"
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/write-skew-protection-config.mts && node scripts/retain-previous-assets.mts"
 
 [context.deploy-preview]
 command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
@@ -147,6 +151,8 @@ Document-Policy = "js-profiling"
 # Content Security Policy (CSP) - Start with report-only mode
 # NOTE: Test thoroughly before switching to enforcing mode
 # Remove '-Report-Only' suffix to enforce
+# report-to default: violations go to the same-origin /api/reports receiver
+# named by Reporting-Endpoints (browser observability SB6), then to Sentry.
 # connect-src allowlist:
 #   - 'self' covers same-origin SSR fetches (proxied PostHog at /api/ph,
 #     health endpoints).
@@ -163,7 +169,8 @@ Document-Policy = "js-profiling"
 #   - https://files.tau.new / https://files.taucad.dev: the files service's signed
 #     LFS downloads (files service blueprint). The two private R2 endpoints stay for
 #     presigned uploads and for rollback to presigned downloads.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://files.tau.new https://files.taucad.dev https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-au-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://files.tau.new https://files.taucad.dev https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests; report-to default;"
+Reporting-Endpoints = 'default="/api/reports"'
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.
@@ -177,6 +184,22 @@ Netlify-CDN-Cache-Control = "no-store"
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]
 for = "/assets/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
+# PicoGK browser runtime, emitted under its receipt digest
+# (picogk-browser/<sha256>/), so every path is immutable like /assets/*.
+[[headers]]
+for = "/picogk-browser/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
+# C# language service runtime, emitted under its manifest digest
+# (csharp-language/<sha256>/), so every path is immutable like /assets/*.
+[[headers]]
+for = "/csharp-language/*"
 [headers.values]
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"

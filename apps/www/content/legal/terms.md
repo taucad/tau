@@ -1,6 +1,6 @@
 # Terms of Service - TauCAD Limited
 
-*Effective date: August 31, 2026*
+*Effective date: November 8, 2026*
 
 > **Summary:** These Terms constitute a binding legal agreement between you and TauCAD Limited. By using the Service, you agree to these Terms. If you do not agree, you may not use the Service.
 
@@ -16,13 +16,14 @@ We reserve the right to modify these Terms at any time. We will provide notice o
 
 - **"User," "you," and "your"** refer to the individual or entity accessing or using the Service.
 - **"Subscription"** refers to the purchased right to access and use the Service according to the selected plan.
+- **"Credits"** refers to the prepaid, non-transferable units used to pay for metered features of the Service, such as AI models and hosted kernels. Credits have no cash value except as stated in Section 3.3.
 - **"Content"** refers to any text, images, videos, audio, or other material that appears on or through the Service.
 - **"User Data"** refers to any data, information, or material that you upload, input, or otherwise provide to the Service.
 - **"Intellectual Property Rights"** means all patent rights, copyright rights, moral rights, rights of publicity, trademark rights, trade dress and service mark rights, goodwill, trade secret rights, and other intellectual property rights.
 
 ## 3. Service & Subscriptions
 
-> **Summary:** Subscriptions renew automatically. You authorize us to charge your payment method at the start of each billing period. You may cancel at any time; access continues until the end of your current billing period.
+> **Summary:** Pro renews monthly until you cancel; access continues to the end of the billing period and there is no pro-rata refund. Top-up Credits do not expire, and the unused balance of a top-up is refundable within 14 days of purchase. Prices are in US dollars, plus applicable tax.
 
 ### 3.1 Service Description
 
@@ -30,27 +31,41 @@ TauCAD is an AI-assisted computer-aided design (CAD) software service. The Servi
 
 To use our Service, you must be at least 18 years old or the age of legal majority in your jurisdiction, whichever is greater.
 
-### 3.2 Subscription Plans
+### 3.2 Plans and Pricing
 
-Many features of our Service are available for free without a Subscription. For access to additional features, increased usage limits, and premium capabilities, we offer paid Subscriptions:
+Many features of the Service are free. For metered and premium features we offer:
 
-- **Monthly Subscriptions**: Billed on a recurring monthly basis
-- **Annual Subscriptions**: Billed annually with a discount compared to monthly rates
-- **Usage Credits**: Pay-per-use credits for AI features and API calls, purchased separately or included in subscription tiers
+- **Pro**: billed monthly in advance at the price shown at checkout. Pro includes a monthly allowance of Credits that rolls over, up to the cap shown for the plan, while you remain subscribed.
+- **Credit top-ups**: prepaid Credits, bought in the amounts shown at checkout, that pay for metered features at the rates in effect when you use them. Top-up Credits do not expire while your account is open.
+- **Enterprise**: custom plans under a separate agreement (see Section 14).
 
-Your Subscription will automatically renew at the end of each billing period unless you cancel before the renewal date. You authorize us to charge your payment method for the Subscription fee at the beginning of each billing period. Prices are subject to change with at least 30 days' notice.
+**Renewal.** Pro renews automatically each month until you cancel. You authorize us to charge your payment method the then-current price, plus applicable taxes, at the start of each billing period.
 
-### 3.3 Cancellation & Refunds
+**Price changes.** We will give you at least 30 days' notice by email before increasing the Pro price. The new price applies from your first renewal after that notice, and you may cancel before it takes effect. The Credits charged for AI features vary by model and usage and may change, including when our AI model providers change their prices. The rate in effect when you use the Service applies, and a rate change never reduces the Credits in your balance.
 
-You may cancel your Subscription at any time through your account settings or by contacting us at support@tau.new. Upon cancellation, access continues until the end of your current billing period. No refunds are provided for unused portions of the billing period, except as required by applicable law (see Section 15 for consumer rights) or at our sole discretion for billing errors.
+### 3.3 Cancellation and Refunds
 
-### 3.4 Taxes & Payment
+**Cancelling Pro.** You may cancel at any time from Billing settings or by emailing support@tau.new. Cancellation takes effect at the end of the current billing period: you keep access until then and are not charged again. Credits included with Pro expire when your subscription ends. We do not refund part-used billing periods, except where Section 15 or applicable law requires.
 
-All fees are exclusive of applicable taxes, unless otherwise stated. You are responsible for all applicable taxes (including VAT, GST, and sales taxes) based on your location. If your payment method fails, we may suspend your access to paid features until payment is collected. Usage credits expire 1 year from the date of purchase, unless otherwise specified.
+**Credit refunds.** You may request a refund of the unused balance of a Credit top-up within 14 days of that purchase by emailing support@tau.new. Credits you have used, Credits included with Pro and promotional Credits are not refundable. We may also refund at our discretion to correct a billing error.
 
-### 3.5 Free Trials
+**How refunds are made.** Approved refunds go to the payment method used for the purchase, and the refunded Credits are removed from your balance.
 
-We may offer free trials or promotional offers at our discretion. If you participate in a free trial and do not cancel before the end of the trial period, we will automatically charge your payment method for the first billing period of your Subscription.
+**Disputed charges.** If you think a charge is wrong, contact us before disputing it with your bank. If a chargeback succeeds, we may remove the Credits that payment funded and suspend paid features until any resulting negative balance is settled.
+
+### 3.4 Payment and Taxes
+
+All prices are in US dollars and are charged through our payment processor; your bank may add currency conversion fees. Prices exclude VAT, GST, sales and similar taxes, which we calculate and add at checkout based on the billing address you provide. You must keep your payment method and billing details current.
+
+**Failed payments.** If a renewal payment fails, we will notify you and retry it. If it is not collected within 7 days, we may suspend Pro and end your subscription. Your top-up Credits are not affected.
+
+**Automatic reload.** If you turn on automatic reload, you authorize us to charge your saved payment method the reload amount, plus tax, whenever your Credit balance falls below the threshold shown when you accepted, within the limits shown at that time. You can turn automatic reload off at any time in Billing settings. If we change the reload terms, reloads pause until you accept the new terms, and they stop after repeated failed payments.
+
+**Credit value.** Credits cannot be transferred, exchanged or redeemed for cash, except for the refund in Section 3.3. Promotional Credits are subject to any conditions stated when they are granted.
+
+### 3.5 Promotions
+
+We may offer promotional Credits or other offers at our discretion. Their conditions are stated when they are offered, and we may withdraw or change an offer at any time before you accept it.
 
 ## 4. Your Account
 
@@ -61,7 +76,7 @@ If you create an account, you are responsible for:
 - All activities that occur under your account
 - Notifying us immediately of any unauthorized use of your account
 
-Accounts are for individual use only. You may not share your account credentials with others or allow multiple users to access the Service through a single account, unless you have a team or organizational Subscription that permits multiple users.
+Accounts are for individual use only. You may not share your account credentials with others or allow multiple users to access the Service through a single account, unless an Enterprise agreement permits multiple users.
 
 You agree to use the Service only for lawful purposes and in accordance with these Terms and our [Acceptable Use Policy](/legal/acceptable-use), which is incorporated by reference. Violations may result in suspension or termination of your account.
 
@@ -174,8 +189,9 @@ We reserve the right to suspend or terminate your access to our Service at our s
 - You will have 90 days to access and export your User Data from our cloud servers
 - After the 90-day retrieval period, we may permanently delete your User Data
 - User Data stored in your browser's storage remains accessible to you
+- Your subscription ends. If we terminate for your breach of these Terms, fees already paid are not refunded and remaining Credits are forfeited, except where applicable law requires otherwise
 
-If you wish to terminate your account, you may do so through your account settings or by contacting us at support@tau.new.
+If you wish to close your account, you may do so through your account settings or by contacting us at support@tau.new. Closing your account cancels Pro immediately without a pro-rata refund and forfeits any remaining Credits; to keep access until the end of your billing period, cancel Pro first (Section 3.3). Closing your account does not affect the 14-day top-up refund in Section 3.3 or your rights under Section 15.
 
 ### 8.5 General Provisions
 
@@ -204,7 +220,7 @@ If you have any questions about these Terms, please contact us:
 
 ## 11. API Usage
 
-API access is subject to rate limits and usage quotas based on your Subscription. You must keep API credentials secure and confidential; you may not share them with any third party without our prior written consent. You are responsible for all activities that occur under your API credentials.
+API access is subject to rate limits and usage quotas based on your plan. Metered API usage is charged to your Credits at the rates in effect when the request is made. You must keep API credentials secure and confidential; you may not share them with any third party without our prior written consent. You are responsible for all activity, and all charges, under your API credentials.
 
 We may modify, update, or discontinue any aspect of our API at any time. For material changes, we will make reasonable efforts to provide advance notice.
 
@@ -238,20 +254,20 @@ For enterprise, business, or organizational accounts with custom requirements (S
 
 > **Summary:** If you are an individual using the Service for personal purposes, you may have additional statutory rights under consumer protection laws in your jurisdiction. These Terms do not limit or exclude those rights.
 
-If you are an individual using the Service for personal, non-business purposes, additional statutory rights may apply based on your location. Nothing in these Terms affects your statutory consumer rights.
+If you are an individual using the Service for personal, non-business purposes, additional statutory rights may apply based on your location. Nothing in these Terms excludes or limits rights that cannot be excluded under the consumer protection laws that apply to you; where those laws give you a greater refund or remedy than these Terms, those laws prevail.
 
 ### 15.1 EU/UK Consumers
 
 If you are a consumer residing in the European Union or United Kingdom:
 
-- **14-day withdrawal right**: You have a statutory 14-day right of withdrawal from the date of purchase. By accessing the Service during this period with your explicit prior consent, you acknowledge that the Service performance begins immediately and that you may lose your right of withdrawal once the Service has been fully performed. If you exercise your right of withdrawal before the Service is fully performed, you may be charged a proportionate amount for the Service already provided.
-- **Unfair terms protection**: Nothing in these Terms affects your statutory consumer rights where the Service is defective or not as described.
+- **14-day right to cancel**: You may cancel a Pro subscription or a Credit top-up within 14 days of purchase, without giving a reason, by emailing support@tau.new from your account email. The Service is supplied immediately after purchase, so if you cancel within this period we refund what you paid less a proportionate amount for what has already been supplied (for Pro, the part of the month that has passed; for a top-up, the Credits you have used). We make the refund within 14 days of your notice, to the payment method you used.
+- **Conformity**: Nothing in these Terms limits your statutory remedies where the Service is faulty or not as described.
 - **Local courts**: Disputes may be brought in the courts of your place of residence.
 
 ### 15.2 Australian Consumers
 
-Our services come with guarantees under Australian Consumer Law that cannot be excluded. You are entitled to a replacement or refund for a major failure and compensation for any other reasonably foreseeable loss or damage.
+Our services come with guarantees that cannot be excluded under the Australian Consumer Law. For a major failure you are entitled to cancel your contract with us and receive a refund for the unused portion, or compensation for its reduced value, and to compensation for any other reasonably foreseeable loss or damage. For other failures you are entitled to have the problem fixed in a reasonable time. Nothing in these Terms excludes, restricts or modifies those guarantees.
 
 ### 15.3 New Zealand Consumers
 
-The Consumer Guarantees Act 1993 applies to consumer transactions. Your statutory rights under New Zealand law are not affected by these Terms.
+If you acquire the Service as a consumer, the Consumer Guarantees Act 1993 and the Fair Trading Act 1986 apply and nothing in these Terms limits your rights under them.

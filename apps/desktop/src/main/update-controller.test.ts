@@ -133,6 +133,18 @@ describe('platform update consent', () => {
     await updater.install();
     expect(backend.finish).toHaveBeenCalledOnce();
   });
+  it('an asynchronous restart failure pauses the restart instead of finishing quietly', async () => {
+    const { backend, options, release } = setup();
+    backend.finish = vi.fn(async () => {
+      throw new Error('spawn EAGAIN');
+    });
+    const updater = startPlatformUpdateController(options, backend);
+    await updater.check();
+    await updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'restart-blocked' });
+    expect(updater.snapshot().detail).toContain('spawn EAGAIN');
+    expect(release).toHaveBeenCalledOnce();
+  });
   it('APT describes system policy truthfully and never downloads package files', async () => {
     const { backend, options } = setup();
     Object.defineProperty(backend, 'systemManaged', { value: true });

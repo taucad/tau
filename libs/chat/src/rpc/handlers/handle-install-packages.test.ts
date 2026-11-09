@@ -222,6 +222,8 @@ describe('handleInstallPackages', () => {
     const result = await handleInstallPackages({ add: { alea: '^1.0.1' } }, fileSystem);
 
     expect(result).toMatchObject({ success: true, manifestChanged: true, issues: [] });
+    /* W3 a4: telling a project's language and walking a package tree need names and types only. */
+    expect(vi.mocked(fileSystem.readdir).mock.calls.every(([, options]) => options?.contentFacts === false)).toBe(true);
   });
 
   it('should refuse under the locked acquisition profile with no request and nothing written', async () => {

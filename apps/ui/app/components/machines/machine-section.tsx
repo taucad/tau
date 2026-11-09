@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Circle, CircleAlert, Hand, LoaderCircle } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Check, ChevronDown, ChevronRight, Circle, CircleAlert, Hand } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -408,7 +409,7 @@ export function PrintSteps({
             ) : needsPerson ? (
               <Hand aria-hidden className='size-3 shrink-0 text-information' />
             ) : step.state === 'active' ? (
-              <LoaderCircle aria-hidden className='size-3 shrink-0 spin-glyph' />
+              <Loader className='size-3 shrink-0' />
             ) : (
               <Circle aria-hidden className='size-3 shrink-0' />
             )}

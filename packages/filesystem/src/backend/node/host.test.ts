@@ -20,6 +20,7 @@ import {
   truncateSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1017,5 +1018,63 @@ describe('checked operation allocation bounds', () => {
     expect(unbounded).not.toHaveBeenCalled();
     const stats = await fs.stat(join(root, 'oversized'));
     expect(stats.size).toBe(checkedRenameLimits.bytes + 1);
+  });
+});
+
+describe('NodeFsProviderClient.applyBatch', () => {
+  it('answers every entry uncertain when the reply is lost, since the host may have applied them', async () => {
+    const { editor } = serve();
+    const lost = new Error('channel closed before the reply');
+    vi.spyOn(NodeFsChannel.prototype, 'request').mockRejectedValueOnce(lost);
+    const receipts = await editor.applyBatch([
+      { op: 'write', path: 'one.txt', data: text('1') },
+      { op: 'delete', path: 'two.txt' },
+    ]);
+    expect(receipts).toEqual([
+      { outcome: 'uncertain', error: lost },
+      { outcome: 'uncertain', error: lost },
+    ]);
+  });
+});
+
+describe('a large-object batch write across the port (EQ13)', () => {
+  it('is resolved by the host against the store it holds for the root, and answers the verified id', async () => {
+    const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-host-lfs-')));
+    const root = join(sandbox, 'root');
+    const store = join(sandbox, 'store');
+    mkdirSync(root);
+    const bytes = text('large object bytes');
+    const oid = createHash('sha256').update(bytes).digest('hex');
+    mkdirSync(join(store, oid.slice(0, 2), oid.slice(2, 4)), { recursive: true });
+    await fs.writeFile(join(store, oid.slice(0, 2), oid.slice(2, 4), oid), bytes);
+    const stores = new Map([[root, store]]);
+    const { port1, port2 } = new MessageChannel();
+    const server = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+      largeObjectStore: (candidate) => stores.get(candidate),
+    });
+    const channel = new NodeFsChannel(port1);
+    cleanups.push(async () => {
+      channel.close();
+      await server.close();
+      port2.close();
+      rmSync(sandbox, { recursive: true, force: true });
+    });
+    const client = new NodeFsProviderClient(channel, root, { largeObjectSources: true });
+    expect(client.capabilities.largeObjectSources).toBe(true);
+    expect(new NodeFsProviderClient(channel, root).capabilities.largeObjectSources).toBeUndefined();
+
+    const [landed] = await client.applyBatch([
+      { op: 'write', path: 'part.step', data: { largeObject: oid, size: bytes.byteLength } },
+    ]);
+    stores.delete(root);
+    const [released] = await client.applyBatch([
+      { op: 'write', path: 'again.step', data: { largeObject: oid, size: bytes.byteLength } },
+    ]);
+
+    expect(landed).toMatchObject({ outcome: 'applied', largeObject: { largeObject: oid, size: bytes.byteLength } });
+    expect(new Uint8Array(await fs.readFile(join(root, 'part.step')))).toStrictEqual(bytes);
+    expect(released).toMatchObject({ outcome: 'failed', error: { code: 'EINVAL' } });
   });
 });

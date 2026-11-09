@@ -74,7 +74,10 @@ const toResolution = (body: unknown): InvocationResolution => {
   const answer = parsed.data;
   switch (answer.state) {
     case 'pending': {
-      return { status: 'pending' };
+      // W2: the instant the gateway settles the attempt by bounds the host's wait; an older image does not state it.
+      return answer.settlesBy === undefined
+        ? { status: 'pending' }
+        : { status: 'pending', settlesBy: answer.settlesBy };
     }
     case 'unavailable': {
       return { status: 'unavailable' };

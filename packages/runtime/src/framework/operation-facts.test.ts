@@ -92,11 +92,7 @@ const chains = {
     {
       name: 'kernel.mesh',
       self: 1,
-      children: [
-        wrap('GeometryCache', 2, [
-          wrap('GltfEdgeDetection', 3, [wrap('DisplaySimplification', 4, [{ name: 'kernel.mesh-compute', self: 5 }])]),
-        ]),
-      ],
+      children: [wrap('GeometryCache', 2, [wrap('GltfEdgeDetection', 3, [{ name: 'kernel.mesh-compute', self: 5 }])])],
     },
   ],
   export: [
@@ -149,10 +145,10 @@ describe('workerFactsFromEntries on the real chains', () => {
     const facts = workerFactsFromEntries(entries, rootSpanId);
     expect(facts.phases).toEqual({ mesh: 6 });
     expect(facts.middleware).toEqual({
-      total: 9,
-      slowestId: 'DisplaySimplification',
-      slowest: 4,
-      ran: ['DisplaySimplification', 'GltfEdgeDetection', 'GeometryCache'],
+      total: 5,
+      slowestId: 'GltfEdgeDetection',
+      slowest: 3,
+      ran: ['GltfEdgeDetection', 'GeometryCache'],
     });
   });
 
@@ -350,6 +346,25 @@ describe('parameterFacts', () => {
     const facts = parameterFacts(shaped({ '/big': {}, '/n': {} }, { big, n: 1 }), { big: { ...big }, n: 2 });
     expect(facts).toMatchObject({ declared: 2, modified: 1, unknown: 1 });
     expect(facts).not.toHaveProperty('truncated');
+  });
+
+  it('should compare structured leaves by their canonical JSON form', () => {
+    const pairs: ReadonlyArray<readonly [unknown, unknown, 'same' | 'modified' | 'unknown']> = [
+      [{ b: 1, a: [1, 2] }, { a: [1, 2], b: 1 }, 'same'],
+      [{ a: -0 }, { a: 0 }, 'same'],
+      [[Number.NaN, null], [Infinity, null], 'same'],
+      [{ a: [1, 2] }, { a: { 0: 1, 1: 2 } }, 'modified'],
+      [{ '10': 1, '2': 1 }, { '2': 1, '10': 2 }, 'modified'],
+      [{ 'a"b': 'é' }, { 'a"b': 'é' }, 'same'],
+      [{ a: 1 }, { a: 1, b: undefined }, 'unknown'],
+      [{ text: 'x'.repeat(240) }, { text: 'x'.repeat(240) }, 'same'],
+      [{ text: 'x'.repeat(250) }, { text: 'x'.repeat(250) }, 'unknown'],
+    ];
+    for (const [fallback, value, expected] of pairs) {
+      const facts = parameterFacts(shaped({ '/s': {} }, { s: fallback }), { s: value });
+      const found = facts.unknown === 1 ? 'unknown' : facts.modified === 1 ? 'modified' : 'same';
+      expect(found, JSON.stringify([fallback, value])).toBe(expected);
+    }
   });
 
   it('should stop a 5,000-leaf sweep at 1,000 leaves and say so', () => {

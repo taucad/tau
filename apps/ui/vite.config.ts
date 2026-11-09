@@ -37,9 +37,8 @@ import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
-const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
-/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases and Streamdown's `shiki`. */
-const uiSourceAliasIdFilter = /^#|^shiki$/u;
+/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases. */
+const uiSourceAliasIdFilter = /^#/u;
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -202,9 +201,6 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       // its own checks for hosts that ignore hook filters.
       filter: { id: uiSourceAliasIdFilter },
       handler(source, importer) {
-        if (source === 'shiki' && importer?.includes('/streamdown/') === true && importer.includes('/code-block-')) {
-          return streamdownShikiFacade;
-        }
         if (!source.startsWith('#')) {
           return null;
         }
@@ -444,6 +440,23 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
   },
 });
 
+/**
+ * Record the build's Sentry release beside the build output (never shipped), so the deploy can attach its commits
+ * to the exact release every event from this bundle reports (`sentryRelease` in `#lib/sentry-event.lib`).
+ *
+ * @param buildId - The build id baked into the server graph.
+ * @returns The plugin.
+ */
+const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
+  name: 'tau-sentry-release-record',
+  // Production builds only, like the server's `tauBuildId` (a test build carries no release).
+  apply: (_config, { command, mode }) => command === 'build' && mode !== 'test',
+  applyToEnvironment: (environment) => environment.config.consumer === 'server',
+  async writeBundle() {
+    await writeFile(path.resolve(__dirname, 'build/sentry-release'), `tau-ui@${String(buildId)}\n`);
+  },
+});
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
@@ -463,7 +476,8 @@ export default defineConfig(({ command, mode }) => {
    * and with it the hash of every chunk importing it: about 3.4 MB of the app
    * shell got new URLs per deploy without a source change.
    */
-  const buildIdDefine = { tauBuildId: JSON.stringify(Date.now()) };
+  const buildId = Date.now();
+  const buildIdDefine = { tauBuildId: JSON.stringify(buildId) };
   const isProductionBuild = command === 'build' && !isTest;
   /*
    * The release label runtime telemetry stamps (short commit). Server graph only, like `tauBuildId`: the page reads
@@ -552,6 +566,7 @@ export default defineConfig(({ command, mode }) => {
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
+      createSentryReleaseRecordPlugin(buildId),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -616,7 +631,7 @@ export default defineConfig(({ command, mode }) => {
       // not a `nx dev ui` concern; dev is plain HTTP regardless of TTY/--host.
       allowedHosts: true,
       // `runtime-ssr-assets.vite-plugin.ts` rewrites package-owned `import.meta.resolve`
-      // assets (resvg WASM, Geist fonts, occt/rhino WASM) to `/@fs/<abs path>` URLs at
+      // assets (resvg WASM, Geist fonts, occt WASM) to `/@fs/<abs path>` URLs at
       // serve time, and those paths live in sibling packages. Vite 8 refuses to serve
       // them unless the workspace root is allowed. NOT the skill-read widening it was
       // originally commented as: the skills moved to JSON modules and no longer need it,

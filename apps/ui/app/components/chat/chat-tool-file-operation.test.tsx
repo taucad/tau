@@ -40,7 +40,7 @@ vi.mock('#hooks/use-resize-observer.js', () => ({
   },
 }));
 
-// Stub Shiki-backed viewers so tests stay fast and avoid highlighter init.
+// Stub the code viewers so these tests stay on the tool card, not on highlighting.
 vi.mock('#components/code/code-viewer.js', () => ({
   CodeViewer({
     text,

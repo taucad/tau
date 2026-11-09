@@ -25,7 +25,7 @@
  */
 
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileContentMetadata,
@@ -38,19 +38,25 @@ import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { getErrno } from '@taucad/utils/error';
 import { sha256Bytes } from '@taucad/utils/hash';
 import type {
-  FileStatOptions,
+  ContentFacts,
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
-  HeadFileStat,
   PathClassification,
   PathPolicy,
   WatchEvent,
   WatchRequest,
 } from '#types.js';
+import { isDigestPrecondition } from '#checked-write-precondition.js';
 import { bufferToStream } from '#backend/stream-utils.js';
-import { headFileStatFromStat } from '#content-metadata.js';
-import type { TreeSearchOptions } from '#tree-index.js';
+import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
+import { mapConcurrent } from '#concurrency.js';
+import { workerTimings } from '#worker-timings.js';
+import type { IndexAdmits, IndexChanges, IndexSearchOptions } from '#project-index/project-index.js';
+import type { IndexFactsOptions } from '#project-index/project-indexes.js';
+import type { AppendFence, Changeset, ChangesetEntry, ChangesetReceipt } from '#changeset.js';
+import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
+import type { ChangeSetWatchRequest } from '#watch-registry.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
 
@@ -100,18 +106,27 @@ export type ComposedViewOverlay = Readonly<{
 /** Optional watch surface a rooted filesystem brings to the view. @public */
 type WatchableFileSystem = {
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) | Promise<() => void>;
+  /** The change-set form (D6): one {@link ChangeSet} per committed changeset, masked like `watch`. */
+  watchChangeSets(request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): () => void;
 };
 
 /**
  * Optional index-backed reads a rooted filesystem brings to the view (charter D3).
  *
  * Not derivable from the port: search and recursive stat are answered from the
- * root's own {@link TreeSearchOptions}-filtered index, so a host that composes
+ * root's own {@link IndexSearchOptions}-filtered index, so a host that composes
  * over a bare provider simply offers neither.
  */
 type IndexedFileSystem = {
-  search(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
-  statTree(path: string, options?: { admits?: TreeSearchOptions['admits'] }): Promise<FileStatEntry[]>;
+  search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
+  facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
+  changedSince(
+    since: number,
+    options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+  ): Promise<IndexChanges>;
+  /** Which of these files are pending entries: from the index, or a pointer-sized file read raw (D9). */
+  pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
 
 /**
@@ -129,7 +144,9 @@ export type ComposedViewCheckout = Readonly<{
     RecursiveRmdir &
     Partial<WatchableFileSystem> &
     Partial<IndexedFileSystem> &
-    Partial<RootedPorcelain>;
+    Partial<RootedPorcelain> & {
+      appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    };
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -161,19 +178,30 @@ export type ComposedViewOptions = Readonly<{
 export type RecursiveRmdir = { rmdir(path: string, options?: { recursive?: boolean }): Promise<void> };
 
 /** A rooted filesystem with provenance. @public */
-export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
+export type ComposedView = Omit<FileSystemProvider, 'rmdir' | 'writeFileChecked'> &
   RecursiveRmdir &
   Partial<WatchableFileSystem> &
   Partial<IndexedFileSystem> &
   Partial<RootedPorcelain> & {
+    /** A fenced record-log append (D23), mask-checked like `appendFile`. */
+    appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    /**
+     * Check and replace one file. A precondition may name a digest (D17), which
+     * the base answers through its `writeFileCheckedDigest`; a base without one
+     * refuses a digest with `ENOTSUP`.
+     */
+    writeFileChecked?(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
-    /** One directory's immediate children with stat metadata and provenance. */
+    /** One directory's immediate children with head metadata and provenance (I3). */
     readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-    readdirWithStats(
-      path: string,
-      options: { readonly content: 'head' },
-    ): Promise<Array<{ name: string } & HeadFileStat>>;
+    /**
+     * Lazy content facts of visible files (D4): an overlay entry's from its
+     * declaration, a project file's from the base's index or measured here — the
+     * kind from its first 512 bytes, a line count only for text within
+     * `byteCap`. Masked like `readFile`; a missing path or directory is left out.
+     */
+    facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
   };
 
 /** One refusal code for every path the registry hides, on ACP `fs/*` and on Tau's own tools alike. @public */
@@ -306,6 +334,61 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return from === undefined ? undefined : { type: 'delete', path: from };
   };
 
+  /** One change-set fact as this view serves it: a move with one hidden edge is the other edge's arrival or departure. */
+  const visibleEntry = (entry: ChangeSetEntry): ChangeSetEntry | undefined => {
+    if (entry.op !== 'moved' || entry.oldPath === undefined) {
+      return hidden(entry.path) ? undefined : entry;
+    }
+    const to = !hidden(entry.path);
+    const from = !hidden(entry.oldPath);
+    if (to && from) {
+      return entry;
+    }
+    if (to) {
+      return {
+        op: 'created',
+        path: entry.path,
+        kind: entry.kind,
+        ...(entry.target === undefined ? {} : { target: entry.target }),
+      };
+    }
+    return from ? { op: 'deleted', path: entry.oldPath, kind: entry.kind } : undefined;
+  };
+
+  /** The nearest ancestor-or-self of `path` this view shows, so a reset never names a hidden directory. */
+  const visibleAncestor = (path: string): string => {
+    let current = path;
+    while (current !== '' && current !== '/' && hidden(current)) {
+      const separator = current.lastIndexOf('/');
+      current = separator > 0 ? current.slice(0, separator) : current.startsWith('/') ? '/' : '';
+    }
+    return current;
+  };
+
+  /** A change set with every hidden fact removed; `undefined` when nothing visible is left. */
+  const visibleSet = (set: ChangeSet): ChangeSet | undefined => {
+    if (set.reset !== undefined) {
+      const prefix = visibleAncestor(set.reset.prefix);
+      return prefix === set.reset.prefix ? set : { ...set, reset: { ...set.reset, prefix } };
+    }
+    const entries = set.entries.flatMap((entry) => visibleEntry(entry) ?? []);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    if (entries.length === set.entries.length && entries.every((entry, index) => entry === set.entries[index])) {
+      return set;
+    }
+    const segments = set.segments?.filter((segment) => !hidden(segment.path));
+    return {
+      generation: set.generation,
+      ...(set.origin === undefined ? {} : { origin: set.origin }),
+      ...(set.backend === undefined ? {} : { backend: set.backend }),
+      entries,
+      touchedDirectories: set.touchedDirectories.filter((directory) => directory === '' || !hidden(directory)),
+      ...(segments === undefined || segments.length === 0 ? {} : { segments }),
+    };
+  };
+
   const writablePath = (path: string): string => {
     const { agentAccess } = classify(path);
     if (agentAccess === 'hidden') {
@@ -317,18 +400,13 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return path;
   };
 
-  async function upperStat(path: string): Promise<FileStat | undefined>;
-  async function upperStat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat | undefined>;
-  async function upperStat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat | undefined> {
+  const upperStat = async (path: string): Promise<FileStat | undefined> => {
     try {
-      return options ? await base.stat(path, options) : await base.stat(path);
-    } catch (error) {
-      if (options && !(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-        throw error;
-      }
+      return await base.stat(path);
+    } catch {
       return undefined;
     }
-  }
+  };
 
   /**
    * Whether the checkout's own tree owns an overlay unit, and therefore the
@@ -432,7 +510,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * entered, and a caller's own filter narrows further but can never widen.
    */
   const admitsVisible =
-    (queryRoot: string, callerAdmits?: TreeSearchOptions['admits']) =>
+    (queryRoot: string, callerAdmits?: IndexAdmits) =>
     (relativePath: string, kind: 'file' | 'dir'): boolean =>
       classify(joinRelativePath(queryRoot, relativePath)).agentAccess !== 'hidden' &&
       callerAdmits?.(relativePath, kind) !== false;
@@ -477,47 +555,23 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return names;
   };
 
-  async function statAt(path: string, route: Route): Promise<FileStat>;
-  async function statAt(path: string, route: Route, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  async function statAt(path: string, route: Route, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  const statAt = async (path: string, route: Route): Promise<FileStat> => {
     if (route.kind === 'overlay') {
-      const stat = overlayStat(overlayNode(route.overlay, path));
-      return options ? headFileStatFromStat(stat) : stat;
+      return overlayStat(overlayNode(route.overlay, path));
     }
-    const stat = options ? await upperStat(path, options) : await upperStat(path);
+    const stat = await upperStat(path);
     if (stat !== undefined) {
       return stat;
     }
     /* A merge directory the checkout does not have is still a directory. */
-    return route.kind === 'merge'
-      ? { type: 'dir', size: 0, mtimeMs: immutableMtimeMs }
-      : options
-        ? base.stat(path, options)
-        : base.stat(path);
-  }
+    return route.kind === 'merge' ? { type: 'dir', size: 0, mtimeMs: immutableMtimeMs } : base.stat(path);
+  };
 
-  /** Every row the checkout holds in a directory, hidden ones included, batched when the base offers it. */
-  function baseEntries(path: string): Promise<Array<{ name: string } & FileStat>>;
-  function baseEntries(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  async function baseEntries(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
-    if (options !== undefined && base.supportsHeadListing !== true) {
-      fileSystemError('ENOTSUP', `Head-only directory metadata is unavailable for ${path}.`);
-    }
-    const batched =
-      options === undefined ? await base.readdirWithStats?.(path) : await base.readdirWithStats?.(path, options);
+  /** Every row the checkout holds in a directory, hidden ones included, batched when the base offers it (head metadata, I3). */
+  const baseEntries = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
+    const batched = await base.readdirWithStats?.(path);
     if (batched !== undefined) {
-      return options === undefined
-        ? batched
-        : batched.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }));
-    }
-    if (options !== undefined) {
-      fileSystemError('ENOTSUP', `Head-only directory metadata is unavailable for ${path}.`);
+      return batched;
     }
     const names = await base.readdir(path);
     return Promise.all(
@@ -526,22 +580,12 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         return { name, ...stat };
       }),
     );
-  }
+  };
 
   /** The checkout's own rows of a directory, control-plane rows dropped for every consumer. */
-  function upperEntries(path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>>;
-  function upperEntries(
-    path: string,
-    tolerateMissing: boolean,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  async function upperEntries(
-    path: string,
-    tolerateMissing: boolean,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  const upperEntries = async (path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>> => {
     try {
-      const rows = options === undefined ? await baseEntries(path) : await baseEntries(path, options);
+      const rows = await baseEntries(path);
       return rows.filter(({ name }) => !hidden(joinRelativePath(path, name)));
     } catch (error) {
       if (tolerateMissing && (getErrno(error) === 'ENOENT' || getErrno(error) === 'ENOTDIR')) {
@@ -549,7 +593,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       }
       throw error;
     }
-  }
+  };
 
   /**
    * The first path inside a subtree that this view hides, if there is one.
@@ -661,36 +705,23 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return Object.fromEntries(paths.map((path, index) => [path, digests[index]!]));
   };
 
-  function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  function readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  async function readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  const readdirWithStats = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
     const target = readablePath(canonical(path));
     const route = await routeFor(target);
-    const rows: Array<{ name: string } & (FileStat | HeadFileStat)> =
+    const rows: Array<{ name: string } & FileStat> =
       route.kind === 'overlay'
         ? overlayNames(route.overlay, target).map((name) => ({
             name,
-            ...(options === undefined
-              ? overlayStat(overlayNode(route.overlay, joinRelativePath(target, name)))
-              : headFileStatFromStat(overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))))),
+            ...overlayStat(overlayNode(route.overlay, joinRelativePath(target, name))),
           }))
-        : options === undefined
-          ? await upperEntries(target, route.kind === 'merge')
-          : await upperEntries(target, route.kind === 'merge', options);
+        : await upperEntries(target, route.kind === 'merge');
     if (route.kind === 'merge') {
       const seen = new Set(rows.map(({ name }) => name));
       for (const overlay of route.overlays) {
         for (const name of overlayNames(overlay, target)) {
           if (!seen.has(name)) {
             seen.add(name);
-            const stat = overlayStat(overlayNode(overlay, joinRelativePath(target, name)));
-            rows.push({ name, ...(options === undefined ? stat : headFileStatFromStat(stat)) });
+            rows.push({ name, ...overlayStat(overlayNode(overlay, joinRelativePath(target, name))) });
           }
         }
       }
@@ -708,7 +739,85 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         return { ...row, provenance: provenanceForRoute(childPath, await routeFor(childPath)) };
       }),
     );
-  }
+  };
+
+  /*
+   * Facts of project files come from the base's index when it keeps one, and
+   * are otherwise measured from one read here; an overlay entry declares its own.
+   */
+  const facts = async (
+    paths: readonly string[],
+    factsOptions?: IndexFactsOptions,
+  ): Promise<ReadonlyMap<string, ContentFacts>> => {
+    const targets = paths.map((path) => readablePath(canonical(path)));
+    const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+    const answered = new Map<string, ContentFacts>();
+    const project: string[] = [];
+    const projectListed: Array<Readonly<{ size: number; mtimeMs: number }> | undefined> = [];
+    for (const [index, target] of targets.entries()) {
+      const route = routes[index]!;
+      if (route.kind === 'overlay') {
+        const node = route.overlay.node(target);
+        if (node?.type === 'file') {
+          answered.set(
+            paths[index]!,
+            node.contentKind === 'text'
+              ? { contentKind: 'text', lineCount: node.lineCount }
+              : { contentKind: 'binary' },
+          );
+        }
+      } else {
+        project.push(target);
+        projectListed.push(factsOptions?.listed?.[index]);
+      }
+    }
+    const measureHere = async (): Promise<ReadonlyMap<string, ContentFacts>> => {
+      const own = await mapConcurrent(project, factsConcurrency, async (target) => {
+        const stat = await upperStat(target);
+        if (stat?.type !== 'file') {
+          return undefined;
+        }
+        const { facts: measuredFacts, bytesRead } = await measureContentFacts(
+          base,
+          { path: target, size: stat.size },
+          {
+            lineCount: factsOptions?.lineCount,
+            byteCap: factsOptions?.byteCap,
+          },
+        );
+        workerTimings.count('view.facts.bytes', bytesRead);
+        return measuredFacts;
+      });
+      return new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
+    };
+    const measureBelow = async (facts: NonNullable<typeof base.facts>): Promise<ReadonlyMap<string, ContentFacts>> => {
+      try {
+        return await facts(project, {
+          ...factsOptions,
+          ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
+        });
+      } catch (error) {
+        /* A provider that relays the call can learn only by asking that its far
+         * end keeps no index (ENOTSUP): the view then measures, as it does over
+         * a provider with no `facts` at all. */
+        if (getErrno(error) === 'ENOTSUP') {
+          return measureHere();
+        }
+        throw error;
+      }
+    };
+    const measured =
+      project.length === 0
+        ? new Map<string, ContentFacts>()
+        : await (base.facts === undefined ? measureHere() : measureBelow(base.facts.bind(base)));
+    for (const [index, target] of targets.entries()) {
+      const value = routes[index]!.kind === 'overlay' ? undefined : measured.get(target);
+      if (value !== undefined) {
+        answered.set(paths[index]!, value);
+      }
+    }
+    return answered;
+  };
 
   const mutate = async <T>(path: string, apply: (target: string) => Promise<T>): Promise<T> => {
     const [target] = await writableTargets([path]);
@@ -759,11 +868,60 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * under the project root is a records row. The control plane needs no such
    * care — it is the control plane at any depth (path policy contract, PP3).
    */
+  /**
+   * One changeset through the mask (charter D2): every entry's paths answered
+   * before the pipeline sees any of them, so a masked entry refuses the whole
+   * changeset with the masked-path error and nothing is applied. A recursive
+   * delete and a move's source reach paths nobody named, so their subtrees are
+   * walked as `rmdir` and `rename` walk them.
+   *
+   * A `lifecycle` changeset takes the project token exclusively: the fence a
+   * project create, delete, adoption or topology replacement needs (D3). That
+   * is the authority's own work, never a masked consumer's, so the view
+   * refuses it with `EPERM` before anything is asked or applied.
+   */
+  const maskedApply = async (
+    apply: (changeset: Changeset) => Promise<ChangesetReceipt>,
+    changeset: Changeset,
+  ): Promise<ChangesetReceipt> => {
+    if (changeset.lifecycle === true) {
+      fileSystemError('EPERM', `EPERM: the ${options.consumer} view may not apply a lifecycle changeset.`);
+    }
+    const named = changeset.entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+    const targets = await writableTargets(named);
+    let at = 0;
+    const entries = changeset.entries.map((entry): ChangesetEntry => {
+      if (entry.op === 'move') {
+        at += 2;
+        return { ...entry, from: targets[at - 2]!, to: targets[at - 1]! };
+      }
+      at += 1;
+      return { ...entry, path: targets[at - 1]! };
+    });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.op === 'move') {
+          await refuseHiddenSubtree(entry.from);
+        } else if (entry.op === 'delete' && entry.recursive === true) {
+          await refuseHiddenSubtree(entry.path);
+        }
+      }),
+    );
+    return apply({ ...changeset, entries });
+  };
+
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.apply === undefined
+      ? {}
+      : { apply: async (changeset: Changeset) => maskedApply(base.apply!.bind(base), changeset) }),
     ...(base.copyTree === undefined
       ? {}
       : {
-          copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
+          copyTree: async (
+            source: string,
+            target: string,
+            options?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             /* Every entry a copy writes is a target too: `notes/exports` is
@@ -776,16 +934,17 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             const visible = admitsVisible(from, options?.admits);
             return base.copyTree!(from, to!, {
               admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+              ...(options?.signal === undefined ? {} : { signal: options.signal }),
             });
           },
         }),
     ...(base.duplicate === undefined
       ? {}
       : {
-          duplicate: async (source: string, target: string) => {
+          duplicate: async (source: string, target: string, options?: { signal?: AbortSignal }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            return base.duplicate!(from, to!);
+            return base.duplicate!(from, to!, options);
           },
         }),
     ...(base.move === undefined
@@ -870,12 +1029,12 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       return namesFor(target, await routeFor(target));
     },
     readdirWithStats,
-    stat: (async (path: string, options?: FileStatOptions) => {
+    facts,
+    async stat(path) {
       const target = readablePath(canonical(path));
       const route = await routeFor(target);
-      const stat = options ? await statAt(target, route, options) : await statAt(target, route);
-      return { ...stat, provenance: provenanceForRoute(target, route) };
-    }) as FileSystemProvider['stat'],
+      return { ...(await statAt(target, route)), provenance: provenanceForRoute(target, route) };
+    },
     async lstat(path) {
       const target = readablePath(canonical(path));
       const route = await routeFor(target);
@@ -924,16 +1083,28 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           /* The target is a write, the preconditions are reads: a hidden path is
            * refused on whichever side names it, before the fence is taken. */
-          writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
+          writeFileChecked: async (
+            input: Omit<AuthorityCheckedFileWrite, 'signal'>,
+          ): Promise<CheckedFileWriteResult> => {
             const [target] = await writableTargets([input.path]);
-            return base.writeFileChecked!({
-              ...input,
-              path: target!,
-              preconditions: input.preconditions.map(({ path, expected }) => ({
-                path: readablePath(canonical(path)),
-                expected,
-              })),
-            });
+            const preconditions = input.preconditions.map((precondition) => ({
+              ...precondition,
+              path: readablePath(canonical(precondition.path)),
+            }));
+            if (!preconditions.some((precondition) => isDigestPrecondition(precondition))) {
+              return base.writeFileChecked!({
+                ...input,
+                path: target!,
+                preconditions: preconditions as FileWritePrecondition[],
+              });
+            }
+            if (base.writeFileCheckedDigest === undefined) {
+              return fileSystemError(
+                'ENOTSUP',
+                `ENOTSUP: digest preconditions are not supported here, writeFileChecked '${input.path}'`,
+              );
+            }
+            return base.writeFileCheckedDigest({ ...input, path: target!, preconditions });
           },
         }),
     ...(base.deleteFileChecked === undefined
@@ -960,6 +1131,15 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           appendFile: async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> =>
             mutate(path, async (target) => base.appendFile!(target, data)),
         }),
+    ...(base.appendFileFenced === undefined
+      ? {}
+      : {
+          appendFileFenced: async (
+            path: string,
+            data: Uint8Array<ArrayBuffer> | string,
+            fence: AppendFence,
+          ): Promise<void> => mutate(path, async (target) => base.appendFileFenced!(target, data, fence)),
+        }),
     ...(base.watch === undefined
       ? {}
       : {
@@ -972,6 +1152,20 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
               { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
               (event: WatchEvent) => {
                 const visible = visibleEvent(event);
+                if (visible !== undefined) {
+                  handler(visible);
+                }
+              },
+            ),
+        }),
+    ...(base.watchChangeSets === undefined
+      ? {}
+      : {
+          watchChangeSets: (request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): (() => void) =>
+            base.watchChangeSets!(
+              { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
+              (set: ChangeSet) => {
+                const visible = visibleSet(set);
                 if (visible !== undefined) {
                   handler(visible);
                 }
@@ -1036,7 +1230,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.search === undefined
       ? {}
       : {
-          search: async (query: string, searchOptions?: TreeSearchOptions): Promise<FileStatEntry[]> =>
+          search: async (query: string, searchOptions?: IndexSearchOptions): Promise<FileStatEntry[]> =>
             base.search!(query, { ...searchOptions, admits: admitsVisible('', searchOptions?.admits) }),
         }),
     ...(base.statTree === undefined
@@ -1044,10 +1238,32 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           statTree: async (
             path: string,
-            statOptions?: { admits?: TreeSearchOptions['admits'] },
+            statOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
           ): Promise<FileStatEntry[]> => {
             const target = readablePath(canonical(path));
-            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+            return base.statTree!(target, { ...statOptions, admits: admitsVisible(target, statOptions?.admits) });
+          },
+        }),
+    /* Overlay entries never change, so what changed is the checkout's index, masked. */
+    ...(base.changedSince === undefined
+      ? {}
+      : {
+          changedSince: async (
+            since: number,
+            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+          ): Promise<IndexChanges> =>
+            base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
+        }),
+    /* An overlay entry is never pending: only project files are asked about, masked like `readFile`. */
+    ...(base.pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => readablePath(canonical(path)));
+            const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+            const asked = targets.filter((_, index) => routes[index]!.kind !== 'overlay');
+            const pending = new Set(asked.length === 0 ? [] : await base.pendingPaths!(asked));
+            return paths.filter((_, index) => pending.has(targets[index]!));
           },
         }),
     /*

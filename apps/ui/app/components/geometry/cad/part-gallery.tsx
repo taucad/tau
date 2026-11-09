@@ -130,7 +130,7 @@ function useGalleryPreviews({ graphicsRef, unitId, parts, index }: PartGalleryPr
               ...part,
               visualKey: prepared.previews[position]?.key ?? prepared.visualKey,
             })),
-            pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
+            { resolution: 'gallery', ...(pendingRetry ? { manualPartId: pendingRetry.partId } : {}) },
           );
           if (pendingRetry) {
             submittedRetry.current = pendingRetry.attempt;

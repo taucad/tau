@@ -1,5 +1,13 @@
 import { Cpu } from 'lucide-react';
-import { DropdownMenuItem, DropdownMenuSwitchItem } from '@taucad/ui/components/dropdown-menu';
+import {
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuSwitchItem,
+} from '@taucad/ui/components/dropdown-menu';
 import { DropdownMenuDisclosureItem } from '@taucad/ui/components/menu-disclosure-item';
 import { DropdownMenuSliderItem } from '@taucad/ui/components/menu-slider-item';
 import { MenuSegmentedControl } from '#cad/menu-segmented-control.jsx';
@@ -20,6 +28,7 @@ type SchemaNode = Readonly<{
   oneOf?: unknown;
   properties?: Readonly<Record<string, SchemaNode>>;
   'x-tau-unit'?: unknown;
+  'x-tau-labels'?: unknown;
 }>;
 
 type NumberField = Readonly<{
@@ -41,6 +50,22 @@ type NumberField = Readonly<{
 }>;
 
 type BooleanField = Readonly<{ kind: 'boolean'; path: readonly string[]; label: string }>;
+
+/** The value an unset enum row offers when the schema declares no default: the kernel decides, so the row says so. */
+const kernelDefaultValue = '';
+
+/**
+ * One of a string enum: a dropdown row showing the current value, opening a submenu of the values. A schema without
+ * a default (the kernel resolves the value, perhaps from another option) also offers Default, which unsets it.
+ */
+type EnumField = Readonly<{
+  kind: 'enum';
+  path: readonly string[];
+  label: string;
+  values: ReadonlyArray<Readonly<{ value: string; label: string }>>;
+  /** The schema's or the view's default; `undefined` when the kernel resolves an unset value itself. */
+  defaultValue: string | undefined;
+}>;
 
 /**
  * A setting that is one of a list of presets or an explicit object, never both: a `oneOf` of a string enum and an
@@ -73,7 +98,7 @@ const choiceModes = [
  */
 export type KernelSettingsGroup = Readonly<{
   label: string | undefined;
-  fields: ReadonlyArray<NumberField | BooleanField | ChoiceField>;
+  fields: ReadonlyArray<NumberField | BooleanField | EnumField | ChoiceField>;
 }>;
 
 const asNumber = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined);
@@ -101,17 +126,40 @@ const stepFor = (value: number, isInteger: boolean): number => {
   return isInteger ? Math.max(1, Math.round(step)) : step;
 };
 
+/** A string enum's values with their labels: the schema's `x-tau-labels`, else each value in sentence case. */
+const enumValues = (node: SchemaNode): Array<{ value: string; label: string }> | undefined => {
+  if (!Array.isArray(node.enum) || (node.type !== undefined && node.type !== 'string')) {
+    return undefined;
+  }
+  const values = node.enum.filter((value): value is string => typeof value === 'string');
+  if (values.length === 0 || values.length !== node.enum.length) {
+    return undefined;
+  }
+  const labels = asRecord(node['x-tau-labels']) ?? {};
+  return values.map((value) => {
+    const label = labels[value];
+    return { value, label: typeof label === 'string' ? label : humanize(value) };
+  });
+};
+
 const toField = (
   path: readonly string[],
   node: SchemaNode,
   fallback: unknown,
-): NumberField | BooleanField | undefined => {
+): NumberField | BooleanField | EnumField | undefined => {
   const label = typeof node.title === 'string' ? node.title : humanize(path.at(-1) ?? '');
   if (node.type === 'boolean') {
     return { kind: 'boolean', path, label };
   }
+  const values = enumValues(node);
+  if (values) {
+    const defaultValue = [fallback, node.default].find(
+      (value): value is string => typeof value === 'string' && values.some((entry) => entry.value === value),
+    );
+    return { kind: 'enum', path, label, values, defaultValue };
+  }
   if (node.type !== 'number' && node.type !== 'integer') {
-    // ponytail: numbers and switches only; a kernel offering text or choice options adds its row kind here.
+    // ponytail: numbers, switches and enums only; a kernel offering free text adds its row kind here.
     return undefined;
   }
   const isInteger = node.type === 'integer';
@@ -196,7 +244,7 @@ const toChoiceField = (key: string, node: SchemaNode, defaultValue: unknown): Ch
  */
 export const kernelSettingsGroups = (schema: unknown, defaults: Record<string, unknown>): KernelSettingsGroup[] => {
   const properties = (schema as SchemaNode | undefined)?.properties ?? {};
-  const loose: Array<NumberField | BooleanField> = [];
+  const loose: Array<NumberField | BooleanField | EnumField> = [];
   const groups: KernelSettingsGroup[] = [];
   for (const [key, node] of Object.entries(properties)) {
     const choice = toChoiceField(key, node, defaults[key]);
@@ -233,7 +281,8 @@ const readPath = (source: Record<string, unknown>, path: readonly string[]): unk
 
 /**
  * The whole option set with one setting changed: a kernel reads every declared value, not only the changed one.
- * A nested leaf merges only into an object: a preset string beside it is replaced, never merged.
+ * A nested leaf merges only into an object: a preset string beside it is replaced, never merged. A top-level
+ * `undefined` removes the setting.
  *
  * @public
  */
@@ -249,6 +298,10 @@ export const withSetting = (
   }
   const merged = { ...defaults, ...values };
   if (leaf === undefined) {
+    if (value === undefined) {
+      // An unset value is absent, so the kernel resolves it; a present `undefined` would not survive the record.
+      return Object.fromEntries(Object.entries(merged).filter(([name]) => name !== key));
+    }
     return { ...merged, [key]: value };
   }
   const nested = { ...asRecord(defaults[key]), ...asRecord(values[key]), [leaf]: value };
@@ -323,6 +376,47 @@ export function KernelSettings({
       {field.label}
     </DropdownMenuSliderItem>
   );
+  const renderEnum = (field: EnumField): React.JSX.Element => {
+    const current = valueAt(field.path);
+    const selected = typeof current === 'string' ? current : (field.defaultValue ?? kernelDefaultValue);
+    const options =
+      field.defaultValue === undefined
+        ? [{ value: kernelDefaultValue, label: 'Default' }, ...field.values]
+        : field.values;
+    const shown = options.find((option) => option.value === selected)?.label ?? selected;
+    return (
+      <DropdownMenuSub key={field.path.join('.')}>
+        <DropdownMenuSubTrigger aria-label={`${field.label}, ${shown}`}>
+          <span>{field.label}</span>
+          <span className='ml-auto pl-3 text-muted-foreground'>{shown}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuRadioGroup
+            aria-label={field.label}
+            value={selected}
+            onValueChange={(next) => {
+              if (next !== selected) {
+                onChange(withSetting({ values, defaults }, field.path, next === kernelDefaultValue ? undefined : next));
+              }
+            }}
+          >
+            {options.map((option) => (
+              <DropdownMenuRadioItem
+                key={option.value}
+                value={option.value}
+                onSelect={(event) => {
+                  // Keep the menu open: a value is a setting, not a command.
+                  event.preventDefault();
+                }}
+              >
+                {option.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  };
   const renderChoice = (field: ChoiceField): React.JSX.Element => {
     const current = valueAt(field.path);
     const mode: ChoiceMode = typeof current === 'string' ? 'preset' : 'custom';
@@ -396,6 +490,9 @@ export function KernelSettings({
                 return renderNumber(field, valueAt(field.path), (next) => {
                   onChange(withSetting({ values, defaults }, field.path, next));
                 });
+              }
+              if (field.kind === 'enum') {
+                return renderEnum(field);
               }
               return renderChoice(field);
             })}

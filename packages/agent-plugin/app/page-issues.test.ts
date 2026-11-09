@@ -8,7 +8,11 @@ const syntaxError: TauViewerIssue = {
   severity: 'error',
   location: { fileName: '/main.ts', startLineNumber: 3, startColumn: 7 },
 };
-const warning: TauViewerIssue = { message: 'Display simplified', code: 'DISPLAY_SIMPLIFIED', severity: 'warning' };
+const warning: TauViewerIssue = {
+  message: 'Tessellation downgraded',
+  code: 'TESSELLATION_DOWNGRADED',
+  severity: 'warning',
+};
 
 describe('issueChatText', () => {
   it('should name the source and list one issue as desktop Fix with AI does', () => {
@@ -22,7 +26,7 @@ describe('issueChatText', () => {
       [
         'Fix these 2 issues:',
         '- **Message:** Unexpected token\n- **Location:** Line 3, Column 7',
-        '- **Message:** Display simplified\n- **Location:** Unknown location',
+        '- **Message:** Tessellation downgraded\n- **Location:** Unknown location',
       ].join('\n\n'),
     );
   });

@@ -17,15 +17,15 @@
 
 import type { FileSystemBackend } from '@taucad/types';
 import { assertRootedPath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
-import type { ExternalChangeFact, FileSystemProvider } from '#types.js';
+import type { ExternalChangeFact, FileSystemProvider, PathPolicy } from '#types.js';
 import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
 import { mapConcurrent } from '#concurrency.js';
 import type { MountResolution, MountTable, StorageRootConfig, WorkspaceScope } from '#mount-table.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import type { CrossTabCoordinator } from '#cross-tab-coordinator.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
+import { projectIndexDirectory } from '#project-index/index-snapshot.js';
 import { isNotFoundError } from '#workspace-errors.js';
 
 /** Concurrent `getFile()` calls per directory while walking an external snapshot. */
@@ -114,9 +114,8 @@ export class ExternalChangeIngest {
   private readonly _mountTable: MountTable;
   private readonly _pipeline: MutationPipeline;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
-  private readonly _treeIndexes: TreeIndexes;
-  /** Read through a function: the writer-side pool arrives after construction. */
-  private readonly _filePool: () => SharedPool | undefined;
+  private readonly _projectIndexes: ProjectIndexes;
+  private readonly _policy: PathPolicy | undefined;
   /** Drops the registry's provider for a root whose physical identity changed. */
   private readonly _disposeStorageRoot: (storageRootKey: string) => void;
   private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
@@ -124,23 +123,23 @@ export class ExternalChangeIngest {
   /**
    * Create the ingest over the authority's own collaborators.
    *
-   * @param options - The registry, mount table, mutation pipeline, cross-tab coordinator, per-root indexes, pool accessor and storage-root disposer the authority owns.
+   * @param options - The registry, mount table, mutation pipeline, cross-tab coordinator, per-root indexes, path policy, pool accessor and storage-root disposer the authority owns.
    */
   public constructor(options: {
     registry: ProviderRegistry;
     mountTable: MountTable;
     pipeline: MutationPipeline;
     crossTabCoordinator: CrossTabCoordinator;
-    treeIndexes: TreeIndexes;
-    filePool: () => SharedPool | undefined;
+    projectIndexes: ProjectIndexes;
+    policy?: PathPolicy;
     disposeStorageRoot: (storageRootKey: string) => void;
   }) {
     this._registry = options.registry;
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
     this._crossTabCoordinator = options.crossTabCoordinator;
-    this._treeIndexes = options.treeIndexes;
-    this._filePool = options.filePool;
+    this._projectIndexes = options.projectIndexes;
+    this._policy = options.policy;
     this._disposeStorageRoot = options.disposeStorageRoot;
   }
 
@@ -433,9 +432,17 @@ export class ExternalChangeIngest {
    * @param facts - Facts as the provider reported them, unfiltered.
    */
   private async _applyExternalFacts(state: ObservedExternalRoot, facts: readonly PathChangeFact[]): Promise<void> {
-    const admitted = facts.filter(
-      (fact) => !this._isChromiumSwapOnlyFact(fact) && !isWorkspaceStatePath(this._physicalPath(fact.path)),
-    );
+    const admitted = facts.filter((fact) => {
+      const physicalPath = this._physicalPath(fact.path);
+      return (
+        !this._isChromiumSwapOnlyFact(fact) &&
+        !isWorkspaceStatePath(physicalPath) &&
+        !(
+          this._isUningestedPath(physicalPath) &&
+          (fact.from === undefined || this._isUningestedPath(this._physicalPath(fact.from)))
+        )
+      );
+    });
     if (admitted.length === 0) {
       return;
     }
@@ -449,7 +456,7 @@ export class ExternalChangeIngest {
       const oldPhysicalPath = fact.from === undefined ? undefined : this._physicalPath(fact.from);
       const mappings = this._logicalMappingsForPhysicalPath(state, physicalPath);
       const knownKinds = new Map(
-        mappings.map(({ path, resolution }) => [resolution.entry, this._treeIndexes.statType(path)] as const),
+        mappings.map(({ path, resolution }) => [resolution.entry, this._projectIndexes.statType(path)] as const),
       );
       return { fact, physicalPath, oldPhysicalPath, mappings, knownKinds };
     });
@@ -546,6 +553,22 @@ export class ExternalChangeIngest {
 
   private _physicalPath(path: string): string {
     return assertRootedPath(path);
+  }
+
+  /**
+   * Paths no external fact is ingested for, at any depth: the Project Index's
+   * own files and what the path policy calls the control plane (a store,
+   * import staging). Nothing watches them, and the index's own snapshot write
+   * would otherwise come back as an external change that schedules the next.
+   *
+   * @param physicalPath - Canonical provider-relative path.
+   * @returns Whether facts about the path are dropped.
+   */
+  private _isUningestedPath(physicalPath: string): boolean {
+    return (
+      `/${physicalPath}/`.includes(`/${projectIndexDirectory}/`) ||
+      this._policy?.classify(physicalPath).class === 'control-plane'
+    );
   }
 
   private _isChromiumSwapOnlyFact(fact: PathChangeFact): boolean {
@@ -717,19 +740,16 @@ export class ExternalChangeIngest {
     physicalPaths: readonly string[];
   }): void {
     if (scoped === undefined) {
-      this._filePool()?.clear();
-    } else {
-      for (const physicalPath of scoped.physicalPaths) {
-        for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
-          this._filePool()?.invalidate(path);
-        }
+      /* A change that cannot be localized leaves every root unknown; each
+       * compares in full before its next answer (D5), facts kept where unchanged. */
+      this._projectIndexes.invalidate('/');
+      return;
+    }
+    for (const physicalPath of scoped.physicalPaths) {
+      for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
+        this._projectIndexes.invalidate(path);
       }
     }
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: the tree is dropped whole even for a localized change — TreeIndex
-    // cannot express "this subtree is unknown", and a scoped removal would publish a
-    // stale absence. Give it a subtree-invalidation state if the rebuild scan shows up hot.
-    this._treeIndexes.clear();
   }
 
   /**
@@ -810,8 +830,10 @@ export class ExternalChangeIngest {
       return [name, `${relative}\0file\0${file.size}\0${file.lastModified}`];
     };
     const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
-      const entries = await admittedEntries(handle);
       const childRelative = (name: string): string => (relative === '' ? name : `${relative}/${name}`);
+      /* No row for what no fact is ingested for: a diff of it would only echo. */
+      const admitted = await admittedEntries(handle);
+      const entries = admitted.filter(([name]) => !this._isUningestedPath(childRelative(name)));
       const fileRows = await resolveRows(
         entries.filter((entry): entry is [string, FileSystemFileHandle] => entry[1].kind === 'file'),
         async ([name, child]) => fileRow(name, childRelative(name), child),

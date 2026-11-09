@@ -3,20 +3,18 @@ import { useCallback, useMemo } from 'react';
 import type { CadAgentExecution, ModelFamily, ModelProvider, TauAgentExecution } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import { cadAgentExecutionSchema } from '@taucad/chat/schemas';
-/* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
-import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
-/* oxlint-enable import/extensions -- Re-enable project import checks. */
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
+import { useFeature } from '#flags/use-feature.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { defaultChatModel } from '#constants/chat.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 import { resolveNewChatExecution } from '#utils/new-chat-execution.js';
 import type { ModelCatalog } from '#utils/new-chat-execution.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { catalogFreshness, modelsQueryKey, readModelCatalog } from '#lib/model-catalog.js';
+import type { Model as CatalogModel } from '#lib/model-catalog.js';
 
-export type Model = ApiModel;
+export type Model = CatalogModel;
 
 /**
  * UI-local resolved view of a {@link Model}. Always non-null so call sites can
@@ -30,47 +28,42 @@ export type ResolvedModel = {
   family: ModelFamily | typeof unknownIconId;
   provider: { id: ModelProvider | typeof unknownIconId; name: string };
   isResolved: boolean;
+  /**
+   * Whether the display name is not known yet: no catalog row for the id, and either no catalog at all (still loading
+   * or unavailable) or no id. A label shows a fixed-width placeholder then, never the raw id or an empty name. A
+   * catalog that answered without the id (a retired model) is not pending: `name` falls back to the id.
+   */
+  isNamePending: boolean;
   model?: Model;
 };
 
-const buildResolved = (id: string, model?: Model): ResolvedModel => ({
-  id,
-  name: model?.name ?? id.split('/').pop() ?? id,
-  family: model?.details.family ?? unknownIconId,
-  provider: model?.provider ?? { id: unknownIconId, name: 'Unknown' },
-  isResolved: Boolean(model),
-  model,
-});
-
-/**
- * The model catalog. An unreachable API, an error status and a body that is not a list all reject, so a failed
- * catalog is never mistaken for an empty one.
- *
- * @returns The catalog rows.
- */
-export const getModels = async (): Promise<Model[]> => {
-  const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    throw recordApiRequestId(new Error(`The model catalog answered ${response.status}.`), response);
-  }
-  const data: unknown = await response.json();
-  if (!Array.isArray(data)) {
-    throw new TypeError('The model catalog answered with something other than a list.');
-  }
-  // ponytail: the API's own Zod schema shapes the rows; the UI checks only the envelope.
-  return data as Model[];
+const buildResolved = (id: string, rows: readonly Model[] | undefined): ResolvedModel => {
+  const model = rows?.find((entry) => entry.id === id);
+  return {
+    id,
+    name: model?.name ?? id.split('/').pop() ?? id,
+    family: model?.details.family ?? unknownIconId,
+    provider: model?.provider ?? { id: unknownIconId, name: 'Unknown' },
+    isResolved: Boolean(model),
+    isNamePending: model === undefined && (rows === undefined || id === ''),
+    model,
+  };
 };
 
 /**
- * How long a fetched catalog counts as fresh. Milliseconds. The catalog is the same for every visitor and changes
- * only with an API deploy, so remounts and window focus reuse it instead of refetching.
+ * The model catalog. An unreachable API, an error status and a body that is not a list all reject.
+ *
+ * @returns The catalog rows.
  */
-const catalogFreshness = 30 * 60 * 1000;
+export const getModels = async (): Promise<Model[]> =>
+  readModelCatalog(
+    await fetch(`${ENV.TAU_API_URL}/v1/models`, {
+      credentials: 'include',
+    }),
+  );
 
 const modelsQuery = {
-  queryKey: ['models'],
+  queryKey: modelsQueryKey,
   queryFn: getModels,
   staleTime: catalogFreshness,
   /* One retry, whatever the network reports: admission waits on this fetch, so it must settle. */
@@ -84,6 +77,18 @@ const catalogWaitTimeout = 10_000;
 
 const catalogOf = (data: Model[] | undefined, isError: boolean): ModelCatalog =>
   data === undefined ? { status: isError ? 'unavailable' : 'loading' } : { status: 'loaded', models: data };
+
+/**
+ * The model a new chat starts on when nothing was chosen: the row the API marks `default`, else the recommended row,
+ * else the first.
+ *
+ * @param data - The loaded catalog, if any.
+ * @returns The default model id, or `undefined` before the catalog answers or when it is empty.
+ */
+export const catalogDefaultModelId = (
+  data: ReadonlyArray<Readonly<{ id: string; recommended?: boolean; default?: boolean }>> | undefined,
+): string | undefined =>
+  (data?.find((model) => model.default === true) ?? data?.find((model) => model.recommended === true) ?? data?.[0])?.id;
 
 /** A stored execution is untrusted: one that fails the wire schema would fail the turn. */
 const parseStoredExecution = (value: unknown): CadAgentExecution | undefined => {
@@ -105,15 +110,29 @@ const parsePinned = (value: unknown): readonly string[] =>
 export const useModels = () => {
   const queryClient = useQueryClient();
   const [storedExecution, setStoredExecution] = useCookie<unknown>(cookieName.chatExecution, undefined);
-  const [selectedModelId, setSelectedModelId] = useCookie(cookieName.chatModel, defaultChatModel);
+  const [storedModelId, setSelectedModelId] = useCookie<string | undefined>(cookieName.chatModel, undefined);
   const [overrides, setOverrides, resetOverrides] = useCookie<Readonly<Record<string, boolean>>>(
     cookieName.chatModelOverrides,
     noOverrides,
   );
   const [storedPinned, setStoredPinned] = useCookie<unknown>(cookieName.chatModelPinned, noPinned);
+  /* Pinning is behind a hidden flag: while it is off, stored pins neither group nor keep a model in the picker. */
+  const isPinningEnabled = useFeature('modelPinning');
   const [storedEffort, setStoredEffort] = useCookie<string | undefined>(cookieName.chatEffort, undefined);
   // Stored preferences are untrusted: a level outside the vocabulary would fail the turn wire.
   const selectedEffort = reasoningLevels.find((level) => level === storedEffort);
+
+  const { data, isLoading, isError } = useQuery({
+    ...modelsQuery,
+    refetchInterval: 1000 * 60 * 5, // 5 minutes
+  });
+  const catalog = useMemo(() => catalogOf(data, isError), [data, isError]);
+
+  /*
+   * The Tau model chosen last, else the one the catalog names as its default. The API owns the default, so before
+   * the catalog first answers a visitor who never chose has no model yet and admission waits for the catalog.
+   */
+  const selectedModelId = storedModelId ?? catalogDefaultModelId(data) ?? '';
 
   /** The last Tau model and level chosen: where a chat returns to from an external agent. */
   const lastTauExecution = useMemo<TauAgentExecution>(
@@ -125,16 +144,16 @@ export const useModels = () => {
     [selectedModelId, selectedEffort],
   );
 
-  const { data, isLoading, isError } = useQuery({
-    ...modelsQuery,
-    refetchInterval: 1000 * 60 * 5, // 5 minutes
-  });
-  const catalog = useMemo(() => catalogOf(data, isError), [data, isError]);
-
-  /** The execution a chat with none of its own starts on: the last one used, of any agent. */
-  const defaultExecution = useMemo<CadAgentExecution>(
-    () => resolveNewChatExecution({ last: parseStoredExecution(storedExecution), lastTau: lastTauExecution, catalog }),
-    [storedExecution, lastTauExecution, catalog],
+  /**
+   * The execution a chat with none of its own starts on: the last one used, of any agent, on a host this tab reaches.
+   * The cookie is shared by every tab on this device, so a loopback daemon another tab was handed is dropped here.
+   */
+  const defaultExecution = usePlaceableExecution(
+    useMemo<CadAgentExecution>(
+      () =>
+        resolveNewChatExecution({ last: parseStoredExecution(storedExecution), lastTau: lastTauExecution, catalog }),
+      [storedExecution, lastTauExecution, catalog],
+    ),
   );
 
   /**
@@ -183,6 +202,22 @@ export const useModels = () => {
     }
   }, [queryClient]);
 
+  /**
+   * The execution a new chat is created with. A Tau execution with no model yet — chosen before the catalog first
+   * answered — waits for the catalog and takes its default, so the chat is never saved without a model.
+   */
+  const withCatalogDefaultModel = useCallback(
+    async (execution: CadAgentExecution): Promise<CadAgentExecution> => {
+      if (execution.kind !== 'tau' || execution.model !== '') {
+        return execution;
+      }
+      const loaded = await ensureModelCatalog();
+      const model = loaded.status === 'loaded' ? catalogDefaultModelId(loaded.models) : undefined;
+      return model === undefined ? execution : { ...execution, model };
+    },
+    [ensureModelCatalog],
+  );
+
   /*
    * Whether the loaded catalog offers a model id. While the catalog is loading or unavailable every id counts as
    * offered, so an offline session prunes nothing (R3).
@@ -190,7 +225,10 @@ export const useModels = () => {
   const isOffered = useCallback((id: string): boolean => data?.some((model) => model.id === id) ?? true, [data]);
 
   /** Pinned model ids in pin order, without ids the loaded catalog no longer offers. */
-  const pinnedIds = useMemo(() => parsePinned(storedPinned).filter((id) => isOffered(id)), [storedPinned, isOffered]);
+  const pinnedIds = useMemo(
+    () => (isPinningEnabled ? parsePinned(storedPinned).filter((id) => isOffered(id)) : noPinned),
+    [isPinningEnabled, storedPinned, isOffered],
+  );
 
   const isPinned = useCallback((model: Model): boolean => pinnedIds.includes(model.id), [pinnedIds]);
 
@@ -241,22 +279,13 @@ export const useModels = () => {
 
   const recommendedModels = useMemo(() => (data ?? []).filter((model) => model.recommended === true), [data]);
 
-  const modelById = useMemo(() => new Map((data ?? []).map((m) => [m.id, m])), [data]);
-
-  /* Reads the query cache rather than this render's map, so a caller that just awaited the catalog sees it. */
+  /* Reads the query cache rather than this render's data, so a caller that just awaited the catalog sees it. */
   const resolveModel = useCallback(
-    (id: string): ResolvedModel =>
-      buildResolved(
-        id,
-        (queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data)?.find((model) => model.id === id),
-      ),
+    (id: string): ResolvedModel => buildResolved(id, queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data),
     [queryClient, data],
   );
 
-  const selectedModel = useMemo<ResolvedModel>(
-    () => buildResolved(selectedModelId, modelById.get(selectedModelId)),
-    [modelById, selectedModelId],
-  );
+  const selectedModel = useMemo<ResolvedModel>(() => buildResolved(selectedModelId, data), [data, selectedModelId]);
 
   return {
     data,
@@ -266,6 +295,7 @@ export const useModels = () => {
     setSelectedModelId,
     catalog,
     ensureModelCatalog,
+    withCatalogDefaultModel,
     defaultExecution,
     lastTauExecution,
     rememberExecution,
@@ -274,6 +304,7 @@ export const useModels = () => {
     isAvailable,
     setAvailable,
     resetAvailability,
+    isPinningEnabled,
     pinnedIds,
     isPinned,
     setPinned,

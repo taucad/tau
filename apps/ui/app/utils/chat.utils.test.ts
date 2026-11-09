@@ -259,7 +259,7 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 20 out');
+      expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 0 cache read / 0 cache write / 20 out');
     });
 
     /* V6: an external turn's tokens are the vendor's own report, and Tau quotes
@@ -281,7 +281,9 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 300 out');
+      expect(serializeMessage(message)).toBe(
+        'Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 0 cache read / 0 cache write / 300 out',
+      );
     });
 
     /* B4 R2: an export names the funded operations whose receipts hold the
@@ -319,7 +321,9 @@ describe('serializeMessage', () => {
         },
       ]);
       const serialized = serializeMessage(message);
-      expect(serialized).toBe('Model: claude-3 | Tokens: 6 in / 17 out | Tau operations: op_a, op_b');
+      expect(serialized).toBe(
+        'Model: claude-3 | Tokens: 6 in / 0 cache read / 0 cache write / 17 out | Tau operations: op_a, op_b',
+      );
       expect(serialized).not.toContain('$');
     });
 
@@ -352,7 +356,46 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out');
+      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 0 cache read / 0 cache write / 35 out');
+    });
+
+    /* P3: input is the uncached count only. A cached turn's export must show the
+     * cache reads and writes beside it, or a turn served from cache reads as a
+     * dozen tokens of input. The counts are summed per field across parts. */
+    it('separates uncached input, cache read, cache write and output', () => {
+      const message = baseMessage([
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u1',
+            model: 'claude-sonnet-4-5',
+            inputTokens: 5,
+            outputTokens: 4000,
+            reasoningTokens: 0,
+            cacheReadTokens: 100_000,
+            cacheWriteTokens: 73_243,
+            operationId: 'op_a',
+          },
+        },
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u2',
+            model: 'claude-sonnet-4-5',
+            inputTokens: 7,
+            outputTokens: 6969,
+            reasoningTokens: 0,
+            cacheReadTokens: 117_850,
+            cacheWriteTokens: 0,
+            operationId: 'op_a',
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        'Model: claude-sonnet-4-5 | Tokens: 12 in / 217850 cache read / 73243 cache write / 10969 out | Tau operations: op_a',
+      );
     });
   });
 
@@ -675,6 +718,29 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes a glob entry whose kind or line count was not measured by its size alone', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-glob_search',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: '**/*' },
+          output: {
+            files: ['big.log', 'huge.txt'],
+            entries: [
+              { path: 'big.log', size: 5_242_880 },
+              { path: 'huge.txt', size: 2048, contentKind: 'text' },
+            ],
+            totalFiles: 2,
+          },
+        },
+      ]);
+
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="glob_search">\npattern: **/*\n</tool_call>\n<tool_result>\nTotal: 2\nbig.log (5.0MB)\nhuge.txt (2KB)\n</tool_result>',
+      );
+    });
+
     it('serializes tool-grep output-available', () => {
       const message = baseMessage([
         {
@@ -692,6 +758,27 @@ describe('serializeMessage', () => {
       ]);
       expect(serializeMessage(message)).toBe(
         '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 1\na.ts:1: foo\n</tool_result>',
+      );
+    });
+
+    it('serializes the files a grep could not search because their large object is pending', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-grep',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: 'foo' },
+          output: {
+            matches: [],
+            totalMatches: 0,
+            pendingFiles: ['models/part.step'],
+            appliedHeadLimit: 50,
+            appliedOffset: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (large object not on this device yet): models/part.step\n</tool_result>',
       );
     });
 
@@ -817,19 +904,6 @@ describe('serializeMessage', () => {
           angularTolerance: 12,
         },
         'Mesh: 4096 triangles, 2050 vertices, 18 ms\nResolution: requested high, linearTolerance 0.06 mm, angularTolerance 12°',
-      ],
-      [
-        'a downgraded render',
-        {
-          triangles: 1_999_872,
-          vertices: 1_000_014,
-          elapsed: 812,
-          requested: 'extra-high',
-          linearTolerance: 0.02,
-          angularTolerance: 10,
-          downgraded: 1,
-        },
-        'Mesh: 1999872 triangles, 1000014 vertices, 812 ms\nResolution: requested extra-high, linearTolerance 0.02 mm, angularTolerance 10°, downgraded 1',
       ],
     ])('serializes the evaluate_model mesh cost of %s', (_kernel, tessellation, line) => {
       const message = baseMessage([

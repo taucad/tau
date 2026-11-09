@@ -1,0 +1,159 @@
+{
+  "$comment": "Viewer parity fixtures (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D3). Example GLBs are not committed: libs/tau-examples/scripts/export-parity-fixtures.mts generates them into out/test-results/viewer-parity/fixtures from the tau-examples source, and each parity run feeds the same files to the viewer capture and to nanoraster.",
+  "fixtures": [
+    {
+      "name": "flanged-housing",
+      "glb": "packages/viewer/src/graphics/three/utils/fixtures/flanged-housing.glb",
+      "source": "packages/viewer viewer fixture",
+      "class": "filleted, holes",
+      "rationale": "coordinator fixture: fillet arcs, bolt holes, AO-heavy flange"
+    },
+    {
+      "name": "gear-8",
+      "glb": "apps/ui/app/routes/convert/gear-8.glb",
+      "source": "apps/ui convert route sample",
+      "class": "prismatic, teeth",
+      "rationale": "coordinator fixture: gear teeth, small repeated features"
+    },
+    {
+      "name": "replicad.ibeam",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.ibeam.glb",
+      "source": "replicad/ibeam",
+      "class": "prismatic",
+      "rationale": "large flat faces; separates lighting from AO"
+    },
+    {
+      "name": "replicad.t-slot-rail",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.t-slot-rail.glb",
+      "source": "replicad/t-slot-rail",
+      "class": "prismatic",
+      "rationale": "narrow slots, dense one-pixel parallel edges"
+    },
+    {
+      "name": "replicad.lego",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.lego.glb",
+      "source": "replicad/lego",
+      "class": "small features",
+      "rationale": "small studs, hollow underside"
+    },
+    {
+      "name": "smlib.parametric-plate",
+      "glb": "out/test-results/viewer-parity/fixtures/smlib.parametric-plate.glb",
+      "source": "smlib/parametric-plate",
+      "class": "flat metallic",
+      "rationale": "flat metallic plate with a hole grid; SMLib tessellation"
+    },
+    {
+      "name": "replicad.vase",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.vase.glb",
+      "source": "replicad/vase",
+      "class": "turned, thin-walled",
+      "rationale": "thin wall with the interior visible"
+    },
+    {
+      "name": "replicad.bottle",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.bottle.glb",
+      "source": "replicad/bottle",
+      "class": "turned, filleted",
+      "rationale": "filleted shoulders"
+    },
+    {
+      "name": "replicad.hex-screwdriver",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.hex-screwdriver.glb",
+      "source": "replicad/hex-screwdriver",
+      "class": "mixed scales",
+      "rationale": "mixed feature scales, few model pixels"
+    },
+    {
+      "name": "replicad.rao-nozzle",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.rao-nozzle.glb",
+      "source": "replicad/rao-nozzle",
+      "class": "turned, deep cavity",
+      "rationale": "deep visible interior"
+    },
+    {
+      "name": "replicad.tray",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.tray.glb",
+      "source": "replicad/tray",
+      "class": "filleted",
+      "rationale": "large curved fillets"
+    },
+    {
+      "name": "replicad.wavy-vase",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.wavy-vase.glb",
+      "source": "replicad/wavy-vase",
+      "class": "organic",
+      "rationale": "twisted facets, high curvature"
+    },
+    {
+      "name": "openscad.fluted-vase",
+      "glb": "out/test-results/viewer-parity/fixtures/openscad.fluted-vase.glb",
+      "source": "openscad/fluted-vase",
+      "class": "organic",
+      "rationale": "single polyhedron; OpenSCAD kernel"
+    },
+    {
+      "name": "manifold.manifold-logo",
+      "glb": "out/test-results/viewer-parity/fixtures/manifold.manifold-logo.glb",
+      "source": "manifold/manifold-logo",
+      "class": "deep cavities",
+      "rationale": "Menger cavities and vertex colours; Manifold kernel"
+    },
+    {
+      "name": "replicad.hollow-box",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.hollow-box.glb",
+      "source": "replicad/hollow-box",
+      "class": "thin-walled, cavity",
+      "rationale": "shelled open cavity"
+    },
+    {
+      "name": "replicad.simple-tray",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.simple-tray.glb",
+      "source": "replicad/simple-tray",
+      "class": "inner corners",
+      "rationale": "compartment grid with inner corners"
+    },
+    {
+      "name": "picovoxel.lattice-regular",
+      "glb": "out/test-results/viewer-parity/fixtures/picovoxel.lattice-regular.glb",
+      "source": "picovoxel/lattice-regular",
+      "class": "lattice",
+      "rationale": "dense lattice; PicoVoxel kernel"
+    },
+    {
+      "name": "picovoxel.gyroid-sdf",
+      "glb": "out/test-results/viewer-parity/fixtures/picovoxel.gyroid-sdf.glb",
+      "source": "picovoxel/gyroid-sdf",
+      "class": "lattice",
+      "rationale": "TPMS tunnels"
+    },
+    {
+      "name": "picovoxel.sphere-minus-beams",
+      "glb": "out/test-results/viewer-parity/fixtures/picovoxel.sphere-minus-beams.glb",
+      "source": "picovoxel/sphere-minus-beams",
+      "class": "voxel boolean, holes",
+      "rationale": "voxel boolean with through holes"
+    },
+    {
+      "name": "replicad.spur-gearbox",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.spur-gearbox.glb",
+      "source": "replicad/spur-gearbox",
+      "class": "assembly",
+      "rationale": "assembly with coloured materials"
+    },
+    {
+      "name": "jscad.planetary-gear-system",
+      "glb": "out/test-results/viewer-parity/fixtures/jscad.planetary-gear-system.glb",
+      "source": "jscad/planetary-gear-system",
+      "class": "assembly",
+      "rationale": "assembly with flat-shaded JSCAD tessellation"
+    },
+    {
+      "name": "replicad.heat-exchanger",
+      "glb": "out/test-results/viewer-parity/fixtures/replicad.heat-exchanger.glb",
+      "source": "replicad/heat-exchanger",
+      "class": "mixed scales, metal",
+      "rationale": "mixed scales and PBR metal"
+    }
+  ]
+}

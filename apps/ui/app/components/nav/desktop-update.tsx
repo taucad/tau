@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpCircle, Check, Download, LoaderCircle, ShieldAlert } from 'lucide-react';
+import { ArrowUpCircle, Check, Download, ShieldAlert } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { useSidebar } from '@taucad/ui/components/sidebar';
 import { UpdateControl } from '#components/nav/update-control.js';
@@ -81,6 +82,7 @@ export function DesktopUpdateControl({
         saving: 'Saving your work',
         'restart-blocked': 'Restart paused',
         restarting: 'Restarting Tau',
+        'move-required': 'Move Tau to Applications',
       }[phase];
   const detail = actionFailed
     ? 'Try again. Your current session is still open.'
@@ -100,11 +102,13 @@ export function DesktopUpdateControl({
         saving: 'Saving your work before restarting…',
         'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
         restarting: 'Reopening your workspace…',
+        'move-required':
+          'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
       }[phase]);
   const Icon = failed
     ? ShieldAlert
     : busy || phase === 'downloading'
-      ? LoaderCircle
+      ? Loader
       : phase === 'current'
         ? Check
         : phase === 'available'
@@ -115,7 +119,8 @@ export function DesktopUpdateControl({
     try {
       if (phase === 'ready' || phase === 'restart-blocked') {
         await bridge.install();
-      } else if (phase === 'available') {
+      } else if (phase === 'available' || phase === 'move-required') {
+        /* For move-required, main moves Tau to Applications and relaunches it from there. */
         await bridge.download();
       } else {
         await bridge.check();
@@ -131,9 +136,11 @@ export function DesktopUpdateControl({
         ? 'Retry restart'
         : phase === 'available'
           ? 'Download'
-          : phase === 'current' || phase === 'system-managed'
-            ? 'Check again'
-            : 'Retry';
+          : phase === 'move-required'
+            ? 'Move to Applications'
+            : phase === 'current' || phase === 'system-managed'
+              ? 'Check again'
+              : 'Retry';
   return (
     <UpdateControl
       title={title}

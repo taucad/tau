@@ -1,0 +1,64 @@
+{
+  "name": "api-billing",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-billing",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:billing"],
+  "targets": {
+    "formal": {},
+    "formal:nightly": {},
+    "test:billing-foundation": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/test-billing-foundation.mts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": [
+        {
+          "projects": ["api"],
+          "target": "build:billing-command"
+        }
+      ]
+    },
+    "test:billing-stripe": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Optional operator-only Stripe sandbox API probe; never run in CI. Requires separate restricted create/read/refund keys, Stripe CLI and ngrok; never skips when invoked."
+      },
+      "options": {
+        "command": "test -n \"$STRIPE_SECRET_KEY\" && test -n \"$STRIPE_READ_SECRET_KEY\" && test -n \"$STRIPE_REFUND_SECRET_KEY\" && test -n \"$STRIPE_ACCOUNT_ID\" && test -n \"$STRIPE_PRICE_ID_PRO_MONTHLY\" && test -n \"$STRIPE_PRODUCT_ID_CREDIT_PACK\" && BILLING_STRIPE_ACCEPTANCE=true vitest run --config vitest.integration.config.ts src/testing/billing-stripe.acceptance.test.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test:billing-load": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=…` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
+      },
+      "dependsOn": [
+        {
+          "projects": ["api"],
+          "target": "build:billing-command"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/libs/api-billing/src/testing/billing-load/run.ts --profile=local-smoke"
+      },
+      "configurations": {
+        "smoke": {
+          "command": "node --import @oxc-node/core/register apps/libs/api-billing/src/testing/billing-load/run.ts --profile=local-smoke"
+        },
+        "growth": {
+          "command": "node --import @oxc-node/core/register apps/libs/api-billing/src/testing/billing-load/run.ts --profile=local-growth"
+        },
+        "surge": {
+          "command": "node --import @oxc-node/core/register apps/libs/api-billing/src/testing/billing-load/run.ts --profile=surge-64"
+        }
+      }
+    }
+  }
+}

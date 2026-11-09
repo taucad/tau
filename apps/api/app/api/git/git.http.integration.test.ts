@@ -23,12 +23,12 @@ import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { getEnvironment } from '#config/environment.config.js';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
-import { DatabaseService } from '#database/database.service.js';
-import { project, projectDeletion } from '#database/schema.js';
-import { RedisService } from '#redis/redis.service.js';
+import { AuthGuard } from '@taucad/api-auth';
+import { getEnvironment } from '@taucad/api-core';
+import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
+import { DatabaseService } from '@taucad/api-database';
+import { project, projectDeletion } from '@taucad/api-database/schema';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
@@ -48,14 +48,13 @@ import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
 import type { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { startStorageHop } from '#testing/storage-hop.js';
 import type { StorageHop } from '#testing/storage-hop.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { livePackBound } from '#api/git/store/limits.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { createGitTestListener } from '#api/git/git-test-listener.js';
 
 /**
@@ -958,6 +957,53 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     state.lfsBytes = 0;
     lfsRows.delete(oid);
+  }, 60_000);
+
+  /* D11, EQ12: verify trusts the checksum-pinned PUT, so the store itself must
+     refuse bytes that do not hash to the oid, and a verify after a refused PUT
+     finds nothing to finalize. One that landed is finalized without its bytes
+     being read back. */
+  it('refuses same-size bytes the PUT pinned to another oid, and verifies a landed object without reading it', async () => {
+    const bytes = Buffer.from('pinned bytes\n');
+    const oid = createHash('sha256').update(bytes).digest('hex');
+    const batch = async (): Promise<{ href: string; header?: Record<string, string> } | undefined> => {
+      const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/batch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
+        body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid, size: bytes.byteLength }] }),
+      });
+      const body = (await response.json()) as {
+        objects: Array<{ actions?: { upload?: { href: string; header?: Record<string, string> } } }>;
+      };
+      return body.objects[0]?.actions?.upload;
+    };
+    const verify = async (): Promise<number> => {
+      const answered = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
+        body: JSON.stringify({ oid, size: bytes.byteLength }),
+      });
+      return answered.status;
+    };
+    const reads = vi.spyOn(storage, 'getBlob');
+    try {
+      const action = await batch();
+      const corrupt = Buffer.alloc(bytes.byteLength, 7);
+      const refused = await fetch(action?.href ?? '', { method: 'PUT', body: corrupt, headers: action?.header });
+      expect(refused.ok).toBe(false);
+      expect(await verify()).not.toBe(200);
+      expect(lfsRows.get(oid)?.finalized).toBe(false);
+
+      const landed = await fetch(action?.href ?? '', { method: 'PUT', body: bytes, headers: action?.header });
+      expect(landed.ok, `presigned PUT failed: ${String(landed.status)}`).toBe(true);
+      expect(await verify()).toBe(200);
+      expect(lfsRows.get(oid)?.finalized).toBe(true);
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      state.lfsBytes = 0;
+      lfsRows.delete(oid);
+    }
   }, 60_000);
 
   it('round-trips exactly 100 MiB through stock Git LFS and refuses one byte over', async () => {

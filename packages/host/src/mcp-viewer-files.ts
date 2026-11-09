@@ -1,7 +1,7 @@
 /**
  * The project files the viewer page's Files pane lists (agent plugin workbench parity PAR-9).
  *
- * One `TreeIndex` per project folder, built by one breadth-first scan through the folder's `NodeFsProvider` and kept
+ * One `ProjectIndex` per project folder, built by one breadth-first scan through the folder's `NodeFsProvider` and kept
  * current by that provider's recursive watch, so a file the agent, an editor or `sed` writes appears without another
  * walk. `.tau`, other dot-folders and dependency or build folders are never listed; `exports/` is. A change moves the
  * folder's version, which `app_sync` carries to the page as `filesVersion`, so the pane lists again.
@@ -10,7 +10,7 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { TreeIndex } from '@taucad/filesystem';
+import { ProjectIndex } from '@taucad/filesystem';
 import type { FileStat } from '@taucad/filesystem';
 import { drainNodeFsProviderWatchClosures, NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
@@ -125,7 +125,7 @@ export type McpViewerFiles = Readonly<{
 type Folder = {
   readonly root: string;
   readonly provider: NodeFsProvider;
-  readonly index: TreeIndex;
+  index: ProjectIndex;
   version: number;
   truncated: boolean;
   /** Whether the watch runs; without it every listing scans again. */
@@ -138,17 +138,15 @@ type Folder = {
 };
 
 /**
- * A listed file's index metadata from one `lstat`: the pane reads names and sizes only, so no file is opened and its
- * content kind is recorded as binary, never sniffed.
+ * A listed file's index metadata from one `lstat`: the pane reads names and sizes only, so no file is opened and no
+ * content fact is recorded (I3).
  *
  * @param absolute - The file's absolute path.
  * @returns Its metadata, or `undefined` for a link, a special file or one that went away.
  */
 const fileStatOf = async (absolute: string): Promise<Extract<FileStat, { type: 'file' }> | undefined> => {
   const stats = await lstat(absolute).catch(() => undefined);
-  return stats?.isFile() === true
-    ? { type: 'file', size: stats.size, mtimeMs: stats.mtimeMs, contentKind: 'binary' }
-    : undefined;
+  return stats?.isFile() === true ? { type: 'file', size: stats.size, mtimeMs: stats.mtimeMs } : undefined;
 };
 
 /**
@@ -234,7 +232,15 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
 
   const rebuild = async (folder: Folder): Promise<void> => {
     const { entries, truncated } = await scan(folder.root);
-    folder.index.build(entries);
+    const index = new ProjectIndex();
+    for (const entry of entries) {
+      if (entry.type === 'dir') {
+        index.recordDirectory(entry.path);
+      } else {
+        index.recordFile(entry.path, { size: entry.size, mtimeMs: entry.mtimeMs });
+      }
+    }
+    folder.index = index;
     folder.truncated = truncated;
   };
 
@@ -269,28 +275,23 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
       return;
     }
     if (event.type === 'delete') {
-      const node = folder.index.stat(event.path);
-      if (node === undefined) {
+      if (folder.index.entry(event.path) === undefined) {
         return;
       }
-      if (node.type === 'dir') {
-        folder.index.removeDirectory(event.path);
-      } else {
-        folder.index.removeFile(event.path);
-      }
+      folder.index.remove(event.path);
       touch(folder);
       return;
     }
     if (event.kind === 'dir') {
       /* A folder moved in brings files no event names: scan again. */
-      if (folder.index.stat(event.path) === undefined) {
+      if (folder.index.entry(event.path) === undefined) {
         await rebuild(folder);
         touch(folder);
       }
       return;
     }
-    const known = folder.index.stat(event.path) !== undefined;
-    if (!known && folder.index.getDirectoryStat('').length >= fileLimit) {
+    const known = folder.index.entry(event.path) !== undefined;
+    if (!known && folder.index.statTree('').length >= fileLimit) {
       folder.truncated = true;
       return;
     }
@@ -298,7 +299,7 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
     if (stat === undefined) {
       return;
     }
-    folder.index.addFile(event.path, stat);
+    folder.index.recordFile(event.path, { size: stat.size, mtimeMs: stat.mtimeMs });
     touch(folder);
   };
 
@@ -306,7 +307,7 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
     const folder: Folder = {
       root,
       provider: new NodeFsProvider(root, { policy: tauPathPolicy }),
-      index: new TreeIndex(),
+      index: new ProjectIndex(),
       version: 1,
       truncated: false,
       watched: false,
@@ -377,9 +378,9 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
       }
       if (input.query !== undefined) {
         const found = folder.index
-          .searchFiles(input.query, {
+          .search(input.query, {
             maxResults: entryLimit + 1,
-            admits: (path, type) => !isHiddenPath(path, type === 'dir'),
+            admits: (path, kind) => !isHiddenPath(path, kind === 'dir'),
           })
           .map(({ path, size }) => entryOf(path, false, size))
           .toSorted((left, right) => left.path.localeCompare(right.path));
@@ -389,18 +390,15 @@ export const createMcpViewerFiles = (options: McpViewerFilesOptions = {}): McpVi
       if (typeof path !== 'string') {
         return path;
       }
-      const node = folder.index.stat(path);
-      if (node?.children === undefined || (path !== '' && isHiddenPath(path, true))) {
+      if (folder.index.entry(path)?.kind !== 'dir' || (path !== '' && isHiddenPath(path, true))) {
         return { errorCode: 'NOT_A_FOLDER', message: `${path} is not a folder the project lists.` };
       }
-      const entries = [...node.children].map(([name, child]) =>
-        entryOf(path === '' ? name : `${path}/${name}`, child.type === 'dir', child.size),
-      );
+      const entries = folder.index.children(path).map((child) => entryOf(child.path, child.kind === 'dir', child.size));
       return answer(folder, entries.toSorted(compareEntries), folder.truncated);
     },
     async paths(root) {
       const folder = await folderOf(root);
-      return folder.index.getDirectoryStat('').map(({ path }) => path);
+      return folder.index.statTree('').map(({ path }) => path);
     },
     listed(root) {
       const folder = opened.get(root);

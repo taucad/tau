@@ -1,5 +1,5 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
@@ -13,6 +13,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -77,6 +78,9 @@ import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-ed
 import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import type { FileContentSelection } from '#hooks/use-file-content.js';
+import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
@@ -93,6 +97,8 @@ import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-paramete
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
+import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
+import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
@@ -104,7 +110,6 @@ import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel
 import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
 import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
-import { TerminalCloseContext, useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
@@ -352,19 +357,10 @@ function ConsoleWorkbenchPanel(): React.JSX.Element {
   return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
 }
 
-/* A running Terminal asks before its tab closes; Hide closes the Workbench lane, which keeps this panel mounted. */
-function TerminalWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+/* Closing the Terminal's tab unmounts the pane, which ends its session. */
+function TerminalWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  const { setWorkbenchOpen } = useProjectWorkspace();
-  const hide = useCallback(() => {
-    setWorkbenchOpen(false);
-  }, [setWorkbenchOpen]);
-  const closeHost = useDockviewTerminalCloseHost(api, hide);
-  return (
-    <TerminalCloseContext.Provider value={closeHost}>
-      <ProjectTerminalPane profile={profile} />
-    </TerminalCloseContext.Provider>
-  );
+  return <ProjectTerminalPane profile={profile} />;
 }
 
 type WorkbenchSurface = {
@@ -1177,6 +1173,7 @@ function FileWorkbenchPane({
     presentation,
   });
   const [fileActionsContainer, setFileActionsContainer] = useState<HTMLDivElement>();
+  const [symbolPath, setSymbolPath] = useState<readonly EditorSymbolCrumb[]>([]);
   const alternateView = presentation?.views.find((view) => view.id !== paneState.viewId);
   const filesAction = paneState.filesOpen ? `Hide files for ${title}` : `Show files for ${title}`;
 
@@ -1220,7 +1217,9 @@ function FileWorkbenchPane({
   return (
     <div className='flex size-full min-h-0 flex-col bg-background' data-file-pane-id={paneId}>
       {filePath ? (
-        <ChatEditorBreadcrumbs filePath={filePath}>{actions}</ChatEditorBreadcrumbs>
+        <ChatEditorBreadcrumbs filePath={filePath} symbolPath={symbolPath}>
+          {actions}
+        </ChatEditorBreadcrumbs>
       ) : (
         <div className='flex min-h-9 flex-row items-center justify-between border-b border-border bg-background px-1 py-1 text-muted-foreground'>
           <span className='truncate px-1 text-sm font-medium'>{title}</span>
@@ -1228,7 +1227,9 @@ function FileWorkbenchPane({
         </div>
       )}
       <div className='flex min-h-0 flex-1'>
-        <div className='min-h-0 min-w-0 flex-1'>{children}</div>
+        <div className='min-h-0 min-w-0 flex-1'>
+          <EditorSymbolPathProvider onSymbolPath={setSymbolPath}>{children}</EditorSymbolPathProvider>
+        </div>
         {paneState.filesOpen ? (
           <FilePaneFilesSidecar
             regionId={regionId}
@@ -1306,7 +1307,9 @@ export const FileEditor = memo(function ({
     (previous, next) => previous?.path === next?.path && previous?.readOnly === next?.readOnly,
   );
   const filePath = liveEntry?.path ?? filePathFromParams;
-  const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
+  const readOnly =
+    isVirtualDeclarationPath(filePath) ||
+    isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };
 
   // Kernel diagnostics
@@ -1316,9 +1319,23 @@ export const FileEditor = memo(function ({
   // The discriminated outcome is the single source of truth for the render
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
-  const result = useFileContent(filePath);
-  /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
-  const isAwaitingLargeObject = useLargeObjectPending(filePath);
+  const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
+  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  // A declaration held in memory has nothing to observe on disk, so it is always current.
+  const result = useMemo(
+    (): FileContentSelection =>
+      virtualDeclaration === undefined
+        ? fileContent
+        : {
+            ...virtualDeclaration,
+            observation: { status: 'ready', value: virtualDeclaration },
+            retry: fileContent.retry,
+          },
+    [fileContent, virtualDeclaration],
+  );
+  /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it.
+     Being open, its object is fetched and written first (D10). */
+  const isAwaitingLargeObject = useOpenedLargeObjectPending(filePath);
 
   const handleFileSelectorSelect = useCallback(
     (path: string) => {
@@ -1356,12 +1373,13 @@ export const FileEditor = memo(function ({
     throw new Error(`File '${filePath}' is not available to a viewer`);
   }, [contentService, filePath, textContent, binarySize]);
 
+  /* Typing is written once the debounce window closes (D17), or at once at a flush point. */
   const reportSave = useCallback(
     (path: string): void => {
       if (!documentSession) {
         return;
       }
-      const completion = documentSession.save(path);
+      const completion = documentSession.scheduleSave(path);
       if (handledSaveCompletion.current === completion) {
         return;
       }
@@ -1370,6 +1388,22 @@ export const FileEditor = memo(function ({
     },
     [documentSession],
   );
+
+  /* The pane's own flush points (D17): its editor losing focus, the pane hidden
+   * by a tab switch, and the pane closing. */
+  const flushPaneSave = useCallback((): void => {
+    const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
+    documentSession?.flushSaves(live?.path ?? filePath);
+  }, [documentSession, editorRef, filePath, paneId]);
+  /* A flush is idempotent, so one also running when the pane is shown again, or its path changes, is harmless. */
+  useEffect(() => {
+    if (!isPanelShown) {
+      flushPaneSave();
+    }
+    return () => {
+      flushPaneSave();
+    };
+  }, [isPanelShown, flushPaneSave]);
 
   const handleEditorApply = useCallback(
     (document: EditorDocument, transaction: DocumentTransaction): DocumentChange | undefined => {
@@ -1546,7 +1580,7 @@ export const FileEditor = memo(function ({
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
     >
-      <div className='flex h-full min-h-0 flex-1 flex-col'>
+      <div className='flex h-full min-h-0 flex-1 flex-col' onBlur={flushPaneSave}>
         {result.observation.status === 'closed' || result.observation.status === 'error' ? (
           <div role='status' className='flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1 text-xs'>
             <span>File updates unavailable</span>
@@ -1857,6 +1891,8 @@ export const WorkbenchDockview = memo(function ({
         return;
       }
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+      // Launchers are window-local, so a record carries none; keep the open one beside the record's tabs.
+      const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
       isRestoringLayout.current = true;
       try {
         // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
@@ -1865,6 +1901,7 @@ export const WorkbenchDockview = memo(function ({
           toDockview('workbench', withoutUnshippedPanes(node), {
             dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
             files,
+            ...(launcherId === undefined ? {} : { launcherId }),
           }),
           { reuseExistingPanels: true },
         );

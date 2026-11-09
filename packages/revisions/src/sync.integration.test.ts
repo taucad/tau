@@ -21,6 +21,7 @@
  * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
  * | 19 | **D87** | another checkout's branch that diverged with overlapping changes records its conflict line on the pull and pushes it, and the live branch's next revision still reaches the remote (isomorphic-git leg) |
+ * | 20 | **R4, R6** | a cold connect fetches only the authored refs, once, over `validate`'s one advertisement, and the opening pull fetches only the chats; another device's operation log never comes down |
  * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
@@ -729,6 +730,82 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     }
   }, 180_000);
 
+  it('row 20 (R4, R6): a cold connect fetches the authored refs once, and the opening pull fetches only the chats', async () => {
+    const remoteRoot = await temporaryRoot('remote-cold-connect');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-cold-connect',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([7, 7, 7]);\n',
+          [`${chatRecordsPath(chatId)}/chat.json`]: '{"name":"Bracket"}\n',
+          [`${chatRecordsPath(chatId)}/events.jsonl`]: '{"type":"turn.start"}\n',
+        },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([7, 7, 7]);\n' }, summary: 'Device A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+      /* Another device's operation log: pushed by it, never pulled by anyone. */
+      const opsRef = 'refs/tau/ops/device-z';
+      await remote.git(['update-ref', opsRef, head]);
+
+      const two = await device({ leg, label: 'b-cold-connect', remoteUrl: remote.url });
+      const before = remote.trail().length;
+      await run(two.actors.remote.validate, { remote: 'tau', url: remote.url });
+      await run(two.actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+      const connected = remote.trail().slice(before);
+      expect(await two.port.readRef(`refs/remotes/tau/main`)).toBe(head);
+      /* Neither the operation log nor the chat came with the connect. */
+      expect(await two.port.readRef('refs/remotes/tau/tau/ops/device-z')).toBeUndefined();
+      expect(await two.port.readRef('refs/remotes/tau/tau/chats/c1')).toBeUndefined();
+
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      second.stop();
+      const opened = remote.trail().slice(before + connected.length);
+
+      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe('cube([7, 7, 7]);\n');
+      /* The chat arrived with the opening pull's record projection. */
+      expect(await two.filesystem.readFile(`${chatRecordsPath(chatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"Bracket"}\n',
+      );
+      expect(await two.port.readRef('refs/remotes/tau/tau/ops/device-z')).toBeUndefined();
+
+      if (leg.name === 'isomorphic-git') {
+        const count = (trail: readonly string[], suffix: string): number =>
+          trail.filter((entry) => entry.endsWith(suffix)).length;
+        /* Connect: one advertisement, `validate`'s, which the fetch reuses (R6), and one pack. */
+        expect({
+          infoRefs: count(connected, '/info/refs'),
+          uploadPacks: count(connected, '/git-upload-pack'),
+        }).toStrictEqual({ infoRefs: 1, uploadPacks: 1 });
+        /* The opening pull: one listing for its leases, no authored fetch, and the chat by name. */
+        expect({
+          infoRefs: count(opened, '/info/refs'),
+          uploadPacks: count(opened, '/git-upload-pack'),
+        }).toStrictEqual({ infoRefs: 2, uploadPacks: 1 });
+      }
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
   it('row 7: a successful chat projection notifies even when a sibling fails, and retry keeps both', async () => {
     const remoteRoot = await temporaryRoot('remote-partial-chat');
     const remote = await startGitHttpBackend({ root: remoteRoot });
@@ -1045,6 +1122,156 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     },
     180_000,
   );
+
+  /* W6.2: the compare-and-set refusing a push planned from its own fresh advertisement is a lost lease too. */
+  it('row 9e: a ref another writer moved between a fresh advertisement and the receive is refused as leaseLost', async () => {
+    const remote = await startGitHttpBackend({
+      root: await temporaryRoot('remote-fresh-moved'),
+      /* Moves `main` after the advertisement, inside the receive, before its compare-and-set. */
+      preReceive: [
+        'if [ -f tau-move-main ]; then',
+        '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+        '  rm tau-move-main',
+        'fi',
+      ],
+    });
+    try {
+      const one = await device({ leg, label: 'a-fresh-moved', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+      const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+      const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+      expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+      await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+      const other = await remote.git([
+        '-c',
+        'user.name=Another writer',
+        '-c',
+        'user.email=another@example.test',
+        'commit-tree',
+        await remote.git(['rev-parse', `${first}^{tree}`]),
+        '-p',
+        first,
+        '-m',
+        'Another writer',
+      ]);
+      await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+
+      const moved = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+      expect(moved.refs[0]).toMatchObject({ status: 'rejected', reason: 'leaseLost' });
+      await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /* W6.2: a ref whose lock another process holds is contention, not a moved ref: git's own words, never leaseLost. */
+  it("row 9f: a ref locked by another process on the server is refused in git's words, not as leaseLost", async () => {
+    const remote = await startGitHttpBackend({
+      root: await temporaryRoot('remote-locked'),
+      preReceive: ['if [ -f tau-lock-main ]; then', '  : > refs/heads/main.lock', '  rm tau-lock-main', 'fi'],
+    });
+    try {
+      const one = await device({ leg, label: 'a-locked', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+      const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+      const session: RevisionPushSession = {};
+      const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+      expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+      await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+      await writeFile(join(remote.repositoryPath, 'tau-lock-main'), '');
+
+      /* Over the kept advertisement, which once made any lock refusal a lost lease. */
+      const locked = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+      expect(locked.refs[0]).toMatchObject({ status: 'rejected' });
+      expect(locked.refs[0]?.reason).not.toBe('leaseLost');
+      /* Git's own status: 2.43 says `failed to update ref`, and the batched
+       * receive-pack of 2.51 and later says `reference already exists` for a
+       * held lock; the sideband's `Unable to create … File exists` tells it apart. */
+      expect(locked.refs[0]?.reason).toMatch(/failed to update ref|reference already exists/u);
+      await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /* W6.2 review: in an atomic push, a moved ref takes the other command with it; a held lock takes neither. */
+  it('row 9e2: an atomic push whose one ref moved inside the receive refuses both as leaseLost, and a held lock as git said', async () => {
+    const remote = await startGitHttpBackend({
+      root: await temporaryRoot('remote-atomic-moved'),
+      preReceive: [
+        'if [ -f tau-move-main ]; then',
+        '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+        '  rm tau-move-main',
+        'fi',
+        'if [ -f tau-lock-main ]; then',
+        '  : > refs/heads/main.lock',
+        '  rm tau-lock-main',
+        'fi',
+      ],
+    });
+    try {
+      const one = await device({ leg, label: 'a-atomic-moved', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+      const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+      const featureRef = 'refs/heads/feature';
+      await one.port.updateRef({ name: featureRef, expectedHead: undefined, head: revisionId(first) });
+      const both = [{ name: mainRef }, { name: featureRef }];
+      const pushed = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+      expect(pushed.refs.map((entry) => entry.status)).toEqual(['updated', 'updated']);
+      const second = await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+      await one.port.updateRef({ name: featureRef, expectedHead: revisionId(first), head: revisionId(second) });
+      const other = await remote.git([
+        'commit-tree',
+        await remote.git(['rev-parse', `${first}^{tree}`]),
+        '-p',
+        first,
+        '-m',
+        'Another writer',
+      ]);
+      await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+
+      const moved = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+      expect(moved.refs).toEqual([
+        expect.objectContaining({ name: mainRef, status: 'rejected', reason: 'leaseLost' }),
+        expect.objectContaining({ name: featureRef, status: 'rejected', reason: 'leaseLost' }),
+      ]);
+      await expect(remote.git(['rev-parse', featureRef])).resolves.toBe(first);
+
+      /* Back where this device has it, then only a lock in the way. */
+      await remote.git(['update-ref', mainRef, first]);
+      await writeFile(join(remote.repositoryPath, 'tau-lock-main'), '');
+      const locked = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+      expect(locked.refs.map((entry) => entry.status)).toEqual(['rejected', 'rejected']);
+      for (const entry of locked.refs) {
+        expect(entry.reason).not.toBe('leaseLost');
+        expect(entry.reason).toMatch(/failed to update ref|atomic transaction failed/u);
+      }
+      await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /* W6.2 review: a ref the server cannot read is the server's fault, not a moved ref, so it is never retried as one. */
+  it("row 9g: a ref broken on the server is refused in git's words, not as leaseLost", async () => {
+    const remote = await startGitHttpBackend({
+      root: await temporaryRoot('remote-broken'),
+      /* Git then says `cannot lock ref '<ref>': unable to resolve reference '<ref>': reference broken`. */
+      preReceive: ['if [ -f tau-break-main ]; then', '  echo garbage > refs/heads/main', '  rm tau-break-main', 'fi'],
+    });
+    try {
+      const one = await device({ leg, label: 'a-broken', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+      const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+      const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+      expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+      await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+      await writeFile(join(remote.repositoryPath, 'tau-break-main'), '');
+
+      const broken = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+      expect(broken.refs[0]).toMatchObject({ status: 'rejected' });
+      expect(broken.refs[0]?.reason).not.toBe('leaseLost');
+      expect(broken.refs[0]?.reason).toMatch(/failed to update ref/u);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
 
   /* Review: a kept copy saying a ref is already there is read again, since nothing sent would find out. */
   it.skipIf(leg.name === 'native git')(

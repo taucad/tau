@@ -3,10 +3,47 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@tauca
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#api/agent-observability/provider-stream-facts.js';
-import type { ModelInvocationSurface, ModelProviderWire } from '#api/llm/model-invocation.types.js';
+import type { ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
 export const apiProviderMapper = 'api-provider-v2';
+
+/* An evidence id admits word characters, `:`, `.` and `-`; anything else in an image reference is replaced. */
+const releaseUnsafe = /[^\w:.-]/gu;
+
+/**
+ * This API build's release label for the facts it reports: the last path segment of the Fly image reference
+ * (`FLY_IMAGE_REF`), the same label `otel.ts` reports as `service.version` and Sentry as its release, made a valid
+ * evidence id. Outside Fly there is no build identity, and the observation reports release `unknown`.
+ *
+ * @param imageReference - The deployed image reference; the process's `FLY_IMAGE_REF` by default.
+ * @returns The label, or `undefined` when no image reference is set.
+ */
+export const apiBuildRelease = (
+  imageReference: string | undefined = process.env['FLY_IMAGE_REF'],
+): string | undefined => {
+  const label = imageReference?.split('/').at(-1)?.replaceAll(releaseUnsafe, '_').slice(0, 128);
+  return label === '' ? undefined : label;
+};
+
+/**
+ * The versions an API-reported fact carries: this API's build, under the summary purposes policy.
+ *
+ * @param mapper - The fact's mapper version.
+ * @returns The envelope's versions.
+ */
+export const apiVersions = (mapper: string): Evidence['versions'] => ({
+  hostBuild: null,
+  apiBuild: apiBuildRelease() ?? null,
+  harness: null,
+  compaction: null,
+  prompts: [],
+  skills: [],
+  tools: [],
+  kernels: [],
+  mapper,
+  policy: 'purposes-v1',
+});
 
 /* The host names each gateway attempt `<run>:<attempt>:<position>` when it prepares it (agent-host's session). */
 const hostAttemptKey = /^(.+):\d+:\d+$/u;
@@ -129,18 +166,7 @@ export const providerAttemptEvidence = async (
     },
     run,
     execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
-    versions: {
-      hostBuild: null,
-      apiBuild: null,
-      harness: null,
-      compaction: null,
-      prompts: [],
-      skills: [],
-      tools: [],
-      kernels: [],
-      mapper: apiProviderMapper,
-      policy: 'purposes-v1',
-    },
+    versions: apiVersions(apiProviderMapper),
     task: null,
     clocks: {
       occurredAt: attempt.startedAt,

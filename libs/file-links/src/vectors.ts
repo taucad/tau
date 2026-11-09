@@ -8,7 +8,7 @@
  */
 
 import vectors from '#vectors.json' with { type: 'json' };
-import type { FileLinkLocation } from '#path.js';
+import type { FileLinkLfsLocation } from '#path.js';
 
 /** One test key generation. @public */
 export type FileLinkVectorKey = Readonly<{ generation: number; kid: string; keyBase64: string }>;
@@ -19,7 +19,7 @@ export type FileLinkVector = Readonly<{
   kid: string;
   baseUrl: string;
   audience: string;
-  location: FileLinkLocation;
+  location: FileLinkLfsLocation;
   size: number;
   expiresAt: number;
   path: string;

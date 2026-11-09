@@ -1,11 +1,16 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { IngestEntryName, AttributeKey, knownAgentIds, runtimeEntryNames } from '@taucad/telemetry';
+import {
+  IngestEntryName,
+  AttributeKey,
+  knownAgentIds,
+  runtimeEntryNames,
+  workerTimingSpanNames,
+} from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolicyAnswer } from '@taucad/telemetry';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { OptionalAuth, OptionalUser } from '#auth/decorators/auth.decorator.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { AuthGuard, OptionalAuth, OptionalUser } from '@taucad/api-auth';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
@@ -79,6 +84,7 @@ export class TelemetryController {
       entries: runtime,
       principal: userId,
       ip: request.ip,
+      requestId: request.id,
       bodyBytes: Number.isFinite(declared) ? declared : Buffer.byteLength(JSON.stringify(body)),
       now: new Date(),
     });
@@ -112,22 +118,6 @@ export class TelemetryController {
       }
       case IngestEntryName.KERNEL_EXPORT_GEOMETRY: {
         this.recordKernelExport(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.WEBSOCKET_RECONNECTION: {
-        this.recordWebsocketReconnection(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.EDITOR_LOAD: {
-        this.recordEditorLoad(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.WASM_MODULE_LOAD: {
-        this.recordWasmModuleLoad(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.INDEXEDDB_OPERATION: {
-        this.recordIndexedDbOperation(entry, durationSeconds);
         return;
       }
       case IngestEntryName.AGENT_SESSION: {
@@ -175,43 +165,6 @@ export class TelemetryController {
     this.metrics.kernelExportDuration.record(durationSeconds, {
       [AttributeKey.KERNEL_STATUS]: status,
       [AttributeKey.EXPORT_FORMAT]: format,
-    });
-  }
-
-  private recordWebsocketReconnection(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.WEBSOCKET_RECONNECTION }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.wsReconnectionDuration.record(durationSeconds, {
-      [AttributeKey.WS_RECONNECTION_ATTEMPT]: entry.detail?.attempt ?? 0,
-    });
-  }
-
-  private recordEditorLoad(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.EDITOR_LOAD }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.editorLoadDuration.record(durationSeconds, {
-      [AttributeKey.EDITOR_KERNEL]: entry.detail?.kernel ?? 'unknown',
-    });
-  }
-
-  private recordWasmModuleLoad(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.WASM_MODULE_LOAD }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.wasmModuleLoadDuration.record(durationSeconds, {
-      [AttributeKey.WASM_MODULE]: entry.detail?.module ?? 'unknown',
-    });
-  }
-
-  private recordIndexedDbOperation(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.INDEXEDDB_OPERATION }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.indexeddbOperationDuration.record(durationSeconds, {
-      [AttributeKey.INDEXEDDB_OPERATION]: entry.detail?.operation ?? 'unknown',
-      [AttributeKey.INDEXEDDB_STORE]: entry.detail?.store ?? 'unknown',
     });
   }
 
@@ -331,7 +284,8 @@ export class TelemetryController {
   }
 
   private recordLfsFetch(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.LFS_FETCH }>): void {
-    const { placement, networkObjects, networkBytes, localObjects, localBytes, transport } = entry.detail;
+    const { placement, networkObjects, networkBytes, localObjects, localBytes, transport, spans } = entry.detail;
+    this.recordWorkerSpans('lfs_fetch', spans);
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientLfsDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       ...attributes,
@@ -351,8 +305,25 @@ export class TelemetryController {
     }
   }
 
+  /** Each worker span's total over one entry's window, as its own sample; a span that never ran mints nothing. */
+  private recordWorkerSpans(
+    stage: 'first_view' | 'fully_fetched' | 'lfs_fetch',
+    spans: Readonly<Partial<Record<(typeof workerTimingSpanNames)[number], number>>> | undefined,
+  ): void {
+    for (const span of workerTimingSpanNames) {
+      const milliseconds = spans?.[span];
+      if (milliseconds !== undefined) {
+        this.metrics.projectOpenSpanDuration.record(Math.min(milliseconds, maximumSyncAttemptMilliseconds) / 1000, {
+          stage,
+          span,
+        });
+      }
+    }
+  }
+
   private recordProjectOpen(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.PROJECT_OPEN }>): void {
-    const { phase, cache, transport } = entry.detail;
+    const { phase, cache, transport, spans } = entry.detail;
+    this.recordWorkerSpans(phase, spans);
     /* An open waits on the same pull and transfers as a sync attempt, so the same hour bounds a skewed clock. */
     this.metrics.projectOpenDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       phase,

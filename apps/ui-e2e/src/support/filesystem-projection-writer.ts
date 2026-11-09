@@ -628,7 +628,7 @@ export const openProjectionDirectoryImport = async (
             throw new Error('Raw projection physical round-trip chunk proof mismatch.');
           }
         }
-        const stat = await rooted.stat(path, { content: 'head' });
+        const stat = await rooted.stat(path);
         if (stat.size !== file.byteLength) {
           throw new Error('Raw projection physical length mismatch.');
         }
@@ -651,7 +651,7 @@ export const openProjectionDirectoryImport = async (
             }
             const path = directory ? `${directory}/${name}` : name;
             actualPaths.push(path);
-            const stat = await rooted.stat(path, { content: 'head' });
+            const stat = await rooted.stat(path);
             if (stat.type === 'dir') {
               await walk(path);
             }

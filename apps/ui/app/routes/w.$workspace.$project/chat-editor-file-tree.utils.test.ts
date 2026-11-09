@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { FileItem } from '#types/editor.types.js';
 import {
+  buildFileTreeIndex,
   getItemData,
+  indexedItemData,
   isEditorSystemArtifactPath,
   isPathFolder,
   sortChildrenFoldersFirst,
@@ -49,6 +51,9 @@ describe('isEditorSystemArtifactPath', () => {
     '.Trash-1000',
     '.main.ts.crswap',
     '.main.ts.1.crswap',
+    '.main.ts.tau-staged.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
+    '.main.ts.tau-backup.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
+    '.tau-watch.tau-staged.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
   ])('hides approved host artifact %s', (path) => {
     expect(isEditorSystemArtifactPath(path)).toBe(true);
     expect(isEditorSystemArtifactPath(`src/${path}/descendant.ts`)).toBe(true);
@@ -67,6 +72,11 @@ describe('isEditorSystemArtifactPath', () => {
     'notes.crswap.txt',
     'desktop.ini.txt',
     '.trash-1000',
+    'main.ts.tau-staged.1.tmp',
+    '.main.ts.tau-staged.1.txt',
+    '.main.ts.tau-pending.1.tmp',
+    '.main.ts.tau-staged.my-draft.tmp',
+    '.main.ts.tau-backup.0B6F2A52-6A4E-4C1D-9C4F-3F8E2D1A7B90.tmp',
   ])('keeps user-significant or near-miss path %s', (path) => {
     expect(isEditorSystemArtifactPath(path)).toBe(false);
   });
@@ -215,5 +225,44 @@ describe('sortChildrenFoldersFirst', () => {
     expect(sorted[0]).toBe('lib');
     expect(sorted[1]).toBe('src');
     expect(sorted[2]).toBe('index.ts');
+  });
+});
+
+describe('buildFileTreeIndex', () => {
+  const fileTree = [
+    createFileItem('src', { isDirectory: true }),
+    createFileItem('lib/utils/helper.ts'),
+    createFileItem('index.ts'),
+    createFileItem('src/b.ts'),
+    createFileItem('src/A.ts'),
+    createFileItem('src/nested', { isDirectory: true }),
+  ];
+
+  it('answers the same items and folder flags as the scanning helpers', () => {
+    const index = buildFileTreeIndex(fileTree, rootId);
+    for (const path of [rootId, 'src', 'lib', 'lib/utils', 'lib/utils/helper.ts', 'index.ts', 'missing']) {
+      expect(indexedItemData(index, rootId, path)).toStrictEqual(getItemData(fileTree, rootId, path));
+    }
+    expect(index.allPaths).toStrictEqual(
+      new Set([
+        rootId,
+        'src',
+        'lib',
+        'lib/utils',
+        'lib/utils/helper.ts',
+        'index.ts',
+        'src/b.ts',
+        'src/A.ts',
+        'src/nested',
+      ]),
+    );
+  });
+
+  it("lists each folder's immediate children, folders first then by name", () => {
+    const index = buildFileTreeIndex(fileTree, rootId);
+    expect(index.childrenOf(rootId)).toStrictEqual(['lib', 'src', 'index.ts']);
+    expect(index.childrenOf('src')).toStrictEqual(['src/nested', 'src/A.ts', 'src/b.ts']);
+    expect(index.childrenOf('lib')).toStrictEqual(['lib/utils']);
+    expect(index.childrenOf('index.ts')).toStrictEqual([]);
   });
 });

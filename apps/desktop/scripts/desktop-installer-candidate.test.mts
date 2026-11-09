@@ -6,6 +6,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createPackage } from '@electron/asar';
+import { z } from 'zod';
 import { desktopArtifactKinds, desktopArtifactName } from '#shared/desktop-release.js';
 /* eslint-disable @typescript-eslint/naming-convention -- Tests exercise exact external GitHub wire fields and process environment keys. */
 const main = async (): Promise<void> => {
@@ -18,7 +19,7 @@ const main = async (): Promise<void> => {
     const git = join(tools, 'git');
     await writeFile(
       gh,
-      '#!/usr/bin/env node\nconsole.log(process.argv.some(arg => arg.includes("/jobs?")) ? process.env.TEST_JOBS : process.env.TEST_RUN);\n',
+      '#!/usr/bin/env node\nimport fs from "node:fs";\nconst has = (part) => process.argv.some(arg => arg.includes(part));\nif (has("/zip")) process.stdout.write(fs.readFileSync(process.env.TEST_ARCHIVE));\nelse console.log(has("/jobs?") ? process.env.TEST_JOBS : has("/artifacts?") ? process.env.TEST_ARTIFACTS : process.env.TEST_RUN);\n',
     );
     await writeFile(
       git,
@@ -71,17 +72,27 @@ const main = async (): Promise<void> => {
     }
     assert.equal(run('resolve', { GITHUB_REF: 'refs/heads/untrusted' }).status, 1);
     const linuxTag = 'desktop-staging@0.2.0-staging.3';
-    const linuxJobs = [
-      'resolve',
-      `Verify ${linuxTag}`,
-      'Package linux-x64 (unsigned)',
-      'Attach immutable candidate assets',
-    ].map((name) => ({ name, head_sha: source, run_id: 123, status: 'completed', conclusion: 'success' }));
+    // A Linux-only candidate needs only its own jobs: release attachment waits for macOS signing and notarization.
+    const linuxJobs = ['resolve', `Verify ${linuxTag}`, 'Package linux-x64 (unsigned)'].map((name) => ({
+      name,
+      head_sha: source,
+      run_id: 123,
+      status: 'completed',
+      conclusion: 'success',
+    }));
+    const linuxArtifact = {
+      id: 789,
+      name: 'desktop-linux-x64',
+      expired: false,
+      digest: `sha256:${'c'.repeat(64)}`,
+      workflow_run: { id: 123, head_sha: source },
+    };
     const linuxResolve = {
       DESKTOP_RELEASE_TAG: linuxTag,
       TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
       TEST_JOBS: JSON.stringify([{ jobs: linuxJobs }]),
       TEST_RUN: JSON.stringify({ ...successful, conclusion: 'failure' }),
+      TEST_ARTIFACTS: JSON.stringify({ artifacts: [linuxArtifact] }),
     };
     const admitted = run('resolve', linuxResolve);
     assert.equal(admitted.status, 0, admitted.stderr);
@@ -92,7 +103,28 @@ const main = async (): Promise<void> => {
         1,
       );
     }
-    for (const index of [0, 1, 2, 3]) {
+    // The release run may still be packaging, signing or notarizing macOS; only a Linux candidate may start then.
+    const inProgress = JSON.stringify({ ...successful, status: 'in_progress', conclusion: null });
+    const early = run('resolve', { ...linuxResolve, TEST_RUN: inProgress });
+    assert.equal(early.status, 0, early.stderr);
+    const attachQueued = { ...linuxJobs[0]!, name: 'Attach immutable candidate assets', status: 'queued' };
+    const queuedJobs = JSON.stringify([{ jobs: [...linuxJobs, attachQueued] }]);
+    assert.equal(run('resolve', { ...linuxResolve, TEST_RUN: inProgress, TEST_JOBS: queuedJobs }).status, 0);
+    assert.equal(run('resolve', { TEST_RUN: inProgress }).status, 1);
+    // The archive artifact must be exactly one unexpired output of the exact run and source with a recorded digest.
+    for (const artifacts of [
+      [],
+      [linuxArtifact, { ...linuxArtifact, id: 790 }],
+      [{ ...linuxArtifact, expired: true }],
+      [{ ...linuxArtifact, digest: null }],
+      [{ ...linuxArtifact, digest: 'md5:abc' }],
+      [{ ...linuxArtifact, workflow_run: { id: 456, head_sha: source } }],
+      [{ ...linuxArtifact, workflow_run: { id: 123, head_sha: 'b'.repeat(40) } }],
+      [{ ...linuxArtifact, name: 'desktop-win32-x64' }],
+    ]) {
+      assert.equal(run('resolve', { ...linuxResolve, TEST_ARTIFACTS: JSON.stringify({ artifacts }) }).status, 1);
+    }
+    for (const index of [0, 1, 2]) {
       for (const change of [
         { conclusion: 'failure' },
         { conclusion: 'skipped' },
@@ -122,14 +154,13 @@ const main = async (): Promise<void> => {
       }).status,
       0,
     );
-    // Mac-only staging admits a failed whole run only when its own exact Mac prerequisite jobs succeeded.
+    // Mac-only staging is Apple silicon only: it admits a failed whole run only when its own exact Apple silicon
+    // prerequisite jobs succeeded.
     const macJobs = [
       'resolve',
       `Verify ${linuxTag}`,
       'Package macOS arm64 (signed)',
-      'Package macOS x64 (signed)',
       'Verify native macOS arm64 OTA replacement',
-      'Verify native macOS x64 OTA replacement',
       'Attach immutable candidate assets',
     ].map((name) => ({ name, head_sha: source, run_id: 123, status: 'completed', conclusion: 'success' }));
     const macResolve = {
@@ -140,6 +171,18 @@ const main = async (): Promise<void> => {
     const macAdmitted = run('resolve', macResolve);
     assert.equal(macAdmitted.status, 0, macAdmitted.stderr);
     assert.equal(run('resolve', { ...macResolve, TEST_RUN: JSON.stringify(successful) }).status, 0);
+    // Intel Mac jobs are outside the Mac-only scope: their failure cannot block an Apple silicon candidate.
+    const intelJobs = ['Package macOS x64 (signed)', 'Verify native macOS x64 OTA replacement'].map((name) => ({
+      name,
+      head_sha: source,
+      run_id: 123,
+      status: 'completed',
+      conclusion: 'failure',
+    }));
+    assert.equal(
+      run('resolve', { ...macResolve, TEST_JOBS: JSON.stringify([{ jobs: [...macJobs, ...intelJobs] }]) }).status,
+      0,
+    );
     // Linux prerequisites never satisfy a Mac-only candidate, and production has no Mac-only scope.
     assert.equal(run('resolve', { ...macResolve, TEST_JOBS: JSON.stringify([{ jobs: linuxJobs }]) }).status, 1);
     assert.equal(run('resolve', { ...macResolve, DESKTOP_RELEASE_TAG: tag }).status, 1);
@@ -201,8 +244,10 @@ const main = async (): Promise<void> => {
       DESKTOP_RELEASE_TAG: linuxMetadata.tag,
       TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
     };
+    // Release metadata exists only once every platform is attached, so a Linux-only candidate never preflights it.
     const linuxOnly = run('preflight', linuxPreflight);
-    assert.equal(linuxOnly.status, 0, linuxOnly.stderr);
+    assert.equal(linuxOnly.status, 1);
+    assert.match(linuxOnly.stderr, /release-build archive artifact/u);
     assert.equal(run('preflight', { ...linuxPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
     await writeFile(join(archives, 'download.json'), JSON.stringify({ ...linuxMetadata, assets: {} }));
     assert.equal(run('preflight', linuxPreflight).status, 1);
@@ -228,35 +273,37 @@ const main = async (): Promise<void> => {
     };
     await writeFile(join(archives, 'download.json'), JSON.stringify(full));
     assert.equal(run('preflight', preflight).status, 0);
-    // Mac-only preflight needs exactly both Mac archives, never Windows or Linux ones.
+    // Mac-only preflight needs the Apple silicon archive, never an Intel Mac, Windows or Linux one in its place.
     const macPreflight = { ...linuxPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'macos' };
     const macAssets = {
       'darwin-arm64': {
         ...metadata.assets['linux-x64'],
         url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-arm64.zip',
       },
-      'darwin-x64': {
-        ...metadata.assets['linux-x64'],
-        url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-x64.zip',
-      },
+    };
+    const intelAsset = {
+      ...metadata.assets['linux-x64'],
+      url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-x64.zip',
     };
     await writeFile(join(archives, 'download.json'), JSON.stringify({ ...linuxMetadata, assets: macAssets }));
     const macOnly = run('preflight', macPreflight);
     assert.equal(macOnly.status, 0, macOnly.stderr);
     assert.equal(run('preflight', linuxPreflight).status, 1);
     assert.equal(run('preflight', { ...macPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
+    // Apple silicon alone never satisfies the full scope, which still needs both Mac archives.
+    assert.equal(run('preflight', { ...macPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
     await writeFile(
       join(archives, 'download.json'),
-      JSON.stringify({ ...linuxMetadata, assets: { 'darwin-arm64': macAssets['darwin-arm64'] } }),
+      JSON.stringify({ ...linuxMetadata, assets: { 'darwin-x64': intelAsset } }),
     );
-    const singleArchitecture = run('preflight', macPreflight);
-    assert.equal(singleArchitecture.status, 1);
-    assert.match(singleArchitecture.stderr, /both Mac archives/u);
+    const intelOnly = run('preflight', macPreflight);
+    assert.equal(intelOnly.status, 1);
+    assert.match(intelOnly.stderr, /require the Apple silicon archive/u);
     await writeFile(join(archives, 'download.json'), JSON.stringify(linuxMetadata));
     assert.equal(run('preflight', macPreflight).status, 1);
     assert.equal(run('preflight', { ...macPreflight, DESKTOP_RELEASE_TAG: tag }).status, 1);
-    // A Mac-only candidate cannot stage another platform's archive.
-    for (const target of ['linux-x64', 'win32-x64']) {
+    // A Mac-only candidate cannot stage another platform's archive, nor an Intel Mac one.
+    for (const target of ['darwin-x64', 'linux-x64', 'win32-x64']) {
       const refused = run('stage', {
         ...macPreflight,
         DESKTOP_CANDIDATE_TARGET: target,
@@ -265,21 +312,23 @@ const main = async (): Promise<void> => {
       assert.equal(refused.status, 1);
       assert.match(refused.stderr, /cannot stage another platform/u);
     }
-    // The assembled Mac-only manifest must be exactly both ZIP/DMG pairs from this tag and source.
+    // The assembled Mac-only manifest must be exactly the Apple silicon ZIP/DMG pair from this tag and source.
     const assets = join(root, 'assets');
     await mkdir(assets);
-    const macArtifacts = (['arm64', 'x64'] as const).flatMap((arch) =>
-      (['macos-zip', 'macos-dmg'] as const).map((kind, index) => ({
-        kind,
-        target: `darwin-${arch}`,
-        format: desktopArtifactKinds[kind].format,
-        roles: [...desktopArtifactKinds[kind].roles],
-        name: desktopArtifactName({ kind, channel: 'staging', version: '1.0.3', arch }),
-        size: 10,
-        sha256: String(index + 1).repeat(64),
-        sha512: Buffer.alloc(64, index + 1).toString('base64'),
-      })),
-    );
+    const macArtifactsFor = (archs: ReadonlyArray<'arm64' | 'x64'>) =>
+      archs.flatMap((arch) =>
+        (['macos-zip', 'macos-dmg'] as const).map((kind, index) => ({
+          kind,
+          target: `darwin-${arch}`,
+          format: desktopArtifactKinds[kind].format,
+          roles: [...desktopArtifactKinds[kind].roles],
+          name: desktopArtifactName({ kind, channel: 'staging', version: '1.0.3', arch }),
+          size: 10,
+          sha256: String(index + (arch === 'arm64' ? 1 : 3)).repeat(64),
+          sha512: Buffer.alloc(64, index + (arch === 'arm64' ? 1 : 3)).toString('base64'),
+        })),
+      );
+    const macArtifacts = macArtifactsFor(['arm64']);
     const macManifest = {
       schemaVersion: 1,
       tag: linuxMetadata.tag,
@@ -289,17 +338,32 @@ const main = async (): Promise<void> => {
       artifacts: macArtifacts,
     };
     let admission = 0;
-    const admitScope = async (manifest: unknown, changes: Record<string, string> = {}): Promise<number | undefined> => {
+    const admitScopeResult = async (manifest: unknown, changes: Record<string, string> = {}) => {
       const directory = join(assets, String(++admission));
       await mkdir(directory);
       await writeFile(join(directory, 'desktop-artifacts.json'), JSON.stringify(manifest));
-      const result = run('admit-scope', { ...macPreflight, DESKTOP_ASSETS_DIR: directory, ...changes });
+      return run('admit-scope', { ...macPreflight, DESKTOP_ASSETS_DIR: directory, ...changes });
+    };
+    const admitScope = async (manifest: unknown, changes: Record<string, string> = {}): Promise<number | undefined> => {
+      const result = await admitScopeResult(manifest, changes);
       return result.status ?? undefined;
     };
     const scoped = await admitScope(macManifest);
     assert.equal(scoped, 0);
+    // Any Intel Mac artifact is refused by the Apple silicon rule: the former two-architecture candidate, Intel in place
+    // of Apple silicon, and an Intel ZIP added to the exact Apple silicon pair.
+    const intelRefusals = await Promise.all(
+      [
+        macArtifactsFor(['arm64', 'x64']),
+        macArtifactsFor(['x64']),
+        [...macArtifacts, ...macArtifactsFor(['x64']).filter((artifact) => artifact.kind === 'macos-zip')],
+      ].map(async (artifacts) => admitScopeResult({ ...macManifest, artifacts })),
+    );
+    for (const refused of intelRefusals) {
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /Mac-only publication requires exactly staging ZIP and DMG for Apple silicon/u);
+    }
     const refusedManifests = [
-      { ...macManifest, artifacts: macArtifacts.filter((artifact) => artifact.target === 'darwin-arm64') },
       { ...macManifest, artifacts: macArtifacts.filter((artifact) => artifact.kind === 'macos-zip') },
       { ...macManifest, sourceCommit: 'b'.repeat(40) },
       {
@@ -339,6 +403,73 @@ const main = async (): Promise<void> => {
     assert.equal(run('stage', { ...staging, TAU_DESKTOP_SOURCE_SHA: 'b'.repeat(40) }).status, 1);
     await writeFile(archive, 'tampered');
     assert.equal(run('stage', { ...staging, DESKTOP_CANDIDATE_STAGE: join(root, 'tamper-stage') }).status, 1);
+
+    // A Linux-only staging candidate stages the exact release run's archive artifact, never release metadata.
+    const linuxRoot = join(root, 'linux-artifact');
+    const linuxApp = join(linuxRoot, 'Tau-linux-x64');
+    await mkdir(join(linuxApp, 'resources'), { recursive: true });
+    const linuxContent = join(linuxRoot, 'content');
+    await mkdir(linuxContent);
+    await writeFile(
+      join(linuxContent, 'package.json'),
+      JSON.stringify({ version: '1.0.3', tauDesktop: { sourceCommit: source, channel: 'staging' } }),
+    );
+    await createPackage(linuxContent, join(linuxApp, 'resources/app.asar'));
+    const linuxArchive = join(linuxRoot, 'Tau-linux-x64.tar.gz');
+    execFileSync('tar', ['-czf', linuxArchive, '-C', linuxRoot, 'Tau-linux-x64']);
+    const zipArtifact = (name: string, members: string[]): string => {
+      const path = join(linuxRoot, name);
+      execFileSync('zip', ['-q', '-j', path, ...members]);
+      return path;
+    };
+    const digestOf = async (path: string): Promise<string> =>
+      `sha256:${createHash('sha256')
+        .update(await readFile(path))
+        .digest('hex')}`;
+    const linuxZip = zipArtifact('linux.zip', [linuxArchive]);
+    const linuxDigest = await digestOf(linuxZip);
+    const linuxArtifacts = (changes: Record<string, unknown> = {}) =>
+      JSON.stringify({ artifacts: [{ ...linuxArtifact, digest: linuxDigest, ...changes }] });
+    let linuxStageAttempt = 0;
+    const stageLinux = (changes: Record<string, string> = {}) => {
+      const attempt = linuxStageAttempt++;
+      return run('stage', {
+        ...linuxResolve,
+        DESKTOP_CANDIDATE_TARGET: 'linux-x64',
+        DESKTOP_CANDIDATE_ARCHIVES: join(linuxRoot, `input-${attempt}`),
+        DESKTOP_CANDIDATE_STAGE: join(linuxRoot, `stage-${attempt}`),
+        TEST_ARCHIVE: linuxZip,
+        TEST_ARTIFACTS: linuxArtifacts(),
+        ...changes,
+      });
+    };
+    const linuxStaged = stageLinux();
+    assert.equal(linuxStaged.status, 0, linuxStaged.stderr);
+    const recorded = z
+      .object({ releaseRunId: z.literal('123'), artifactId: z.literal(789), artifactSha256: z.string() })
+      .parse(JSON.parse(await readFile(join(linuxRoot, 'stage-0', 'candidate-source.json'), 'utf8')));
+    assert.equal(recorded.artifactSha256, linuxDigest.slice('sha256:'.length));
+    // Wrong digest, another run's or source's artifact, extra members, a foreign application and pre-filled input refuse.
+    const foreign = join(linuxRoot, 'foreign');
+    await mkdir(foreign);
+    execFileSync('tar', ['-czf', join(foreign, 'Tau-linux-x64.tar.gz'), '-C', root, 'Tau-linux-x64']);
+    const foreignZip = zipArtifact('foreign.zip', [join(foreign, 'Tau-linux-x64.tar.gz')]);
+    const extraZip = zipArtifact('extra.zip', [linuxArchive, join(linuxContent, 'package.json')]);
+    const prefilled = join(linuxRoot, 'prefilled');
+    await mkdir(prefilled);
+    const linuxRefusals: Array<Record<string, string>> = [
+      { TEST_ARTIFACTS: linuxArtifacts({ digest: `sha256:${'f'.repeat(64)}` }) },
+      { TEST_ARTIFACTS: linuxArtifacts({ workflow_run: { id: 456, head_sha: source } }) },
+      { TEST_ARTIFACTS: linuxArtifacts({ workflow_run: { id: 123, head_sha: 'b'.repeat(40) } }) },
+      { TAU_DESKTOP_SOURCE_SHA: 'b'.repeat(40) },
+      { TEST_ARCHIVE: extraZip, TEST_ARTIFACTS: linuxArtifacts({ digest: await digestOf(extraZip) }) },
+      { TEST_ARCHIVE: foreignZip, TEST_ARTIFACTS: linuxArtifacts({ digest: await digestOf(foreignZip) }) },
+      { DESKTOP_CANDIDATE_ARCHIVES: prefilled },
+    ];
+    for (const changes of linuxRefusals) {
+      const refused = stageLinux(changes);
+      assert.equal(refused.status, 1, JSON.stringify(Object.keys(changes)));
+    }
 
     // Exercise the actual fetch executable: Windows consumers fetch the existing all-platform archive.
     const fetchedName = 'inert-candidate.txt';

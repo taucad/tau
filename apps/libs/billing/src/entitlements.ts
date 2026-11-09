@@ -36,8 +36,8 @@ export type Entitlements = {
   readonly geospecEvidenceRetentionDays: number;
   /**
    * Data-flywheel consent (AD15): whether this account's runs may enter the
-   * training corpus. Free: user-controlled opt-in, default false. Pro/Enterprise:
-   * always false (no-train guarantee).
+   * training corpus. Free: the user's preference, on by default. Pro/Enterprise:
+   * off until the user opts in themselves.
    */
   readonly trainingConsent: boolean;
   /** The end of the last paid subscription period: the renewal date, or the access end once cancelled. */

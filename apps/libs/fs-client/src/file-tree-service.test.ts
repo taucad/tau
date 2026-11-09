@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
-import type { FileTreeNode, HeadFileStat, WatchEvent } from '@taucad/filesystem';
-import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
+import type { FileTreeNode, WatchEvent } from '@taucad/filesystem';
+import type { ChangeEvent, FileEntry, FileProvenance, FileStat, FileStatEntry, PathChangeEvent } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
@@ -309,21 +309,7 @@ const dependencyMountView = (): ComposedViewProxy => {
     ['', [{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]],
     ['three', [{ name: 'index.d.ts', ...textStat() }]],
   ]);
-  function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  function readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  async function readdirWithStats(path: string, options?: { readonly content: 'head' }) {
-    const entries = rows.get(path) ?? [];
-    return options === undefined
-      ? entries
-      : entries.map((row) =>
-          row.type === 'file' && row.contentKind === 'text'
-            ? { name: row.name, type: row.type, size: row.size, mtimeMs: row.mtimeMs, contentKind: row.contentKind }
-            : row,
-        );
-  }
+  const readdirWithStats = async (path: string): Promise<Array<{ name: string } & FileStat>> => rows.get(path) ?? [];
   const view = mock<ComposedViewProxy>({
     readdirWithStats,
     readdir: vi.fn().mockResolvedValue([]),
@@ -376,7 +362,7 @@ describe('FileTreeService dependency mount row (close-out W3)', () => {
       /* The resync walks resolved directories root-first, so the mount's own arm
        * runs only while the row survived the root's merge. */
       await vi.waitFor(() => {
-        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('', { content: 'head' });
+        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
       });
 
       expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
@@ -478,6 +464,54 @@ describe('FileTreeService rooted search and external polling', () => {
     expect(proxy.searchFiles).toHaveBeenNthCalledWith(1, '/projects/abc', 'first', undefined);
     expect(proxy.searchFiles).toHaveBeenNthCalledWith(2, '/projects/def', 'second', { maxResults: 2 });
     disposeChannel();
+  });
+
+  it('collapses a burst of keystrokes into one index query for the latest query (D18)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, disposeChannel } = createTreeHarness();
+      const hit: FileStatEntry = {
+        path: 'src/main.ts',
+        name: 'main.ts',
+        type: 'file',
+        size: 1,
+        mtimeMs: 1,
+        contentKind: 'binary',
+      };
+      vi.mocked(proxy.searchFiles).mockResolvedValue([hit]);
+
+      const typed = ['m', 'ma', 'mai', '*.ts'].map(async (query) => tree.searchFilesDebounced(query));
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(proxy.searchFiles).toHaveBeenCalledExactlyOnceWith('/projects/abc', '*.ts', undefined);
+      await expect(Promise.all(typed)).resolves.toEqual([[hit], [hit], [hit], [hit]]);
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives each caller its own search window, so one picker never answers with another picker's query (D18)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, disposeChannel } = createTreeHarness();
+      vi.mocked(proxy.searchFiles).mockImplementation(async (_root, query) => [
+        { path: query, name: query, type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
+      ]);
+
+      const mention = tree.searchFilesDebounced('mai', { maxResults: 20, caller: 'mention' });
+      const quickOpen = tree.searchFilesDebounced('read', { maxResults: 20, caller: 'quick-open' });
+      const unnamed = tree.searchFilesDebounced('dir', { includeDirectories: true });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(proxy.searchFiles).toHaveBeenCalledTimes(3);
+      expect(proxy.searchFiles).toHaveBeenCalledWith('/projects/abc', 'mai', { maxResults: 20 });
+      const answers = await Promise.all([mention, quickOpen, unnamed]);
+      expect(answers.map((entries) => entries.map(({ path }) => path))).toEqual([['mai'], ['read'], ['dir']]);
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes polls and keeps one visibility subscription across interval changes', async () => {
@@ -739,11 +773,13 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
-  it('clears an exact count when a shallow refresh cannot prove it is still current', async () => {
+  /* A head listing has no count: the one held stands while size and time do, and the row is not re-published. */
+  it('keeps a measured count through a head re-list of an unchanged file, without a new row', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = createTreeHarness();
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
     await tree.listDirectory('');
+    const before = tree.getTreeSnapshot().get('a.ts');
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
       { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 100, contentKind: 'text' },
     ]);
@@ -751,7 +787,65 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     tree.scheduleRefresh('');
     await vi.advanceTimersByTimeAsync(200);
 
+    const after = tree.getTreeSnapshot().get('a.ts');
+    expect(after).toBe(before);
+    expect(after).toMatchObject({ contentKind: 'text', lineCount: 2 });
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  it('clears an exact count when a head re-list shows the file moved', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 200, contentKind: 'text' },
+    ]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ contentKind: 'text', mtimeMs: 200 });
     expect('lineCount' in (tree.getTreeSnapshot().get('a.ts') ?? {})).toBe(false);
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  it('drops a measured count when a head re-list shows another provenance', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { ...textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 }), provenance: provenanceOf(true) },
+    ]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 100, contentKind: 'text', provenance: provenanceOf(false) },
+    ]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect('lineCount' in (tree.getTreeSnapshot().get('a.ts') ?? {})).toBe(false);
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  /* A swap's backup rename is not a row rename: the real name stays until the parent re-read. */
+  it('keeps the real row when a file is renamed to its apply backup sibling', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValue([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
+    await tree.listDirectory('');
+    const backup = '.a.ts.tau-backup.01234567-89ab-cdef-0123-456789abcdef.tmp';
+
+    emitFileChanged({ type: 'fileRenamed', oldPath: 'a.ts', newPath: backup, backend: 'opfs' });
+
+    expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ name: 'a.ts' });
+    expect(tree.getTreeSnapshot().has(backup)).toBe(false);
     tree.dispose();
     disposeChannel();
     vi.useRealTimers();
@@ -996,6 +1090,27 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     const snap = tree.getTreeSnapshot();
     expect(snap.has('gone.ts')).toBe(false);
     expect(snap.has('stay.ts')).toBe(true);
+    disposeChannel();
+  });
+
+  /* An apply swaps each file through a staged and a backup sibling; the tree shows neither. */
+  it("should leave an apply's staging and backup siblings out of listings and change events", async () => {
+    const staged = '.main.ts.tau-staged.0f1e2d3c-4b5a-4968-8776-655443322110.tmp';
+    const backup = '.main.ts.tau-backup.0f1e2d3c-4b5a-4968-8776-655443322111.tmp';
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('main.ts'), textNode(staged), textNode(backup)]);
+    await tree.listDirectory('');
+    const emit = connectContentService(tree);
+
+    emit({ type: 'written', path: staged, data: new TextEncoder().encode('cube(1);'), source: 'machine' });
+    emit({ type: 'renamed', oldPath: 'main.ts', newPath: backup });
+    emit({ type: 'renamed', oldPath: staged, newPath: 'main.ts' });
+    emit({ type: 'deleted', path: backup, source: 'machine' });
+    await Promise.resolve();
+
+    expect([...tree.getTreeSnapshot().keys()].filter((key) => key.includes('.tau-'))).toEqual([]);
+    expect(tree.getTreeSnapshot().has('main.ts')).toBe(true);
+    tree.dispose();
     disposeChannel();
   });
 
@@ -1872,6 +1987,381 @@ describe('directory capability replacement', () => {
     await expect(newListing).resolves.toMatchObject([{ name: 'new.ts' }]);
     expect(readDirectory).toHaveBeenCalledTimes(2);
     tree.dispose();
+    disposeChannel();
+  });
+});
+
+describe('refresh pause during a revision apply', () => {
+  const resolvedTree = (): ReturnType<typeof createTreeHarness> =>
+    createTreeHarness({
+      initialEntries: [{ ...directoryEntry('src'), isDirectoryResolved: true }],
+    });
+
+  /** The events one staged swap of `path` raises: the staged write, then its rename into place. */
+  const emitStagedSwap = (emit: (event: ChangeEvent) => void, path: string): void => {
+    const separator = path.lastIndexOf('/');
+    const staged = `${path.slice(0, separator + 1)}.${path.slice(separator + 1)}.tau-staged.0.tmp`;
+    emit({ type: 'fileWritten', path: staged, backend: 'opfs' });
+    emit({ type: 'fileRenamed', oldPath: staged, newPath: path, backend: 'opfs' });
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should list nothing while paused and re-read each touched directory once on release', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+
+      for (let index = 0; index < 50; index++) {
+        emitStagedSwap(emitFileChanged, `file-${index}.ts`);
+        emitStagedSwap(emitFileChanged, `src/file-${index}.ts`);
+        // oxlint-disable-next-line no-await-in-loop -- Each step outlasts the debounce window an unpaused tree would fire on.
+        await vi.advanceTimersByTimeAsync(150);
+      }
+
+      expect(tree.refreshesPaused).toBe(true);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(tree.refreshesPaused).toBe(false);
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual(['/projects/abc', '/projects/abc/src']);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(2);
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should cancel a re-read already scheduled when the pause begins', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      emitFileChanged({ type: 'fileWritten', path: 'src/early.ts', backend: 'opfs' });
+
+      const release = tree.pauseRefreshes();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledOnce();
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should hold until the last of nested pauses releases, and ignore a repeated release', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const outer = tree.pauseRefreshes();
+      const inner = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      inner();
+      inner();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(tree.refreshesPaused).toBe(true);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      outer();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledOnce();
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should not re-list a leased open directory while paused, and re-list it once on release', async () => {
+    let onWatch = (_event: WatchEvent): void => undefined;
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockResolvedValue([textNode('a.ts'), textNode('b.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady: (_request, handler) => {
+        onWatch = handler;
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() };
+      },
+    });
+    const lease = tree.observeDirectory('').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready' });
+      });
+      expect(readDirectory).toHaveBeenCalledOnce();
+
+      const release = tree.pauseRefreshes();
+      for (const name of ['a.ts', 'b.ts']) {
+        const staged = `.${name}.tau-staged.0.tmp`;
+        const backup = `.${name}.tau-backup.0.tmp`;
+        emitFileChanged({ type: 'fileRenamed', oldPath: name, newPath: backup, backend: 'opfs' });
+        emitFileChanged({ type: 'fileRenamed', oldPath: staged, newPath: name, backend: 'opfs' });
+        emitFileChanged({ type: 'fileDeleted', path: backup, backend: 'opfs' });
+        onWatch({ type: 'rename', oldPath: staged, newPath: name });
+        onWatch({ type: 'change', path: name });
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      expect(readDirectory).toHaveBeenCalledOnce();
+
+      release();
+      await vi.waitFor(() => {
+        expect(readDirectory).toHaveBeenCalledTimes(2);
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      expect(readDirectory).toHaveBeenCalledTimes(2);
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'a.ts' }, { name: 'b.ts' }] });
+    } finally {
+      lease.release();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should not list through a disposed tree when a hold is released after dispose', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      tree.dispose();
+      release();
+      tree.scheduleRefresh('src');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+    } finally {
+      disposeChannel();
+    }
+  });
+
+  /* React #185: a release can come from a store subscriber inside a commit; the re-reads it starts must not. */
+  it('should start no re-read inside the release call, only from a later task', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      release();
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should drain a large release a few directories per task, and stop draining under a new hold', async () => {
+    vi.useFakeTimers();
+    const directories = Array.from({ length: 40 }, (_, index) => `dir-${String(index)}`);
+    const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
+      initialEntries: directories.map((name) => ({ ...directoryEntry(name), isDirectoryResolved: true })),
+    });
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      for (const directory of directories) {
+        emitStagedSwap(emitFileChanged, `${directory}/a.ts`);
+      }
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(16);
+
+      const again = tree.pauseRefreshes();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(16);
+
+      again();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual(directories.map((name) => `/projects/abc/${name}`).toSorted());
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should not re-read anything on release when nothing changed while paused', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      release();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+});
+
+/*
+ * Tree work per change set is O(touched directories) (charter D18, W8): a
+ * listing merge, a subtree drop and a subtree rename read the directory's own
+ * children and subtree through the child index, never every key of the tree.
+ */
+describe('directory-scoped tree work', () => {
+  const directories = 100;
+  const filesPerDirectory = 20;
+  const projectEntries = (): FileEntry[] =>
+    Array.from({ length: directories }, (_, directory) => [
+      directoryEntry(`d${String(directory)}`),
+      ...Array.from({ length: filesPerDirectory }, (_, file) => textEntry(`d${String(directory)}/f${String(file)}.ts`)),
+    ]).flat();
+
+  /** Counts whole-map iterations of any map at least as large as the tree. */
+  const countTreeScans = (threshold: number): { scans: () => number; restore: () => void } => {
+    const spies = [
+      vi.spyOn(Map.prototype, 'keys'),
+      vi.spyOn(Map.prototype, 'entries'),
+      vi.spyOn(Map.prototype, 'values'),
+      vi.spyOn(Map.prototype, 'forEach'),
+      vi.spyOn(Map.prototype, Symbol.iterator),
+    ];
+    return {
+      scans: () =>
+        spies
+          .flatMap((spy) => spy.mock.contexts)
+          .filter((context) => (context as Map<unknown, unknown>).size >= threshold).length,
+      restore: () => {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      },
+    };
+  };
+
+  it('merges one listing, drops one subtree and renames one subtree without scanning the tree', async () => {
+    const { tree, proxy, disposeChannel } = createTreeHarness({ initialEntries: projectEntries() });
+    const emit = connectContentService(tree);
+    vi.mocked(proxy.readDirectory).mockResolvedValue([
+      ...Array.from({ length: filesPerDirectory - 1 }, (_, file) => textNode(`f${String(file + 1)}.ts`)),
+      textNode('added.ts'),
+    ]);
+    const counter = countTreeScans(directories * filesPerDirectory);
+    try {
+      const listed = await tree.listDirectory('d5');
+      emit({ type: 'directoryDeleted', path: 'd7' });
+      emit({ type: 'directoryRenamed', oldPath: 'd8', newPath: 'e8' });
+      expect(listed.map((entry) => entry.name)).toContain('added.ts');
+      expect(counter.scans()).toBe(0);
+    } finally {
+      counter.restore();
+    }
+
+    const snapshot = tree.getTreeSnapshot();
+    expect(snapshot.has('d5/f0.ts')).toBe(false);
+    expect(snapshot.has('d5/added.ts')).toBe(true);
+    expect([...snapshot.keys()].filter((key) => key === 'd7' || key.startsWith('d7/'))).toEqual([]);
+    expect(snapshot.has('d8/f3.ts')).toBe(false);
+    expect(snapshot.get('e8/f3.ts')?.path).toBe('e8/f3.ts');
+    expect([...snapshot.keys()].filter((key) => key.startsWith('e8/'))).toHaveLength(filesPerDirectory);
+    disposeChannel();
+  });
+
+  it('re-reads each touched directory once for a fifty-file change set and patches only its structural entries', async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({ initialEntries: projectEntries() });
+      vi.mocked(proxy.readDirectory).mockResolvedValue(
+        Array.from({ length: filesPerDirectory }, (_, file) => textNode(`f${String(file)}.ts`)),
+      );
+      await tree.listDirectory('d3');
+      await tree.listDirectory('d4');
+      vi.mocked(proxy.readDirectory).mockClear();
+      const scheduleRefresh = vi.spyOn(tree, 'scheduleRefresh');
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      emitFileChanged({
+        type: 'changeSet',
+        entries: [
+          ...Array.from(
+            { length: 50 },
+            (_, file): PathChangeEvent => ({
+              type: 'fileWritten',
+              path: `d3/agent-${String(file)}.ts`,
+              backend: 'indexeddb',
+            }),
+          ),
+          { type: 'fileDeleted', path: 'd4/f0.ts', backend: 'indexeddb' },
+        ],
+      });
+
+      expect(tree.getTreeSnapshot().has('d4/f0.ts')).toBe(false);
+      expect(scheduleRefresh).not.toHaveBeenCalled();
+      expect(setTimeoutSpy).toHaveBeenCalledOnce();
+      await vi.runAllTimersAsync();
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual([`${workspaceRoot}/d3`, `${workspaceRoot}/d4`]);
+      tree.dispose();
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a subtree reachable through an ancestor the tree has not listed', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [textEntry('top.ts'), textEntry('a/b/deep.ts')],
+    });
+    const emit = connectContentService(tree);
+
+    emit({ type: 'directoryDeleted', path: 'a' });
+
+    expect(tree.getTreeSnapshot().has('a/b/deep.ts')).toBe(false);
+    expect(tree.getTreeSnapshot().has('top.ts')).toBe(true);
+    disposeChannel();
+  });
+
+  it('copies the child index with the tree, so a handed-out snapshot never changes', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [directoryEntry('a'), textEntry('a/one.ts'), textEntry('a/two.ts')],
+    });
+    const emit = connectContentService(tree);
+    const before = tree.getTreeSnapshot();
+
+    emit({ type: 'directoryDeleted', path: 'a' });
+
+    expect(before.has('a/one.ts')).toBe(true);
+    expect(tree.getTreeSnapshot().has('a/one.ts')).toBe(false);
     disposeChannel();
   });
 });

@@ -1,0 +1,5 @@
+{
+  "name": "request-heartbeat",
+  "kind": "rp",
+  "frame": { "v": 1, "k": "rp", "i": "r1" }
+}

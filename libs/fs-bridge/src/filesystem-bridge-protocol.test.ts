@@ -1,11 +1,15 @@
+import { MessageChannel } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { MessagePortLike } from '@taucad/rpc';
 import * as barrel from '#index.js';
 import {
   createFileSystemBridgeHello,
+  FileSystemBridgeProtocolVersionError,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
 } from '#filesystem-bridge-protocol.js';
+import { createTransferredFileSystemBridgeProxy } from '#filesystem-bridge.js';
 
 describe('void call results', () => {
   const { result } = fileSystemBridgeSchemas.calls.writeFile;
@@ -25,25 +29,39 @@ describe('void call results', () => {
   });
 });
 
-describe('head-only directory metadata', () => {
-  it('accepts the explicit mode and unknown text count while exact stat still requires a count', () => {
+describe('archive ceilings', () => {
+  it('carries a caller byte ceiling on both archive calls and refuses a malformed one', () => {
+    const { archive, getScopedZippedDirectory } = fileSystemBridgeSchemas.calls;
+    const scope = { backend: 'opfs' } as const;
+    expect(archive.args.safeParse(['', { versionedOnly: true, maxBytes: 1024 }]).success).toBe(true);
+    expect(archive.args.safeParse(['', { maxBytes: 0 }]).success).toBe(false);
+    expect(archive.args.safeParse(['', { maxBytes: 1.5 }]).success).toBe(false);
+    expect(getScopedZippedDirectory.args.safeParse(['dir', { scope, maxBytes: 1024 }]).success).toBe(true);
+    expect(getScopedZippedDirectory.args.safeParse(['dir', { scope, maxBytes: -1 }]).success).toBe(false);
+  });
+});
+
+describe('metadata-only stats (I3)', () => {
+  it('accepts a stat with no facts, with known facts, and refuses a malformed count', () => {
     const listing = fileSystemBridgeSchemas.calls.readdirWithStats;
-    const rows = [{ name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' }];
-    expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(true);
+    const head = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1 };
     expect(listing.args.safeParse(['']).success).toBe(true);
-    expect(listing.result.safeParse(rows).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt', { content: 'head' }]).success).toBe(true);
+    expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(false);
+    expect(listing.result.safeParse([head]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'text' }]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'text', lineCount: 3 }]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'binary', lineCount: 3 }]).success).toBe(false);
+    expect(listing.result.safeParse([{ ...head, lineCount: 3 }]).success).toBe(false);
     expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt']).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(rows[0]).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.lstat.result.safeParse(rows[0]).success).toBe(false);
+    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(head).success).toBe(true);
   });
 });
 
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 5', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(6);
+  it('should be 11', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(11);
   });
 
   it('rejects a version 4 peer', () => {
@@ -57,6 +75,45 @@ describe('filesystem bridge protocol version', () => {
         v: 4,
       }),
     ).toThrow('protocol version mismatch');
+  });
+
+  const helloAt = (v: number) => ({
+    ...createFileSystemBridgeHello({
+      state: 'ready',
+      capabilities: { persistent: false, writable: true, quotaBased: false },
+      watchable: false,
+    }),
+    v,
+  });
+
+  it('rejects a version 8 hello, the protocol before long calls', () => {
+    expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(8))).toThrow(FileSystemBridgeProtocolVersionError);
+    expect(fileSystemBridgeSchemas.hello.parse(helloAt(fileSystemBridgeProtocolVersion))).toMatchObject({ v: 11 });
+  });
+
+  it('rejects a version 9 hello, whose changedSince answers no epoch or removals', () => {
+    expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(9))).toThrow(FileSystemBridgeProtocolVersionError);
+  });
+
+  it('rejects a version 10 hello, whose checked writes take no digest', () => {
+    expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(10))).toThrow(FileSystemBridgeProtocolVersionError);
+  });
+
+  it('refuses a connection whose authority answers with a version 8 hello', async () => {
+    const channel = new MessageChannel();
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2 as unknown as MessagePortLike);
+    channel.port1.postMessage({ v: 1, k: 'lh', o: 1, d: helloAt(8) });
+    try {
+      const refusal = await proxy.ready.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(FileSystemBridgeProtocolVersionError);
+      expect(refusal).toMatchObject({ expected: 11, received: 8, code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH' });
+    } finally {
+      proxy.dispose();
+      channel.port1.close();
+    }
   });
 });
 
@@ -200,5 +257,38 @@ describe('rooted machine settings wire records', () => {
         call.args.safeParse([{ operationId: 'op-1', typeId: 'fixture.cnc', base: null, next: invalid }]).success,
       ).toBe(false);
     }
+  });
+});
+
+describe('digest-checked writes and digested reads on the wire (D17)', () => {
+  const sha256 = 'a'.repeat(64);
+  const { writeFileChecked, readFileWithDigest } = fileSystemBridgeSchemas.calls;
+
+  it('should carry a digest precondition and refuse one that is not a lowercase SHA-256', () => {
+    const input = (expectedSha256: string) => [
+      { path: 'a.ts', data: 'x', preconditions: [{ path: 'a.ts', expectedSha256 }] },
+    ];
+    expect(writeFileChecked.args.parse(input(sha256))).toEqual(input(sha256));
+    expect(writeFileChecked.args.safeParse(input('A'.repeat(64))).success).toBe(false);
+    expect(writeFileChecked.args.safeParse(input('abc')).success).toBe(false);
+  });
+
+  it("should keep a result's digest and a conflict's digest", () => {
+    const content = new Uint8Array([1]);
+    expect(writeFileChecked.result.parse({ status: 'applied', content, sha256 })).toEqual({
+      status: 'applied',
+      content,
+      sha256,
+    });
+    expect(
+      writeFileChecked.result.parse({ status: 'conflict', conflicts: [{ path: 'a.ts', actual: content, sha256 }] }),
+    ).toEqual({ status: 'conflict', conflicts: [{ path: 'a.ts', actual: content, sha256 }] });
+  });
+
+  it('should answer a digested read as bytes and a digest', () => {
+    const data = new Uint8Array([1, 2]);
+    expect(readFileWithDigest.args.safeParse(['a.ts']).success).toBe(true);
+    expect(readFileWithDigest.result.parse({ data, sha256 })).toEqual({ data, sha256 });
+    expect(readFileWithDigest.result.safeParse({ data, sha256: 'x' }).success).toBe(false);
   });
 });

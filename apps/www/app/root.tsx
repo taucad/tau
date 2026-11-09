@@ -21,7 +21,7 @@ import type { SiteConfiguration } from '#app/config.server.js';
 import { siteConfiguration } from '#app/config.server.js';
 import type { Route } from './+types/root.js';
 import siteCss from '#www/site.css?inline';
-import { appOrigin } from '#www/environment.js';
+import { appHref } from '#www/environment.js';
 
 export function loader(): SiteConfiguration & { nonce: string } {
   return { ...siteConfiguration(), nonce: randomUuid() };
@@ -73,12 +73,12 @@ function Navigation({ label }: { label: string }) {
         </Link>
       ))}
       <a href='https://docs.tau.new/'>Docs ↗</a>
-      {label === 'Mobile navigation' ? <a href={`${appOrigin}/auth/sign-in`}>Sign in ↗</a> : null}
+      {label === 'Mobile navigation' ? <a href={appHref('/auth/sign-in')}>Sign in ↗</a> : null}
     </nav>
   );
 }
 
-function SiteShell() {
+function SiteShell({ children }: { children?: React.ReactNode }) {
   const { pathname } = useLocation();
   const navigationState = useNavigation();
   const previousPath = useRef(pathname);
@@ -117,11 +117,11 @@ function SiteShell() {
             <Navigation label='Main navigation' />
           </div>
           <div className='header-actions'>
-            <a className='signin' href={`${appOrigin}/auth/sign-in`}>
+            <a className='signin' href={appHref('/auth/sign-in')}>
               Sign in
             </a>
             <Button asChild size='sm'>
-              <a href='https://tau.new/projects/new' data-event='cta' data-placement='header'>
+              <a href={appHref('/projects/new')} data-event='cta' data-placement='header'>
                 Start designing ↗
               </a>
             </Button>
@@ -139,19 +139,19 @@ function SiteShell() {
         {navigationState.state === 'idle' ? '' : 'Loading page…'}
       </div>
       <main id='main' className='frame' tabIndex={-1}>
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
       <footer className='site-footer frame'>
         <div className='band footer-grid'>
           <div className='cell footer-brand'>
             <Brand />
             <p>Design Verify Make.</p>
-            <p className='fine'>Open-source CAD for the things you want to make.</p>
+            <p className='fine'>Open-source, AI-native CAD.</p>
           </div>
           <nav className='cell' aria-label='Product'>
             <h2>Product</h2>
             <Link to='/product/' prefetch='intent'>
-              Workspace
+              Product
             </Link>
             <Link to='/use-cases/' prefetch='intent'>
               Use cases
@@ -160,7 +160,7 @@ function SiteShell() {
               Pricing
             </Link>
             <Link to='/download/' prefetch='intent'>
-              Get Tau
+              Download
             </Link>
           </nav>
           <nav className='cell' aria-label='Company'>
@@ -253,14 +253,30 @@ export default function App(): React.JSX.Element {
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.Element {
   const isMissing = isRouteErrorResponse(error) && error.status === 404;
   return (
-    <main className='frame cell page-intro'>
+    <SiteShell>
       <title>{isMissing ? 'Page not found · Tau' : 'Page unavailable · Tau'}</title>
       <meta name='robots' content='noindex,nofollow' />
-      <h1>{isMissing ? 'This path ends here.' : 'This page is unavailable.'}</h1>
-      <p>{isMissing ? 'The link may have changed.' : 'Please try again in a moment.'}</p>
-      <Button asChild>
-        <a href='/'>Back to Tau</a>
-      </Button>
-    </main>
+      <section className='band'>
+        <header className='cell page-intro'>
+          <div>
+            <p className='kicker'>{isMissing ? '404' : 'Error'}</p>
+            <h1>{isMissing ? 'Page not found' : 'Page unavailable'}</h1>
+            <p className='lead'>
+              {isMissing
+                ? 'This page may have moved or no longer exists.'
+                : 'This page could not be loaded. Try again in a moment.'}
+            </p>
+          </div>
+          <div className='actions'>
+            <Button asChild size='lg'>
+              <a href='/'>Go to the homepage</a>
+            </Button>
+            <a className='text-link' href={appHref('/projects')}>
+              Open projects ↗
+            </a>
+          </div>
+        </header>
+      </section>
+    </SiteShell>
   );
 }

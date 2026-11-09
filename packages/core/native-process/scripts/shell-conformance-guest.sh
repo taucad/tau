@@ -3,15 +3,15 @@
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
 # Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/tau (tracked sources plus verified host-built Electron/UI artifacts).
 # Required env: GITHUB_SHA/GITHUB_RUN_ID/GITHUB_REPOSITORY, TAU_SHELL_CONFORMANCE_ROW (forwarded identities).
-# Usage: bash shell-conformance-guest.sh ubuntu|debian (inside the disposable guest only).
+# Usage: bash shell-conformance-guest.sh ubuntu|ubuntu2604|debian (inside the disposable guest only).
 # Exit: nonzero for any prerequisite, conformance/application assertion, evidence or stock-policy failure.
 set -euo pipefail
 umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 ]]
 source /etc/os-release
-[[ "$ID" == "$1" ]]
-case "$ID:$VERSION_ID" in ubuntu:24.04|debian:13) ;; *) exit 1 ;; esac
+# The argument names the expected image: each token admits exactly one release.
+case "$1:$ID:$VERSION_ID" in ubuntu:ubuntu:24.04|ubuntu2604:ubuntu:26.04|debian:debian:13) ;; *) exit 1 ;; esac
 printf 'Guest: %s (%s)\n' "$PRETTY_NAME" "$(uname -r)"
 before="$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')"
 printf 'apparmor_restrict_unprivileged_userns: %s\n' "$before"
@@ -38,10 +38,8 @@ trap 'exit 1' INT TERM
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 # Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
-# `fuse3` carries the setuid `fusermount3` the Linux projection transport mounts through. The projection is
-# unactivated, so no row here mounts one; the dependency is declared so activation needs no guest change.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  apparmor bubblewrap socat ripgrep fuse3 curl git git-lfs ca-certificates build-essential python3 util-linux \
+  apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
   xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
   libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
   libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
@@ -96,6 +94,12 @@ status=0
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
   pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache || status=$?
+# The native sandbox every kernel worker runs in, as the packaged app runs it: the stock bwrap first on PATH and the
+# selector's copy named by TAU_NATIVE_SANDBOX_BWRAP. Stock Ubuntu 26.04 confines /usr/bin/bwrap with
+# bwrap-userns-restrict, so apply-seccomp opens its nested namespace only through the Tau copy (qualification
+# 41865985263 ubuntu2604-*: build123d's bytecode compile exited 1 and no model rendered). CI=1 forbids a skip.
+(cd packages/core/native-process && PATH="$HOME/node/bin:/usr/local/bin:/usr/bin:/bin" CI=1 \
+  TAU_NATIVE_SANDBOX_BWRAP="$bwrap" pnpm exec vitest run src/native-sandbox.integration.test.ts) || status=$?
 # The host shell service's rows over the same provider and bwrap (H01-H06), with their own receipt.
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \

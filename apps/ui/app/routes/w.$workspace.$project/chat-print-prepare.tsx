@@ -1,9 +1,11 @@
 import type { MachineSettingsProvenance } from '@taucad/runtime/machine/settings';
+import { Loader } from '@taucad/ui/components/loader';
+import { FileTooLargeError } from '@taucad/fs-client/file-content-errors';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
-import { Check, Eye, Layers, ListChecks, LoaderCircle, Scissors, Send, Settings2 } from 'lucide-react';
+import { Check, Eye, Layers, ListChecks, Scissors, Send, Settings2 } from 'lucide-react';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
@@ -836,7 +838,16 @@ export const usePrintPrepare = ({
       /* Named by its bytes, as job imports are (blueprint D5), so a later slice never rewrites what a request names. */
       controller.signal.throwIfAborted();
       const path = `.tau/artifacts/${hex}/${fileName}`;
-      const isHeld = (await fileManager.exists(path)) && (await sha256Bytes(await fileManager.readFile(path))) === hex;
+      /* Read raw (L3 D-3): a held artifact of another size is not this one, and is replaced. */
+      const held = (await fileManager.exists(path))
+        ? await fileManager.readRawBytes(path, { sizeLimit: file.bytes.byteLength }).catch((error: unknown) => {
+            if (error instanceof FileTooLargeError) {
+              return undefined;
+            }
+            throw error;
+          })
+        : undefined;
+      const isHeld = held !== undefined && (await sha256Bytes(held)) === hex;
       controller.signal.throwIfAborted();
       if (!isHeld) {
         await fileManager.writeFiles({ [path]: { content: file.bytes } });
@@ -1378,7 +1389,7 @@ export function PrepareActions({
               void prepare.send();
             }}
           >
-            {isSending ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Send aria-hidden />}
+            {isSending ? <Loader /> : <Send aria-hidden />}
             {action.label}
           </Button>
         </div>
@@ -1407,7 +1418,7 @@ export function PrepareActions({
           aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
           onClick={prepare.sliceNow}
         >
-          {isSlicing ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Scissors aria-hidden />}
+          {isSlicing ? <Loader /> : <Scissors aria-hidden />}
           {action.label}
         </Button>
       </div>

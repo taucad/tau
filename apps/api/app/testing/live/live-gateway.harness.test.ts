@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { requestedMaxTokens } from '@taucad/agent-host';
 import type { AgentSession } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, modelList } from '@taucad/api-llm-gateway';
 import {
   createLiveSession,
   createLiveToolRegistry,

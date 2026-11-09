@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SharedPool } from '@taucad/memory';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { isEventGloballyVisible } from '#event-origin-registry.js';
 import { MountTable } from '#mount-table.js';
@@ -186,16 +185,12 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(unmountedEntries?.mock.calls).toHaveLength(0);
   });
 
-  it('invalidates only the changed subtree when the external diff is localizable', async () => {
+  it('refreshes only the changed subtree when the external diff is localizable', async () => {
     const { service, provider } = await createWebAccessService();
-    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
-    service.setFilePool(pool);
     const alphaFile = `/projects/${alphaProjectId}/main.ts`;
     const betaFile = `/projects/${betaProjectId}/main.ts`;
     await service.readFile(alphaFile);
     await service.readFile(betaFile);
-    expect(pool.has(alphaFile)).toBe(true);
-    expect(pool.has(betaFile)).toBe(true);
 
     const refresh = vi.spyOn(provider, 'refresh');
     await service.pollExternalChanges(`/projects/${alphaProjectId}`);
@@ -205,11 +200,9 @@ describe('WorkspaceFileService external webaccess observation', () => {
 
     expect(refresh).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledWith([`${alphaPhysicalRoot}/main.ts`]);
-    expect(pool.has(alphaFile)).toBe(false);
-    expect(pool.has(betaFile)).toBe(true);
   });
 
-  it('falls back to a full invalidation when the external diff cannot be localized', async () => {
+  it('falls back to a full refresh when the external diff cannot be localized', async () => {
     const { service, provider, handle } = await createWebAccessService({
       beforeConfigure: async ({ provider: seedProvider }) => {
         for (let index = 0; index < 70; index++) {
@@ -218,8 +211,6 @@ describe('WorkspaceFileService external webaccess observation', () => {
         }
       },
     });
-    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
-    service.setFilePool(pool);
     const alphaFile = `/projects/${alphaProjectId}/main.ts`;
     const betaFile = `/projects/${betaProjectId}/main.ts`;
     await service.readFile(alphaFile);
@@ -233,8 +224,47 @@ describe('WorkspaceFileService external webaccess observation', () => {
 
     expect(refresh).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledWith(undefined);
-    expect(pool.has(alphaFile)).toBe(false);
-    expect(pool.has(betaFile)).toBe(false);
+  });
+
+  /* Review E3, at the ingest: the index's own snapshot write must not come back as a fact that schedules the next. */
+  it('ingests no fact about the Project Index snapshot, so storing it never stores it again', async () => {
+    const { service, provider } = await createWebAccessService({ native: true });
+    const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
+    await rooted.statTree!('');
+    const snapshot = `${alphaPhysicalRoot}/.tau/index/snapshot.json`;
+    await vi.waitFor(
+      async () => {
+        await expect(provider.exists(snapshot)).resolves.toBe(true);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    /* The project's first scoped poll records its baseline. */
+    await service.pollExternalChanges(`/projects/${alphaProjectId}`);
+    const writes = vi.spyOn(provider, 'writeFile');
+    const refresh = vi.spyOn(provider, 'refresh');
+
+    TestFileSystemObserver.instances[0]!.callback([
+      {
+        type: 'modified',
+        changedHandle: fileHandle('snapshot.json'),
+        relativePathComponents: ['alpha-project', '.tau', 'index', 'snapshot.json'],
+      },
+    ]);
+    await service.pollExternalChanges(`/projects/${alphaProjectId}`);
+    await rooted.statTree!('');
+    /* Past the two-second snapshot debounce. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2500);
+    });
+
+    expect(writes).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('offers no index-backed hashFiles on a folder other programs edit', async () => {
+    const { service } = await createWebAccessService();
+
+    expect(service.createRootedFileSystem(`/projects/${alphaProjectId}`).hashFiles).toBeUndefined();
   });
 
   it('reads external snapshot file metadata with bounded concurrency', async () => {

@@ -31,20 +31,6 @@ export type ShellFilesystem = Readonly<{
   writable: readonly string[];
   readOnly?: readonly string[] | undefined;
   denied: readonly string[];
-  /**
-   * Containers hidden except for explicit strict-descendant readable, writable and read-only roots. Ancestor
-   * grants never reopen their children; denied still wins. Existing containers must be real directories.
-   * Absent containers require a canonical immediate parent and remain uncreatable on Linux.
-   * Linux rebinds existing children: file roots cannot be created if absent, deleted or atomically replaced,
-   * and absent directory roots are omitted. Unknown temporary children never reach the host filesystem.
-   * On both platforms a file root cannot be atomically replaced through a temporary sibling inside the
-   * container, because that sibling is an unknown child. Listing the container shows only the opened
-   * children on Linux and is refused on macOS, as is listing a directory between it and an opened child.
-   * Recursive tools run from the checkout (`find`, `grep -r`, `ls -R`) therefore report an error and exit
-   * non-zero on macOS. A hidden entry fails with EPERM on macOS but ENOENT on Linux, so on macOS a guessed
-   * name can be confirmed to exist, though never read, listed or stat-ed.
-   */
-  masked?: readonly string[] | undefined;
   directories?: readonly string[] | undefined;
 }>;
 
@@ -107,6 +93,13 @@ export type ShellLaunch = Readonly<{
    */
   environment: Readonly<Record<string, string>>;
   stdio: ShellStdio;
+  /**
+   * `zsh` lets the human macOS Terminal's system Zsh read the person's own Zsh startup files (operator ruling
+   * 2026-11-01T18:57Z): the provider reopens exactly those files read-only from the baseline and points `ZDOTDIR` at
+   * the home that holds them. It refuses the field on any other platform, a pipe launch or any executable but
+   * `/bin/zsh`. Agent launches never set it.
+   */
+  startupFiles?: 'zsh' | undefined;
   /** Aborting terminates the whole owned process tree; `exited` then settles. */
   signal: AbortSignal;
 }>;
@@ -176,12 +169,22 @@ export type ShellProcess = ShellPipesProcess | ShellTerminalProcess;
  * is a missing or broken prerequisite on this device (a later launch may succeed once it is repaired). Neither
  * started anything.
  *
+ * `retryable` marks a sandbox that failed to set up after the launch's profile was computed, proven before the
+ * workload could start: a protected path the profile named as present may have been removed before the sandbox bound
+ * it. A launch freshly prepared computes a fresh profile, so a host may retry it once, after it recovered this one.
+ *
  * @public
  */
 export type ShellLaunchOutcome =
   | Readonly<{ status: 'started'; process: ShellProcess }>
   | Readonly<{ status: 'unsupported'; requirement: ShellRequirement; message: string }>
-  | Readonly<{ status: 'sandbox-unavailable'; message: string }>;
+  | Readonly<{
+      status: 'sandbox-unavailable';
+      message: string;
+      retryable?: true | undefined;
+      /** What the sandbox printed before it failed, for the host log only; it can name paths. */
+      diagnostic?: string | undefined;
+    }>;
 
 /**
  * The replaceable boundary: one implementation per platform family plus a deterministic test fake.

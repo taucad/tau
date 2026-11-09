@@ -44,6 +44,26 @@ describe('handleListDirectory', () => {
     });
   });
 
+  /* D4, EQ15: a listing counts lines only within its byte cap and never guesses a kind it did not measure. */
+  it('should report a file by its size alone where the listing did not measure it', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([
+      { name: 'large.log', type: 'file', size: 5_000_000, contentKind: 'text' },
+      { name: 'unknown.dat', type: 'file', size: 9_000_000 },
+    ]);
+
+    const result = await handleListDirectory({ path: '' }, fileSystem);
+
+    expect(result).toStrictEqual({
+      success: true,
+      path: '',
+      entries: [
+        { name: 'large.log', type: 'file', size: 5_000_000, contentKind: 'text' },
+        { name: 'unknown.dat', type: 'file', size: 9_000_000 },
+      ],
+    });
+  });
+
   it('should omit modifiedAt when not provided', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir.mockResolvedValue([textEntry('readme.md', 500, { lineCount: 8 })]);

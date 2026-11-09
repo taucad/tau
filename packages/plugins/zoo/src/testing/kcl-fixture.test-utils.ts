@@ -37,7 +37,7 @@ const uuidPattern = /[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}/g;
 export const gapOf = (message: string): string =>
   message.replaceAll(uuidPattern, '<id>').replaceAll(/\s+/g, ' ').trim().slice(0, 100).trimEnd();
 
-const directoryFileSystem = (directory: string): ConstructorParameters<typeof FileSystemManager>[0] =>
+export const directoryFileSystem = (directory: string): ConstructorParameters<typeof FileSystemManager>[0] =>
   ({
     async readFile(file: string, encoding?: string) {
       const bytes = await readFile(path.join(directory, file));

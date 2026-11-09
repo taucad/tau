@@ -6,7 +6,7 @@ import { useObservation, useObservationValue } from '@taucad/fs-client/react/use
 import type { SkillMetadata } from '@taucad/chat';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { titleFromSkillName } from '@taucad/agent-tools/skills';
+import { createSkillResolver, titleFromSkillName } from '#lib/skill-resolver.js';
 
 export function skillMetadataToSlashCommand(skill: SkillMetadata): {
   id: string;
@@ -85,9 +85,6 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
         // Both resolver selections acquire each file and directory once per refresh.
         const files = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
         const directories = new Map<string, ReturnType<FileTreeService['listDirectory']>>();
-        // The resolver carries every system skill's body, most of a megabyte, so it is fetched when the
-        // catalog is first read rather than shipped with the composer that renders the catalog.
-        const { createSkillResolver } = await import('#lib/skill-resolver.js');
         const resolver = createSkillResolver({
           readFile: async (path) => {
             let bytes = files.get(path);
@@ -98,6 +95,8 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
             }
             return bytes;
           },
+          // Rows keep the composed view's provenance, so the resolver takes system skills from the
+          // compiled catalog and never reads overlay bytes; the tree listing keeps subscribePath live.
           listDirectory: async (path) => {
             let entries = directories.get(path);
             if (!entries) {
@@ -159,7 +158,11 @@ export function usePromptSkillsCatalog(): SkillMetadata[] {
 
 export type SkillsCatalogState = Catalog & Pick<ObservationSnapshot<Catalog>, 'status' | 'error'> & { retry(): void };
 
-/** Functional catalog selection with truthful authority health and same-owner retry. */
+/**
+ * Functional catalog selection with truthful authority health and same-owner retry.
+ * The status is `registering` until the file services exist (server render, early hydration);
+ * `closed` and `error` report a catalog observation that actually failed.
+ */
 export function useSkillsCatalogState(): SkillsCatalogState {
   const service = useCatalogService();
   const snapshot = useObservation(service);
@@ -170,12 +173,10 @@ export function useSkillsCatalogState(): SkillsCatalogState {
     () => ({
       commands: snapshot.value?.commands ?? emptySkills,
       prompt: snapshot.value?.prompt ?? emptySkills,
-      /* No service yet means storage is still starting, not that the catalog closed: a closed status here
-       * put "Skill updates unavailable" in the composer for the first seconds of every load. */
-      status: service === undefined ? 'registering' : snapshot.status,
+      status: snapshot.status,
       error: snapshot.error,
       retry,
     }),
-    [service, snapshot, retry],
+    [snapshot, retry],
   );
 }

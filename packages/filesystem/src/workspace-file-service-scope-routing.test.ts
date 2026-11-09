@@ -164,6 +164,20 @@ describe('WorkspaceFileService — unified scope routing', () => {
     expect(blob).toBeInstanceOf(Blob);
   });
 
+  it('getZippedDirectory({ scope, maxBytes }) refuses a subtree past the caller ceiling', async () => {
+    vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(
+      mock<FileSystemProvider>({
+        readdir: vi.fn().mockResolvedValue(['big.bin']),
+        readdirEntries: undefined,
+        stat: vi.fn().mockResolvedValue({ type: 'file', size: 64, mtimeMs: 1 }),
+      }),
+    );
+
+    await expect(service.getZippedDirectory('/scope/dir', { scope, maxBytes: 16 })).rejects.toMatchObject({
+      code: 'ARCHIVE_TOO_LARGE',
+    });
+  });
+
   it('without a scope, every method routes through the mount table (no standalone provider lookup)', async () => {
     const standaloneSpy = vi.spyOn(providerRegistry, 'getProvider');
 
@@ -243,12 +257,18 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
 
     try {
       sender.postMessage({
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-a',
-          providerBasePath: alphaProjectId,
-        },
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-a',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -256,12 +276,18 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`, 'utf8')).resolves.toBe('authority b');
 
       sender.postMessage({
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-b',
-          providerBasePath: alphaProjectId,
-        },
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-b',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
       });
       await vi.waitFor(async () => {
         await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`)).rejects.toMatchObject({

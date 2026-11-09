@@ -1,0 +1,296 @@
+/**
+ * One import entry decoded, and the facts of what was written measured from
+ * its read-back (charter D12, EQ6, I2).
+ *
+ * The compute worker decodes over the `Blob` it was handed: it reads the one
+ * range the entry occupies, inflates it into a buffer sized by the declared
+ * size (a stream that runs past it, or ends short, is refused as damaged: the
+ * bytes, not the header, decide) and checks the zip CRC-32, the decode's only
+ * integrity check. Nothing is hashed then. Once the staging wrote the bytes,
+ * it reads them back and the compute worker measures that read-back
+ * ({@link measureImportBytes}): the git blob id and SHA-256 by one-shot
+ * WebCrypto digests and the content kind, so the facts recorded are those of
+ * the bytes on disk, and each file is hashed once.
+ *
+ * @module
+ */
+
+import { getFileContentMetadata } from '#content-metadata.js';
+import { crc32 } from '#importer/crc32.js';
+import { ImportRefusedError } from '#importer/limits.js';
+import { zipEntryDataOffset, zipLocalHeaderBytes } from '#importer/zip.js';
+import type { ZipEntry } from '#importer/zip.js';
+import type { ContentFacts } from '#types.js';
+
+/**
+ * What to decode: a range of a `Blob`, stored or deflated inside a zip, or a
+ * whole file.
+ *
+ * @public
+ */
+export type ImportDecodeRequest = Readonly<{
+  blob: Blob;
+  /** The entry's path, for a refusal's message. */
+  path: string;
+  /** The size the source declares; the decoded bytes must match it exactly. */
+  size: number;
+  /** Present for a zip entry: where its local header is and how it is stored. */
+  zip?: Readonly<Pick<ZipEntry, 'localHeaderOffset' | 'extentEnd' | 'compressedSize' | 'method' | 'crc32'>>;
+}>;
+
+/**
+ * One decoded entry: its bytes, checked against the declared size and CRC.
+ *
+ * @public
+ */
+export type ImportDecodedEntry = Readonly<{
+  data: Uint8Array<ArrayBuffer>;
+}>;
+
+/**
+ * The facts of one written file, measured from its read-back.
+ *
+ * @public
+ */
+export type ImportMeasuredFacts = ContentFacts &
+  Readonly<{
+    blobOid: string;
+    sha256: string;
+    /** How many bytes were measured, so a caller sees bytes lost on the way (a detached buffer) as a mismatch. */
+    size: number;
+  }>;
+
+/**
+ * Measure one written file's read-back: the compute worker's
+ * {@link measureImportBytes}, or the inline one where there is none.
+ *
+ * @public
+ */
+export type ImportMeasurer = (bytes: Uint8Array<ArrayBuffer>, expectedSize: number) => Promise<ImportMeasuredFacts>;
+
+/**
+ * The largest read-back measured in one shot: the per-file limit (EQ14), so
+ * every admitted file is one digest call per algorithm.
+ *
+ * @public
+ */
+export const importMeasureMaximumBytes = 100 * 1024 * 1024;
+
+/**
+ * The decode an import runs per entry: the compute worker's, or
+ * {@link createInlineImportDecoder} where there is none.
+ *
+ * @public
+ */
+export type ImportDecoder = (
+  request: ImportDecodeRequest,
+  options?: ImportDecodeOptions,
+) => Promise<ImportDecodedEntry>;
+
+/**
+ * A one-shot digest, lowercase hex.
+ *
+ * @public
+ */
+export type ImportHash = (algorithm: 'sha1' | 'sha256', bytes: Uint8Array<ArrayBuffer>) => Promise<string>;
+
+const hex = (digest: ArrayBuffer): string =>
+  [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+/**
+ * WebCrypto's digest: the hash wherever `crypto.subtle` exists.
+ *
+ * @param algorithm - SHA-1 or SHA-256.
+ * @param bytes - The bytes.
+ * @returns The digest, lowercase hex.
+ * @public
+ */
+export const subtleImportHash: ImportHash = async (algorithm, bytes) => {
+  const { subtle } = globalThis.crypto;
+  return hex(await subtle.digest(algorithm === 'sha1' ? 'SHA-1' : 'SHA-256', bytes));
+};
+
+const damaged = (path: string, cause?: unknown): ImportRefusedError =>
+  new ImportRefusedError('corrupt', { path, ...(cause === undefined ? {} : { cause }) });
+
+/* A stream of the range where the host can stream a `Blob`, else its bytes whole (jsdom has no `Blob.stream`). */
+const rangeStream = (blob: Blob): ReadableStream<Uint8Array<ArrayBuffer>> => {
+  if (typeof blob.stream === 'function') {
+    return blob.stream();
+  }
+  return new ReadableStream({
+    pull: async (controller) => {
+      controller.enqueue(new Uint8Array(await blob.arrayBuffer()));
+      controller.close();
+    },
+  });
+};
+
+/* The entry's bytes, inflated into one buffer after `prefix` bytes, checked against the declared size and CRC. */
+const inflate = async (
+  request: ImportDecodeRequest,
+  prefix: Uint8Array<ArrayBuffer>,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const { blob, path, size, zip } = request;
+  signal?.throwIfAborted();
+  let range = blob;
+  if (zip === undefined) {
+    if (blob.size !== size) {
+      throw new ImportRefusedError('corrupt', { path, message: 'A file changed while it was being imported.' });
+    }
+  } else {
+    const header = new Uint8Array(
+      await blob.slice(zip.localHeaderOffset, zip.localHeaderOffset + zipLocalHeaderBytes).arrayBuffer(),
+    );
+    const start = zipEntryDataOffset(header, { ...zip, name: path, size, directory: false, symlink: false });
+    if (start + zip.compressedSize > blob.size) {
+      throw damaged(path);
+    }
+    /* The local header's own name and extra field count too: its data may not reach the next entry. */
+    if (start + zip.compressedSize > zip.extentEnd) {
+      throw new ImportRefusedError('corrupt', { path, message: 'An archive entry overlaps the next one.' });
+    }
+    range = blob.slice(start, start + zip.compressedSize);
+  }
+  const framed = new Uint8Array(prefix.byteLength + size);
+  framed.set(prefix);
+  let written = prefix.byteLength;
+  let stream = rangeStream(range);
+  if (zip?.method === 'deflate') {
+    stream = stream.pipeThrough(
+      new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<
+        Uint8Array<ArrayBuffer>,
+        Uint8Array<ArrayBuffer>
+      >,
+    );
+  }
+  const reader = stream.getReader();
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      signal?.throwIfAborted();
+      if (written + read.value.byteLength > framed.byteLength) {
+        throw damaged(path);
+      }
+      framed.set(read.value, written);
+      written += read.value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error instanceof ImportRefusedError || signal?.aborted === true ? error : damaged(path, error);
+  }
+  if (written !== framed.byteLength) {
+    throw damaged(path);
+  }
+  if (zip !== undefined && crc32(framed.subarray(prefix.byteLength)) !== zip.crc32) {
+    throw damaged(path);
+  }
+  return framed;
+};
+
+/**
+ * Options of one decode.
+ *
+ * @public
+ */
+export type ImportDecodeOptions = Readonly<{
+  /** Stops the decode between chunks; a decode in another realm may ignore it and finish. */
+  signal?: AbortSignal;
+}>;
+
+/**
+ * Decode one entry, checked by the declared size and the zip CRC-32. It
+ * hashes nothing: the facts come from the read-back of what was written.
+ *
+ * @param request - The entry.
+ * @param options - A signal that stops the decode between chunks.
+ * @returns The bytes.
+ * @throws ImportRefusedError `corrupt` when the bytes do not decode to exactly the declared size and CRC.
+ * @public
+ */
+export const decodeImportEntry = async (
+  request: ImportDecodeRequest,
+  options: ImportDecodeOptions = {},
+): Promise<ImportDecodedEntry> => ({ data: await inflate(request, new Uint8Array(0), options.signal) });
+
+/**
+ * Measure one written file from its read-back: the git blob id and SHA-256,
+ * each one WebCrypto digest over the whole bytes (no file an import admits is
+ * larger than {@link importMeasureMaximumBytes}), and the content kind. This
+ * is the one hash pass a file costs an import (I2).
+ *
+ * One-shot SHA-1 over the git header and the bytes needs them contiguous,
+ * so the bytes are copied once behind the header: a file costs twice its
+ * size while it is measured. Avoiding it would need a read-back into a
+ * buffer framed in advance, which no provider read offers.
+ *
+ * @param bytes - The file's bytes as read back.
+ * @param expectedSize - The size the file was written at: bytes of another length are refused, never measured.
+ * @param hash - The digest to use; WebCrypto's by default.
+ * @returns The facts, with the size measured.
+ * @throws RangeError when the bytes are larger than one shot admits, or are not the size expected (a detached buffer).
+ * @public
+ */
+export const measureImportBytes = async (
+  bytes: Uint8Array<ArrayBuffer>,
+  expectedSize: number,
+  hash: ImportHash = subtleImportHash,
+): Promise<ImportMeasuredFacts> => {
+  if (bytes.byteLength > importMeasureMaximumBytes) {
+    throw new RangeError(`An imported file is larger than ${String(importMeasureMaximumBytes)} bytes.`);
+  }
+  /* A transferred buffer reads as empty once detached: its digests would be the empty blob's. */
+  if (bytes.byteLength !== expectedSize || (expectedSize > 0 && bytes.buffer.byteLength === 0)) {
+    throw new RangeError(
+      `Measured ${String(bytes.byteLength)} bytes of a file written at ${String(expectedSize)}: they were lost on the way.`,
+    );
+  }
+  /* The git object header and the bytes in one buffer, so the blob id is one digest call. */
+  const prefix = new TextEncoder().encode(`blob ${String(bytes.byteLength)}\0`);
+  const framed = new Uint8Array(prefix.byteLength + bytes.byteLength);
+  framed.set(prefix);
+  framed.set(bytes, prefix.byteLength);
+  const data = framed.subarray(prefix.byteLength);
+  const [blobOid, sha256] = await Promise.all([hash('sha1', framed), hash('sha256', data)]);
+  return { ...getFileContentMetadata(data), blobOid, sha256, size: data.byteLength };
+};
+
+/**
+ * Read one entry's bytes without digesting them: what a review's preview
+ * shows, checked against the declared size and CRC like any decode, and
+ * hashed by nothing.
+ *
+ * @param request - The entry.
+ * @param options - A signal that stops the read between chunks.
+ * @returns The bytes.
+ * @throws ImportRefusedError `corrupt` when the bytes do not decode to exactly the declared size and CRC.
+ * @public
+ */
+export const readImportEntry = async (
+  request: ImportDecodeRequest,
+  options: ImportDecodeOptions = {},
+): Promise<Uint8Array<ArrayBuffer>> => inflate(request, new Uint8Array(0), options.signal);
+
+/**
+ * The decode run in the caller's own realm, for a host with no compute worker
+ * and for tests.
+ *
+ * @returns A decoder.
+ * @public
+ */
+export const createInlineImportDecoder = (): ImportDecoder => async (request, options) =>
+  decodeImportEntry(request, options);
+
+/**
+ * The read-back measure run in the caller's own realm, for a host with no
+ * compute worker and for tests.
+ *
+ * @param hash - The digest to use; WebCrypto's by default.
+ * @returns A measurer.
+ * @public
+ */
+export const createInlineImportMeasurer =
+  (hash: ImportHash = subtleImportHash): ImportMeasurer =>
+  async (bytes, expectedSize) =>
+    measureImportBytes(bytes, expectedSize, hash);

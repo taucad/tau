@@ -160,7 +160,7 @@ catalog:
   schematic-symbols: 0.0.244
   spicets: 0.0.5
   spicey: 0.0.14
-  '@taucad/kcl-wasm-lib': 0.1.191
+  '@taucad/kcl-wasm-lib': 0.1.192
   '@testing-library/jest-dom': 6.6.3
   '@testing-library/react': 16.3.2
   '@tiptap/core': ^3.30.5
@@ -223,9 +223,9 @@ catalog:
   geist: ^1.7.2
   # GeoSpec authoring package from taucad/geospec, in the engine's fixed release group: pin the same exact
   # version as geospec-engine.
-  geospec: 0.5.0
+  geospec: 0.6.0
   # GeoSpec engine from taucad/geospec, exact stable pin; bump through a version PR.
-  geospec-engine: 0.5.0
+  geospec-engine: 0.6.0
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
@@ -245,14 +245,13 @@ catalog:
   madge: ^8.0.0
   manifold-3d: 3.4.1
   mermaid: ^11.17.2
-  meshoptimizer: ^1.1.1
   # Also an undeclared runtime import of @tscircuit/infgrid-ijump-astar's dist; @taucad/tscircuit owns it so it hoists.
   nanoid: ^5.1.16
   netlify-cli: ^27.12.0
   next: ^16.4.0
   next-themes: ^0.4.6
   nx: 22.7.12
-  '@taulabs/openrscad-engine': 0.11.0-beta.4
+  '@taulabs/openrscad-engine': 0.11.0-beta.5
   oxfmt: 0.39.0
   oxlint: ^1.80.0
   oxlint-tsgolint: ^0.16.0
@@ -284,7 +283,6 @@ catalog:
   source-map-js: ^1.2.2
   strip-literal: ^3.1.0
   stripe: 22.6.2
-  shiki: ^3.23.0
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3
   three: 0.184.0
@@ -309,7 +307,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: 4.4.3
-  nanoraster: ^0.8.0
+  nanoraster: ^0.9.0
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
@@ -349,7 +347,7 @@ catalog:
   '@better-auth-ui/core': 1.7.29
   '@better-auth-ui/react': 1.7.29
   smol-toml: 1.9.1
-  nanoraster-darwin-arm64: 0.8.0
+  nanoraster-darwin-arm64: 0.9.0
   '@napi-rs/keyring': 2.1.2
   proper-lockfile: 4.1.2
   '@types/proper-lockfile': 4.1.4
@@ -368,8 +366,10 @@ catalog:
   '@codemirror/lang-json': 6.0.2
   '@codemirror/lang-markdown': 6.5.2
   '@codemirror/lang-yaml': 6.1.3
-  '@codemirror/legacy-modes': 6.5.5
   '@lezer/highlight': 1.2.5
+  '@lezer/common': 1.5.4
+  '@lezer/lr': 1.4.11
+  '@lezer/generator': 1.8.0
   vscode-json-languageservice: 5.7.2
   compression: 1.8.2
   '@types/compression': ^1.8.1
@@ -484,6 +484,8 @@ patchedDependencies:
   n8ao@1.10.2: tools/pnpm/patches/n8ao@1.10.2.patch
   vaul@1.1.2: tools/pnpm/patches/vaul@1.1.2.patch
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
+  react-router@7.18.2: tools/pnpm/patches/react-router@7.18.2.patch
+  '@aurigax-ai/ghostty-web@0.3.6': tools/pnpm/patches/@aurigax-ai__ghostty-web@0.3.6.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

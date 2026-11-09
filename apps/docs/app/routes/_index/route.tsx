@@ -77,14 +77,14 @@ const LandingPage = (): React.JSX.Element => {
       <main id='main-content' className='bg-background text-foreground'>
         <section className='border-b border-border'>
           <div className='mx-auto w-full max-w-7xl px-6 py-20 sm:py-24 lg:px-10 lg:py-32'>
-            <p className='font-mono text-xs tracking-widest text-muted-foreground'>TAU DOCUMENTATION</p>
+            <p className='font-mono text-xs tracking-widest text-muted-foreground'>DOCUMENTATION</p>
             <h1 className='mt-6 max-w-6xl text-5xl leading-none font-semibold tracking-tight text-balance sm:text-7xl lg:text-8xl'>
-              CAD belongs in the browser.
+              Tau documentation
             </h1>
             <div className='mt-8 grid gap-8 lg:grid-cols-12 lg:items-end'>
               <p className='max-w-2xl text-lg leading-8 text-muted-foreground lg:col-span-7'>
-                Tau is an open-source, next-generation platform for parametric CAD. Describe a part, inspect real
-                geometry, and export anywhere without leaving the browser.
+                Tau is open-source, AI-native CAD. These docs cover the Tau app, the CAD kernels and the runtime that
+                runs them in browser, Node.js and Electron apps.
               </p>
               <div className='flex flex-wrap items-center gap-3 lg:col-span-5 lg:justify-end'>
                 <Button

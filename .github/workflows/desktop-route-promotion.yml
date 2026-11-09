@@ -12,7 +12,7 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or a Mac-only staging ZIP/DMG catalog (promotion only)
+        description: All qualified routes, or an Apple silicon-only staging ZIP/DMG catalog (promotion only)
         type: choice
         options: [all, macos]
         default: all
@@ -106,6 +106,35 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
         if: steps.selected.outputs.run == 'true'
+      # Operator decision D3 (2026-11-08, Brain research/ci-throughput-review.md): production promotes
+      # only a candidate whose own commit has five green shell conformance rows. They come from the
+      # staging gate that created the tag (its run is named in the release notes) or from a green
+      # `shell-conformance.yml` run on that commit. This reads results; it never runs the rows again.
+      - name: Require green shell conformance on the candidate's commit
+        if: steps.selected.outputs.run == 'true' && matrix.channel == 'production' && inputs.operation == 'promote-routes'
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAG" ] || { echo '::error::A production promotion names its candidate tag.'; exit 1; }
+          sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha)
+          green=$(gh api "repos/${GH_REPO}/actions/workflows/shell-conformance.yml/runs?head_sha=${sha}&status=success&per_page=1" --jq '.total_count')
+          if [ "$green" -gt 0 ]; then
+            echo "Shell conformance passed on ${sha} in a shell-conformance.yml run."
+            exit 0
+          fi
+          gate=$(gh release view "$TAG" --repo "$GH_REPO" --json body --jq .body | sed -n 's/^Shell conformance gate: run \([0-9][0-9]*\)$/\1/p' | head -n 1)
+          if [ -n "$gate" ]; then
+            passed=$(gh api --paginate "repos/${GH_REPO}/actions/runs/${gate}/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name | startswith("Shell gate / Shell conformance on ")) | select(.conclusion == "success") | .name' | sort -u | wc -l)
+            if [ "$passed" -ge 5 ]; then
+              echo "Shell conformance passed on ${sha}: all five rows of the staging gate run ${gate}."
+              exit 0
+            fi
+          fi
+          echo "::error::No green shell conformance on ${sha} (${TAG}). Dispatch shell-conformance.yml on the tag, or cut a new candidate."
+          exit 1
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:

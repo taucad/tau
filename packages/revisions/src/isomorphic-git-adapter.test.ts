@@ -6,7 +6,12 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
-import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
 import type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
 
 const encoder = new TextEncoder();
@@ -135,7 +140,7 @@ node_modules/
 # END Tau generated
 `;
 
-  it('should replace a stale generated block once and keep the hand-written lines', async () => {
+  it('should leave an existing ignore file as written and keep its ignores in the store (D16)', async () => {
     const { filesystem, written } = counting();
     await filesystem.writeFile(generatedIgnorePath, stale);
     written.length = 0;
@@ -143,8 +148,49 @@ node_modules/
 
     await port.init({ author });
 
-    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent('# mine\n*.log\n'));
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
+    /* Brand new, so the attributes file Tau's rule lives in is created beside it. */
+    expect(written).toStrictEqual([generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedGitattributesPath, 'utf8')).toBe(
+      generatedGitattributesContent(undefined),
+    );
+    expect(await filesystem.readFile('.git/info/exclude', 'utf8')).toBe(generatedIgnoreContent(undefined));
+  });
+
+  it('should create both setup files for a brand-new project', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+
+    await port.init({ author });
+
     expect(written).toStrictEqual([generatedIgnorePath, generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent(undefined));
+  });
+
+  it('should give a project an older build created its attributes file, and nothing else (DEF-W22-1)', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author, createSetupFiles: false });
+    await filesystem.writeFile(generatedIgnorePath, stale);
+    written.length = 0;
+
+    await port.init({ author });
+
+    expect(written).toStrictEqual([generatedGitattributesPath]);
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
+  });
+
+  it('should write neither file into a store whose files carry no Tau block', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author, createSetupFiles: false });
+    await filesystem.writeFile(generatedIgnorePath, '# mine\n*.log\n');
+    written.length = 0;
+
+    await port.init({ author });
+
+    expect(written).toStrictEqual([]);
+    expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
   });
 
   it('should write nothing when the project is already current', async () => {
@@ -483,6 +529,53 @@ describe('advertisement cancellation', () => {
   });
 });
 
+/* R6 review: a server that answers protocol v2 to a v1 request lists no refs in its advertisement. */
+describe('a protocol-v2-only advertisement', () => {
+  it('lists through ls-refs rather than reading an empty repository, and keeps nothing for a fetch', async () => {
+    const pkt = (line: string): string => `${(line.length + 4).toString(16).padStart(4, '0')}${line}`;
+    const oid = 'a'.repeat(40);
+    const requests: string[] = [];
+    const answer = (request: RevisionHttpRequest, text: string, type: string): RevisionHttpResponse => ({
+      url: request.url,
+      method: request.method ?? 'GET',
+      headers: { 'content-type': type },
+      body: (async function* () {
+        await Promise.resolve();
+        yield encoder.encode(text);
+      })(),
+      statusCode: 200,
+      statusMessage: 'OK',
+    });
+    const http: RevisionHttpClient = {
+      request: async (request) => {
+        requests.push(`${request.method ?? 'GET'} ${new URL(request.url).pathname}`);
+        if ((request.method ?? 'GET') === 'GET') {
+          return answer(
+            request,
+            `${pkt('# service=git-upload-pack\n')}0000${pkt('version 2\n')}${pkt('ls-refs\n')}${pkt('fetch\n')}0000`,
+            'application/x-git-upload-pack-advertisement',
+          );
+        }
+        return answer(
+          request,
+          `${pkt(`${oid} HEAD symref-target:refs/heads/main\n`)}${pkt(`${oid} refs/heads/main\n`)}0000`,
+          'application/x-git-upload-pack-result',
+        );
+      },
+    };
+    const port = await storeWithRemote(http, 'tau');
+
+    const listed = await port.listRemoteRefs('tau');
+    expect(listed).toStrictEqual([{ name: 'refs/heads/main', head: oid }]);
+    expect(requests.filter((entry) => entry.startsWith('POST'))).toHaveLength(1);
+
+    /* The v2 answer is not an advertisement a fetch can reuse: it asks for its own. */
+    const before = requests.length;
+    await port.fetch({ remote: 'tau', refs: ['refs/heads/main'], advertised: listed });
+    expect(requests.slice(before)).toStrictEqual(['GET /v1/git/p1.git/info/refs']);
+  });
+});
+
 /*
  * Load-path audit fix 1: a tree read collects the pointers its store does not
  * hold, then fetches them together, where it used to make one batch call and
@@ -495,6 +588,8 @@ describe('reading a tree with large objects', () => {
   ]);
   const partTree = (): ImmutableRevisionTree =>
     new ImmutableRevisionTree([
+      /* Tau's block names the family, so the parts are pointers (D16). */
+      [generatedGitattributesPath, encoder.encode(generatedGitattributesContent(undefined))],
       ['main.scad', encoder.encode('cube(1);\n')],
       ...parts.map(([path, content]) => [path!, encoder.encode(content)] as const),
     ]);
@@ -601,6 +696,48 @@ describe('reading a tree with large objects', () => {
     expect(reports).toHaveLength(1);
   });
 
+  /* Two tabs storing one oid: the one that sees a whole copy appear while it writes keeps it. */
+  it('keeps a whole copy another writer stored while this one was writing', async () => {
+    const { port, head, evict, filesystem } = await lfsStore();
+    await evict(parts[0]![1]!);
+    const file = `.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`;
+    await filesystem.writeFile(file, 'sol');
+    const write = filesystem.writeFile.bind(filesystem);
+    vi.spyOn(filesystem, 'writeFile').mockImplementation(async (path, data) => {
+      await write(path, data);
+      if (path.startsWith(`${file}.`) && path.endsWith('.partial')) {
+        /* The other tab's store lands, whole, between this one's two looks. */
+        await write(file, parts[0]![1]!);
+      }
+    });
+    const unlinks = vi.spyOn(filesystem, 'unlink');
+
+    const read = await port.readTree(head);
+
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(unlinks.mock.calls.map(([path]) => path).filter((path) => !path.endsWith('.partial'))).toStrictEqual([]);
+    expect(await filesystem.readdir(file.slice(0, file.lastIndexOf('/')))).toStrictEqual([oidOf(parts[0]![1]!)]);
+  });
+
+  it("keeps the other writer's whole copy when it loses the rename", async () => {
+    const { port, head, evict, filesystem } = await lfsStore();
+    await evict(parts[0]![1]!);
+    const file = `.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`;
+    const rename = filesystem.rename.bind(filesystem);
+    vi.spyOn(filesystem, 'rename').mockImplementation(async (from, to) => {
+      if (to === file) {
+        await filesystem.writeFile(to, parts[0]![1]!);
+        throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
+      }
+      return rename(from, to);
+    });
+
+    const read = await port.readTree(head);
+
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(await filesystem.readdir(file.slice(0, file.lastIndexOf('/')))).toStrictEqual([oidOf(parts[0]![1]!)]);
+  });
+
   it('shares one download between two readers of the same tree', async () => {
     const { port, head, asked, transfer, evict } = await lfsStore();
     await evict(...parts.map(([, content]) => content!));
@@ -609,6 +746,22 @@ describe('reading a tree with large objects', () => {
     expect(second?.get(parts[1]![0]!)).toStrictEqual(encoder.encode(parts[1]![1]));
     expect(asked).toHaveLength(1);
     expect(transfer).toHaveBeenCalledTimes(parts.length);
+  });
+
+  /* I10, S4: a read-through that joins the fill's download hears its bytes arrive, and the object downloads once. */
+  it('tells a reader that joined a download as its bytes arrive, downloading the object once', async () => {
+    const { port, head, transfer, evict } = await lfsStore();
+    await evict(...parts.map(([, content]) => content!));
+    const { pointer } = lfsPointerFor(encoder.encode(parts[0]![1]));
+    const progress = vi.fn();
+    const [tree, fetched] = await Promise.all([
+      port.readTree(head),
+      port.fetchLargeObjects!([pointer], { onTransferProgress: progress }),
+    ]);
+    expect(fetched.get(pointer.oid)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(tree?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(transfer).toHaveBeenCalledTimes(parts.length);
+    expect(progress).toHaveBeenCalledWith(pointer.oid);
   });
 
   it("fetches for itself what another reader's failed download did not deliver", async () => {
@@ -662,6 +815,28 @@ describe('reading a tree with large objects', () => {
     expect(transfer).not.toHaveBeenCalled();
   });
 
+  /* R5: a reader that wants one file reads one file, not every blob and every large object. */
+  it('reads only the named paths, and leaves out what is missing or a directory', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[1]![1]!);
+    const read = await port.readTree(head, {
+      largeObjects: 'local',
+      paths: ['main.scad', parts[2]![0]!, parts[0]![0]!, 'models', 'missing.json', 'main.scad/inner'],
+    });
+    expect(read?.entries().map(({ path }) => path)).toStrictEqual(
+      [parts[0]![0]!, parts[2]![0]!, 'main.scad'].toSorted(),
+    );
+    expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
+    expect(read?.get(parts[2]![0]!)).toStrictEqual(encoder.encode(parts[2]![1]));
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(lfsPointerFor(encoder.encode(parts[0]![1])).bytes);
+    expect(asked).toStrictEqual([]);
+    expect(transfer).not.toHaveBeenCalled();
+    /* A fetching read of a subset fetches only that subset's large objects. */
+    const fetched = await port.readTree(head, { paths: [parts[0]![0]!] });
+    expect(fetched?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(asked).toStrictEqual([[oidOf(parts[0]![1]!)]]);
+  });
+
   it('tells a fetching read about each object as it lands', async () => {
     const { port, head, evict } = await lfsStore();
     await evict(parts[0]![1]!, parts[2]![1]!);
@@ -676,6 +851,15 @@ describe('reading a tree with large objects', () => {
         [oidOf(parts[2]![1]!), parts[2]![1]],
       ]),
     );
+  });
+
+  /* D10: the fill names an opened path's object, and the read asks for it before the rest. */
+  it('asks for the objects a fetching read names first before the others', async () => {
+    const { port, head, asked, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[2]![1]!);
+    const first = new Set([oidOf(parts[2]![1]!)]);
+    await port.readTree(head, { firstLargeObjects: () => first });
+    expect(asked).toStrictEqual([[oidOf(parts[2]![1]!)], [oidOf(parts[0]![1]!)]]);
   });
 
   it('tells a second reader about an object the first reader is fetching', async () => {

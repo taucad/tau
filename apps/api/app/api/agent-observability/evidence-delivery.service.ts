@@ -4,12 +4,12 @@ import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { Evidence } from '@taucad/agent-observability/contract';
-import { DatabaseService } from '#database/database.service.js';
-import { readProjectDeletion } from '#database/project-lifecycle.js';
-import type { Environment } from '#config/environment.config.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { AgentEvidenceDeliveryOutcome } from '#telemetry/metrics.js';
+import { DatabaseService } from '@taucad/api-database';
+import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import type { Environment } from '@taucad/api-core';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceDeliveryOutcome } from '@taucad/api-observability/metrics';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#api/agent-observability/evidence-seal.js';
 import {
@@ -60,6 +60,15 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
       return settlement.kind;
     }
   }
+};
+
+/** What a failure log may carry: the error's class and driver code, never its message, which can embed row values. */
+const errorFacts = (error: unknown): Readonly<{ name: string; code?: string }> => {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    ...(typeof code === 'string' ? { code } : {}),
+  };
 };
 
 const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) => Promise<void>): Promise<void> => {
@@ -170,16 +179,31 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       };
       const pending = await leasePending(database, lease);
       await runInPool(pending, deliveryTiming.concurrency, async (row) => {
-        count(await this.deliver({ client, pseudonym }, row, now));
+        const progress = { identified: false };
+        count(
+          await this.isolate(row, {
+            stage: 'deliver',
+            progress,
+            now,
+            attempt: async () => this.deliver({ client, pseudonym, progress }, row, now),
+          }),
+        );
       });
       const uncertain = await leaseUncertain(database, lease);
       await runInPool(uncertain, deliveryTiming.concurrency, async (row) => {
-        count(await this.reconcile(client, row, now));
+        count(
+          await this.isolate(row, {
+            stage: 'reconcile',
+            progress: { identified: true },
+            now,
+            attempt: async () => this.reconcile(client, row, now),
+          }),
+        );
       });
       this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'delivery', outcome: 'ok' });
     } catch (error) {
       this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'delivery', outcome: 'error' });
-      this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Evidence delivery pass failed');
+      this.logger.warn(errorFacts(error), 'Evidence delivery pass failed');
     }
     if (Object.values(counts).some((value) => value > 0)) {
       this.logger.log({ counts }, 'Evidence delivery pass');
@@ -201,6 +225,55 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     })();
     this.running = pass;
     this.shutdown.track(pass);
+  }
+
+  /**
+   * Run one row's attempt so that its failure settles that row alone. Without
+   * this, one row's error rejected the pass and stranded every row it had
+   * leased in `sending` until the lease lapsed, when the sweep counted them as
+   * abandoned although no worker had died.
+   *
+   * A row whose send identity is not yet recorded provably never reached
+   * ingestion, so it backs off and is sent again; one whose identity is
+   * recorded may have been applied, so it is only ever reconciled.
+   */
+  private async isolate(
+    row: LeasedDelivery,
+    {
+      stage,
+      progress,
+      now,
+      attempt,
+    }: Readonly<{
+      stage: 'deliver' | 'reconcile';
+      progress: Readonly<{ identified: boolean }>;
+      now: Date;
+      attempt: () => Promise<string>;
+    }>,
+  ): Promise<string> {
+    try {
+      return await attempt();
+    } catch (error) {
+      this.logger.warn({ stage, ...errorFacts(error) }, 'Evidence delivery attempt failed');
+      try {
+        if (stage === 'reconcile') {
+          return await this.settle(row, {
+            kind: 'recheck',
+            notBefore: new Date(now.getTime() + deliveryTiming.recheckMilliseconds),
+          });
+        }
+        return progress.identified
+          ? await this.settle(row, { kind: 'sent', reason: 'error' })
+          : await this.settle(row, {
+              kind: 'retry',
+              reason: 'error',
+              notBefore: new Date(now.getTime() + retryDelay(row.attempts)),
+            });
+      } catch {
+        /* The database itself failed; the lease lapses and the sweep recovers the row. */
+        return 'error';
+      }
+    }
   }
 
   private async settle(row: LeasedDelivery, settlement: DeliverySettlement): Promise<string> {
@@ -258,7 +331,11 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async deliver(
-    { client, pseudonym }: Readonly<{ client: LangfuseClient; pseudonym: Uint8Array<ArrayBuffer> }>,
+    {
+      client,
+      pseudonym,
+      progress,
+    }: Readonly<{ client: LangfuseClient; pseudonym: Uint8Array<ArrayBuffer>; progress: { identified: boolean } }>,
     row: LeasedDelivery,
     now: Date,
   ): Promise<string> {
@@ -297,6 +374,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       this.metrics.agentEvidenceDeliveries.add(1, { outcome: 'lease_lost' });
       return 'lease-lost';
     }
+    progress.identified = true;
     const outcome = await client.send(span, this.shutdown.signal);
     switch (outcome.kind) {
       case 'accepted': {

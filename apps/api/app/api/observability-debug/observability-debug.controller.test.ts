@@ -11,10 +11,12 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObservabilityHarnessFailure } from '#api/observability-debug/observability-debug.controller.js';
 import { isObservabilityFailureRouteEnabled } from '#api/observability-debug/observability-debug.gate.js';
 import { ObservabilityDebugModule } from '#api/observability-debug/observability-debug.module.js';
-import type * as Sentry from '#telemetry/sentry.js';
+import type * as Sentry from '@taucad/api-observability/sentry';
 
-const reportServerError = vi.hoisted(() => vi.fn<(error: unknown, requestId?: string) => void>());
-vi.mock('#telemetry/sentry.js', async (importOriginal) => ({
+const reportServerError = vi.hoisted(() =>
+  vi.fn<(error: unknown, requestId?: string, sentryTrace?: string | string[]) => void>(),
+);
+vi.mock('@taucad/api-observability/sentry', async (importOriginal) => ({
   ...(await importOriginal<typeof Sentry>()),
   reportServerError,
 }));
@@ -91,6 +93,6 @@ describe('GET /v1/__debug/observability/failure', () => {
     expect(typeof requestId).toBe('string');
     expect(response.json()).toMatchObject({ code: 'INTERNAL_SERVER_ERROR', requestId });
     expect(reportServerError).toHaveBeenCalledOnce();
-    expect(reportServerError).toHaveBeenCalledWith(expect.any(ObservabilityHarnessFailure), requestId);
+    expect(reportServerError).toHaveBeenCalledWith(expect.any(ObservabilityHarnessFailure), requestId, undefined);
   });
 });

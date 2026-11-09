@@ -3,11 +3,12 @@ import { Module } from '@nestjs/common';
 import type { MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
-import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseModule } from '@taucad/api-database';
 import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
+import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
@@ -24,7 +25,7 @@ import { StorageReceiptsController } from '#api/git/forwarding/receipts.controll
 import { repositoryRouteGuardProvider } from '#api/git/routing/routing.providers.js';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 import { UsageController } from '#api/git/usage.controller.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 
 /**
@@ -37,7 +38,14 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  */
 @Module({
   imports: [DatabaseModule, ProjectAccessModule, DurableEventsModule],
-  controllers: [GitController, GitProxyController, RevisionSaltController, UsageController, StorageReceiptsController],
+  controllers: [
+    GitController,
+    GitCatalogueController,
+    GitProxyController,
+    RevisionSaltController,
+    UsageController,
+    StorageReceiptsController,
+  ],
   providers: [
     GitRepositoryService,
     /* The API's one Redis budget primitive (D22). Provided here as well as in

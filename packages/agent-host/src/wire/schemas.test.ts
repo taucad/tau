@@ -98,3 +98,29 @@ it('should carry explicit commentary and reasoning summaries across the live wir
     expect(wire.agentLiveEventSchema.parse(event)).toEqual(event);
   }
 });
+
+describe('the attempt receipt (W2)', () => {
+  const pending = { state: 'pending', operationId: 'operation-1', dispatchState: 'accepted' } as const;
+  /* The API's default invocation deadline and recovery grace (apps/api), which this package cannot import. */
+  const invocationDeadline = 300_000;
+  const recoveryGrace = 5 * 60_000;
+  const settlesBy = new Date(Date.UTC(2026, 10, 6) + invocationDeadline + recoveryGrace).toISOString();
+
+  it('should read a pending answer from an API older than settlesBy unchanged', () => {
+    expect(wire.attemptReceiptSchema.parse(pending)).toEqual(pending);
+  });
+
+  it('should read the settlement instant a newer API states on a pending answer', () => {
+    expect(wire.attemptReceiptSchema.parse({ ...pending, settlesBy })).toEqual({ ...pending, settlesBy });
+  });
+
+  it('should refuse a settlement instant that is not an ISO timestamp', () => {
+    expect(wire.attemptReceiptSchema.safeParse({ ...pending, settlesBy: 'soon' }).success).toBe(false);
+  });
+
+  it('should leave settlesBy to an older host as a field it keeps without reading', () => {
+    // The pre-W2 pending reader, as an older host still parses the answer.
+    const older = z.looseObject({ state: z.literal('pending'), operationId: z.string().min(1) });
+    expect(older.parse({ ...pending, settlesBy })).toEqual({ ...pending, settlesBy });
+  });
+});

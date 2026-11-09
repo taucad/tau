@@ -1,0 +1,429 @@
+{
+  "schema": {
+    "$id": "urn:taucad:openrscad:parameters",
+    "$schema": "https://json-structure.org/meta/extended/v0/#",
+    "$uses": ["JSONSchemaUnits"],
+    "additionalProperties": false,
+    "name": "OpenRscadParameters",
+    "properties": {
+      "Colors": {
+        "additionalProperties": false,
+        "properties": {
+          "primary_color": {
+            "default": "#FF6600",
+            "description": "Color string",
+            "title": "primary_color",
+            "type": "string"
+          }
+        },
+        "title": "Colors",
+        "type": "object"
+      },
+      "Dimensions": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "default": 5,
+            "description": "Slider with step",
+            "maximum": 20,
+            "minimum": 0,
+            "multipleOf": 1,
+            "title": "count",
+            "type": "double"
+          },
+          "depth": {
+            "default": 34,
+            "description": "Slider with max",
+            "maximum": 100,
+            "minimum": 0,
+            "title": "depth",
+            "type": "double"
+          },
+          "height": {
+            "default": 50,
+            "description": "Plain spinbox",
+            "title": "height",
+            "type": "double"
+          },
+          "length": {
+            "default": 50,
+            "description": "Slider with range",
+            "maximum": 200,
+            "minimum": 10,
+            "title": "length",
+            "type": "double"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Centered slider",
+            "maximum": 10,
+            "minimum": -10,
+            "multipleOf": 0.1,
+            "title": "offset",
+            "type": "double"
+          },
+          "width": {
+            "default": 25.5,
+            "description": "Spinbox with step",
+            "title": "width",
+            "type": "double"
+          }
+        },
+        "title": "Dimensions",
+        "type": "object"
+      },
+      "Options": {
+        "additionalProperties": false,
+        "properties": {
+          "finish": {
+            "default": "M",
+            "description": "Labeled string dropdown",
+            "oneOf": [
+              {
+                "const": "M",
+                "title": "Matte"
+              },
+              {
+                "const": "G",
+                "title": "Glossy"
+              },
+              {
+                "const": "S",
+                "title": "Satin"
+              }
+            ],
+            "title": "finish",
+            "type": "string"
+          },
+          "label_text": {
+            "default": "Hello",
+            "description": "Text string",
+            "title": "label_text",
+            "type": "string"
+          },
+          "material": {
+            "default": "wood",
+            "description": "String dropdown",
+            "oneOf": [
+              {
+                "const": "wood",
+                "title": "wood"
+              },
+              {
+                "const": "metal",
+                "title": "metal"
+              },
+              {
+                "const": "plastic",
+                "title": "plastic"
+              },
+              {
+                "const": "glass",
+                "title": "glass"
+              }
+            ],
+            "title": "material",
+            "type": "string"
+          },
+          "quality": {
+            "default": 20,
+            "description": "Labeled number dropdown",
+            "oneOf": [
+              {
+                "const": 10,
+                "title": "Low"
+              },
+              {
+                "const": 20,
+                "title": "Medium"
+              },
+              {
+                "const": 30,
+                "title": "High"
+              }
+            ],
+            "title": "quality",
+            "type": "double"
+          },
+          "serial": {
+            "default": "ABC123",
+            "description": "String with max length",
+            "maxLength": 8,
+            "title": "serial",
+            "type": "string"
+          },
+          "show_base": {
+            "default": true,
+            "description": "Checkbox",
+            "title": "show_base",
+            "type": "boolean"
+          },
+          "size": {
+            "default": 20,
+            "description": "Number dropdown",
+            "oneOf": [
+              {
+                "const": 10,
+                "title": "10"
+              },
+              {
+                "const": 20,
+                "title": "20"
+              },
+              {
+                "const": 30,
+                "title": "30"
+              },
+              {
+                "const": 40,
+                "title": "40"
+              }
+            ],
+            "title": "size",
+            "type": "double"
+          }
+        },
+        "title": "Options",
+        "type": "object"
+      },
+      "Vectors": {
+        "additionalProperties": false,
+        "properties": {
+          "bounds": {
+            "default": [0, 0, 100, 100],
+            "description": "Vector4",
+            "items": {
+              "type": "double"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "bounds",
+            "type": "array"
+          },
+          "offsets": {
+            "default": [5, 10, 15],
+            "description": "Vector with range",
+            "items": {
+              "type": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "offsets",
+            "type": "array"
+          },
+          "position": {
+            "default": [10, 20],
+            "description": "Vector2",
+            "items": {
+              "type": "double"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "position",
+            "type": "array"
+          },
+          "rotation": {
+            "default": [0, 45, 90],
+            "description": "Vector3",
+            "items": {
+              "type": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "rotation",
+            "type": "array"
+          }
+        },
+        "title": "Vectors",
+        "type": "object"
+      }
+    },
+    "type": "object"
+  },
+  "resources": {},
+  "defaults": {
+    "Colors": {
+      "primary_color": "#FF6600"
+    },
+    "Dimensions": {
+      "count": 5,
+      "depth": 34,
+      "height": 50,
+      "length": 50,
+      "offset": 0,
+      "width": 25.5
+    },
+    "Options": {
+      "finish": "M",
+      "label_text": "Hello",
+      "material": "wood",
+      "quality": 20,
+      "serial": "ABC123",
+      "show_base": true,
+      "size": 20
+    },
+    "Vectors": {
+      "bounds": [0, 0, 100, 100],
+      "offsets": [5, 10, 15],
+      "position": [10, 20],
+      "rotation": [0, 45, 90]
+    }
+  },
+  "bindings": {
+    "/Dimensions/depth": {
+      "provenance": {
+        "quantityKind": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/depth;instance=/Dimensions/depth;name=depth",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-depth-token-v1/quantity-kind",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "space": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/depth;instance=/Dimensions/depth;name=depth",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-depth-token-v1/space",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "unit": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/depth;instance=/Dimensions/depth;name=depth",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-depth-token-v1/unit",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        }
+      },
+      "quantityKind": "http://qudt.org/vocab/quantitykind/Depth",
+      "space": "linear",
+      "unit": "mm"
+    },
+    "/Dimensions/height": {
+      "provenance": {
+        "quantityKind": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/height;instance=/Dimensions/height;name=height",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-height-token-v1/quantity-kind",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "space": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/height;instance=/Dimensions/height;name=height",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-height-token-v1/space",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "unit": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/height;instance=/Dimensions/height;name=height",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-height-token-v1/unit",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        }
+      },
+      "quantityKind": "http://qudt.org/vocab/quantitykind/Height",
+      "space": "linear",
+      "unit": "mm"
+    },
+    "/Dimensions/length": {
+      "provenance": {
+        "quantityKind": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/length;instance=/Dimensions/length;name=length",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-length-token-v1/quantity-kind",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "space": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/length;instance=/Dimensions/length;name=length",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-length-token-v1/space",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "unit": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/length;instance=/Dimensions/length;name=length",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-length-token-v1/unit",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        }
+      },
+      "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
+      "space": "linear",
+      "unit": "mm"
+    },
+    "/Dimensions/width": {
+      "provenance": {
+        "quantityKind": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/width;instance=/Dimensions/width;name=width",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-width-token-v1/quantity-kind",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "space": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/width;instance=/Dimensions/width;name=width",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-width-token-v1/space",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "unit": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Dimensions/properties/width;instance=/Dimensions/width;name=width",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "length-width-token-v1/unit",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        }
+      },
+      "quantityKind": "http://qudt.org/vocab/quantitykind/Width",
+      "space": "linear",
+      "unit": "mm"
+    },
+    "/Vectors/rotation/*": {
+      "provenance": {
+        "quantityKind": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Vectors/properties/rotation/items;instance=/Vectors/rotation/*;name=rotation",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "angle-default-v1/quantity-kind",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "space": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Vectors/properties/rotation/items;instance=/Vectors/rotation/*;name=rotation",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "angle-default-v1/space",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        },
+        "unit": {
+          "evidence": "urn:taucad:parameter-schema:root#/properties/Vectors/properties/rotation/items;instance=/Vectors/rotation/*;name=rotation",
+          "origin": "inferred",
+          "producer": "@taucad/middleware/parameterUnits",
+          "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
+          "rule": "angle-default-v1/unit",
+          "sourceRevision": "64f98cdbcd8e39a8352172392fbbd13cfc476c68f0041c516f470b692bfff743"
+        }
+      },
+      "quantityKind": "http://qudt.org/vocab/quantitykind/PlaneAngle",
+      "space": "linear",
+      "unit": "deg"
+    }
+  }
+}

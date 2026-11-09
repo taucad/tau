@@ -1,24 +1,173 @@
 /**
- * Ref-counted watch subscription registry.
+ * Ref-counted watch subscription registry: the authority's watch plane.
  *
- * Deduplicates identical watch requests so multiple consumers share a single
- * ChangeEventBus subscription. The returned unsubscribe owns lifecycle cleanup.
+ * Deduplicates identical watch requests so multiple consumers share one
+ * subscription. The registry holds one {@link ChangeEventBus} listener for all
+ * of them and finds the subscriptions an event can reach with a prefix trie of
+ * their watch paths, so matching costs O(facts × depth) instead of
+ * O(facts × subscriptions) (charter D6). The returned unsubscribe owns
+ * lifecycle cleanup.
+ *
+ * Two delivery forms share the plane:
+ *
+ * - {@link WatchRegistry.watchChangeSets} delivers one {@link ChangeSet} per
+ *   committed changeset (`immediate`), or one per animation frame (`frame`),
+ *   with exact entries and touched directories or an explicit scoped reset.
+ * - {@link WatchRegistry.watch} delivers per-path {@link WatchEvent}s after a
+ *   coalescing window, for consumers that have not moved to change sets.
  */
 
 import { Topic } from '@taucad/events';
-import type { ChangeEventBus } from '#change-event-bus.js';
-import type { ChangeEvent, WatchRequest, WatchEvent } from '#types.js';
-import { EventCoalescer } from '#event-coalescer.js';
+import { mergeResets, toChangeSet } from '#change-event-bus.js';
+import type { ChangeEventBus, ChangeSet, ChangeSetReset, ChangeSetResetReason } from '#change-event-bus.js';
+import type { ChangeEvent, PathChangeEvent, WatchRequest, WatchEvent } from '#types.js';
+import { changeEventEntries } from '#changeset.js';
+import { ChangeSetCoalescer, EventCoalescer } from '#event-coalescer.js';
+import type { FrameScheduler } from '#event-coalescer.js';
 import { getEventAuthorities, getEventOrigin, isEventGloballyVisible, tagEventOrigin } from '#event-origin-registry.js';
 import { canonicalizePath, parentDirectory } from '@taucad/utils/path';
+import { workerTimings } from '#worker-timings.js';
 
-type WatchSubscription = {
-  request: WatchRequest;
-  authority?: WeakKey;
-  handlers: Topic<WatchEvent>;
-  unsubscribeFromBus: () => void;
-  coalescer: EventCoalescer;
+/**
+ * A watch on the change-set form of the plane.
+ *
+ * `coalesce: 'immediate'` (the default; kernels and revisions) delivers each
+ * changeset as it commits; `'frame'` (UI connections) merges every changeset
+ * one animation frame commits into one delivery.
+ *
+ * @public
+ */
+export type ChangeSetWatchRequest = WatchRequest & { coalesce?: 'immediate' | 'frame' };
+
+type SubscriptionBase = {
+  readonly hash: string;
+  readonly request: WatchRequest;
+  readonly authority?: WeakKey;
 };
+
+type EventSubscription = SubscriptionBase & {
+  readonly form: 'events';
+  readonly handlers: Topic<WatchEvent>;
+  readonly coalescer: EventCoalescer;
+};
+
+type ChangeSetSubscription = SubscriptionBase & {
+  readonly form: 'changeSets';
+  readonly handlers: Topic<ChangeSet>;
+  readonly frame?: ChangeSetCoalescer;
+  readonly skipOrigin?: string;
+  /** Facts this subscription admitted from the event being dispatched. */
+  facts: PathChangeEvent[];
+  /** A reset this subscription earned from the event being dispatched. */
+  reset?: ChangeSetReset;
+};
+
+type WatchSubscription = EventSubscription | ChangeSetSubscription;
+
+/** One trie node per watch-path segment; subscriptions sit at the node of each path they watch. */
+type TrieNode = {
+  readonly children: Map<string, TrieNode>;
+  readonly recursive: Set<WatchSubscription>;
+  readonly direct: Set<WatchSubscription>;
+};
+
+const createNode = (): TrieNode => ({ children: new Map(), recursive: new Set(), direct: new Set() });
+
+const segmentsOf = (path: string): string[] => {
+  const canonical = canonicalizePath(path);
+  return canonical === '/' ? [] : canonical.slice(1).split('/');
+};
+
+/**
+ * Add every subscription at or below a node.
+ *
+ * @param node - The subtree's root.
+ * @param into - Collects the subscriptions.
+ */
+const collectBelow = (node: TrieNode, into: Set<WatchSubscription>): void => {
+  for (const subscription of node.recursive) {
+    into.add(subscription);
+  }
+  for (const subscription of node.direct) {
+    into.add(subscription);
+  }
+  for (const child of node.children.values()) {
+    collectBelow(child, into);
+  }
+};
+
+/**
+ * The subscriptions an event path can reach: recursive watches on any ancestor
+ * or the path itself, direct watches on its parent or itself, and with
+ * `subtree` every watch at or below it (a summary or directory fact can
+ * replace a watched descendant). A superset: each candidate's filter decides.
+ */
+class WatchTrie {
+  readonly #root = createNode();
+
+  public add(path: string, subscription: WatchSubscription, recursive: boolean): void {
+    let node = this.#root;
+    for (const segment of segmentsOf(path)) {
+      let child = node.children.get(segment);
+      if (child === undefined) {
+        child = createNode();
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
+    (recursive ? node.recursive : node.direct).add(subscription);
+  }
+
+  public remove(path: string, subscription: WatchSubscription): void {
+    const trail: Array<{ node: TrieNode; segment: string }> = [];
+    let node: TrieNode | undefined = this.#root;
+    for (const segment of segmentsOf(path)) {
+      const child: TrieNode | undefined = node.children.get(segment);
+      if (child === undefined) {
+        return;
+      }
+      trail.push({ node, segment });
+      node = child;
+    }
+    node.recursive.delete(subscription);
+    node.direct.delete(subscription);
+    /* Prune the branch back to the first node still in use. */
+    for (let index = trail.length - 1; index >= 0; index--) {
+      const { node: parent, segment } = trail[index]!;
+      const child = parent.children.get(segment)!;
+      if (child.children.size > 0 || child.recursive.size > 0 || child.direct.size > 0) {
+        break;
+      }
+      parent.children.delete(segment);
+    }
+  }
+
+  public collect(path: string, subtree: boolean, into: Set<WatchSubscription>): void {
+    const segments = segmentsOf(path);
+    let node: TrieNode | undefined = this.#root;
+    for (let depth = 0; node !== undefined; depth++) {
+      for (const subscription of node.recursive) {
+        into.add(subscription);
+      }
+      if (depth >= segments.length - 1) {
+        for (const subscription of node.direct) {
+          into.add(subscription);
+        }
+      }
+      if (depth === segments.length) {
+        if (subtree) {
+          collectBelow(node, into);
+        }
+        return;
+      }
+      node = node.children.get(segments[depth]!);
+    }
+  }
+
+  public collectAll(into: Set<WatchSubscription>): void {
+    collectBelow(this.#root, into);
+  }
+}
 
 const snapshotWatchRequest = (request: WatchRequest): WatchRequest => ({
   paths: request.paths.map(canonicalizePath).sort(),
@@ -26,10 +175,6 @@ const snapshotWatchRequest = (request: WatchRequest): WatchRequest => ({
   includes: request.includes === undefined ? undefined : [...request.includes].sort(),
   excludes: request.excludes === undefined ? undefined : [...request.excludes].sort(),
 });
-
-function hashWatchRequest(request: WatchRequest): string {
-  return JSON.stringify(request);
-}
 
 function isPathMatched(eventPath: string, watchPaths: string[], recursive: boolean): boolean {
   const normalized = canonicalizePath(eventPath);
@@ -148,12 +293,13 @@ function changeEventToWatchEvent(event: ChangeEvent): WatchEvent | undefined {
   return watchEvent;
 }
 
-function getEventPaths(event: ChangeEvent): string[] {
+function getEventPaths(event: PathChangeEvent): string[] {
   switch (event.type) {
     case 'fileWritten':
     case 'fileDeleted':
     case 'directoryCreated':
-    case 'directoryDeleted': {
+    case 'directoryDeleted':
+    case 'directoryChanged': {
       return [event.path];
     }
     case 'fileRenamed':
@@ -164,11 +310,85 @@ function getEventPaths(event: ChangeEvent): string[] {
     case 'directoryCopied': {
       return [event.targetPath];
     }
-    default: {
+    case 'backendChanged': {
       return [];
     }
   }
 }
+
+/**
+ * Whether a fact's path may sit above a watched path, so the trie also offers the watches below it.
+ *
+ * @param event - One path fact.
+ * @returns `true` for summaries and directory facts.
+ */
+const reachesBelow = (event: PathChangeEvent): boolean =>
+  event.type === 'directoryChanged' ||
+  event.type === 'directoryCreated' ||
+  event.type === 'directoryDeleted' ||
+  event.type === 'directoryRenamed';
+
+/** What one fact means to one subscription. */
+type Admission =
+  | { readonly verdict: 'skip' }
+  | { readonly verdict: 'match' }
+  /** The subscription must resync; `summary` is the fact itself when it is a summary. */
+  | {
+      readonly verdict: 'reset';
+      readonly prefix: string;
+      readonly reason: ChangeSetResetReason;
+      readonly summary: boolean;
+    };
+
+/**
+ * The per-path events one watch would hear, read off a change set of the whole
+ * root (charter D14): what a client that holds one root-wide event channel per
+ * connection hands each of its watches, instead of registering each on the
+ * authority. It admits as {@link WatchRegistry} admits: an entry reaches the
+ * watch when either of its paths matches the request's paths, recursion and
+ * globs, and a directory created, deleted or moved above a watched path, or a
+ * reset over one, is a reset. A reset swallows the set's entries, as it does
+ * in a change set the authority scoped itself.
+ *
+ * A root-wide set may already be a reset where a scoped one would have named
+ * paths (a summary anywhere in the changeset resets their common ancestor), so
+ * a watch may hear a reset it would not have heard alone. It never misses a
+ * change it would have heard.
+ *
+ * @param set - One change set of the connection's whole root.
+ * @param request - The watch's paths and matching scope.
+ * @returns The events, in commit order; none when the set does not reach the watch.
+ * @public
+ */
+export const watchEventsOfChangeSetFor = (set: ChangeSet, request: WatchRequest): WatchEvent[] => {
+  const recursive = request.recursive ?? false;
+  const { paths } = request;
+  if (set.reset !== undefined) {
+    return isSummaryMatched(set.reset.prefix, paths, recursive) ? [{ type: 'reset' }] : [];
+  }
+  const admitted = (path: string): boolean =>
+    isPathMatched(path, paths, recursive) &&
+    !matchesExcludes(path, request.excludes) &&
+    matchesIncludes(path, request.includes);
+  const events: WatchEvent[] = [];
+  for (const entry of set.entries) {
+    const edges = entry.oldPath === undefined ? [entry.path] : [entry.oldPath, entry.path];
+    if (entry.kind === 'dir' && edges.some((path) => summaryContainsDescendantWatch(path, paths))) {
+      return [{ type: 'reset' }];
+    }
+    if (!edges.some((path) => admitted(path))) {
+      continue;
+    }
+    if (entry.op === 'deleted') {
+      events.push({ type: 'delete', path: entry.path });
+    } else if (entry.op === 'moved' && entry.oldPath !== undefined) {
+      events.push({ type: 'rename', oldPath: entry.oldPath, newPath: entry.path });
+    } else {
+      events.push({ type: 'change', path: entry.path });
+    }
+  }
+  return events;
+};
 
 /**
  * Optional configuration for WatchRegistry.
@@ -180,11 +400,15 @@ export type WatchRegistryOptions = {
   coalescingWindow?: number;
   /** Deliver the first events of a quiet subscription on the next tick; see `CoalescerOptions.leadingEdge`. */
   leadingEdge?: boolean;
+  /** When a `frame` change-set watch's window closes. Default: the next animation frame. */
+  frameScheduler?: FrameScheduler;
 };
 
 /** Internal authority selector used by captured rooted filesystems. */
 type WatchRegistrationOptions = {
   authority?: WeakKey;
+  /** Change-set watches only: leave out every fact this bridge port originated (skip-originator). */
+  skipOrigin?: string;
 };
 
 /**
@@ -194,11 +418,14 @@ type WatchRegistrationOptions = {
 export class WatchRegistry {
   private readonly _subscriptions = new Map<string, WatchSubscription>();
   private readonly _authoritySubscriptions = new Map<WeakKey, Map<string, WatchSubscription>>();
+  private readonly _trie = new WatchTrie();
   private readonly _eventBus: ChangeEventBus;
   private readonly _maxQueueDepth?: number;
   /** Milliseconds. */
   private readonly _coalescingWindow?: number;
   private readonly _leadingEdge?: boolean;
+  private readonly _frameScheduler?: FrameScheduler;
+  private _unsubscribeFromBus: (() => void) | undefined;
 
   /**
    * Create a WatchRegistry.
@@ -211,11 +438,13 @@ export class WatchRegistry {
     this._maxQueueDepth = options?.maxQueueDepth;
     this._coalescingWindow = options?.coalescingWindow;
     this._leadingEdge = options?.leadingEdge;
+    this._frameScheduler = options?.frameScheduler;
   }
 
   /**
-   * Register a watch subscription. Identical requests (by hash) share
-   * one underlying ChangeEventBus listener with ref-counted disposal.
+   * Register a per-path watch. Identical requests (by hash) share one
+   * subscription with ref-counted disposal; events arrive after the
+   * coalescing window, one per path.
    *
    * @param request - Watch paths, recursion, and include/exclude globs.
    * @param handler - callback for matching events
@@ -228,15 +457,26 @@ export class WatchRegistry {
     options?: WatchRegistrationOptions,
   ): () => void {
     const snapshot = snapshotWatchRequest(request);
-    const hash = hashWatchRequest(snapshot);
+    const hash = `events\0${JSON.stringify(snapshot)}`;
     const subscriptions = this._subscriptionsFor(options?.authority);
-    let subscription = subscriptions.get(hash);
+    let subscription = subscriptions.get(hash) as EventSubscription | undefined;
 
     if (!subscription) {
+      const handlers = new Topic<WatchEvent>({
+        name: 'WatchRegistry.handlers',
+        onError: (error) => {
+          console.error('[WatchRegistry] Handler error:', error);
+        },
+      });
       const coalescer = new EventCoalescer(
         (events) => {
           for (const event of events) {
-            this._dispatchCoalescedEvent(subscription!, event);
+            const watchEvent = changeEventToWatchEvent(event);
+            if (watchEvent !== undefined) {
+              /* Per-path deliveries, counted so a gate can hold the hot write path to the change-set form (S8). */
+              workerTimings.count('watch.pathEvents', handlers.size);
+              handlers.emit(watchEvent);
+            }
           }
         },
         {
@@ -244,46 +484,96 @@ export class WatchRegistry {
           leadingEdge: this._leadingEdge,
           maxQueueDepth: this._maxQueueDepth,
           onOverflow: () => {
-            this._dispatchReset(subscription!);
+            handlers.emit({ type: 'reset' });
           },
         },
       );
-      const unsubscribeFromBus = this._eventBus.subscribe((event) => {
-        this._filterAndEnqueue(subscription!, event, coalescer);
-      });
-      subscription = {
-        request: snapshot,
-        authority: options?.authority,
-        handlers: new Topic<WatchEvent>({
-          name: 'WatchRegistry.handlers',
-          onError: (error) => {
-            console.error('[WatchRegistry] Handler error:', error);
-          },
-        }),
-        unsubscribeFromBus,
-        coalescer,
-      };
-      subscriptions.set(hash, subscription);
+      subscription = { form: 'events', hash, request: snapshot, authority: options?.authority, handlers, coalescer };
+      this._register(subscriptions, subscription);
     }
 
-    const unsubscribeHandler = subscription.handlers.subscribe(handler);
-
-    let unsubscribed = false;
-    return () => {
-      if (unsubscribed) {
-        return;
-      }
-      unsubscribed = true;
-      unsubscribeHandler();
-      this._removeSubscriptionWhenEmpty(subscriptions, hash, subscription);
-    };
+    return this._lease(subscriptions, subscription, subscription.handlers.subscribe(handler));
   }
 
-  /** Emit a reset event to all subscribers. */
-  public emitResetAll(): void {
+  /**
+   * Register a change-set watch (charter D6): one {@link ChangeSet} per
+   * committed changeset that reaches the watched paths, carrying only the
+   * facts the request admits, or one per frame with `coalesce: 'frame'`.
+   * Identical requests share one subscription.
+   *
+   * @param request - Watch paths, recursion, include/exclude globs and the delivery cadence.
+   * @param handler - Receives each change set.
+   * @param options - Optional captured authority filter and the port whose own facts are left out.
+   * @returns unsubscribe function
+   */
+  public watchChangeSets(
+    request: ChangeSetWatchRequest,
+    handler: (set: ChangeSet) => void,
+    options?: WatchRegistrationOptions,
+  ): () => void {
+    const snapshot = snapshotWatchRequest(request);
+    const coalesce = request.coalesce ?? 'immediate';
+    const skipOrigin = options?.skipOrigin;
+    const hash = `changeSets\0${coalesce}\0${skipOrigin ?? ''}\0${JSON.stringify(snapshot)}`;
+    const subscriptions = this._subscriptionsFor(options?.authority);
+    let subscription = subscriptions.get(hash) as ChangeSetSubscription | undefined;
+
+    if (!subscription) {
+      const handlers = new Topic<ChangeSet>({
+        name: 'WatchRegistry.changeSetHandlers',
+        onError: (error) => {
+          console.error('[WatchRegistry] Change-set handler error:', error);
+        },
+      });
+      const frame =
+        coalesce === 'frame'
+          ? new ChangeSetCoalescer(
+              (set) => {
+                workerTimings.count('watch.changeSets', handlers.size);
+                handlers.emit(set);
+              },
+              {
+                ...(this._frameScheduler === undefined ? {} : { schedule: this._frameScheduler }),
+                ...(this._maxQueueDepth === undefined ? {} : { maxEntries: this._maxQueueDepth }),
+              },
+            )
+          : undefined;
+      subscription = {
+        form: 'changeSets',
+        hash,
+        request: snapshot,
+        authority: options?.authority,
+        ...(skipOrigin === undefined ? {} : { skipOrigin }),
+        handlers,
+        ...(frame === undefined ? {} : { frame }),
+        facts: [],
+      };
+      this._register(subscriptions, subscription);
+    }
+
+    return this._lease(subscriptions, subscription, subscription.handlers.subscribe(handler));
+  }
+
+  /**
+   * Tell every subscriber its stream is no longer reliable: per-path watches
+   * receive `reset`, change-set watches a reset of `/`.
+   *
+   * @param reason - Why exactness was lost. Default: `topology`.
+   */
+  public emitResetAll(reason: ChangeSetResetReason = 'topology'): void {
     for (const subscription of this._allSubscriptions()) {
-      subscription.coalescer.flush();
-      subscription.handlers.emit({ type: 'reset' });
+      if (subscription.form === 'events') {
+        subscription.coalescer.flush();
+        subscription.handlers.emit({ type: 'reset' });
+        continue;
+      }
+      subscription.frame?.flush();
+      subscription.handlers.emit({
+        generation: this._eventBus.generation,
+        entries: [],
+        touchedDirectories: [],
+        reset: { prefix: '/', reason },
+      });
     }
   }
 
@@ -316,73 +606,149 @@ export class WatchRegistry {
   /** Dispose all subscriptions and coalescers. */
   public dispose(): void {
     for (const subscription of this._allSubscriptions()) {
-      subscription.coalescer.dispose();
-      subscription.unsubscribeFromBus();
-      subscription.handlers.dispose();
+      this._disposeSubscription(subscription);
     }
     this._subscriptions.clear();
     this._authoritySubscriptions.clear();
+    this._unsubscribeFromBus?.();
+    this._unsubscribeFromBus = undefined;
+  }
+
+  private _register(subscriptions: Map<string, WatchSubscription>, subscription: WatchSubscription): void {
+    subscriptions.set(subscription.hash, subscription);
+    for (const path of subscription.request.paths) {
+      this._trie.add(path, subscription, subscription.request.recursive ?? false);
+    }
+    this._unsubscribeFromBus ??= this._eventBus.subscribe((event) => {
+      this._dispatch(event);
+    });
+  }
+
+  private _lease(
+    subscriptions: Map<string, WatchSubscription>,
+    subscription: WatchSubscription,
+    unsubscribeHandler: () => void,
+  ): () => void {
+    let unsubscribed = false;
+    return () => {
+      if (unsubscribed) {
+        return;
+      }
+      unsubscribed = true;
+      unsubscribeHandler();
+      this._removeSubscriptionWhenEmpty(subscriptions, subscription);
+    };
   }
 
   /**
-   * Route events by captured authority and path/glob, then enqueue them.
-   * Coalescer will batch and deliver via _dispatchCoalescedEvent.
+   * Route one bus event: each fact reaches the subscriptions the trie offers
+   * for its paths, and each change-set subscription it reached receives one
+   * change set built from the facts it admitted.
    *
-   * @param subscription - Captured subscription.
-   * @param event - Change event from the bus.
-   * @param coalescer - Event coalescer to enqueue into.
+   * @param event - One committed changeset's event.
    */
-  private _filterAndEnqueue(subscription: WatchSubscription, event: ChangeEvent, coalescer: EventCoalescer): void {
+  private _dispatch(event: ChangeEvent): void {
+    const { generation } = this._eventBus;
+    const reached = new Set<ChangeSetSubscription>();
+    const candidates = new Set<WatchSubscription>();
+    for (const fact of changeEventEntries(event)) {
+      candidates.clear();
+      if (fact.type === 'backendChanged') {
+        this._trie.collectAll(candidates);
+      } else {
+        for (const path of getEventPaths(fact)) {
+          this._trie.collect(path, reachesBelow(fact), candidates);
+        }
+      }
+      for (const subscription of candidates) {
+        const admission = this._admit(subscription, fact);
+        if (admission.verdict === 'skip') {
+          continue;
+        }
+        if (subscription.form === 'events') {
+          this._deliverEvent(subscription, fact, admission);
+          continue;
+        }
+        if (subscription.skipOrigin !== undefined && getEventOrigin(fact) === subscription.skipOrigin) {
+          continue;
+        }
+        if (admission.verdict === 'match' || admission.summary) {
+          subscription.facts.push(fact);
+        } else {
+          /* Two replaced ancestors in one changeset: one reset that covers both, never the later alone. */
+          subscription.reset = mergeResets(subscription.reset, { prefix: admission.prefix, reason: admission.reason });
+        }
+        reached.add(subscription);
+      }
+    }
+    for (const subscription of reached) {
+      const set = toChangeSet(subscription.facts, generation, subscription.reset);
+      subscription.facts = [];
+      subscription.reset = undefined;
+      if (set === undefined) {
+        continue;
+      }
+      if (subscription.frame === undefined) {
+        workerTimings.count('watch.changeSets', subscription.handlers.size);
+        subscription.handlers.emit(set);
+      } else {
+        subscription.frame.push(set);
+      }
+    }
+  }
+
+  /**
+   * Whether one fact reaches one subscription: by captured authority, then by
+   * path and glob. A summary or a replaced ancestor of a watched path is a reset.
+   *
+   * @param subscription - A candidate the trie offered.
+   * @param event - One path fact.
+   * @returns The subscription's verdict.
+   */
+  private _admit(subscription: WatchSubscription, event: PathChangeEvent): Admission {
     if (subscription.authority === undefined) {
       if (!isEventGloballyVisible(event)) {
-        return;
+        return { verdict: 'skip' };
       }
     } else {
       const authorities = getEventAuthorities(event);
       if (authorities !== undefined && !authorities.includes(subscription.authority)) {
-        return;
+        return { verdict: 'skip' };
       }
       if (authorities === undefined && event.type !== 'backendChanged') {
-        return;
+        return { verdict: 'skip' };
       }
     }
 
     if (subscription.handlers.size === 0) {
-      return;
+      return { verdict: 'skip' };
     }
 
     const { request } = subscription;
 
     if (event.type === 'backendChanged') {
-      coalescer.flush();
-      subscription.handlers.emit({ type: 'reset' });
-      return;
+      return { verdict: 'reset', prefix: '/', reason: 'topology', summary: true };
     }
 
     if (event.type === 'directoryChanged') {
       if (!isSummaryMatched(event.path, request.paths, request.recursive ?? false)) {
-        return;
+        return { verdict: 'skip' };
       }
-      coalescer.flush();
-      const resetEvent: WatchEvent = { type: 'reset' };
-      const origin = getEventOrigin(event);
-      if (origin !== undefined) {
-        tagEventOrigin(resetEvent, origin);
-      }
-      subscription.handlers.emit(resetEvent);
-      return;
+      return { verdict: 'reset', prefix: canonicalizePath(event.path), reason: 'observer-uncertain', summary: true };
     }
 
     if (
-      ((event.type === 'directoryCreated' || event.type === 'directoryDeleted') &&
-        summaryContainsDescendantWatch(event.path, request.paths)) ||
-      (event.type === 'directoryRenamed' &&
-        (summaryContainsDescendantWatch(event.oldPath, request.paths) ||
-          summaryContainsDescendantWatch(event.newPath, request.paths)))
+      (event.type === 'directoryCreated' || event.type === 'directoryDeleted') &&
+      summaryContainsDescendantWatch(event.path, request.paths)
     ) {
-      coalescer.flush();
-      subscription.handlers.emit({ type: 'reset' });
-      return;
+      return { verdict: 'reset', prefix: canonicalizePath(event.path), reason: 'topology', summary: false };
+    }
+    if (event.type === 'directoryRenamed') {
+      for (const path of [event.oldPath, event.newPath]) {
+        if (summaryContainsDescendantWatch(path, request.paths)) {
+          return { verdict: 'reset', prefix: canonicalizePath(path), reason: 'topology', summary: false };
+        }
+      }
     }
 
     const matches = getEventPaths(event).some(
@@ -391,48 +757,56 @@ export class WatchRegistry {
         !matchesExcludes(path, request.excludes) &&
         matchesIncludes(path, request.includes),
     );
-    if (!matches) {
-      return;
-    }
-
-    coalescer.push(event);
+    return matches ? { verdict: 'match' } : { verdict: 'skip' };
   }
 
   /**
-   * Emit reset when the coalescer queue is exceeded.
+   * Hand one admitted fact to a per-path subscription: a match joins its
+   * coalescing window; a reset flushes the window first so order holds.
    *
-   * @param subscription - Captured subscription.
+   * @param subscription - A per-path subscription.
+   * @param event - The admitted fact.
+   * @param admission - Its verdict.
    */
-  private _dispatchReset(subscription: WatchSubscription): void {
-    subscription.handlers.emit({ type: 'reset' });
-  }
-
-  /**
-   * Deliver a coalesced ChangeEvent as a WatchEvent to all handlers.
-   *
-   * @param subscription - Captured subscription.
-   * @param event - Coalesced change event.
-   */
-  private _dispatchCoalescedEvent(subscription: WatchSubscription, event: ChangeEvent): void {
-    const watchEvent = changeEventToWatchEvent(event);
-    if (!watchEvent) {
+  private _deliverEvent(subscription: EventSubscription, event: PathChangeEvent, admission: Admission): void {
+    if (admission.verdict === 'match') {
+      subscription.coalescer.push(event);
       return;
     }
+    subscription.coalescer.flush();
+    const resetEvent: WatchEvent = { type: 'reset' };
+    const origin = event.type === 'directoryChanged' ? getEventOrigin(event) : undefined;
+    if (origin !== undefined) {
+      tagEventOrigin(resetEvent, origin);
+    }
+    subscription.handlers.emit(resetEvent);
+  }
 
-    subscription.handlers.emit(watchEvent);
+  private _disposeSubscription(subscription: WatchSubscription): void {
+    if (subscription.form === 'events') {
+      subscription.coalescer.dispose();
+    } else {
+      subscription.frame?.dispose();
+    }
+    subscription.handlers.dispose();
+    for (const path of subscription.request.paths) {
+      this._trie.remove(path, subscription);
+    }
   }
 
   private _removeSubscriptionWhenEmpty(
     subscriptions: Map<string, WatchSubscription>,
-    hash: string,
     subscription: WatchSubscription,
   ): void {
-    if (subscription.handlers.size === 0 && subscriptions.get(hash) === subscription) {
-      subscription.coalescer.dispose();
-      subscription.unsubscribeFromBus();
-      subscriptions.delete(hash);
+    if (subscription.handlers.size === 0 && subscriptions.get(subscription.hash) === subscription) {
+      this._disposeSubscription(subscription);
+      subscriptions.delete(subscription.hash);
       if (subscription.authority !== undefined && subscriptions.size === 0) {
         this._authoritySubscriptions.delete(subscription.authority);
+      }
+      if (this.subscriptionCount === 0) {
+        this._unsubscribeFromBus?.();
+        this._unsubscribeFromBus = undefined;
       }
     }
   }

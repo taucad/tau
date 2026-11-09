@@ -5,7 +5,6 @@ import { EditorSaveConflictError, FileContentService } from '#file-content-servi
 import { FileContentBudget } from '#file-content-budget.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
-import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileStat } from '@taucad/types';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import type { WatchEvent } from '@taucad/filesystem';
@@ -36,10 +35,18 @@ function createMockProxy(overrides?: Partial<ComposedViewClient>): ComposedViewC
   /* A checked editor save (RV-W5b F4) on this fake filesystem is a write whose check passes. */
   proxy.writeFileChecked.mockImplementation(async ({ path, data }) => {
     await proxy.writeFile(path, data);
-    return { status: 'applied', content: typeof data === 'string' ? new TextEncoder().encode(data) : data };
+    const content = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    return { status: 'applied', content, sha256: hash.sha256BytesSync(content) };
   });
   if (overrides) {
     Object.assign(proxy, overrides);
+  }
+  /* The authority's digested read (D17): this fake's own read, hashed on the fake's side of the wire. */
+  if (overrides?.readFileWithDigest === undefined) {
+    proxy.readFileWithDigest = vi.fn(async (path: string) => {
+      const data = await proxy.readFile(path);
+      return { data, sha256: hash.sha256BytesSync(data) };
+    });
   }
   return proxy;
 }
@@ -416,6 +423,7 @@ describe('FileContentService', () => {
 
   it('should clone buffer before transfer on write, keeping valid local copy', async () => {
     const original = new Uint8Array([1, 2, 3]);
+    await service.resolve('main.ts');
 
     await service.write('main.ts', original, 'machine');
 
@@ -436,6 +444,7 @@ describe('FileContentService', () => {
    * copy it hands over. A second, wire-only copy was a third payload at peak (D-UI-14). */
   it('should hand the bridge the one copy it retains on write', async () => {
     const original = new Uint8Array([1, 2, 3]);
+    await service.resolve('main.ts');
 
     await service.write('main.ts', original, 'machine');
 
@@ -446,12 +455,36 @@ describe('FileContentService', () => {
 
   it('should hand the bridge the one copy it retains for each file of a batch', async () => {
     const file = new Uint8Array([1, 2]);
+    await service.resolve('a.ts');
 
     await service.writeFiles({ 'a.ts': { content: file } }, 'machine');
 
     const sent = vi.mocked(proxy.writeFiles).mock.calls[0]![0]['/project/a.ts']?.content;
     expect(sent).not.toBe(file);
     expect(service.peek('a.ts')).toBe(sent);
+  });
+
+  /* D17: a write nothing here holds is incidental — it reaches the authority and
+   * its subscribers, and the editor cache stays the files someone looks at. */
+  it('should not retain an incidental write to a path nothing holds, and still report it', async () => {
+    const events: ContentChangeEvent[] = [];
+    service.onDidContentChange((event) => {
+      events.push(event);
+    });
+
+    await service.write('exports/part.stl', new Uint8Array([0, 1, 2]), 'machine');
+    await service.writeFiles({ 'exports/part.glb': { content: new Uint8Array([0, 3]) } }, 'machine');
+
+    expect(service.peek('exports/part.stl')).toBeUndefined();
+    expect(service.peekOutcome('exports/part.stl')).toEqual({ kind: 'loading' });
+    expect(service.peek('exports/part.glb')).toBeUndefined();
+    expect(events.map((event) => event.type)).toEqual(['written', 'batchWritten']);
+  });
+
+  it('should retain an editor write to a path nothing holds yet', async () => {
+    await service.write('notes.md', new Uint8Array([65]), 'editor');
+
+    expect(service.peekOutcome('notes.md')).toEqual({ kind: 'text', content: new Uint8Array([65]) });
   });
 
   it('should fire onDidContentChange with valid data after write', async () => {
@@ -505,6 +538,45 @@ describe('FileContentService', () => {
     expect(events.flatMap((event) => (event.type === 'written' ? [new TextDecoder().decode(event.data)] : []))).toEqual(
       ['C', 'A'],
     );
+  });
+
+  describe('worker-supplied digests and debounced saves (D17)', () => {
+    it('should read through the plain read where the view serves no digested read', async () => {
+      vi.mocked(proxy.readFileWithDigest!).mockRejectedValueOnce(
+        Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' }),
+      );
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([65]));
+
+      const result = await service.resolve('node_modules/three/index.js');
+
+      expect(result).toEqual({ kind: 'text', content: new Uint8Array([65]) });
+    });
+
+    it('should hand held editor text to the queue before a cut waits on it', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
+      await service.resolve('main.ts');
+      const flush = vi.fn(() => {
+        void service.saveEditor('main.ts', new Uint8Array([2]));
+      });
+      const unregister = service.addEditorSaveFlusher(flush);
+
+      await service.settleEditorSaves();
+      unregister();
+      await service.settleEditorSaves();
+
+      expect(flush).toHaveBeenCalledOnce();
+      expect(proxy.writeFile).toHaveBeenCalledWith('/project/main.ts', new Uint8Array([2]));
+    });
+
+    it('should serve an incidental raw read from the cache without promoting it', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
+      await service.resolve('main.ts');
+      vi.mocked(proxy.stat).mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0 });
+      vi.mocked(proxy.readFile).mockClear();
+
+      await expect(service.readRawBytes('main.ts')).resolves.toEqual(new Uint8Array([1]));
+      expect(proxy.readFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('editor save backpressure', () => {
@@ -595,6 +667,69 @@ describe('FileContentService', () => {
       await expect(saving).rejects.toBe(failure);
     });
 
+    it('should settle a path on its latest save when a refused write is saved again', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused).mockResolvedValue(undefined);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      /* The editor's rebase: once the write is refused, its merged text is saved again. */
+      const resaved = (async () => {
+        await saving.catch(async () => service.saveEditor('main.ts', new Uint8Array([1, 2])));
+      })();
+
+      await expect(service.settleEditorSaves()).resolves.toBeUndefined();
+      await resaved;
+      expect(vi.mocked(proxy.writeFile).mock.calls.at(-1)?.[1]).toEqual(new Uint8Array([1, 2]));
+    });
+
+    it('should settle a refusal its editor answers on that answer, not as an unsaved edit', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      /* The editor records the overlap beside the file; the close waits on that record. */
+      const record = Promise.withResolvers<void>();
+      let settled = false;
+
+      const settling = (async () => {
+        await service.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined => (failure === refused ? record.promise : undefined),
+        });
+        settled = true;
+      })();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(settled).toBe(false);
+      record.resolve();
+      await settling;
+
+      expect(settled).toBe(true);
+      await expect(saving).rejects.toBe(refused);
+    });
+
+    it('should report the answer when the editor fails to answer a refusal it owns', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+      const unrecorded = new Error('record failed');
+
+      await expect(
+        service.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined =>
+            failure === refused ? Promise.reject(unrecorded) : undefined,
+        }),
+      ).rejects.toBe(unrecorded);
+      await expect(saving).rejects.toBe(refused);
+    });
+
+    it('should still report a refusal its editor does not own', async () => {
+      const refused = new Error('conflict');
+      vi.mocked(proxy.writeFile).mockRejectedValueOnce(refused);
+      const saving = service.saveEditor('main.ts', new Uint8Array([1]));
+
+      await expect(service.settleEditorSaves({ resolution: () => undefined })).rejects.toBe(refused);
+      await expect(saving).rejects.toBe(refused);
+    });
+
     it('should settle only once an edit made during a move is written at the destination', async () => {
       const move = Promise.withResolvers<FileStat>();
       vi.mocked(proxy.move).mockReturnValueOnce(move.promise);
@@ -676,16 +811,36 @@ describe('FileContentService', () => {
       expect(service.peekOutcome('main.ts')).toEqual({ kind: 'orphaned' });
     });
 
-    it('should check each editor save against the bytes the editor was made from (RV-W5b F4)', async () => {
+    it("should check each editor save against the authority's digest of the bytes the editor was made from (D17)", async () => {
       vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
       await service.resolve('main.ts');
+      const digest = vi.spyOn(hash, 'sha256Bytes');
 
-      await service.saveEditor('main.ts', new Uint8Array([2]));
-      await service.saveEditor('main.ts', new Uint8Array([3]));
+      try {
+        await service.saveEditor('main.ts', new Uint8Array([2]));
+        await service.saveEditor('main.ts', new Uint8Array([3]));
 
-      expect(vi.mocked(proxy.writeFileChecked).mock.calls.map(([write]) => write.preconditions)).toEqual([
-        [{ path: '/project/main.ts', expected: new Uint8Array([1]) }],
-        [{ path: '/project/main.ts', expected: new Uint8Array([2]) }],
+        expect(vi.mocked(proxy.writeFileChecked).mock.calls.map(([write]) => write.preconditions)).toEqual([
+          [{ path: '/project/main.ts', expectedSha256: hash.sha256BytesSync(new Uint8Array([1])) }],
+          [{ path: '/project/main.ts', expectedSha256: hash.sha256BytesSync(new Uint8Array([2])) }],
+        ]);
+        expect(digest).not.toHaveBeenCalled();
+      } finally {
+        digest.mockRestore();
+      }
+    });
+
+    it('should check a save past the old 8 MiB ceiling by its digest, in one checked write (D17)', async () => {
+      const large = (fill: number): Uint8Array<ArrayBuffer> => new Uint8Array(6 * 1024 * 1024).fill(fill);
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(large(0x41));
+      await service.resolve('big.txt');
+
+      await service.saveEditor('big.txt', large(0x42));
+
+      expect(proxy.writeFile).toHaveBeenCalledOnce();
+      expect(proxy.writeFileChecked).toHaveBeenCalledOnce();
+      expect(vi.mocked(proxy.writeFileChecked).mock.calls[0]?.[0].preconditions).toEqual([
+        { path: '/project/big.txt', expectedSha256: hash.sha256BytesSync(large(0x41)) },
       ]);
     });
 
@@ -712,14 +867,31 @@ describe('FileContentService', () => {
     });
 
     it('should check a save against the bytes its model was made from, not the latest outcome (RV-W5b2 N3)', async () => {
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([9]));
+      vi.mocked(proxy.readFile)
+        .mockResolvedValueOnce(new Uint8Array([9]))
+        .mockResolvedValueOnce(new Uint8Array([1]));
       await service.resolve('main.ts');
 
+      /* [1] is no outcome's bytes, so its digest is learned from one digested read that finds [1]. */
       await service.saveEditor('main.ts', new Uint8Array([2]), new Uint8Array([1]));
 
+      expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(2);
       expect(vi.mocked(proxy.writeFileChecked).mock.calls[0]?.[0].preconditions).toEqual([
-        { path: '/project/main.ts', expected: new Uint8Array([1]) },
+        { path: '/project/main.ts', expectedSha256: hash.sha256BytesSync(new Uint8Array([1])) },
       ]);
+    });
+
+    it('should refuse a save whose unknown base no longer matches the file, publishing what it found', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([7]));
+
+      const refusal = await service.saveEditor('main.ts', new Uint8Array([2]), new Uint8Array([1])).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(refusal).toBeInstanceOf(EditorSaveConflictError);
+      expect(proxy.writeFileChecked).not.toHaveBeenCalled();
+      expect(service.peekOutcome('main.ts')).toEqual({ kind: 'text', content: new Uint8Array([7]) });
     });
 
     it('should check a save of a file it never read against its absence, never write it blind (RV-W5b2 N3)', async () => {
@@ -730,7 +902,7 @@ describe('FileContentService', () => {
       ]);
     });
 
-    it('should refuse a save past the checked-write ceiling when the file changed since its model was made (RV-W5b2 N3)', async () => {
+    it('should refuse a large save, sending nothing, when the file changed since its model was made (RV-W5b2 N3)', async () => {
       const large = (fill: number): Uint8Array<ArrayBuffer> => new Uint8Array(5 * 1024 * 1024).fill(fill);
       vi.mocked(proxy.readFile).mockResolvedValueOnce(large(0x43));
 
@@ -923,6 +1095,8 @@ describe('FileContentService', () => {
 
     const filePathA = 'a.ts';
     const filePathB = 'b.ts';
+    await service.resolve(filePathA);
+    await service.resolve(filePathB);
     await service.writeFiles({ [filePathA]: { content: file1 }, [filePathB]: { content: file2 } }, 'machine');
 
     expect(proxy.writeFiles).toHaveBeenCalledOnce();
@@ -1156,130 +1330,6 @@ describe('FileContentService', () => {
     });
   });
 
-  describe('SharedPool fast path', () => {
-    const encoder = new TextEncoder();
-
-    function createPoolService(options?: { openSizeBytes?: number }): {
-      service: FileContentService;
-      pool: SharedPool;
-      proxy: ComposedViewClient;
-      emitFileChanged: (event: ChangeEvent) => void;
-    } {
-      const buffer = new SharedArrayBuffer(16 * 1024 * 1024);
-      const pool = new SharedPool(buffer, { maxEntries: 128 });
-      const mockProxy = createMockProxy();
-      const listen = vi.fn().mockReturnValue(vi.fn());
-      const paths = new WorkspacePathResolver('/project');
-      const channel = new WorkerChangeChannel({ transport: { listen } });
-      const refreshGuard = new RefreshGenerationGuard();
-      const svc = new FileContentService({
-        proxy: mockProxy,
-        paths,
-        channel,
-        refreshGuard,
-        filePool: pool,
-        openSizeBytes: options?.openSizeBytes ?? 50 * 1024 * 1024,
-      });
-      return {
-        service: svc,
-        pool,
-        proxy: mockProxy,
-        emitFileChanged: (event) => {
-          (listen.mock.calls[0]![1] as (data: unknown) => void)(event);
-        },
-      };
-    }
-
-    it('should resolve text from shared pool on cache miss', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService();
-
-      pool.store('/project/pooled.ts', encoder.encode('pool content'));
-
-      const result = await svc.resolve('pooled.ts');
-      expect(result.kind).toBe('text');
-      if (result.kind === 'text') {
-        expect(new TextDecoder().decode(result.content)).toBe('pool content');
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-    });
-
-    it('should produce binary outcome when pool returns binary bytes', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService();
-
-      const binaryBytes = new Uint8Array(2048);
-      binaryBytes[0] = 0x00;
-      pool.store('/project/mystery.dat', binaryBytes);
-
-      const result = await svc.resolve('mystery.dat');
-
-      expect(result.kind).toBe('binary');
-      if (result.kind === 'binary') {
-        expect(result.size).toBe(2048);
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-      expect(svc.peek('mystery.dat')).toEqual(binaryBytes);
-    });
-
-    it('should produce too-large outcome when pool returns oversize ASCII bytes', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService({ openSizeBytes: 1024 });
-
-      const big = makeAsciiBuffer(4096);
-      pool.store('/project/mystery.dat', big);
-
-      const result = await svc.resolve('mystery.dat');
-
-      expect(result.kind).toBe('too-large');
-      if (result.kind === 'too-large') {
-        expect(result.size).toBe(4096);
-        expect(result.limit).toBe(1024);
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-    });
-
-    it('should fall through to worker RPC on double miss', async () => {
-      const { service: svc, proxy: mockProxy } = createPoolService();
-
-      const workerData = new Uint8Array([7, 8, 9]);
-      vi.mocked(mockProxy.readFile).mockResolvedValue(workerData);
-
-      const result = await svc.resolve('worker-only.ts');
-      expect(mockProxy.readFile).toHaveBeenCalledWith('/project/worker-only.ts');
-      expectTextContent(result, workerData);
-    });
-
-    it('should bypass stale pooled bytes when a worker invalidation requests an authoritative reread', async () => {
-      const { service: svc, pool, proxy: mockProxy, emitFileChanged: emit } = createPoolService();
-      pool.store('/project/main.ts', encoder.encode('stale'));
-      await svc.resolve('main.ts');
-      vi.mocked(mockProxy.readFile).mockResolvedValue(encoder.encode('fresh'));
-
-      emit({ type: 'directoryChanged', path: '', backend: 'webaccess' });
-
-      await vi.waitFor(() => {
-        const outcome = svc.peekOutcome('main.ts');
-        expect(outcome.kind).toBe('text');
-        if (outcome.kind === 'text') {
-          expect(new TextDecoder().decode(outcome.content)).toBe('fresh');
-        }
-      });
-      expect(mockProxy.readFile).toHaveBeenCalledWith('/project/main.ts');
-    });
-
-    it('should preserve existing cache hit behaviour after pool fast path', async () => {
-      const { service: svc, proxy: mockProxy } = createPoolService();
-
-      const workerData = new Uint8Array([1, 2, 3]);
-      vi.mocked(mockProxy.readFile).mockResolvedValue(workerData);
-
-      await svc.resolve('cached.ts');
-      vi.mocked(mockProxy.readFile).mockClear();
-
-      const result = await svc.resolve('cached.ts');
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-      expectTextContent(result, workerData);
-    });
-  });
-
   describe('outcome subscription channel', () => {
     it('should fire onDidChangeOutcome once per outcome transition', async () => {
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
@@ -1326,7 +1376,7 @@ describe('FileContentService', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should retain the binary outcome for separately allocated equal bytes', async () => {
+    it("should retain the binary outcome for separately allocated equal bytes, by the authority's digest", async () => {
       vi.mocked(proxy.readFile).mockImplementation(async () => new Uint8Array([0, 1, 2]));
       await service.resolve('asset.bin');
       const first = service.peekOutcome('asset.bin');
@@ -1336,15 +1386,16 @@ describe('FileContentService', () => {
       try {
         emitFileChanged(fileWritten('asset.bin'));
         await vi.waitFor(() => {
-          expect(digest).toHaveBeenCalledOnce();
+          expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(2);
         });
-        await digest.mock.results[0]!.value;
+        await vi.mocked(proxy.readFileWithDigest!).mock.results[1]!.value;
         await Promise.resolve();
 
         const second = service.peekOutcome('asset.bin');
         expect(second).toBe(first);
         expect(handler).not.toHaveBeenCalled();
         expect(await service.resolve('asset.bin')).toBe(first);
+        expect(digest).not.toHaveBeenCalled();
       } finally {
         digest.mockRestore();
       }
@@ -1357,25 +1408,27 @@ describe('FileContentService', () => {
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
       service.onDidChangeOutcome(handler);
       const digest = vi.spyOn(hash, 'sha256Bytes');
+      const reads = vi.mocked(proxy.readFileWithDigest!);
       try {
         emitFileChanged({ type: 'directoryChanged', path: '', backend: 'indexeddb' });
         await vi.waitFor(() => {
-          expect(digest).toHaveBeenCalledOnce();
+          expect(reads).toHaveBeenCalledTimes(2);
         });
-        await digest.mock.results[0]!.value;
+        await reads.mock.results[1]!.value;
         await Promise.resolve();
         expect(service.peekOutcome('asset.bin')).toBe(first);
         expect(handler).not.toHaveBeenCalled();
 
         emitFileChanged({ type: 'backendChanged', backend: 'opfs' });
         await vi.waitFor(() => {
-          expect(digest).toHaveBeenCalledTimes(2);
+          expect(reads).toHaveBeenCalledTimes(3);
         });
-        await digest.mock.results[1]!.value;
+        await reads.mock.results[2]!.value;
         await Promise.resolve();
 
         expect(service.peekOutcome('asset.bin')).toBe(first);
         expect(handler).not.toHaveBeenCalled();
+        expect(digest).not.toHaveBeenCalled();
       } finally {
         digest.mockRestore();
       }
@@ -1405,29 +1458,29 @@ describe('FileContentService', () => {
       }
     });
 
-    it('should discard an older binary refresh after its delayed digest completes', async () => {
+    it('should discard an older binary refresh after its delayed digested read completes', async () => {
       vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 0]));
       await service.resolve('asset.bin');
       const older = new Uint8Array([0, 1, 1]);
       const newer = new Uint8Array([0, 1, 2]);
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(older).mockResolvedValueOnce(newer);
-      const olderDigest = Promise.withResolvers<string>();
-      const actualHash = hash.sha256Bytes;
-      const digest = vi
-        .spyOn(hash, 'sha256Bytes')
-        .mockImplementationOnce(async () => olderDigest.promise)
-        .mockImplementation(actualHash);
+      const olderRead = Promise.withResolvers<{ data: Uint8Array<ArrayBuffer>; sha256: string }>();
+      vi.mocked(proxy.readFileWithDigest!)
+        .mockImplementationOnce(async () => olderRead.promise)
+        .mockImplementationOnce(async () => ({ data: newer, sha256: hash.sha256BytesSync(newer) }));
+      const digest = vi.spyOn(hash, 'sha256Bytes');
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
       service.onDidChangeOutcome(handler);
       try {
         emitFileChanged(fileWritten('asset.bin'));
         await vi.waitFor(() => {
-          expect(digest).toHaveBeenCalledOnce();
+          expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(2);
         });
+        /* The newer change lands while the older read is still out: it is read after, and wins. */
         emitFileChanged(fileWritten('asset.bin'));
-        expect(proxy.readFile).toHaveBeenCalledTimes(2);
-        olderDigest.resolve(await actualHash(older));
-        await digest.mock.results[0]!.value;
+        olderRead.resolve({ data: older, sha256: hash.sha256BytesSync(older) });
+        await vi.waitFor(() => {
+          expect(proxy.readFileWithDigest).toHaveBeenCalledTimes(3);
+        });
         await vi.waitFor(() => {
           const result = service.peekOutcome('asset.bin');
           expect(result.kind).toBe('binary');
@@ -1439,6 +1492,7 @@ describe('FileContentService', () => {
 
         expect(service.peekOutcome('asset.bin')).toBe(latest);
         expect(handler).toHaveBeenCalledOnce();
+        expect(digest).not.toHaveBeenCalled();
       } finally {
         digest.mockRestore();
       }
@@ -1461,22 +1515,31 @@ describe('FileContentService', () => {
       expect(service.peekOutcome('asset.bin')).not.toBe(first);
     });
 
-    it('should keep the binary outcome on equal local single and batch writes', async () => {
+    /* D17: this thread never hashes, so a local write of a binary carries no digest
+     * and its outcome is new: a render, never a SHA-256 here. */
+    it('should republish a binary outcome on a local write without hashing it here', async () => {
       const bytes = new Uint8Array([0, 1, 2]);
       vi.mocked(proxy.readFile).mockResolvedValue(bytes);
       const first = await service.resolve('asset.bin');
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
       service.onDidChangeOutcome(handler);
+      const digest = vi.spyOn(hash, 'sha256Bytes');
+      try {
+        await service.write('asset.bin', new Uint8Array(bytes), 'machine');
+        await service.writeFiles({ 'asset.bin': { content: new Uint8Array(bytes) } }, 'machine');
 
-      await service.write('asset.bin', new Uint8Array(bytes), 'machine');
-      await service.writeFiles({ 'asset.bin': { content: new Uint8Array(bytes) } }, 'machine');
-
-      expect(service.peekOutcome('asset.bin')).toBe(first);
-      expect(handler).not.toHaveBeenCalled();
+        expect(service.peekOutcome('asset.bin').kind).toBe('binary');
+        expect(service.peekOutcome('asset.bin')).not.toBe(first);
+        expect(handler).toHaveBeenCalledTimes(2);
+        expect(digest).not.toHaveBeenCalled();
+      } finally {
+        digest.mockRestore();
+      }
     });
 
     it('should classify a changed local binary write and preserve editor text intent', async () => {
       const bytes = new Uint8Array([0, 1, 2]);
+      await service.resolve('asset.bin');
       await service.write('asset.bin', bytes, 'machine');
       const first = service.peekOutcome('asset.bin');
       expect(first.kind).toBe('binary');
@@ -1495,19 +1558,18 @@ describe('FileContentService', () => {
 
     it('should apply the open size limit to local binary writes', async () => {
       const { service: tinyService } = createHarness({ openSizeBytes: 2 });
+      await tinyService.resolve('asset.bin');
       await tinyService.write('asset.bin', new Uint8Array([0, 1, 2]), 'machine');
       expect(tinyService.peekOutcome('asset.bin')).toEqual({ kind: 'too-large', size: 3, limit: 2 });
     });
 
-    it('should publish binary outcomes before write facts in commit order when an earlier digest is slow', async () => {
+    it('should publish each binary outcome before its write fact, in commit order', async () => {
       const firstBytes = new Uint8Array([0, 1, 2]);
       const secondBytes = new Uint8Array([0, 1, 3]);
-      const firstDigest = Promise.withResolvers<string>();
-      const actualHash = hash.sha256Bytes;
-      const digest = vi
-        .spyOn(hash, 'sha256Bytes')
-        .mockImplementationOnce(async () => firstDigest.promise)
-        .mockImplementation(actualHash);
+      await service.resolve('asset.bin');
+      const firstWrite = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(firstWrite.promise).mockResolvedValue(undefined);
+      const digest = vi.spyOn(hash, 'sha256Bytes');
       const written: number[] = [];
       const visible: FileContentResult[] = [];
       service.onDidContentChange((event) => {
@@ -1518,22 +1580,15 @@ describe('FileContentService', () => {
       });
       try {
         const first = service.write('asset.bin', firstBytes, 'machine');
-        await vi.waitFor(() => {
-          expect(digest).toHaveBeenCalledOnce();
-        });
-        const second = service.write('asset.bin', secondBytes, 'machine');
-        await second;
-
+        await service.write('asset.bin', secondBytes, 'machine');
         expect(written).toEqual([3]);
         expect(visible[0]?.kind).toBe('binary');
-        const secondOutcome = service.peekOutcome('asset.bin');
 
-        firstDigest.resolve(await actualHash(firstBytes));
+        firstWrite.resolve();
         await first;
         expect(written).toEqual([3, 2]);
-        expect(visible[1]?.kind).toBe('binary');
-        expect(visible[0]).toBe(secondOutcome);
         expect(visible[1]).toBe(service.peekOutcome('asset.bin'));
+        expect(digest).not.toHaveBeenCalled();
       } finally {
         digest.mockRestore();
       }
@@ -1547,6 +1602,7 @@ describe('FileContentService', () => {
         }
       });
 
+      await service.resolve('asset.bin');
       await service.writeFiles({ 'asset.bin': { content: new Uint8Array([0, 1, 2]) } }, 'machine');
 
       expect(snapshots).toHaveLength(1);
@@ -2444,6 +2500,7 @@ describe('FileContentService', () => {
         events.push(event);
       });
 
+      await harness.service.resolve('main.ts');
       await harness.service.write('main.ts', new Uint8Array([1, 2, 3]), 'machine');
 
       const written = events.find((event) => event.type === 'written');

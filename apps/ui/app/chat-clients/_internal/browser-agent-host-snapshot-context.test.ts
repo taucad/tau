@@ -33,6 +33,7 @@ const resolvedModel = {
   family: 'gpt',
   provider: { id: 'openai', name: 'OpenAI' },
   isResolved: true,
+  isNamePending: false,
   model: {
     id: 'openai-gpt-5.5',
     providerKind: 'tau-hosted',
@@ -88,6 +89,15 @@ describe('browser agent host snapshot context', () => {
     expect(context).toContain('<open_files>');
     expect(context).toContain('<project_layout>');
     expect(workbenchBlock(context ?? '')).toEqual(workbench);
+    expect(context).not.toContain('more files not listed');
+  });
+
+  it('says how many files a bounded tree left out (D18)', () => {
+    const context = buildBrowserAgentHostSnapshotContext({
+      fileTree: [{ path: 'main.ts', name: 'main.ts', size: 5, type: 'file' }],
+      fileTreeOmitted: 1200,
+    });
+    expect(context).toContain('- main.ts\n  (1200 more files not listed;');
   });
 
   it('renders the viewer selection as data and omits an empty one', () => {

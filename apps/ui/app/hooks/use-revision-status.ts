@@ -57,6 +57,7 @@ import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
+import { holdTreeRefreshesWhileApplying } from '#lib/tree-refresh-hold.js';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
 
@@ -1067,6 +1068,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    /* On the selected checkout, which is the one the page's files are rooted at. */
+    materialize: async (paths) => {
+      const checkoutId = status?.checkoutId;
+      await ask({ command: 'materialize', paths, ...(checkoutId === undefined ? {} : { checkoutId }) });
+    },
     createBranch: async (name, from) => {
       const result = await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
       if (result.kind !== 'branch') {
@@ -1230,6 +1236,16 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
   const sessionUser = useRevisionSessionUser();
   const client = useRevisionClient();
   const { projectId } = useProject();
+  const { fileManagerRef } = useFileManager();
+  const treeService = useSelector(fileManagerRef, (state) => state.context.treeService);
+  const treeRoot = useSelector(fileManagerRef, (state) => state.context.rootDirectory);
+  /* While an apply writes the tree's root, its file events would each re-list a directory the apply is still writing. */
+  useEffect(() => {
+    if (client === undefined || treeService === undefined) {
+      return;
+    }
+    return holdTreeRefreshesWhileApplying({ client, tree: treeService, root: treeRoot });
+  }, [client, treeService, treeRoot]);
   /*
    * A38's two-phase unload, through the one registry the document already has.
    *

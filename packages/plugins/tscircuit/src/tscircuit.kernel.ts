@@ -5,18 +5,39 @@
  * `@tscircuit/core` to settled circuit JSON (the native handle), and meshes that
  * JSON by view: a GLB board, a schematic SVG or a
  * PCB SVG. Exports (`glb`, `csv` BOM, `txt` netlist, `json`) derive from the same
- * handle without re-evaluating (charter D8). Rendering is offline: no parts
+ * handle without re-evaluating (charter D8). Rendering is offline by default: no parts
  * engine, local autorouter, and `fetch` is trapped during evaluation and GLB
  * conversion so every URL becomes a warning issue instead of a request
- * (charter D3–D6, D10, I1).
+ * (charter D3–D6, D10, I1). `kicad:` footprints and common footprinter strings
+ * resolve from Tau's local KiCad pack; the opt-in `parts: 'online'` kernel option
+ * also lets the trap pass requests to tscircuit's own part hosts.
  */
 
-import { Primitive, WebIO } from '@gltf-transform/core';
-import { allExtensions, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
-import type { Document, Root } from '@gltf-transform/core';
+import { Mesh, Primitive, WebIO } from '@gltf-transform/core';
+import {
+  allExtensions,
+  detectEdges,
+  markClosedMeshesSingleSided,
+  normalizeGltfGeometryNames,
+} from '@taucad/geometry-core';
+import type { Document, Material, Node, Scene } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
 import { z } from 'zod';
+
+import type { BoardPresentationOptions } from '#board-geometry.js';
+import { pcbPaletteOptions, schematicThemeOptions } from '#svg-themes.js';
+import {
+  kicadFootprintCacheUrl,
+  kicadNameOfModelUrl,
+  kicadPackVersion,
+  loadKicadPack,
+  loadPackFootprint,
+  loadPackModel,
+  packModelScheme,
+  loadPackPadCentre,
+  packModelUrl,
+} from '#kicad-pack.js';
 
 import type { KernelIssue } from '@taucad/runtime/types';
 import { cadEdgeOverlayMaterialDefaults, createExportFile } from '@taucad/runtime/types';
@@ -70,11 +91,58 @@ const zUpRotation: [number, number, number, number] = [Math.SQRT1_2, 0, 0, Math.
 export const tscircuitDetectPattern =
   /import\s+.*from\s+["'](tscircuit|@tscircuit\/core)["']|require\s*\(\s*["'](tscircuit|@tscircuit\/core)["']\s*\)/;
 
-const pcbViewOptionsSchema = z.object({ pinNumbers: z.boolean().optional().meta({ title: 'Pin numbers' }) });
+/**
+ * Where parts come from. `local` (the default) never touches the network: footprinter strings,
+ * inline footprints and Tau's KiCad pack. `online` also fetches `kicad:` footprints and cadModel
+ * URLs from tscircuit's part hosts ({@link onlinePartHosts}); every other URL stays blocked.
+ * @public
+ */
+export const tscircuitOptionsSchema = z.object({
+  parts: z.enum(['local', 'online']).optional().meta({
+    title: 'Parts',
+    description: "Local parts only, or also fetch KiCad footprints and 3D models from tscircuit's part hosts.",
+  }),
+});
+
+/** The hosts `parts: 'online'` may reach, over HTTPS only. @public */
+export const onlinePartHosts: readonly string[] = [
+  'kicad-mod-cache.tscircuit.com',
+  'modelcdn.tscircuit.com',
+  'registry-api.tscircuit.com',
+  'jlcsearch.tscircuit.com',
+];
+
+const pcbViewOptionsSchema = z.object({
+  pinNumbers: z.boolean().optional().meta({ title: 'Pin numbers' }),
+  palette: z.enum(['fabrication', 'engineering']).optional().meta({
+    title: 'Palette',
+    description: 'Fabrication preview (mask, finish, silkscreen) or engineering layer colours.',
+  }),
+});
+
+const schematicViewOptionsSchema = z.object({
+  theme: z.enum(['light', 'dark', 'engineering']).optional().meta({
+    title: 'Theme',
+    description: 'Light or dark presentation colours, or the classic engineering (KiCad) colours.',
+  }),
+});
+
+/**
+ * The board view's options. Edge lines are the runtime's `includeEdges` content, as on the mechanical kernels; a
+ * saved `style` from before is stripped and ignored.
+ */
+const boardViewOptionsSchema = z.object({
+  finish: z
+    .enum(['enig', 'hasl', 'bare'])
+    .optional()
+    .meta({ title: 'Pad finish', 'x-tau-labels': { enig: 'ENIG', hasl: 'HASL', bare: 'Bare copper' } }),
+});
+
+type BoardViewOptions = z.output<typeof boardViewOptionsSchema>;
 
 /** Per-format export option schemas: GLB shares the runtime's glTF convention; the text formats take none. @public */
 const tscircuitExportSchemas = {
-  board: gltfExportConventionSchema,
+  board: gltfExportConventionSchema.extend(boardViewOptionsSchema.shape),
   bom: z.object({}),
   netlist: z.object({}),
   circuit: z.object({}),
@@ -103,14 +171,13 @@ type TscircuitNativeHandle = {
 };
 
 type TscircuitContext = {
+  /** Whether the fetch guard may pass requests to {@link onlinePartHosts}; off when absent. */
+  online?: boolean;
   /** Evaluate an entry module's board component to settled circuit JSON. */
   renderCircuit: (
     module: unknown,
     parameters: Record<string, unknown>,
-  ) => Promise<{
-    circuitJson: CircuitElement[];
-    authoredSheets: ReadonlyMap<string, string>;
-  }>;
+  ) => Promise<{ circuitJson: CircuitElement[]; authoredSheets: ReadonlyMap<string, string> }>;
 };
 
 type CircuitComponent = ComponentType<Record<string, unknown>>;
@@ -155,6 +222,11 @@ const asCircuitJson = (circuitJson: CircuitElement[]) => converterCircuitJsonSch
 const stringField = (element: CircuitElement, key: string): string | undefined => {
   const value: unknown = Reflect.get(element, key);
   return typeof value === 'string' && value !== '' ? value : undefined;
+};
+
+const numberField = (element: CircuitElement, key: string): number | undefined => {
+  const value: unknown = Reflect.get(element, key);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 };
 
 // Names supplied by an author are stable across reordered evaluations. Generated names and
@@ -240,43 +312,88 @@ const collectCircuitIssues = (circuitJson: CircuitElement[]): KernelIssue[] => {
 // Offline guard
 // =============================================================================
 
-/** URL sinks of the `withOfflineFetch` calls currently in flight; one shared trap serves them all. */
-const activeUrlSinks = new Set<Set<string>>();
+/** The `withOfflineFetch` calls in flight; one shared trap serves them all. */
+type GuardCall = { urls: Set<string>; online: boolean };
+const activeCalls = new Set<GuardCall>();
 let replacedFetch: typeof globalThis.fetch | undefined;
 
-const offlineFetch: typeof globalThis.fetch = async (input) => {
+/** The host's own `fetch`, for the pack's bundled assets, even while the trap is installed. */
+const hostFetch: typeof globalThis.fetch = async (input, init) => {
+  const fetchImpl = activeCalls.size > 0 ? replacedFetch : globalThis.fetch;
+  if (!fetchImpl) {
+    throw new TypeError('This host has no fetch to load bundled tscircuit assets.');
+  }
+  return fetchImpl(input, init);
+};
+
+const isOnlinePartUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && onlinePartHosts.includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
+const guardedFetch: typeof globalThis.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  for (const sink of activeUrlSinks) {
-    sink.add(url);
+  const pack = url.startsWith(packModelScheme) ? await loadKicadPack() : undefined;
+  const packEntry = pack?.ofModelUrl(url);
+  if (packEntry) {
+    return new Response(await loadPackModel(packEntry, hostFetch), {
+      headers: { 'content-type': 'model/gltf-binary' },
+    });
+  }
+  if (pack) {
+    const { buildGenericBodyGlb, parseGenericBodyUrl } = await import('#engine/generic-body.js');
+    const body = parseGenericBodyUrl(url);
+    if (body) {
+      // The toolkit's own glTF-Transform, so the engine bundles no second copy.
+      const glb = await buildGenericBodyGlb(body, await import('@gltf-transform/core'));
+      return new Response(glb, { headers: { 'content-type': 'model/gltf-binary' } });
+    }
+  }
+  // A request passes only when every call sharing the trap opted in.
+  if (replacedFetch && isOnlinePartUrl(url) && [...activeCalls].every((call) => call.online)) {
+    return replacedFetch(input, init);
+  }
+  for (const call of activeCalls) {
+    call.urls.add(url);
   }
   throw new TypeError(`Tau renders tscircuit boards offline; network access to ${url} is not available`);
 };
 
 const networkIssue = (url: string): KernelIssue => ({
-  message: `Network access is disabled: ${url} was not fetched (tscircuit boards render offline in Tau).`,
+  message: isOnlinePartUrl(url)
+    ? `Network access is disabled: ${url} was not fetched. Set the tscircuit kernel's parts option to 'online' to fetch tscircuit parts.`
+    : `Network access is disabled: ${url} was not fetched (tscircuit boards render offline in Tau).`,
   code: 'RUNTIME',
   type: 'runtime',
   severity: 'warning',
   details: { url, producer: 'tscircuit' },
 });
 
-// Run `task` with `globalThis.fetch` replaced by a recorder that rejects every request (charter I1):
-// `@tscircuit/core` fetches `http(s)` footprints and `circuit-json-to-gltf` fetches `cadModel`
-// URLs through the global. Nested calls share the one installation; the value replaced by the
+// Run `task` with `globalThis.fetch` replaced by a guard (charter I1): `@tscircuit/core` fetches
+// `http(s)` footprints and `circuit-json-to-gltf` fetches `cadModel` URLs through the global. The
+// guard serves `tau-models:` pack URLs, passes tscircuit part hosts when `online`, and records and
+// rejects everything else. Nested calls share the one installation; the value replaced by the
 // outermost call returns once every call has finished, and only if nothing else replaced it since.
-const withOfflineFetch = async <T>(task: () => Promise<T>): Promise<{ value: T; issues: KernelIssue[] }> => {
-  const urls = new Set<string>();
-  if (activeUrlSinks.size === 0) {
+const withOfflineFetch = async <T>(
+  task: () => Promise<T>,
+  { online = false }: { online?: boolean } = {},
+): Promise<{ value: T; issues: KernelIssue[] }> => {
+  const call: GuardCall = { urls: new Set(), online };
+  if (activeCalls.size === 0) {
     replacedFetch = globalThis.fetch;
-    globalThis.fetch = offlineFetch;
+    globalThis.fetch = guardedFetch;
   }
-  activeUrlSinks.add(urls);
+  activeCalls.add(call);
   try {
     const value = await task();
-    return { value, issues: [...urls].map((url) => networkIssue(url)) };
+    return { value, issues: [...call.urls].map((url) => networkIssue(url)) };
   } finally {
-    activeUrlSinks.delete(urls);
-    if (activeUrlSinks.size === 0 && globalThis.fetch === offlineFetch) {
+    activeCalls.delete(call);
+    if (activeCalls.size === 0 && globalThis.fetch === guardedFetch) {
       if (replacedFetch === undefined) {
         Reflect.deleteProperty(globalThis, 'fetch');
       } else {
@@ -284,6 +401,123 @@ const withOfflineFetch = async <T>(task: () => Promise<T>): Promise<{ value: T; 
       }
     }
   }
+};
+
+// =============================================================================
+// KiCad footprints and models
+// =============================================================================
+
+type FootprintLibraryResult = { footprintCircuitJson: unknown[]; cadModel?: { stepUrl: string } };
+
+// `kicad:Library/Footprint` resolves from the local pack, else (online only) from kicad-mod-cache,
+// mirroring @tscircuit/eval's resolver. The cadModel stays the canonical STEP URL so circuit JSON
+// matches tscircuit's own; rendering swaps in the pack's GLB (see `withPackModels`).
+const resolveKicadFootprint = async (reference: string, online: boolean): Promise<FootprintLibraryResult> => {
+  // KiCad writes `Library:Footprint`; kicad-mod-cache paths are `Library/Footprint`.
+  const name = reference.replace(':', '/');
+  const cadModel = { stepUrl: `${kicadFootprintCacheUrl}/${name}.step` };
+  const pack = await loadKicadPack();
+  const entry = pack.entry(name);
+  if (entry) {
+    const footprint = await loadPackFootprint(entry, hostFetch);
+    return { footprintCircuitJson: Array.isArray(footprint) ? footprint : [], cadModel };
+  }
+  if (!online) {
+    throw new Error(
+      `KiCad footprint "${name}" is not in Tau's local KiCad pack; set the tscircuit kernel's parts option to 'online' to fetch it.`,
+    );
+  }
+  const url = `${kicadFootprintCacheUrl}/${name}.circuit.json`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load KiCad footprint "${name}" from ${url} (HTTP ${response.status}).`);
+  }
+  const raw: unknown = await response.json();
+  const elements = Array.isArray(raw) ? raw : [raw];
+  return {
+    // Matches the pack: reference designator text only, no fabrication-layer notes.
+    footprintCircuitJson: elements.filter((element: unknown) => {
+      if (!isRecordObject(element) || typeof element['type'] !== 'string') {
+        return true;
+      }
+      const { type } = element;
+      return (
+        !type.startsWith('pcb_fabrication_note') && (type !== 'pcb_silkscreen_text' || element['text'] === 'REF**')
+      );
+    }),
+    cadModel,
+  };
+};
+
+const modelUrlKeys = [
+  'model_stl_url',
+  'model_obj_url',
+  'model_glb_url',
+  'model_gltf_url',
+  'model_step_url',
+  'model_wrl_url',
+] as const;
+
+// Converter input with pack models swapped in: a KiCad STEP/WRL model the pack carries, or a
+// generic footprinter body the pack maps by its footprinter string (and source `ftype`), becomes a
+// `tau-models:` GLB; a part with no model at all (an inline `<footprint>`) gets a generic body
+// sized from its courtyard, so no part renders as bare pads. The handle's circuit JSON is
+// untouched, so exports keep tscircuit's canonical URLs.
+const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitElement[]> => {
+  const pack = await loadKicadPack();
+  const { genericBodyOf, genericBodyUrl } = await import('#engine/generic-body.js');
+  const ftypes = new Map(
+    circuitJson
+      .filter((element) => element.type === 'source_component')
+      .map((element) => [stringField(element, 'source_component_id'), stringField(element, 'ftype')] as const),
+  );
+  const mapped = circuitJson.map(async (element) => {
+    if (element.type !== 'cad_component') {
+      return element;
+    }
+    const kicadUrl = stringField(element, 'model_step_url') ?? stringField(element, 'model_wrl_url');
+    const kicadName = kicadUrl === undefined ? undefined : kicadNameOfModelUrl(kicadUrl);
+    // Core writes absent model fields as present-but-undefined keys.
+    const hasModel =
+      modelUrlKeys.some((key) => Boolean(Reflect.get(element, key))) || Boolean(Reflect.get(element, 'model_jscad'));
+    const footprinterString = stringField(element, 'footprinter_string');
+    const footprinterEntry =
+      kicadName === undefined && !hasModel && footprinterString !== undefined
+        ? pack.forFootprinter(footprinterString, ftypes.get(stringField(element, 'source_component_id')))
+        : undefined;
+    const entry = kicadName === undefined ? footprinterEntry : pack.entry(kicadName);
+    if (!entry) {
+      const pcbComponentId = stringField(element, 'pcb_component_id');
+      const body =
+        hasModel || footprinterString !== undefined || pcbComponentId === undefined
+          ? undefined
+          : genericBodyOf(circuitJson, pcbComponentId, ftypes.get(stringField(element, 'source_component_id')));
+      // The body is built about the component centre, so its own origin places it.
+      /* eslint-disable @typescript-eslint/naming-convention -- circuit JSON field names. */
+      return body
+        ? { ...element, model_glb_url: genericBodyUrl(body), model_origin_position: { x: 0, y: 0, z: 0 } }
+        : element;
+      /* eslint-enable @typescript-eslint/naming-convention -- end of circuit JSON field names. */
+    }
+    const rest = Object.fromEntries(
+      Object.entries(element).filter(([key]) => key !== 'model_step_url' && key !== 'model_wrl_url'),
+    );
+    const turn = footprinterEntry?.footprinterRotation ?? 0;
+    const rotation: unknown = Reflect.get(element, 'rotation');
+    const z: unknown = isRecordObject(rotation) ? rotation['z'] : undefined;
+    const turned =
+      turn !== 0 && isRecordObject(rotation)
+        ? { rotation: { ...rotation, z: (typeof z === 'number' ? z : 0) + turn } }
+        : {};
+    // A footprinter footprint is centred on its pads; KiCad's origin is often pin 1 (headers, terminals).
+    // The converter reads the origin in its loaded mesh frame: Y up, the KiCad model's Y along Z.
+    const centre = footprinterEntry ? await loadPackPadCentre(footprinterEntry, hostFetch) : undefined;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
+    const origin = centre ? { model_origin_position: { x: centre.x, y: 0, z: centre.y } } : {};
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
+    return { ...rest, ...turned, ...origin, type: element.type, model_glb_url: packModelUrl(entry) };
+  });
+  return Promise.all(mapped);
 };
 
 // Transports may deliver the snapshot as any view or buffer; TextDecoder accepts either.
@@ -311,7 +545,8 @@ const withViewBox = (svg: string): string => {
     : svg;
 };
 
-const addFeatureEdges = (document: Document, root: Root): void => {
+// Feature edges (30 degrees) for the given triangle primitives, as LINES beside each in its mesh.
+const addFeatureEdges = (document: Document, primitives: readonly Primitive[]): void => {
   const edgeMaterial = document
     .createMaterial('tau-edge-material')
     .setBaseColorFactor([...cadEdgeOverlayMaterialDefaults.baseColorFactor])
@@ -319,35 +554,121 @@ const addFeatureEdges = (document: Document, root: Root): void => {
     .setRoughnessFactor(cadEdgeOverlayMaterialDefaults.roughnessFactor)
     .setDoubleSided(cadEdgeOverlayMaterialDefaults.doubleSided)
     .setAlphaMode(cadEdgeOverlayMaterialDefaults.alphaMode);
-  for (const mesh of root.listMeshes()) {
-    for (const primitive of mesh.listPrimitives()) {
-      if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
-        continue;
-      }
-      const positions = primitive.getAttribute('POSITION')?.getArray();
-      const indices = primitive.getIndices()?.getArray();
-      if (!(positions instanceof Float32Array)) {
-        continue;
-      }
-      const edges = detectEdges(
-        positions,
-        indices instanceof Uint16Array || indices instanceof Uint32Array ? indices : undefined,
-        30,
-      );
-      if (edges.positions.length === 0) {
-        continue;
-      }
-      mesh.addPrimitive(
-        document
-          .createPrimitive()
-          .setMode(Primitive.Mode['LINES']!)
-          .setMaterial(edgeMaterial)
-          .setAttribute(
-            'POSITION',
-            document.createAccessor('edge-positions').setType('VEC3').setArray(edges.positions),
-          ),
-      );
+  for (const primitive of primitives) {
+    const positions = primitive.getAttribute('POSITION')?.getArray();
+    const indices = primitive.getIndices()?.getArray();
+    if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !(positions instanceof Float32Array)) {
+      continue;
     }
+    const edges = detectEdges(
+      positions,
+      indices instanceof Uint16Array || indices instanceof Uint32Array ? indices : undefined,
+      30,
+    );
+    if (edges.positions.length === 0) {
+      continue;
+    }
+    const lines = document
+      .createPrimitive()
+      .setMode(Primitive.Mode['LINES']!)
+      .setMaterial(edgeMaterial)
+      .setAttribute('POSITION', document.createAccessor('edge-positions').setType('VEC3').setArray(edges.positions));
+    for (const parent of primitive.listParents()) {
+      if (parent instanceof Mesh) {
+        parent.addPrimitive(lines);
+      }
+    }
+  }
+};
+
+const boundsOf = (node: Node): { min: number[]; max: number[] } | undefined => {
+  const mesh = node.getMesh();
+  if (!mesh) {
+    return undefined;
+  }
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const primitive of mesh.listPrimitives()) {
+    const position = primitive.getAttribute('POSITION');
+    if (!position) {
+      continue;
+    }
+    const lo = position.getMin([]);
+    const hi = position.getMax([]);
+    for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis]!, lo[axis]!);
+      max[axis] = Math.max(max[axis]!, hi[axis]!);
+    }
+  }
+  return { min, max };
+};
+
+// The converter's board slab: the root mesh spanning a board's outline and thickness (the converter
+// names it generically, so it is matched by size, not name).
+const boardSlabTest = (circuitJson: CircuitElement[]): ((node: Node) => boolean) => {
+  const boards = circuitJson.filter((element) => element.type === 'pcb_board');
+  return (node) => {
+    const bounds = boundsOf(node);
+    if (!bounds) {
+      return false;
+    }
+    const size = bounds.max.map((value, axis) => value - bounds.min[axis]!);
+    return boards.some(
+      (board) =>
+        Math.abs((size[0] ?? 0) - (numberField(board, 'width') ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[2] ?? 0) - (numberField(board, 'height') ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[1] ?? 0) - (numberField(board, 'thickness') ?? 1.6)) < 0.2,
+    );
+  };
+};
+
+// Swap the converter's untextured board slab for the layered presentation board, and give the
+// component bodies presentation materials. With edges, the part bodies and the board core (its
+// outline and holes) get feature edges; copper, mask, finish and silkscreen get none, as their
+// outlines would be most of the lines and read as noise.
+const presentBoard = async (
+  document: Document,
+  scene: Scene | undefined,
+  {
+    circuitJson,
+    options,
+    includeEdges,
+  }: { circuitJson: CircuitElement[]; options: BoardPresentationOptions; includeEdges: boolean },
+): Promise<void> => {
+  const { buildPresentationBoard } = await import('#board-geometry.js');
+  const { applyPresentationMaterial } = await import('#presentation-materials.js');
+  const isBoardSlab = boardSlabTest(circuitJson);
+  const slabMaterials = new Set<Material>();
+  for (const node of scene?.listChildren() ?? []) {
+    if (isBoardSlab(node)) {
+      for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
+        const material = primitive.getMaterial();
+        if (material) {
+          slabMaterials.add(material);
+        }
+      }
+      node.dispose();
+    }
+  }
+  for (const material of slabMaterials) {
+    material.dispose();
+  }
+  for (const material of document.getRoot().listMaterials()) {
+    applyPresentationMaterial(material);
+  }
+  const primitivesOf = (): Primitive[] =>
+    document
+      .getRoot()
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives());
+  const partPrimitives = includeEdges ? primitivesOf() : [];
+  const board = await buildPresentationBoard(document, circuitJson, options);
+  if (board && scene) {
+    scene.addChild(board);
+  }
+  if (includeEdges) {
+    const corePrimitives = primitivesOf().filter((primitive) => primitive.getMaterial()?.getName() === 'pcb-core');
+    addFeatureEdges(document, [...partPrimitives, ...corePrimitives]);
   }
 };
 
@@ -355,12 +676,19 @@ const addFeatureEdges = (document: Document, root: Root): void => {
 const applyGlbConvention = async (
   glb: Uint8Array<ArrayBuffer>,
   { coordinateSystem, unit }: GlbConvention,
+  {
+    circuitJson,
+    options: { finish },
+    includeEdges,
+  }: { circuitJson: CircuitElement[]; options: BoardViewOptions; includeEdges: boolean },
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
-  addFeatureEdges(document, root);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
+  // Converter part bodies only: the presentation board below is built afterwards.
+  markClosedMeshesSingleSided(document);
+  await presentBoard(document, scene, { circuitJson, options: { finish }, includeEdges });
   if (!scene) {
     return glb;
   }
@@ -390,21 +718,63 @@ const applyGlbConvention = async (
   });
 };
 
+type ConverterOutput = { glb: Uint8Array<ArrayBuffer>; issues: KernelIssue[] };
+
+// The converter's GLB per settled circuit and parts mode. It takes seconds on a dense board, while
+// the post-pass (presentation board, edges) is cheap, so a view change such as the edge toggle
+// reuses it. Keyed weakly by the handle's circuit JSON, so it lives as long as that evaluation.
+const converterOutputs = new WeakMap<CircuitElement[], Map<boolean, Promise<ConverterOutput>>>();
+
+const convert = async (circuitJson: CircuitElement[], online: boolean): Promise<ConverterOutput> => {
+  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
+  // The converter never rasterizes a board texture: the presentation board is layer geometry.
+  const { value, issues } = await withOfflineFetch(
+    async () =>
+      convertCircuitJsonToGltf(asCircuitJson(await withPackModels(circuitJson)), {
+        format: 'glb',
+        boardTextureResolution: 0,
+      }),
+    { online },
+  );
+  if (!(value instanceof ArrayBuffer)) {
+    throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
+  }
+  return { glb: new Uint8Array(value), issues };
+};
+
+const convertedGlb = async (circuitJson: CircuitElement[], online: boolean): Promise<ConverterOutput> => {
+  const byMode = converterOutputs.get(circuitJson) ?? new Map<boolean, Promise<ConverterOutput>>();
+  converterOutputs.set(circuitJson, byMode);
+  const output = byMode.get(online) ?? convert(circuitJson, online);
+  byMode.set(online, output);
+  try {
+    return await output;
+  } catch (error) {
+    // A failed conversion is not kept, so the next request tries again.
+    if (byMode.get(online) === output) {
+      byMode.delete(online);
+    }
+    throw error;
+  }
+};
+
 // One GLB path for render and export (charter D6, D8).
 const circuitJsonToGlb = async (
   circuitJson: CircuitElement[],
   convention: GlbConvention,
+  {
+    online = false,
+    includeEdges = false,
+    ...options
+  }: BoardViewOptions & { online?: boolean | undefined; includeEdges?: boolean | undefined } = {},
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
-  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
-  // The converter's browser worker path uses resvg-wasm for board layers.
-  const { value: content, issues } = await withOfflineFetch(async () => {
-    const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' });
-    if (!(glb instanceof ArrayBuffer)) {
-      throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
-    }
-    return applyGlbConvention(new Uint8Array(glb), convention);
-  });
-  return { content, issues };
+  const converted = await convertedGlb(circuitJson, online);
+  // Each pass reads its own copy, so no edit can reach the cached bytes.
+  const { value: content, issues } = await withOfflineFetch(
+    async () => applyGlbConvention(new Uint8Array(converted.glb), convention, { circuitJson, options, includeEdges }),
+    { online },
+  );
+  return { content, issues: [...converted.issues, ...issues] };
 };
 
 const textExportFile = (format: 'csv' | 'txt' | 'json', name: string, text: string) =>
@@ -462,10 +832,21 @@ export const tscircuitKernel = defineKernel({
     flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
-  version: '1.1.0',
+  version: `1.3.0+kicad.${kicadPackVersion}`,
+  optionsSchema: tscircuitOptionsSchema,
   views: {
-    board: { title: '3D board', mimeType: 'model/gltf-binary' },
-    schematic: { title: 'Schematic', mimeType: 'image/svg+xml', instances: true },
+    board: {
+      title: '3D board',
+      mimeType: 'model/gltf-binary',
+      optionsSchema: boardViewOptionsSchema,
+      content: ['includeEdges'],
+    },
+    schematic: {
+      title: 'Schematic',
+      mimeType: 'image/svg+xml',
+      instances: true,
+      optionsSchema: schematicViewOptionsSchema,
+    },
     pcb: { title: 'PCB', mimeType: 'image/svg+xml', optionsSchema: pcbViewOptionsSchema },
   },
   exports: {
@@ -474,6 +855,7 @@ export const tscircuitKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: tscircuitExportSchemas.board,
+      content: ['includeEdges'],
     },
     bom: {
       title: 'Bill of materials',
@@ -495,7 +877,8 @@ export const tscircuitKernel = defineKernel({
     },
   },
 
-  async initialize(_options, runtime): Promise<TscircuitContext> {
+  async initialize(options, runtime): Promise<TscircuitContext> {
+    const online = options.parts === 'online';
     const [reactModule, jsxRuntimeModule, core] = await Promise.all([
       import('#engine/react.js'),
       import('#engine/jsx-runtime.js'),
@@ -505,12 +888,7 @@ export const tscircuitKernel = defineKernel({
     const { jsxRuntime } = jsxRuntimeModule;
     const tscircuitCore: Record<string, unknown> = { ...core };
     // `React` as a global lets the bundler's classic JSX transform resolve without an import.
-    registerKernelModule(runtime, {
-      name: 'react',
-      exports: { ...react },
-      package: reactPackage,
-      globalName: 'React',
-    });
+    registerKernelModule(runtime, { name: 'react', exports: { ...react }, package: reactPackage, globalName: 'React' });
     registerKernelModule(runtime, { name: 'react/jsx-runtime', exports: { ...jsxRuntime }, package: reactPackage });
     registerKernelModule(runtime, { name: '@tscircuit/core', exports: tscircuitCore, package: corePackage });
     // `tscircuit` runs `@tscircuit/core`, so its identity is the alias `npm:@tscircuit/core@<version>`.
@@ -519,6 +897,7 @@ export const tscircuitKernel = defineKernel({
     registerKernelModule(runtime, { name: '@tscircuit/props', exports: {}, package: propsPackage });
     runtime.logger.debug('Initialized tscircuit kernel with @tscircuit/core');
     return {
+      online,
       async renderCircuit(module, parameters) {
         const component = resolveCircuitComponent(module);
         if (!component) {
@@ -526,8 +905,14 @@ export const tscircuitKernel = defineKernel({
             'tscircuit entry must export a board component: a default export or a named function export.',
           );
         }
-        // No `partsEngine` and the local autorouter keep the render offline (charter D4).
-        const circuit = new core.RootCircuit({ platform: { autorouter: 'auto' } });
+        // No `partsEngine` and the local autorouter keep the render offline (charter D4); `kicad:`
+        // footprints resolve from the local pack, and from kicad-mod-cache when online.
+        const circuit = new core.RootCircuit({
+          platform: {
+            autorouter: 'auto',
+            footprintLibraryMap: { kicad: async (name: string) => resolveKicadFootprint(name, online) },
+          },
+        });
         circuit.add(react.createElement(component, parameters));
         await circuit.renderUntilSettled();
         const authoredSheets = new Map<string, string>();
@@ -605,7 +990,9 @@ export const tscircuitKernel = defineKernel({
       ({
         value: { circuitJson, authoredSheets },
         issues: networkIssues,
-      } = await withOfflineFetch(async () => context.renderCircuit(executeResult.value, parameters)));
+      } = await withOfflineFetch(async () => context.renderCircuit(executeResult.value, parameters), {
+        online: context.online,
+      }));
       runtime.signal.throwIfAborted();
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
@@ -640,7 +1027,7 @@ export const tscircuitKernel = defineKernel({
     };
   },
 
-  async render(request) {
+  async render(request, _runtime, context) {
     const { handle, view } = request;
     const { circuitJson } = handle;
     switch (view) {
@@ -654,7 +1041,7 @@ export const tscircuitKernel = defineKernel({
           content: withViewBox(
             convertCircuitJsonToSchematicSvg(asCircuitJson(circuitJson), {
               ...(sheetId === undefined ? {} : { schematicSheetId: sheetId }),
-              colorOverrides: { schematic: { junction: 'rgb(0, 105, 0)', wire: 'rgb(0, 105, 0)' } },
+              ...schematicThemeOptions(request.options.theme),
             }),
           ),
         };
@@ -665,6 +1052,7 @@ export const tscircuitKernel = defineKernel({
           content: withViewBox(
             convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson), {
               showPinNumbers: request.options.pinNumbers,
+              ...pcbPaletteOptions(request.options.palette, circuitJson),
               matchBoardAspectRatio: true,
               drawPaddingOutsideBoard: false,
             }),
@@ -672,7 +1060,11 @@ export const tscircuitKernel = defineKernel({
         };
       }
       case 'board': {
-        const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention);
+        const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention, {
+          ...request.options,
+          includeEdges: request.content?.includeEdges === true,
+          online: context.online,
+        });
         return { content, issues };
       }
     }
@@ -712,12 +1104,18 @@ export const tscircuitKernel = defineKernel({
     return { circuitJson: parsed['circuitJson'], sheets: mappings };
   },
 
-  async export({ exportId, handle, options }) {
-    const { circuitJson } = handle;
+  async export(input, _runtime, context) {
+    const { circuitJson } = input.handle;
     const issues = collectCircuitIssues(circuitJson);
-    switch (exportId) {
+    switch (input.exportId) {
       case 'board': {
-        const { content, issues: glbIssues } = await circuitJsonToGlb(circuitJson, options);
+        const { options, content: exportContent } = input;
+        const { coordinateSystem, unit, finish } = options;
+        const { content, issues: glbIssues } = await circuitJsonToGlb(
+          circuitJson,
+          { coordinateSystem, unit },
+          { finish, includeEdges: exportContent?.includeEdges === true, online: context.online },
+        );
         return { files: [createExportFile('glb', 'model.glb', content)], issues: [...issues, ...glbIssues] };
       }
       case 'bom': {
@@ -738,8 +1136,10 @@ export const tscircuitKernel = defineKernel({
         return { files: [textExportFile('json', 'circuit.json', JSON.stringify(circuitJson, null, 2))], issues };
       }
       default: {
-        const exhaustive: never = exportId;
-        throw new Error(`Export '${String(exhaustive)}' is not supported by tscircuit.`);
+        const exhaustive: never = input;
+        throw new Error(
+          `Export '${JSON.stringify(Reflect.get(exhaustive, 'exportId'))}' is not supported by tscircuit.`,
+        );
       }
     }
   },

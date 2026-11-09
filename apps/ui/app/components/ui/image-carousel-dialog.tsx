@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import { Download, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -12,6 +11,7 @@ import {
 import type { CarouselApi } from '@taucad/ui/components/carousel';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { cn } from '@taucad/ui/utils/cn';
+import { ViewerLayer, ViewerLayerPortal } from '#components/ui/viewer-layer.js';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 
@@ -221,24 +221,21 @@ function ImageCarouselDialog({
 
   return (
     <Dialog open={isOpen} modal={false} onOpenChange={onOpenChange}>
-      {canUseDocument
-        ? createPortal(
+      {canUseDocument ? (
+        <ViewerLayer {...dialogProps}>
+          <div
+            aria-hidden='true'
+            className='absolute inset-0 z-0 animate-in bg-black/60 fade-in-0'
+            {...dialogProps}
+            onClick={() => {
+              onOpenChange(false);
+            }}
+          />
+          {currentItem && currentDownloadName ? (
             <div
-              aria-hidden='true'
-              className='fixed inset-0 z-100 animate-in bg-black/60 fade-in-0'
-              {...dialogProps}
-              onClick={() => {
-                onOpenChange(false);
-              }}
-            />,
-            document.body,
-          )
-        : null}
-      {canUseDocument && currentItem && currentDownloadName
-        ? createPortal(
-            <div
-              className='fixed top-4 right-4 z-102 flex items-center gap-2'
+              className='fixed top-4 right-4 z-2 flex items-center gap-2'
               data-image-carousel-overlay-control=''
+              data-shortcut-scope='image-carousel'
               {...dialogProps}
             >
               <DownloadLink directory={directory} item={currentItem} name={currentDownloadName} />
@@ -253,103 +250,102 @@ function ImageCarouselDialog({
                   <X />
                 </Button>
               </DialogClose>
-            </div>,
-            document.body,
-          )
-        : null}
-      <DialogContent
-        {...dialogProps}
-        onInteractOutside={(event) => {
-          if (isImageCarouselOverlayControlEvent(event)) {
-            event.preventDefault();
-          }
-        }}
-        // The backdrop covers the page, so focus leaving is never a dismissal: a menu that opened the
-        // viewer returns focus to its trigger as it closes. Backdrop clicks, Close and Escape still dismiss.
-        onFocusOutside={(event) => {
-          event.preventDefault();
-        }}
-        onPointerDownOutside={(event) => {
-          if (isImageCarouselOverlayControlEvent(event)) {
-            event.preventDefault();
-          }
-        }}
-        className={cn(
-          'z-101! pointer-events-none flex h-[80vh]! max-h-none! w-auto! max-w-[90vw]! items-center justify-center overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none *:data-[slot=dialog-close]:hidden max-md:w-[90vw]',
-          contentClassName,
-        )}
-      >
-        <DialogTitle className='sr-only'>Image preview carousel</DialogTitle>
-        <DialogDescription className='sr-only'>
-          Use the previous and next controls or arrow keys to review images.
-        </DialogDescription>
-        <Carousel
-          ref={carouselReference}
-          aria-label='Image preview carousel'
-          className='flex h-full w-full min-w-0 flex-col outline-none'
-          opts={carouselOptions}
-          setApi={setCarouselApi}
-          tabIndex={0}
-        >
-          <div className='relative flex min-h-0 flex-1 items-center justify-center overflow-hidden'>
-            <CarouselContent className='ml-0 h-full items-center'>
-              {items.map((item, index) => (
-                <CarouselItem key={item.id} className='flex h-full items-center justify-center pl-0'>
-                  <div className='relative flex h-full w-full items-center justify-center'>
-                    {/* Only the image takes clicks; the rest of the dialog falls through to the closing backdrop. */}
-                    <SlideImage
-                      directory={directory}
-                      item={item}
-                      onError={() => {
-                        onImageError?.(item, index);
-                      }}
-                    />
-                    {item.label ? (
-                      <div className='absolute top-5 left-10 max-w-[calc(100%-5rem)] truncate rounded bg-black/60 px-2 py-1 text-xs font-medium tracking-wide text-white uppercase max-md:left-4'>
-                        {item.label}
+            </div>
+          ) : null}
+          <DialogContent
+            {...dialogProps}
+            onInteractOutside={(event) => {
+              if (isImageCarouselOverlayControlEvent(event)) {
+                event.preventDefault();
+              }
+            }}
+            // The backdrop covers the page, so focus leaving is never a dismissal: a menu that opened the
+            // viewer returns focus to its trigger as it closes. Backdrop clicks, Close and Escape still dismiss.
+            onFocusOutside={(event) => {
+              event.preventDefault();
+            }}
+            onPointerDownOutside={(event) => {
+              if (isImageCarouselOverlayControlEvent(event)) {
+                event.preventDefault();
+              }
+            }}
+            className={cn(
+              'z-1 pointer-events-none flex h-[80vh]! max-h-none! w-auto! max-w-[90vw]! items-center justify-center overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none *:data-[slot=dialog-close]:hidden max-md:w-[90vw]',
+              contentClassName,
+            )}
+          >
+            <DialogTitle className='sr-only'>Image preview carousel</DialogTitle>
+            <DialogDescription className='sr-only'>
+              Use the previous and next controls or arrow keys to review images.
+            </DialogDescription>
+            <Carousel
+              ref={carouselReference}
+              aria-label='Image preview carousel'
+              className='flex h-full w-full min-w-0 flex-col outline-none'
+              opts={carouselOptions}
+              setApi={setCarouselApi}
+              tabIndex={0}
+            >
+              <div className='relative flex min-h-0 flex-1 items-center justify-center overflow-hidden'>
+                <CarouselContent className='ml-0 h-full items-center'>
+                  {items.map((item, index) => (
+                    <CarouselItem key={item.id} className='flex h-full items-center justify-center pl-0'>
+                      <div className='relative flex h-full w-full items-center justify-center'>
+                        {/* Only the image takes clicks; the rest of the dialog falls through to the closing backdrop. */}
+                        <SlideImage
+                          directory={directory}
+                          item={item}
+                          onError={() => {
+                            onImageError?.(item, index);
+                          }}
+                        />
+                        {item.label ? (
+                          <div className='absolute top-5 left-10 max-w-[calc(100%-5rem)] truncate rounded bg-black/60 px-2 py-1 text-xs font-medium tracking-wide text-white uppercase max-md:left-4'>
+                            {item.label}
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                </CarouselItem>
-              ))}
-            </CarouselContent>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
 
-            {hasMultipleItems ? (
-              <>
-                {canUseDocument
-                  ? createPortal(
-                      <div className='contents' data-image-carousel-overlay-control='' {...dialogProps}>
+                {hasMultipleItems ? (
+                  <>
+                    <ViewerLayerPortal>
+                      <div
+                        className='contents'
+                        data-image-carousel-overlay-control=''
+                        data-shortcut-scope='image-carousel'
+                        {...dialogProps}
+                      >
                         <CarouselPrevious
                           className={cn(
                             imageCarouselControlClassName,
-                            'fixed top-1/2 left-4 z-102 size-10 -translate-y-1/2 disabled:opacity-40',
+                            'fixed top-1/2 left-4 z-2 size-10 -translate-y-1/2 disabled:opacity-40',
                           )}
                           size='icon-lg'
                         />
                         <CarouselNext
                           className={cn(
                             imageCarouselControlClassName,
-                            'fixed top-1/2 right-4 z-102 size-10 -translate-y-1/2 disabled:opacity-40',
+                            'fixed top-1/2 right-4 z-2 size-10 -translate-y-1/2 disabled:opacity-40',
                           )}
                           size='icon-lg'
                         />
-                      </div>,
-                      document.body,
-                    )
-                  : null}
-                {canUseDocument
-                  ? createPortal(
-                      <div className='pointer-events-none fixed bottom-4 left-1/2 z-102 flex h-10 -translate-x-1/2 items-center rounded-full bg-background/90 px-4 text-sm font-medium text-foreground shadow-md'>
+                      </div>
+                    </ViewerLayerPortal>
+                    <ViewerLayerPortal>
+                      <div className='pointer-events-none fixed bottom-4 left-1/2 z-2 flex h-10 -translate-x-1/2 items-center rounded-full bg-background/90 px-4 text-sm font-medium text-foreground shadow-md'>
                         {clampedActiveIndex + 1} / {items.length}
-                      </div>,
-                      document.body,
-                    )
-                  : null}
-              </>
-            ) : null}
-          </div>
-        </Carousel>
-      </DialogContent>
+                      </div>
+                    </ViewerLayerPortal>
+                  </>
+                ) : null}
+              </div>
+            </Carousel>
+          </DialogContent>
+        </ViewerLayer>
+      ) : null}
     </Dialog>
   );
 }

@@ -1,0 +1,254 @@
+import { describe, expect, it } from 'vitest';
+import {
+  classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
+  contextWindowRefusalMessage,
+  isContextWindowRefusal,
+  providerRetryAfterSeconds,
+  readUpstreamRefusal,
+  redactCredentials,
+  upstreamRetryAfterSeconds,
+} from '#upstream-refusal.js';
+
+const jsonResponse = (body: unknown, status: number): Response =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+describe('redactCredentials', () => {
+  it.each([
+    ['an authorization header value', 'authorization: Bearer ya29.a0AfH6SMBx-secret', 'ya29.a0AfH6SMBx-secret'],
+    ['an OpenAI-style key', 'key sk-proj-AbCdEf0123456789 rejected', 'sk-proj-AbCdEf0123456789'],
+    ['an xAI-style key', 'key xai-AbCdEf0123456789 rejected', 'xai-AbCdEf0123456789'],
+    ['a Google API key', 'key=AIzaSyA0123456789abcdefg', 'AIzaSyA0123456789abcdefg'],
+    ['a JWT', 'assertion eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0YXUifQ.c2lnbmF0dXJl', 'eyJhbGciOiJSUzI1NiJ9'],
+    [
+      'a JSON private key',
+      String.raw`{"private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADAN\n-----END PRIVATE KEY-----\n"}`,
+      'MIIEvQIBADAN',
+    ],
+  ])('should remove %s', (_name, text, secret) => {
+    const redacted = redactCredentials(text);
+
+    expect(redacted).not.toContain(secret);
+    expect(redacted).toContain('[redacted]');
+  });
+
+  it('should leave a diagnostic body untouched', () => {
+    const body = '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"ref loops are only supported"}}';
+
+    expect(redactCredentials(body)).toBe(body);
+  });
+});
+
+describe('readUpstreamRefusal', () => {
+  it('should parse the body for recognition and keep a content-free copy for the log', async () => {
+    const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Bearer ya29.secret-token' } };
+
+    const refusal = await readUpstreamRefusal(jsonResponse(body, 400));
+
+    expect(refusal.body).toEqual(body);
+    expect(refusal.loggedBody).toContain('INVALID_ARGUMENT');
+    expect(refusal.loggedBody).not.toContain('ya29.secret-token');
+  });
+
+  it('should bound the logged copy at 2 KiB', async () => {
+    const refusal = await readUpstreamRefusal(
+      jsonResponse({ error: { details: Array.from({ length: 16 }, () => ({ code: 'x'.repeat(128) })) } }, 400),
+    );
+
+    expect(refusal.loggedBody).toHaveLength(2 * 1024);
+  });
+
+  it('should log nothing for a body that is not JSON', async () => {
+    const refusal = await readUpstreamRefusal(new Response('<html>502 Bad Gateway</html>', { status: 502 }));
+
+    expect(refusal).toEqual({ body: undefined });
+  });
+
+  it('should tolerate an absent body', async () => {
+    expect(await readUpstreamRefusal(new Response(undefined, { status: 503 }))).toEqual({ body: undefined });
+  });
+
+  it('should tolerate an already-consumed body', async () => {
+    const response = jsonResponse({ error: { message: 'gone' } }, 400);
+    await response.text();
+
+    expect(await readUpstreamRefusal(response)).toEqual({ body: undefined });
+  });
+});
+
+describe('upstreamRetryAfterSeconds', () => {
+  it.each([
+    ['7', 7],
+    ['0', 0],
+    // An HTTP-date Retry-After carries no delta-seconds estimate.
+    ['Wed, 21 Oct 2026 07:28:00 GMT', undefined],
+    ['-1', undefined],
+    ['', undefined],
+  ])('should read %s as %s', (header, seconds) => {
+    expect(upstreamRetryAfterSeconds(new Headers({ 'retry-after': header }))).toBe(seconds);
+  });
+
+  it('should report no estimate when the header is absent', () => {
+    expect(upstreamRetryAfterSeconds(new Headers())).toBeUndefined();
+  });
+});
+
+const googleRetryInfo = (retryDelay: string): unknown => ({
+  error: {
+    code: 429,
+    message: 'Resource exhausted. Please try again later.',
+    status: 'RESOURCE_EXHAUSTED',
+    details: [
+      { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'RATE_LIMIT_EXCEEDED' },
+      { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay },
+    ],
+  },
+});
+
+describe('providerRetryAfterSeconds', () => {
+  it.each([
+    ['a Google RetryInfo detail', googleRetryInfo('37s'), 37],
+    ['a fractional RetryInfo, rounded up', googleRetryInfo('37.226s'), 38],
+    ['a RetryInfo inside the Vertex one-element array', [googleRetryInfo('12s')], 12],
+    ['an OpenAI sentence', { error: { message: 'Rate limit reached. Please try again in 11.054s.' } }, 12],
+    ['a Gemini sentence', { error: { message: 'Quota exceeded. Please retry in 4.2s.' } }, 5],
+    ['a millisecond sentence, rounded up', { error: { message: 'Please try again in 250ms.' } }, 1],
+    ['a sentence in seconds', { error: { message: 'Try again in 30 seconds.' } }, 30],
+  ])('should read %s', (_label, body, seconds) => {
+    expect(providerRetryAfterSeconds(body)).toBe(seconds);
+  });
+
+  it.each([
+    ['no wait in the sentence', { error: { message: 'Resource exhausted. Please try again later.' } }],
+    ['no error member', { message: 'try again in 5s' }],
+    ['no body', undefined],
+  ])('should report no estimate for %s', (_label, body) => {
+    expect(providerRetryAfterSeconds(body)).toBeUndefined();
+  });
+
+  it('should prefer the upstream header over the body, and fall back to the body without one', () => {
+    expect(upstreamRetryAfterSeconds(new Headers({ 'retry-after': '7' }), googleRetryInfo('37s'))).toBe(7);
+    expect(upstreamRetryAfterSeconds(new Headers(), googleRetryInfo('37s'))).toBe(37);
+    expect(upstreamRetryAfterSeconds(new Headers({ 'retry-after': 'soon' }), googleRetryInfo('37s'))).toBe(37);
+  });
+});
+
+describe('classifyUpstreamRefusal', () => {
+  it('should map an upstream 429 to RATE_LIMITED carrying its retry estimate', () => {
+    expect(classifyUpstreamRefusal({ status: 429, retryAfterSeconds: 7, accountOwner: 'operator' })).toEqual({
+      status: 429,
+      type: 'RATE_LIMITED',
+      details: { retryAfterSeconds: 7 },
+    });
+  });
+
+  it('should map an upstream 429 without a retry estimate to RATE_LIMITED alone', () => {
+    expect(classifyUpstreamRefusal({ status: 429, accountOwner: 'tau' })).toEqual({
+      status: 429,
+      type: 'RATE_LIMITED',
+    });
+  });
+
+  it.each([
+    // Google answers 499 CANCELLED on the Vertex wire; it is an outage, not a rejected request.
+    [499],
+    [500],
+    [503],
+  ])('should map upstream %i to PROVIDER_UNAVAILABLE', (status) => {
+    expect(classifyUpstreamRefusal({ status, accountOwner: 'operator' })).toEqual({
+      status: 503,
+      type: 'PROVIDER_UNAVAILABLE',
+    });
+  });
+
+  it.each([[400], [404], [422]])('should map upstream %i to UPSTREAM_REJECTED', (status) => {
+    expect(classifyUpstreamRefusal({ status, accountOwner: 'operator' })).toEqual({
+      status: 502,
+      type: 'UPSTREAM_REJECTED',
+    });
+  });
+
+  it.each([[401], [403]])('should keep upstream %i as each account owner already answered it', (status) => {
+    expect(classifyUpstreamRefusal({ status, accountOwner: 'operator' }).type).toBe('UPSTREAM_REJECTED');
+    expect(classifyUpstreamRefusal({ status, accountOwner: 'tau' }).type).toBe('PROVIDER_UNAVAILABLE');
+  });
+
+  it('should treat a 2xx that carried no stream as an outage', () => {
+    expect(classifyUpstreamRefusal({ status: 200, accountOwner: 'tau' })).toEqual({
+      status: 503,
+      type: 'PROVIDER_UNAVAILABLE',
+    });
+  });
+});
+
+describe('cloudUpstreamRefusalMessage', () => {
+  it.each([
+    ['UPSTREAM_REJECTED', 400, 'The model provider rejected the request (HTTP 400).'],
+    ['RATE_LIMITED', 429, 'The model provider is rate limiting this request.'],
+    ['PROVIDER_UNAVAILABLE', 503, 'The model provider is unavailable.'],
+  ] as const)('should answer a %s with the sentence a Cloud customer reads', (type, status, expected) => {
+    expect(cloudUpstreamRefusalMessage({ type, status })).toBe(expected);
+  });
+
+  it('should name the context window when the provider refused the request for its size', () => {
+    expect(cloudUpstreamRefusalMessage({ type: 'UPSTREAM_REJECTED', status: 400, contextWindowExceeded: true })).toBe(
+      'The request exceeds the context window of the selected model.',
+    );
+  });
+
+  it('should never quote the supplier, whatever it said', () => {
+    // The pre-stream leg and the mid-stream frame filter share these sentences so
+    // a refusal cannot name Tau's supplier account on one path and not the other.
+    expect(cloudUpstreamRefusalMessage({ type: 'RATE_LIMITED', status: 429 })).not.toContain('Resource exhausted');
+  });
+});
+
+describe('isContextWindowRefusal', () => {
+  it.each([
+    [
+      'an Anthropic prompt-too-long body',
+      {
+        type: 'error',
+        error: { type: 'invalid_request_error', message: 'prompt is too long: 217210 tokens > 200000 maximum' },
+      },
+    ],
+    [
+      'an Anthropic 413 body',
+      { type: 'error', error: { type: 'request_too_large', message: 'Request exceeds the maximum size' } },
+    ],
+    [
+      'an OpenAI context_length_exceeded code',
+      { error: { code: 'context_length_exceeded', message: 'Your input exceeds the context window of this model.' } },
+    ],
+    [
+      'a Gemini token-count sentence',
+      {
+        error: {
+          code: 400,
+          message: 'The input token count (1100000) exceeds the maximum number of tokens allowed (1048576).',
+        },
+      },
+    ],
+    ['an in-band error object', { code: 'context_length_exceeded', message: 'Too long.' }],
+  ])('should recognise %s', (_label, body) => {
+    expect(isContextWindowRefusal(body)).toBe(true);
+  });
+
+  it.each([
+    [
+      'a credit-balance refusal',
+      { error: { type: 'invalid_request_error', message: 'Your credit balance is too low.' } },
+    ],
+    ['a schema refusal', { error: { type: 'invalid_request_error', message: 'tools.0.name: String should match' } }],
+    ['an absent body', undefined],
+    ['a non-object body', 'prompt is too long'],
+  ])('should not recognise %s', (_label, body) => {
+    expect(isContextWindowRefusal(body)).toBe(false);
+  });
+
+  it('should answer in words the host overflow recognition matches', () => {
+    // The host compacts and retries only on a refusal it recognises as a context
+    // overflow; pi-ai matches "exceeds the context window".
+    expect(contextWindowRefusalMessage).toMatch(/exceeds the context window/i);
+  });
+});

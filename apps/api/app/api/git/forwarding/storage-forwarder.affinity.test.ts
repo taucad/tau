@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpException } from '@nestjs/common';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import {
   encodeReceiptPrefix,

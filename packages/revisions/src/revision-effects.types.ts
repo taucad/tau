@@ -74,6 +74,40 @@ export type TurnPlacement = Readonly<{ runId: string }> &
       }>
   );
 
+/**
+ * Why a tree is being materialized.
+ *
+ * - `apply` — an ordinary write into the checkout's current tree (a turn's settlement).
+ * - `tree` — another revision's tree replaces the checkout's (a restore, an undo,
+ *   a switch, a pull, a merge, a decision landing): the write announces a new
+ *   tree, and readiness re-enters at what that tree leaves it in (D10, I7).
+ * - `fill` — a large-object fill's flush.
+ *
+ * @public
+ */
+export type ApplyingTreePurpose = 'apply' | 'tree' | 'fill';
+
+/**
+ * What a tree write tells its host as it begins. A write that holds the tree
+ * names its entry closure (`tau.json` and the files it names), which it lands
+ * first; once the checkout's index has every one of them landed, the host may
+ * read the tree as `entryReady` (D10).
+ *
+ * @public
+ */
+export type ApplyingTreeBracket = Readonly<{ purpose: ApplyingTreePurpose; closure?: readonly string[] }>;
+
+/**
+ * How a tree write ended, told as its bracket is released: `failed` when it
+ * threw or was aborted and left the checkout torn, so a host never reads the
+ * tree it began as written (D10, I7). A write that threw after changing
+ * nothing, or that put the prior files back, left the checkout whole and is
+ * told `failed: false`; the operation itself still rejects.
+ *
+ * @public
+ */
+export type ApplyingTreeOutcome = Readonly<{ failed: boolean }>;
+
 /** Dependencies one project's actor set is built from. @public */
 export type RevisionActorsOptions = Readonly<{
   /** The content-addressed store every revision id comes from. */
@@ -144,8 +178,24 @@ export type RevisionActorsOptions = Readonly<{
   /**
    * Brackets tree materialization so a disk host can ignore its own watcher
    * events instead of reporting them as editor changes.
+   *
+   * The bracket's `purpose` (see {@link ApplyingTreePurpose}) is `fill` for a
+   * large-object fill's flush, which replaces placeholders with their bytes in
+   * place; `tree` when another revision's tree replaces the checkout's, which
+   * readiness reads as a new tree; and `apply` (the default) for a write into
+   * the checkout's current tree. A host can hold a file tree's re-reads for
+   * `apply` and `tree` without holding them for every flush of a long fill. A
+   * write that holds the tree also names its entry `closure`, landed first.
+   *
+   * The returned release is called once, with the write's outcome (see
+   * {@link ApplyingTreeOutcome}): a `tree` write released `failed: true` left
+   * the checkout torn and is not its tree written.
    */
-  onApplyingTree?: (checkout: Checkout, paths: readonly string[]) => (() => void) | void;
+  onApplyingTree?: (
+    checkout: Checkout,
+    paths: readonly string[],
+    bracket?: ApplyingTreeBracket,
+  ) => ((outcome?: ApplyingTreeOutcome) => void) | void;
   /**
    * Told how a checkout's large-object placeholders are being filled.
    *

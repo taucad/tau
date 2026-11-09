@@ -3,7 +3,7 @@
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "scripts/src",
   "projectType": "library",
-  "tags": ["scope:shared", "type:tool"],
+  "tags": ["scope:shared", "type:tool", "ci:standalone"],
   "targets": {
     "validate-agent-config": {
       "executor": "nx:run-commands",
@@ -170,7 +170,6 @@
             "replicad",
             "smlib",
             "tscircuit",
-            "rhino",
             "tscircuit",
             "rpc",
             "kinematics",
@@ -329,12 +328,6 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node scripts/src/html-to-md.ts"
-      }
-    },
-    "bake-hero-glb": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "node --import tsx scripts/src/bake-hero-glb.mts"
       }
     },
     "validate-agent-lanes": {

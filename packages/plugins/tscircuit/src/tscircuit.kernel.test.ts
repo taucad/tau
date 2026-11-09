@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { readFile } from 'node:fs/promises';
-import { WebIO } from '@gltf-transform/core';
+import { WebIO, getBounds } from '@gltf-transform/core';
 import { createNodeIo } from '@taucad/geometry-core';
 import { esbuildBundler } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
@@ -22,7 +22,21 @@ import {
 } from '@taucad/runtime-testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import type * as GltfEngine from '#engine/gltf.js';
 import { tscircuitDetectPattern, tscircuitKernel } from '#tscircuit.kernel.js';
+
+// Counts converter runs, so a test can show a view change reuses the converter's GLB.
+const converterRuns = vi.hoisted(() => ({ count: 0 }));
+vi.mock('#engine/gltf.js', async (importOriginal) => {
+  const original = await importOriginal<typeof GltfEngine>();
+  return {
+    ...original,
+    convertCircuitJsonToGltf: async (...input: Parameters<typeof original.convertCircuitJsonToGltf>) => {
+      converterRuns.count++;
+      return original.convertCircuitJsonToGltf(...input);
+    },
+  };
+});
 
 // =============================================================================
 // Fixtures
@@ -501,7 +515,7 @@ describe('TscircuitKernel', () => {
         'main.tsx': `
           export default () => (
             <board width="20mm" height="20mm">
-              <chip name="U1" footprint="kicad:Package_SO:SOIC-8_3.9x4.9mm_P1.27mm" />
+              <chip name="U1" footprint="kicad:Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm" />
             </board>
           );
         `,
@@ -515,12 +529,161 @@ describe('TscircuitKernel', () => {
         expect.objectContaining({
           code: 'RUNTIME',
           severity: 'warning',
-          message: expect.stringContaining('kicad'),
+          message: expect.stringContaining("not in Tau's local KiCad pack"),
           details: expect.objectContaining({ producer: 'tscircuit' }),
         }),
       );
       /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
       expect(result.success && result.issues.some((issue) => issue.severity === 'error')).toBe(false);
+    });
+
+    it('resolves a kicad: footprint and its real 3D model from the local pack without the network', async () => {
+      const client = createClient({
+        'main.tsx': `
+          export default () => (
+            <board width="20mm" height="20mm">
+              <chip name="U1" footprint="kicad:Package_SO/SOIC-8_3.9x4.9mm_P1.27mm" />
+            </board>
+          );
+        `,
+      });
+
+      const result = await render(client, 'main.tsx');
+      const glb = expectGlb(result);
+      expect(
+        result.success &&
+          result.issues.filter((issue) => issue.message.includes('KiCad') || issue.message.includes('Network')),
+      ).toEqual([]);
+      const circuitJson = await readSettledCircuitJson(client);
+      expect(circuitJson.filter((element) => element.type === 'pcb_smtpad')).toHaveLength(8);
+      // The handle keeps tscircuit's canonical model URL; only the render swaps in the pack's GLB.
+      expect(circuitJson.find((element) => element.type === 'cad_component')).toMatchObject({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
+        model_step_url: 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-8_3.9x4.9mm_P1.27mm.step',
+      });
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
+      const body = document
+        .getRoot()
+        .listNodes()
+        .find((node) => node.getName() === 'U1');
+      expect(body?.getMesh()?.listPrimitives().length).toBeGreaterThan(1);
+    });
+
+    it('gives every part a body: inline footprints, colour options and 5.08 mm pin rows', async () => {
+      const client = createClient({
+        'main.tsx': `
+          export default () => (
+            <board width="40mm" height="30mm">
+              <inductor
+                name="L1"
+                inductance="10uH"
+                pcbX={8}
+                footprint={
+                  <footprint>
+                    <smtpad portHints={['pin1']} shape="rect" width="2mm" height="3.2mm" pcbX={-3} pcbY={0} />
+                    <smtpad portHints={['pin2']} shape="rect" width="2mm" height="3.2mm" pcbX={3} pcbY={0} />
+                    <courtyardrect width="8mm" height="8mm" />
+                  </footprint>
+                }
+              />
+              <led name="LED1" color="green" footprint="0603" pcbX={-8} pcbY={8} />
+              <pinheader name="J1" pinCount={2} pitch="5.08mm" footprint="pinrow2_p5.08mm_id1.3mm_od2.4mm" pcbX={-10} />
+            </board>
+          );
+        `,
+      });
+
+      const glb = expectGlb(await render(client, 'main.tsx'));
+      const circuitJson = await readSettledCircuitJson(client);
+      // The handle is tscircuit's own: L1 has no model and the others keep their footprinter strings.
+      const cad = circuitJson.filter((element) => element.type === 'cad_component');
+      expect(cad.map((element): unknown => Reflect.get(element, 'footprinter_string'))).toEqual([
+        undefined,
+        '0603_color(green)',
+        'pinrow2_p5.08mm_id1.3mm_od2.4mm',
+      ]);
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
+      const nodes = new Map(
+        document
+          .getRoot()
+          .listNodes()
+          .map((node) => [node.getName(), node]),
+      );
+      // Y-up metres in the converter's frame: Y is height above the board and X runs opposite to pcb X.
+      const boundsMm = (name: string) => {
+        const node = nodes.get(name);
+        expect(node?.getMesh(), name).toBeDefined();
+        const { min, max } = getBounds(node!);
+        return { min: min.map((value) => value * 1000), max: max.map((value) => value * 1000) };
+      };
+      const inductorBody = boundsMm('L1');
+      expect(inductorBody.max[0]! - inductorBody.min[0]!).toBeCloseTo(7.5, 1);
+      expect(inductorBody.max[2]! - inductorBody.min[2]!).toBeCloseTo(7.5, 1);
+      expect((inductorBody.max[0]! + inductorBody.min[0]!) / 2).toBeCloseTo(-8, 1);
+      expect(inductorBody.max[1]! - inductorBody.min[1]!).toBeGreaterThan(2.5);
+      // The KiCad LED, not tscircuit's generic block: KiCad models carry several materials.
+      expect(nodes.get('LED1')?.getMesh()?.listPrimitives().length).toBeGreaterThan(1);
+      // The screw terminal stands on its pins: its pin row is centred on J1, whose pins run along X.
+      const terminal = boundsMm('J1');
+      expect(terminal.max[1]! - terminal.min[1]!).toBeGreaterThan(8);
+      // Two 5.08 mm poles: about 10.2 mm of housing plus its end walls.
+      expect(terminal.max[0]! - terminal.min[0]!).toBeGreaterThan(10);
+      expect(terminal.max[0]! - terminal.min[0]!).toBeLessThan(11.5);
+      expect((terminal.max[0]! + terminal.min[0]!) / 2).toBeCloseTo(10, 0);
+    });
+
+    it('fetches only tscircuit part hosts when the parts option is online', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const pack = await readFile(
+        new URL('assets/kicad/Package_SO_SOIC-8_3.9x4.9mm_P1.27mm.circuit.json', import.meta.url),
+        'utf8',
+      );
+      const online = vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url === 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm.circuit.json') {
+          return new Response(pack, { headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`unexpected request ${url}`);
+      });
+      vi.stubGlobal('fetch', online);
+      const blocked = 'https://example.invalid/part.glb';
+      const runtime = defineRuntime({
+        plugins: [middleware()],
+        kernels: [tscircuitKernel({ parts: 'online' })],
+        bundlers: [esbuildBundler()],
+      });
+      const client = createTestRuntimeClient({
+        runtime,
+        files: {
+          'main.tsx': `
+            export default () => (
+              <board width="20mm" height="20mm">
+                <chip name="U1" footprint="kicad:Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm" pcbX={-4} />
+                <chip name="U2" footprint="soic8" cadModel={{ glbUrl: '${blocked}' }} pcbX={5} />
+              </board>
+            );
+          `,
+        },
+      });
+      clients.add(client);
+      const document = client.open({ source: { path: 'main.tsx' }, watch: false });
+      documents.add(document);
+      const view = document.view('board');
+      const outcome = await view.rendering();
+      view.close();
+      vi.stubGlobal('fetch', fetchGuard);
+
+      expect(outcome.superseded).toBe(false);
+      const result = outcome.superseded ? undefined : outcome.rendering;
+      expect(online).toHaveBeenCalledWith(
+        'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm.circuit.json',
+        undefined,
+      );
+      expect(result?.success && result.issues).toContainEqual(expectNetworkWarning(blocked));
+      // The footprint the online resolver fetched placed its pads.
+      expect(result?.success && result.issues.some((issue) => issue.message.includes('SOIC-20W'))).toBe(false);
     });
 
     it('should not fetch an http footprint: the render completes with a warning naming the URL', async () => {
@@ -630,7 +793,7 @@ describe('TscircuitKernel', () => {
       expect(extent.height).toBeLessThan(0.01);
     });
 
-    it('should retain board textures and add feature-edge line primitives', async () => {
+    it('should render the presentation board as layer geometry by default', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       const glb = expectGlb(await render(client, 'main.tsx'));
@@ -639,13 +802,49 @@ describe('TscircuitKernel', () => {
       const io = await createNodeIo();
       const document = await io.readBinary(glb);
       const root = document.getRoot();
-      expect(root.listTextures().length).toBeGreaterThan(0);
-      expect(
-        root
-          .listMeshes()
-          .flatMap((mesh) => mesh.listPrimitives())
-          .filter((primitive) => primitive.getMode() === 1).length,
-      ).toBeGreaterThan(0);
+      expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
+      expect(root.listMaterials().some((material) => material.getName().includes('mask'))).toBe(true);
+    });
+
+    it('should draw edges on part bodies and the board outline only when edges are asked for', async () => {
+      const client = createClient({ 'main.tsx': fixtureBoard });
+      expectGlb(await render(client, 'main.tsx'));
+      const circuitJson = await readSettledCircuitJson(client);
+      const runtime = createMockKernelRuntime();
+      const context = await definition.initialize({}, runtime);
+      const handle = { circuitJson, sheets: new Map() };
+      const io = await createNodeIo();
+      const lineMeshes = async (content: Uint8Array<ArrayBuffer>) => {
+        const document = await io.readBinary(content);
+        const root = document.getRoot();
+        // No raster board texture: the board is layer geometry.
+        expect(root.listTextures()).toHaveLength(0);
+        expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
+        return root.listMeshes().filter((mesh) => mesh.listPrimitives().some((primitive) => primitive.getMode() === 1));
+      };
+      const runsBefore = converterRuns.count;
+      const plain = await definition.render!({ view: 'board', handle, options: {} }, runtime, context);
+      expect(await lineMeshes(plain.content as Uint8Array<ArrayBuffer>)).toHaveLength(0);
+
+      const edged = await definition.render!(
+        { view: 'board', handle, options: {}, content: { includeEdges: true } },
+        runtime,
+        context,
+      );
+      const edgedMeshes = await lineMeshes(edged.content as Uint8Array<ArrayBuffer>);
+      const board = edgedMeshes.find((mesh) =>
+        mesh.listPrimitives().some((primitive) => primitive.getMaterial()?.getName() === 'pcb-core'),
+      );
+      // The board core carries the outline and the holes; copper, mask, finish and silkscreen get no lines.
+      const boardPrimitives = board?.listPrimitives() ?? [];
+      expect(boardPrimitives.filter((primitive) => primitive.getMode() === 1)).toHaveLength(
+        boardPrimitives.filter((primitive) => primitive.getMaterial()?.getName() === 'pcb-core').length,
+      );
+      expect(boardPrimitives.length).toBeGreaterThan(4);
+      // Every part body is edged too: more than the core alone.
+      expect(edgedMeshes.length).toBeGreaterThan(4);
+      // The edge toggle reruns only the post-pass: the converter ran once for both renders.
+      expect(converterRuns.count - runsBefore).toBe(1);
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {
@@ -659,10 +858,10 @@ describe('TscircuitKernel', () => {
       expect(svg).toContain('class="tscircuit-schematic"');
       expect(svg).toContain('sch-component');
       expect(svg).toContain('sch-trace');
-      expect(svg).toContain('fill: rgb(0, 105, 0)');
-      // WCAG contrast of the net-label text colour against white paper.
-      const channel = 105 / 255;
-      const luminance = 0.7152 * ((channel + 0.055) / 1.055) ** 2.4;
+      // The light theme's text colour, and its WCAG contrast against white paper.
+      expect(svg).toContain('.text { fill: rgb(88, 98, 114); }');
+      const linear = (channel: number) => ((channel / 255 + 0.055) / 1.055) ** 2.4;
+      const luminance = 0.2126 * linear(88) + 0.7152 * linear(98) + 0.0722 * linear(114);
       expect(1.05 / (luminance + 0.05)).toBeGreaterThan(4.5);
       expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
     }, 20_000);
@@ -676,11 +875,30 @@ describe('TscircuitKernel', () => {
       expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
       expect(svg).toContain('data-type="pcb_background"');
       expect(svg).toContain('pcb-pad');
-      expect(svg).toContain('pcb-trace');
+      // The fabrication palette covers traces with solder mask.
+      expect(svg).toContain('pcb-soldermask');
       expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
       const circuitJson = await readSettledCircuitJson(client);
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
+      const engineering = await definition.render!(
+        { view: 'pcb', handle: { circuitJson, sheets: new Map() }, options: { palette: 'engineering' } },
+        runtime,
+        context,
+      );
+      expect(engineering.content).toContain('pcb-trace');
+      expect(engineering.content).not.toContain('pcb-soldermask');
+      const classic = await definition.render!(
+        {
+          view: 'schematic',
+          handle: { circuitJson, sheets: new Map() },
+          instance: undefined,
+          options: { theme: 'engineering' },
+        },
+        runtime,
+        context,
+      );
+      expect(classic.content).toContain('fill: rgb(0, 105, 0)');
       const pinSvg = await definition.render!(
         { view: 'pcb', handle: { circuitJson, sheets: new Map() }, options: { pinNumbers: true } },
         runtime,
@@ -737,9 +955,7 @@ describe('TscircuitKernel', () => {
 
   describe('kernel selection', () => {
     it('should route a .tsx file without any import by extension', async () => {
-      const client = createClient({
-        'board.tsx': 'export default () => <board width="10mm" height="10mm" />;',
-      });
+      const client = createClient({ 'board.tsx': 'export default () => <board width="10mm" height="10mm" />;' });
 
       expectGlb(await render(client, 'board.tsx'));
     });
@@ -937,9 +1153,7 @@ describe('TscircuitKernel', () => {
       const context = await definition.initialize({}, runtime);
       const circuitJson = [{ type: 'source_project_metadata', name: 'snapshot' }];
       const nativeHandle = definition.deserializeHandle!(
-        {
-          serialized: definition.serializeHandle!({ handle: { circuitJson, sheets: new Map() } }, runtime, context),
-        },
+        { serialized: definition.serializeHandle!({ handle: { circuitJson, sheets: new Map() } }, runtime, context) },
         runtime,
         context,
       );

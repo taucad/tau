@@ -4,6 +4,7 @@ import type { Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { DocumentChange, DocumentTransaction, EditorDocument } from '#lib/editor-document.js';
 import type { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
@@ -29,6 +30,8 @@ export type CodeEditorProps = Readonly<{
   lineHighlights?: ReadonlyArray<Readonly<{ fromLine: number; toLine: number; tone: 'mine' | 'theirs' }>>;
   onApply?: (transaction: DocumentTransaction) => DocumentChange | undefined;
   onHistory?: (kind: 'undo' | 'redo') => DocumentChange | undefined;
+  /** The cursor's symbol path, outermost first, for breadcrumbs outside the editor. */
+  onSymbolPath?: (path: readonly EditorSymbolCrumb[]) => void;
   /** Re-registers when the mounted view's document path changes. */
   onMount?: (view: EditorView, path: string) => void | (() => void);
 }>;

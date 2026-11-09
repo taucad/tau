@@ -1,11 +1,16 @@
-import { editorHighlightStyle } from '#components/code/editor-highlight-style.js';
+import { tauHighlighter } from '@taucad/grammars';
 import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
 import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
 import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
 import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
-import { availableLanguageActions, languageFeatureNavigation } from '#components/code/editor-language-features.js';
+import {
+  availableLanguageActions,
+  languageFeatureNavigation,
+  symbolPathListener,
+} from '#components/code/editor-language-features.js';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
@@ -36,7 +41,7 @@ import {
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemirror/commands';
 import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches, search } from '@codemirror/search';
-import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
+import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { cn } from '@taucad/ui/utils/cn';
 import {
   ContextMenu,
@@ -178,6 +183,7 @@ export function CodeEditorView({
   onApply,
   onHistory,
   onMount,
+  onSymbolPath,
   lineHighlights,
   showLineNumbers = true,
 }: CodeEditorProps): React.JSX.Element {
@@ -189,7 +195,7 @@ export function CodeEditorView({
   const semantics = useRef(new Compartment());
   const editable = useRef(new Compartment());
   const highlightedLines = useRef(new Compartment());
-  const callbacksRef = useRef({ onApply, onHistory, onMount, readOnly });
+  const callbacksRef = useRef({ onApply, onHistory, onMount, onSymbolPath, readOnly });
   const mountRegistration = useRef<
     | {
         view: EditorView;
@@ -205,8 +211,8 @@ export function CodeEditorView({
   const [canGoToDefinition, setCanGoToDefinition] = useState(false);
   const [languageActions, setLanguageActions] = useState<readonly AvailableLanguageAction[]>([]);
   useEffect(() => {
-    callbacksRef.current = { onApply, onHistory, onMount, readOnly };
-  }, [onApply, onHistory, onMount, readOnly]);
+    callbacksRef.current = { onApply, onHistory, onMount, onSymbolPath, readOnly };
+  }, [onApply, onHistory, onMount, onSymbolPath, readOnly]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -250,11 +256,14 @@ export function CodeEditorView({
           search({ createPanel: createEditorSearchPanel }),
           highlightSelectionMatches(),
           lintGutter(),
-          diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
-          syntaxHighlighting(editorHighlightStyle, { fallback: true }),
+          diagnostics ? storeDiagnostics(diagnostics, document, 'kernel') : [],
+          syntaxHighlighting(tauHighlighter),
           tooltips({ parent: overlay, position: 'fixed' }),
           definitionNavigation(),
           languageFeatureNavigation(),
+          symbolPathListener.of((path) => {
+            callbacksRef.current.onSymbolPath?.(path);
+          }),
           Prec.highest(
             keymap.of([
               { key: 'Mod-z', run: () => applyHistory('undo') },
@@ -350,11 +359,6 @@ export function CodeEditorView({
         applyingExternalRef.current = false;
       }
     });
-    const unsubscribeDiagnostics = diagnostics?.subscribe((event) => {
-      if (event.uri === document.uri && event.owner === 'kernel') {
-        forceLinting(view);
-      }
-    });
     const callback = callbacksRef.current.onMount;
     const dispose = callback?.(view, document.path);
     mountRegistration.current = {
@@ -370,7 +374,6 @@ export function CodeEditorView({
         mountRegistration.current = undefined;
       }
       unsubscribe();
-      unsubscribeDiagnostics?.();
       viewRef.current = undefined;
       view.destroy();
       overlay.remove();
@@ -486,7 +489,11 @@ export function CodeEditorView({
       }}
     >
       <ContextMenuTrigger className='contents'>
-        <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
+        {/* `isolate` keeps CodeMirror's own stacking (gutters 200, panels 300) below app menus and popovers at z-50. */}
+        <div
+          ref={hostRef}
+          className={cn('editor-container ph-no-capture isolate size-full overflow-hidden', className)}
+        />
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem

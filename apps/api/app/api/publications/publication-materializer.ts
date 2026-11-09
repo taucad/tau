@@ -32,9 +32,9 @@ import {
   isPublishableTauPath,
 } from '@taucad/types/constants';
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
-import type { DatabaseService } from '#database/database.service.js';
-import * as schema from '#database/schema.js';
-import { assertProjectActive } from '#database/project-lifecycle.js';
+import type { DatabaseService } from '@taucad/api-database';
+import * as schema from '@taucad/api-database/schema';
+import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
@@ -46,10 +46,26 @@ import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.
 /** Everything this module logs: an over-release, and nothing else. */
 const logger = new Logger('PublicationMaterializer');
 
-/** Per-file ceiling, unchanged from the upload path. */
+/**
+ * The most one published file may be: a product limit on what a viewer is
+ * served. The materializer streams, so this no longer bounds its memory.
+ */
 export const maxBytesPerPublishedFile = 25 * 1024 * 1024;
-/** Whole-publication ceiling, unchanged from the upload path. */
+/**
+ * The most one publication may be, across its files: a product limit, like
+ * {@link maxBytesPerPublishedFile}, and no longer a memory guard.
+ */
 export const maxPublishedTotalBytes = 50 * 1024 * 1024;
+
+/**
+ * Git blob bytes one `cat-file --batch` child answers at once, and the most the
+ * describe pass keeps for the uploads after it. A blob larger than this is read
+ * alone, so a batch is at most this or one file under the per-file ceiling.
+ */
+export const materializerBatchBytes = 8 * 1024 * 1024;
+
+/** Blobs looked up, copied or written at once. */
+const uploadConcurrency = 4;
 
 /**
  * One bounded `git` invocation inside a lease directory.
@@ -306,19 +322,132 @@ const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
   new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
 
+/** Where one LFS object is held, as the resolver answers it. */
+type LfsLocation = NonNullable<Awaited<ReturnType<LfsObjectResolver>>>;
+
 /**
- * The files of one named version, LFS pointers resolved to their bytes.
+ * One publishable file, described without its bytes.
  *
- * @param dependencies - Storage, for the LFS objects R2 holds.
+ * A git blob is hashed as its batch passes and let go; an LFS object is never
+ * read here at all, because its oid is its SHA-256 and the store checked that
+ * when the object was uploaded (the LFS endpoint signs every upload with the
+ * oid as its `x-amz-checksum-sha256`).
+ */
+export type PublishedFile = Readonly<{
+  path: string;
+  sha: string;
+  sizeBytes: number;
+  source:
+    | Readonly<{ kind: 'git'; objectId: string }>
+    /** `verified` when the store reports the oid as the checksum it checked on write. */
+    | Readonly<{ kind: 'lfs'; location: LfsLocation; verified: boolean; etag: string }>;
+}>;
+
+/** A tagged tree, described: every file, and the git bytes kept for the uploads. */
+export type PublishedTree = Readonly<{
+  files: readonly PublishedFile[];
+  /** Git blob bytes by object id, kept while they fit one batch, so most publishes read git once. */
+  retained: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+}>;
+
+/**
+ * Split entries into `cat-file` batches of at most {@link materializerBatchBytes}
+ * listed bytes; a larger entry goes alone.
+ *
+ * @param entries - Listed entries, one per object.
+ * @returns The batches, in order.
+ */
+const batchesOf = (entries: readonly TreeEntry[]): ReadonlyArray<readonly TreeEntry[]> => {
+  const batches: TreeEntry[][] = [];
+  let current: TreeEntry[] = [];
+  let currentBytes = 0;
+  for (const entry of entries) {
+    if (current.length > 0 && currentBytes + entry.sizeBytes > materializerBatchBytes) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(entry);
+    currentBytes += entry.sizeBytes;
+  }
+  if (current.length > 0) {
+    batches.push(current);
+  }
+  return batches;
+};
+
+/**
+ * Run `work` over `items`, at most `limit` at once.
+ *
+ * @param items - The work items.
+ * @param limit - How many run at once.
+ * @param work - One item's work.
+ */
+const forEachLimited = async <Item>(
+  items: readonly Item[],
+  limit: number,
+  work: (item: Item) => Promise<void>,
+): Promise<void> => {
+  let next = 0;
+  /* The first failure stops every lane taking another item, and is raised only
+     once the items already started have settled: a failed publish rolls back its
+     references, so nothing may still be writing into the store after it. */
+  const failures: unknown[] = [];
+  const lane = async (): Promise<void> => {
+    while (failures.length === 0 && next < items.length) {
+      const item = items[next] as Item;
+      next += 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each lane runs its items in turn; the lanes run together.
+        await work(item);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => lane()));
+  if (failures.length > 0) {
+    // oxlint-disable-next-line typescript/only-throw-error -- the first failure, as it was raised.
+    throw failures[0];
+  }
+};
+
+const fileTooLarge = (path: string): BadRequestException =>
+  new BadRequestException({
+    code: publicationApiCode.FILE_TOO_LARGE,
+    message: `File exceeds ${String(maxBytesPerPublishedFile)} bytes: ${path}`,
+  });
+
+const payloadTooLarge = (): BadRequestException =>
+  new BadRequestException({
+    code: publicationApiCode.PAYLOAD_TOO_LARGE,
+    message: 'This version is larger than a publication may be',
+  });
+
+/** The base64 SHA-256 a store reports, for a hex digest. */
+const base64Sha256 = (sha256Hex: string): string => Buffer.from(sha256Hex, 'hex').toString('base64');
+
+/**
+ * Describe one named version without holding it: every publishable file's
+ * digest, size and source, with LFS pointers resolved to where their objects
+ * are held.
+ *
+ * Every ceiling is enforced before the bytes it bounds are read: the listed
+ * sizes before any `cat-file`, and an LFS object's size from its pointer — and
+ * the store's own record of it — before the object is touched. Git blobs are
+ * read in batches of {@link materializerBatchBytes}, so what is resident is one
+ * batch and the bytes kept for the uploads, never the tree.
+ *
+ * @param dependencies - The git runner, storage and the LFS resolver.
  * @param input - The repository, project and tag.
- * @returns Project-relative path to bytes.
- * @throws NotFoundException When the tag names nothing in that repository.
+ * @returns The described tree.
+ * @throws NotFoundException When the tag names nothing, or an object never arrived.
  * @throws BadRequestException When the tree breaks a publication limit.
  */
-export const readPublishedTree = async (
+export const describePublishedTree = async (
   dependencies: MaterializerDependencies,
   input: Readonly<{ directory: string; projectId: string; ownerId: string; tag: string }>,
-): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+): Promise<PublishedTree> => {
   const entries = await listTree(dependencies.git, input.directory, input.tag).catch(() => {
     throw new NotFoundException({
       code: publicationApiCode.NOT_FOUND,
@@ -334,60 +463,163 @@ export const readPublishedTree = async (
     });
   }
 
-  /* Every ceiling is enforced on the sizes `ls-tree -l` reported, before any
-     object is read: the whole tree used to be buffered first, so a tree inside
-     quota by file count could exhaust the machine before the byte checks ran
-     (review R5). The post-read checks below still apply, because an LFS pointer
-     lists as its own few hundred bytes and expands to the object's. */
+  /* The listed sizes first, before any object is read (review R5). An LFS
+     pointer lists as its own few hundred bytes, so its object's size is checked
+     again below, from the pointer, before the object is touched. */
   let listedBytes = 0;
   for (const entry of entries) {
     if (entry.sizeBytes > maxBytesPerPublishedFile) {
-      throw new BadRequestException({
-        code: publicationApiCode.FILE_TOO_LARGE,
-        message: `File exceeds ${String(maxBytesPerPublishedFile)} bytes: ${entry.path}`,
-      });
+      throw fileTooLarge(entry.path);
     }
     listedBytes += entry.sizeBytes;
   }
   if (listedBytes > maxPublishedTotalBytes) {
-    throw new BadRequestException({
-      code: publicationApiCode.PAYLOAD_TOO_LARGE,
-      message: 'This version is larger than a publication may be',
-    });
+    throw payloadTooLarge();
   }
 
-  const objects = await readBlobs(dependencies.git, input.directory, entries);
-  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  const unique = [...new Map(entries.map((entry) => [entry.objectId, entry])).values()];
+  const described = new Map<string, Omit<PublishedFile, 'path'>>();
+  const pointers = new Map<string, Readonly<{ entry: TreeEntry; oid: string; size: number }>>();
+  const retained = new Map<string, Uint8Array<ArrayBuffer>>();
+  let retainedBytes = 0;
+  for (const batch of batchesOf(unique)) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch resident at a time is the point of the batches.
+    const objects = await readBlobs(dependencies.git, input.directory, batch);
+    for (const entry of batch) {
+      const stored = objects.get(entry.objectId);
+      if (stored === undefined) {
+        continue;
+      }
+      const pointer = parseLfsPointer(stored);
+      if (pointer !== undefined) {
+        if (pointer.size > maxBytesPerPublishedFile) {
+          throw fileTooLarge(entry.path);
+        }
+        pointers.set(entry.objectId, { entry, ...pointer });
+        continue;
+      }
+      described.set(entry.objectId, {
+        sha: sha256HexFromBytes(stored),
+        sizeBytes: stored.byteLength,
+        source: { kind: 'git', objectId: entry.objectId },
+      });
+      if (retainedBytes + stored.byteLength <= materializerBatchBytes) {
+        retained.set(entry.objectId, stored);
+        retainedBytes += stored.byteLength;
+      }
+    }
+  }
+
+  /* The whole publication at its served sizes — an LFS file at its object's,
+     from the pointer — before any object is located. */
   let totalBytes = 0;
-
   for (const entry of entries) {
-    const stored = objects.get(entry.objectId);
-    if (stored === undefined) {
-      continue;
-    }
-    const pointer = parseLfsPointer(stored);
-    const bytes =
-      pointer === undefined
-        ? stored
-        : // oxlint-disable-next-line no-await-in-loop -- one large object per iteration; parallel presigned reads would multiply peak memory by the file count.
-          await readLfsObject(dependencies, { projectId: input.projectId, ownerId: input.ownerId, oid: pointer.oid });
-    if (bytes.byteLength > maxBytesPerPublishedFile) {
-      throw new BadRequestException({
-        code: publicationApiCode.FILE_TOO_LARGE,
-        message: `File exceeds ${String(maxBytesPerPublishedFile)} bytes: ${entry.path}`,
-      });
-    }
-    totalBytes += bytes.byteLength;
+    totalBytes += described.get(entry.objectId)?.sizeBytes ?? pointers.get(entry.objectId)?.size ?? 0;
     if (totalBytes > maxPublishedTotalBytes) {
-      throw new BadRequestException({
-        code: publicationApiCode.PAYLOAD_TOO_LARGE,
-        message: 'This version is larger than a publication may be',
-      });
+      throw payloadTooLarge();
     }
-    files.set(entry.path, bytes);
   }
 
+  await forEachLimited([...pointers.values()], uploadConcurrency, async ({ entry, oid, size }) => {
+    const location = await locateLfsObject(dependencies, {
+      projectId: input.projectId,
+      ownerId: input.ownerId,
+      oid,
+      size,
+    });
+    described.set(entry.objectId, { sha: oid, sizeBytes: size, source: { kind: 'lfs', ...location } });
+  });
+
+  const files = entries.flatMap((entry): PublishedFile[] => {
+    const file = described.get(entry.objectId);
+    return file === undefined ? [] : [{ path: entry.path, ...file }];
+  });
+  return { files, retained };
+};
+
+/**
+ * The first bytes of one described file, for a check that needs only its head.
+ *
+ * @param dependencies - The git runner and storage.
+ * @param read - The lease directory, the described tree (whose kept bytes are
+ *   used where they are), the file and how many bytes.
+ * @returns Up to `length` bytes from the start of the file.
+ */
+const readHead = async (
+  dependencies: MaterializerDependencies,
+  read: Readonly<{ directory: string; tree: PublishedTree; file: PublishedFile; length: number }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const { directory, tree, file, length } = read;
+  if (file.source.kind === 'git') {
+    const { objectId } = file.source;
+    const kept = tree.retained.get(objectId);
+    const fetched =
+      kept === undefined
+        ? await readBlobs(dependencies.git, directory, [{ path: file.path, objectId, sizeBytes: 0 }])
+        : undefined;
+    const bytes = kept ?? fetched?.get(objectId);
+    return new Uint8Array(bytes?.subarray(0, length) ?? new Uint8Array());
+  }
+  if (file.sizeBytes === 0) {
+    return new Uint8Array();
+  }
+  const stored = await dependencies.storage.getBlob({
+    ...file.source.location,
+    range: { start: 0, end: Math.min(length, file.sizeBytes) - 1 },
+  });
+  const head = await readStream(stored.body);
+  return head.subarray(0, length);
+};
+
+/**
+ * The files of one named version with their bytes, LFS pointers resolved.
+ *
+ * This reads every byte of the version into memory, so the materializer never
+ * calls it: it is the whole-tree view the tests compare against a stock clone,
+ * built on {@link describePublishedTree} so it enforces the same refusals.
+ *
+ * @param dependencies - Storage, for the LFS objects R2 holds.
+ * @param input - The repository, project and tag.
+ * @returns Project-relative path to bytes.
+ * @throws NotFoundException When the tag names nothing in that repository.
+ * @throws BadRequestException When the tree breaks a publication limit.
+ */
+export const readPublishedTree = async (
+  dependencies: MaterializerDependencies,
+  input: Readonly<{ directory: string; projectId: string; ownerId: string; tag: string }>,
+): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+  const tree = await describePublishedTree(dependencies, input);
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  for (const file of tree.files) {
+    // oxlint-disable-next-line no-await-in-loop -- one file's bytes read at a time.
+    files.set(file.path, await readPublishedFile(dependencies, { directory: input.directory, tree, file }));
+  }
   return files;
+};
+
+/**
+ * One described file's whole bytes.
+ *
+ * @param dependencies - The git runner and storage.
+ * @param request - The lease directory, the described tree and the file.
+ * @returns Its bytes.
+ */
+const readPublishedFile = async (
+  dependencies: MaterializerDependencies,
+  request: Readonly<{ directory: string; tree: PublishedTree; file: PublishedFile }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const { directory, tree, file } = request;
+  if (file.source.kind === 'lfs') {
+    return readLfsObject(dependencies, file.source.location);
+  }
+  const kept = tree.retained.get(file.source.objectId);
+  if (kept !== undefined) {
+    return kept;
+  }
+  const read = await readBlobs(dependencies.git, directory, [
+    { path: file.path, objectId: file.source.objectId, sizeBytes: file.sizeBytes },
+  ]);
+  return read.get(file.source.objectId) ?? new Uint8Array();
 };
 
 /**
@@ -402,27 +634,52 @@ const lfsObjectNotUploaded = (): NotFoundException =>
   });
 
 /**
- * One LFS object's bytes, from the layout the LFS endpoint writes (W9, W11a).
+ * Where one LFS object is held, checked against its pointer without reading it.
  *
- * @param dependencies - Storage.
- * @param object - Whose storage and project it belongs to, and its object id.
- * @returns The object's bytes.
- * @throws NotFoundException When the pointer names an object the remote never received.
+ * @param dependencies - Storage and the LFS resolver.
+ * @param object - Whose storage and project, the pointer's oid and size.
+ * @returns The location, whether the store vouches for the oid as its checksum, and the ETag it holds.
+ * @throws NotFoundException When the object never arrived, or arrived at another size.
  */
-const readLfsObject = async (
+const locateLfsObject = async (
   dependencies: MaterializerDependencies,
-  object: Readonly<{ projectId: string; ownerId: string; oid: string }>,
-): Promise<Uint8Array<ArrayBuffer>> => {
+  object: Readonly<{ projectId: string; ownerId: string; oid: string; size: number }>,
+): Promise<Readonly<{ location: LfsLocation; verified: boolean; etag: string }>> => {
   /* Where the object actually is: the tenant key every upload now lands at
      (D24), or the pre-D24 key under `blobs/` for a project whose objects have
      not been relocated yet. One resolver, the LFS endpoint's own, so a
      publication reads exactly where that endpoint serves from (W4b). */
-  const held = await dependencies.resolveLfsObject(object);
-  if (held === undefined) {
+  const location = await dependencies.resolveLfsObject(object);
+  if (location === undefined) {
     throw lfsObjectNotUploaded();
   }
+  const held = await dependencies.storage.headBlob({ ...location, checksum: true });
+  /* A store whose object is gone, or holds another length than the pointer
+     names, does not hold this object: the push did not finish. */
+  if (held === undefined || held.size !== object.size) {
+    throw lfsObjectNotUploaded();
+  }
+  /* Only a tenant key's writers pin the checksum to the oid (the LFS endpoint
+     signs each upload with it); a legacy key's checksum is never trusted, so
+     its object streams under the oid instead (git-lfs.service.ts). */
+  const verified = location.namespace === 'tenants' && held.checksumSha256 === base64Sha256(object.oid);
+  return { location, verified, etag: held.etag };
+};
+
+/**
+ * One LFS object's bytes, from the layout the LFS endpoint writes (W9, W11a).
+ *
+ * @param dependencies - Storage.
+ * @param location - Where the object is held.
+ * @returns The object's bytes.
+ * @throws NotFoundException When the object is not there.
+ */
+const readLfsObject = async (
+  dependencies: MaterializerDependencies,
+  location: LfsLocation,
+): Promise<Uint8Array<ArrayBuffer>> => {
   try {
-    const stored = await dependencies.storage.getBlob(held);
+    const stored = await dependencies.storage.getBlob(location);
     return await readStream(stored.body);
   } catch (error) {
     /* Only an absent object is the publisher's to act on. A store outage, a
@@ -432,6 +689,155 @@ const readLfsObject = async (
       throw error;
     }
     throw lfsObjectNotUploaded();
+  }
+};
+
+/** One blob the publication store must hold, under one content type. */
+type BlobUpload = Readonly<{ file: PublishedFile; contentType: string }>;
+
+const cacheControlFor = (tier: StorageTier): string =>
+  tier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable';
+
+/**
+ * Put one LFS object into the publication store without reading it here.
+ *
+ * A store that vouches for the oid is asked to copy it server-side; one that
+ * does not, or that refuses the copy, has the object streamed through with the
+ * oid as the checksum it must verify, so the blob keyed by that digest can only
+ * ever hold the bytes it names.
+ *
+ * @param dependencies - Storage.
+ * @param upload - The object and its content type.
+ * @param destination - The blob key and tier.
+ */
+const putLfsBlob = async (
+  dependencies: MaterializerDependencies,
+  upload: BlobUpload,
+  destination: Readonly<{ key: string; tier: StorageTier }>,
+): Promise<void> => {
+  const { file, contentType } = upload;
+  if (file.source.kind !== 'lfs') {
+    return;
+  }
+  const { storage } = dependencies;
+  const target = { namespace: 'blobs', key: destination.key, tier: destination.tier } as const;
+  const cacheControl = cacheControlFor(destination.tier);
+  if (file.source.verified) {
+    try {
+      /* Copied only if the object is still the one its HEAD vouched for. */
+      await storage.copyObject({
+        source: file.source.location,
+        destination: target,
+        contentType,
+        cacheControl,
+        ...(file.source.etag === '' ? {} : { sourceIfMatch: file.source.etag }),
+      });
+      return;
+    } catch (error) {
+      if (isS3ObjectMissing(error)) {
+        throw lfsObjectNotUploaded();
+      }
+      /* A store that cannot copy between these buckets still takes a stream. */
+      logger.warn({ key: destination.key, error }, 'A server-side LFS copy was refused; streaming the object instead');
+    }
+  }
+  let stored: Awaited<ReturnType<ObjectStorageService['getBlob']>>;
+  try {
+    stored = await storage.getBlob(file.source.location);
+  } catch (error) {
+    if (!isS3ObjectMissing(error)) {
+      throw error;
+    }
+    throw lfsObjectNotUploaded();
+  }
+  try {
+    await storage.putBlobStream({
+      ...target,
+      body: stored.body,
+      contentLength: file.sizeBytes,
+      contentType,
+      cacheControl,
+      checksumSha256: base64Sha256(file.sha),
+    });
+  } catch (error) {
+    /* A refused put leaves the read open: let go of it rather than the socket. */
+    stored.body.destroy();
+    throw error;
+  }
+};
+
+/**
+ * Write every blob the store does not already hold, a bounded number at once.
+ *
+ * Git bytes kept from the describe pass are written directly; the rest are read
+ * again in batches, and only for blobs the store lacks, so a re-publish of
+ * unchanged content reads git once. LFS objects never pass through here.
+ *
+ * @param dependencies - The git runner and storage.
+ * @param upload - The lease directory, the described tree and which bucket the blobs go to.
+ */
+const uploadPublishedBlobs = async (
+  dependencies: MaterializerDependencies,
+  upload: Readonly<{ directory: string; tree: PublishedTree; tier: StorageTier }>,
+): Promise<void> => {
+  const { directory, tree, tier } = upload;
+  const { storage } = dependencies;
+  const uploads = [
+    ...new Map(
+      tree.files.map((file) => {
+        const contentType = publicationContentType(file.path);
+        return [`${file.sha}:${contentType}`, { file, contentType }] as const;
+      }),
+    ).values(),
+  ];
+  const missing: Array<BlobUpload & { exists: boolean }> = [];
+  await forEachLimited(uploads, uploadConcurrency, async (upload) => {
+    const existing = await storage.headBlob({ namespace: 'blobs', key: blobKeyFromSha256Hex(upload.file.sha), tier });
+    if (existing === undefined || existing.contentType !== upload.contentType) {
+      missing.push({ ...upload, exists: existing !== undefined });
+    }
+  });
+
+  const putGitBlob = async (upload: BlobUpload & { exists: boolean }, body: Uint8Array<ArrayBuffer>): Promise<void> => {
+    await storage.putBlob({
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(upload.file.sha),
+      body,
+      contentType: upload.contentType,
+      ...(upload.exists ? {} : { ifNoneMatch: '*' }),
+      cacheControl: cacheControlFor(tier),
+      tier,
+    });
+  };
+
+  const lfs = missing.filter((upload) => upload.file.source.kind === 'lfs');
+  const gitUploads = missing.filter(
+    (upload): upload is BlobUpload & { exists: boolean; file: PublishedFile & { source: { kind: 'git' } } } =>
+      upload.file.source.kind === 'git',
+  );
+  const kept = gitUploads.filter((upload) => tree.retained.has(upload.file.source.objectId));
+  const reread = gitUploads.filter((upload) => !tree.retained.has(upload.file.source.objectId));
+
+  await forEachLimited(lfs, uploadConcurrency, async (upload) =>
+    putLfsBlob(dependencies, upload, { key: blobKeyFromSha256Hex(upload.file.sha), tier }),
+  );
+  await forEachLimited(kept, uploadConcurrency, async (upload) =>
+    putGitBlob(upload, tree.retained.get(upload.file.source.objectId) ?? new Uint8Array()),
+  );
+  const byObject = new Map(reread.map((upload) => [upload.file.source.objectId, upload]));
+  const listed = [...byObject.values()].map(({ file }) => ({
+    path: file.path,
+    objectId: file.source.objectId,
+    sizeBytes: file.sizeBytes,
+  }));
+  for (const batch of batchesOf(listed)) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch resident at a time.
+    const objects = await readBlobs(dependencies.git, directory, batch);
+    const batchUploads = reread.filter((upload) => objects.has(upload.file.source.objectId));
+    // oxlint-disable-next-line no-await-in-loop -- the batch is written before the next is read.
+    await forEachLimited(batchUploads, uploadConcurrency, async (upload) =>
+      putGitBlob(upload, objects.get(upload.file.source.objectId) ?? new Uint8Array()),
+    );
   }
 };
 
@@ -483,42 +889,41 @@ export const materializePublication = async (
   });
   const revision = new TextDecoder().decode(head).trim();
   const manifestKey = `publications/${input.publicationId}/${revision}.json`;
-  const files = await readPublishedTree(dependencies, input);
+  const tree = await describePublishedTree(dependencies, input);
   const tier: StorageTier = input.visibility === 'private' ? 'private' : 'public';
+  const byPath = new Map(tree.files.map((file) => [file.path, file]));
 
   /* A manifest that names a file it has no digest for is a publication whose
      viewer opens nothing, so the entry path is checked against the tree rather
      than trusted from the request. */
-  if (input.entryPath !== undefined && input.entryPath !== '' && !files.has(normalizeRelativePath(input.entryPath))) {
+  if (input.entryPath !== undefined && input.entryPath !== '' && !byPath.has(normalizeRelativePath(input.entryPath))) {
     throw new NotFoundException({
       code: publicationApiCode.MISSING_ENTRY_PATH,
       message: `This version does not contain ${input.entryPath}.`,
     });
   }
 
-  const thumbnailBytes = files.get('thumbnail.webp');
-  if (thumbnailBytes !== undefined && !isWebp(thumbnailBytes)) {
+  /* The RIFF/WEBP header is all the check reads: twelve bytes, from git or by a
+     ranged read of the LFS object. */
+  const thumbnailFile = byPath.get('thumbnail.webp');
+  if (
+    thumbnailFile !== undefined &&
+    !isWebp(await readHead(dependencies, { directory: input.directory, tree, file: thumbnailFile, length: 12 }))
+  ) {
     throw new BadRequestException({
       code: publicationApiCode.INVALID_THUMBNAIL_WEBP,
       message: 'thumbnail.webp is not a valid WebP file',
     });
   }
 
-  const uploads = [...files.entries()].map(([relativePath, bytes]) => ({
-    path: relativePath,
-    bytes,
-    sha: sha256HexFromBytes(bytes),
-    contentType: publicationContentType(relativePath),
-  }));
+  const uploads = tree.files;
 
   const increments = new Map<string, BlobRefIncrement>();
-  for (const { bytes, sha } of uploads) {
+  for (const { sizeBytes, sha } of uploads) {
     const existing = increments.get(sha);
     increments.set(
       sha,
-      existing === undefined
-        ? { sha256: sha, sizeBytes: bytes.byteLength, count: 1 }
-        : { ...existing, count: existing.count + 1 },
+      existing === undefined ? { sha256: sha, sizeBytes, count: 1 } : { ...existing, count: existing.count + 1 },
     );
   }
 
@@ -533,24 +938,9 @@ export const materializePublication = async (
   const newReferences = input.heldManifestKey === manifestKey ? [] : blobReferences;
   await applyBlobReferences(writer, newReferences);
 
-  await Promise.all(
-    uploads.map(async ({ bytes, sha, contentType }) => {
-      const key = blobKeyFromSha256Hex(sha);
-      const existing = await storage.headBlob({ namespace: 'blobs', key, tier });
-      if (existing !== undefined && existing.contentType === contentType) {
-        return;
-      }
-      await storage.putBlob({
-        namespace: 'blobs',
-        key,
-        body: bytes,
-        contentType,
-        ...(existing === undefined ? { ifNoneMatch: '*' } : {}),
-        cacheControl: tier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable',
-        tier,
-      });
-    }),
-  );
+  /* A bounded number at once, LFS objects copied in the store and git bytes
+     from the describe pass or a batch re-read: never the tree in memory. */
+  await uploadPublishedBlobs(dependencies, { directory: input.directory, tree, tier });
 
   const thumbnail = uploads.find((upload) => upload.path === 'thumbnail.webp');
   const thumbnailKey = thumbnail ? `blobs/${blobKeyFromSha256Hex(thumbnail.sha)}` : 'defaults/thumb.webp';

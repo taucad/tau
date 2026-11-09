@@ -11,27 +11,31 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 
+import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileStatEntry } from '@taucad/filesystem';
+import type { BatchEntry, BatchOptions, BatchReceipt, FileMode, FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { cleanLargeObjects, lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import { blobOid } from '#tree-id-memo.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { Checkout, ConflictRecord, RevisionPort } from '#revision-port.js';
+import { remoteTrackingRef } from '#remotes.js';
+import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
-import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import {
@@ -49,6 +53,20 @@ import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
 import type { SyncFetchActorOutput, SyncMergeActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
+
+/*
+ * A surface whose primitives a test overrides is driven through them: Node's own batch (D16) stages,
+ * renames and syncs below `writeFile`, so an override there would see nothing.
+ */
+const primitiveBatch = {
+  async applyBatch(
+    this: RevisionFileSystem,
+    entries: readonly BatchEntry[],
+    options?: BatchOptions,
+  ): Promise<BatchReceipt[]> {
+    return AbstractFileSystemProvider.prototype.applyBatch.call(this, entries, options);
+  },
+};
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -1071,8 +1089,13 @@ describe('settling a turn', () => {
   it('refuses to publish when an applied write or deletion silently did not land', async () => {
     const swallowed = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RevisionFileSystem, {
-        rename: async (from: string, to: string) => (swallowed.has(to) ? undefined : real.rename(from, to)),
+      Object.assign(Object.create(real) as RevisionFileSystem, primitiveBatch, {
+        /* A new file is written at its final path in the apply's batch, which
+         * drives this surface's own primitives: the write is accepted and kept nowhere. */
+        writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) =>
+          swallowed.has(path) ? undefined : real.writeFile(path, data),
+        setFileMode: async (path: string, mode: FileMode) =>
+          swallowed.has(path) ? undefined : real.setFileMode?.(path, mode),
       }),
     );
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -1091,6 +1114,50 @@ describe('settling a turn', () => {
 
     /* The turn adds a file; the live tree does not have it, so settling has to
      * write it — and this checkout accepts the call and keeps nothing. */
+    await filesystem.writeFile('notes.md', 'the turn wrote this\n');
+    const captured = await run<{ captureId: string }>(actors.turn.capture, { checkoutId: 'live', turnId: 'turn-1' });
+    await filesystem.unlink('notes.md');
+
+    await expect(
+      run(actors.turn.merge, {
+        checkoutId: 'live',
+        captureId: captured.captureId,
+        baseRevisionId: baseRevision.revisionId,
+      }),
+    ).rejects.toThrow(/did not keep the paths this change wrote: notes\.md/u);
+  }, 30_000);
+
+  /* EQ6, D11: the apply reads back what it wrote and compares the bytes, so a
+   * write that landed at the right size with the wrong bytes is caught — no
+   * receipt or size and mtime compare could see it. */
+  it('refuses to publish when an applied write landed same-size but corrupt', async () => {
+    const corrupted = new Set(['notes.md']);
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
+      Object.assign(Object.create(real) as RevisionFileSystem, primitiveBatch, {
+        writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+          if (!corrupted.has(path) || typeof data === 'string') {
+            return real.writeFile(path, data);
+          }
+          const flipped = Uint8Array.from(data);
+          flipped[0] = ((flipped[0] ?? 0) + 1) % 256;
+          return real.writeFile(path, flipped);
+        },
+      }),
+    );
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const base = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const baseRevision = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: base.cutId,
+      treeId: base.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+
     await filesystem.writeFile('notes.md', 'the turn wrote this\n');
     const captured = await run<{ captureId: string }>(actors.turn.capture, { checkoutId: 'live', turnId: 'turn-1' });
     await filesystem.unlink('notes.md');
@@ -1376,9 +1443,270 @@ describe('restore, through the machine that owns it', () => {
     });
     expect(tree.facts.filter((fact) => fact.type === 'checkoutChanged')).toEqual([]);
     expect(await filesystem.exists('extra.txt')).toBe(false);
-    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt']);
+    /* A restore writes another revision's tree: a new tree for readiness, with the closure it lands first (D10, I7). */
+    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt'], {
+      purpose: 'tree',
+      closure: ['tau.json'],
+    });
     expect(release).toHaveBeenCalledOnce();
     tree.actor.stop();
+  }, 30_000);
+
+  /* D10: a tree write whose fill check fails owes the checkout the fill's word; the next capture gives it. */
+  it('checks the fill again at the next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    const failing = new Proxy(filesystem, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+        if (property === 'applyBatch') {
+          return async (...parameters: unknown[]) => {
+            if (failWrite) {
+              failWrite = false;
+              /* The recovery's capture and the fill check that follows both fail. */
+              failReads = 2;
+              throw new Error('The disk refused the write.');
+            }
+            return bound(...parameters);
+          };
+        }
+        if (property === 'readdirEntries') {
+          return async (...parameters: unknown[]) => {
+            if (failReads > 0) {
+              failReads -= 1;
+              throw new Error('The disk could not be listed.');
+            }
+            return bound(...parameters);
+          };
+        }
+        return bound;
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const reports: LargeObjectsReport[] = [];
+    const tree = await startTree(port, failing, { onLargeObjects: (report) => reports.push(report) });
+    await filesystem.writeFile('extra.txt', 'added\n');
+    const first = await tree.save();
+    await filesystem.unlink('extra.txt');
+    await tree.save();
+
+    failWrite = true;
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const told = reports.length;
+
+    await filesystem.writeFile('later.ts', 'export const later = true;\n');
+    await tree.save();
+    await vi.waitFor(() => {
+      expect(reports.length).toBeGreaterThan(told);
+    });
+    expect(reports.at(-1)?.facet).toBeUndefined();
+    tree.actor.stop();
+  }, 30_000);
+
+  /* D10: the same owed check, for a linked checkout: its next capture gives the fill's word, not only a later pull. */
+  it('checks a linked checkout fill again at its next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+
+    await run(actors.checkout.captureTree, { checkoutId: linkedId });
+    await vi.waitFor(() => {
+      expect(told()).toBeGreaterThan(before);
+    });
+    expect(reports.findLast((report) => report.checkoutId === linkedId)?.facet).toBeUndefined();
+  }, 30_000);
+
+  /* D10: an owed check samples the checkout's tree writes before it awaits, as `fillSoon` does: a write begun in the gap owns the word. */
+  it('starts no owed fill for a linked checkout once a newer tree write has begun', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+    /* The owed check waits on its timer while a restore writes another tree, which gives its own word. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await run(actors.checkout.captureTree, { checkoutId: linkedId });
+      const again = await run<{ planId: string }>(actors.restore.computePlan, {
+        checkoutId: linkedId,
+        target: first.commitId,
+      });
+      await run(actors.restore.applyPlan, { checkoutId: linkedId, planId: again.planId });
+      await vi.waitFor(() => {
+        expect(told()).toBeGreaterThan(before);
+      });
+      const written = told();
+      vi.runOnlyPendingTimers();
+      /* Settle the owed check's work, had it started: its reads are real disk reads. */
+      for (let turn = 0; turn < 50; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one event-loop turn at a time.
+        await new Promise((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      expect(told()).toBe(written);
+    } finally {
+      vi.useRealTimers();
+    }
   }, 30_000);
 
   it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
@@ -1958,7 +2286,7 @@ for (const actorSet of actorSets) {
     it('rolls the checkout back when application fails or the ref CAS loses', async () => {
       const context = await synchronized();
       let failWrite = true;
-      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, primitiveBatch, {
         writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           if (path.includes('.main.ts.') && path.endsWith('.tmp') && failWrite) {
             failWrite = false;
@@ -3210,6 +3538,380 @@ describe('independent sync record failures', () => {
     expect(requested).toHaveLength(5);
   }, 30_000);
 
+  /* R5: a fresh device learns the export preference from the manifest alone, not the whole tree. */
+  it('reads only the fetched manifest to learn a fresh device’s export preference', async () => {
+    const context = await fixture({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['tau.json', '{"syncLargeExports":true}\n'],
+        ['main.ts', 'base\n'],
+        ['parts/a.step', 'solid a\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    const reads: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readTree: async (id, options) => {
+          reads.push(options?.paths);
+          return context.port.readTree(id, options);
+        },
+        listRemoteRefs: async () => [
+          { name: 'refs/heads/main', head },
+          { name: 'refs/tau/evidence/exports', head },
+        ],
+        fetch: async () => ({ refs: [] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+
+    expect(fetched.recordProjection?.syncLargeExports).toBe(true);
+    expect(reads).toStrictEqual([['tau.json']]);
+  }, 30_000);
+
+  /* R4: the connect-time fetch takes what the opening pull would, and that pull then fetches nothing. */
+  it('fetches only the authored refs on connect, and the opening pull does not fetch them again', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const advertised = [
+      { name: 'refs/heads/main', head },
+      { name: 'refs/heads/feature', head },
+      { name: 'refs/tags/v1', head },
+      { name: 'refs/tau/ops/device-b', head },
+      { name: 'refs/tau/chats/c1', head },
+      { name: 'refs/tau/evidence/exports', head },
+      { name: 'refs/tau/artifacts/geospec-candidates/device-b', head },
+    ];
+    const authored = ['refs/heads/main', 'refs/heads/feature', 'refs/tags/v1'];
+    let listings = 0;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          listings += 1;
+          return advertised;
+        },
+        fetch: async (input) => {
+          requested.push(input.refs);
+          await Promise.all(
+            (input.refs ?? []).map(async (name) =>
+              context.port.updateRef({
+                name: remoteTrackingRef('tau', name),
+                expectedHead: await context.port.readRef(remoteTrackingRef('tau', name)),
+                head,
+              }),
+            ),
+          );
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(requested).toEqual([authored]);
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    /* The opening pull still reads the remote once, for its leases, and fetches nothing. */
+    expect(listings).toBe(2);
+    expect(requested).toEqual([authored]);
+    /* The chat still arrives: the record projection asks for it by name. */
+    expect(fetched.recordProjection?.fetchRefs).toEqual(['refs/tau/chats/c1']);
+    await run(actors.sync.projectRecords, fetched.recordProjection);
+    expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
+    /* Another device's operation log never comes down. */
+    expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  /* R6: `validate`'s listing is the connect-time fetch's advertisement, for the same destination only. */
+  it('hands validate’s listing to the connect-time fetch, and lists again for a changed destination', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(1);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toBe(listings[0]);
+
+    /* Taken once: a second connect-time fetch lists for itself. */
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed[1]).toBe(listings[1]);
+
+    /* A destination re-pointed after `validate` read it is not the one it listed. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-2.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed[2]).toBe(listings[3]);
+
+    /* The pull hands its own listing to its fetch too. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(handed.at(-1)).toBe(listings.at(-1));
+  }, 30_000);
+
+  /* D11, S9: a connect whose branch the remote already holds at this head pushes nothing, so it costs one `info/refs`. */
+  it('pushes nothing at connect when the remote already advertises the branch at this head', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let remoteHead: RevisionId | undefined = head;
+    const pushed: RevisionPushInput[] = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => (remoteHead === undefined ? [] : [{ name: 'refs/heads/main', head: remoteHead }]),
+        fetch: async () => ({ refs: [] }),
+        push: async (input) => {
+          pushed.push(input);
+          return { refs: input.refs.map((ref) => ({ name: ref.name, status: 'updated', head })) };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed).toHaveLength(0);
+
+    remoteHead = undefined;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed.map((input) => input.refs.map((ref) => ref.name))).toEqual([['refs/heads/main']]);
+  }, 30_000);
+
+  /* R6 review: only a validation that finished as the current, unstopped one leaves its listing behind. */
+  it('keeps no listing from a stopped or overtaken validation', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const held: Array<PromiseWithResolvers<void>> = [];
+    let hold = false;
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          if (hold) {
+            const gate = Promise.withResolvers<void>();
+            held.push(gate);
+            await gate.promise;
+          }
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+    const input = { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' };
+    const waitForListing = async (count: number): Promise<void> => {
+      await vi.waitFor(() => {
+        expect(listings).toHaveLength(count);
+      });
+    };
+
+    /* Stopped: its listing lands after the stop and is not kept. */
+    hold = true;
+    const stopped = createActor(actors.remote.validate, { input });
+    stopped.start();
+    await waitForListing(1);
+    stopped.stop();
+    held[0]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    hold = false;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed.at(-1)).toBe(listings[1]);
+
+    /* Overtaken: the newer validation's listing is the one kept. */
+    hold = true;
+    const older = createActor(actors.remote.validate, { input });
+    older.start();
+    await waitForListing(3);
+    hold = false;
+    await run(actors.remote.validate, input);
+    held[1]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed.at(-1)).toBe(listings[3]);
+    older.stop();
+  }, 30_000);
+
+  it('forgets the connect-time proof when the connect-time fetch fails', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let failNext = true;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/heads/main', head }],
+        fetch: async (input) => {
+          requested.push(input.refs);
+          if (failNext) {
+            failNext = false;
+            throw new RevisionPortError('INVALID_TRANSPORT', 'LFS transfer failed.');
+          }
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await expect(run(actors.remote.initialSync, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'LFS transfer failed',
+    );
+    /* The tracking ref already names the tip, but nothing this session proved it hydrated. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toEqual([['refs/heads/main'], ['refs/heads/main']]);
+  }, 30_000);
+
+  /* R4 review: the connect no longer writes the evidence tracking ref, so a reconnect's opening pull must still
+   * read a record this device already holds as applied, and never move its changed exports aside. */
+  it.each([
+    { name: 'its own ref names the remote record', local: 'same' },
+    { name: 'its own ref recorded on top of the remote record', local: 'ahead' },
+  ] as const)(
+    'keeps differing local exports on a reconnect when $name',
+    async ({ local }) => {
+      const context = await fixture({
+        'tau.json': '{"syncLargeExports":true}\n',
+        'exports/shared.step': 'edited since it was recorded\n',
+      });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const recorded = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: 'Exports' },
+      });
+      const remoteHead = revisionId(recorded.commitId);
+      const ahead =
+        local === 'same'
+          ? undefined
+          : await context.port.writeRevision({
+              parents: [remoteHead],
+              tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded again\n']]),
+              provenance: { source: 'user', actorId: 'device-a', createdAt: 2 },
+              summary: { generated: 'Exports again' },
+            });
+      const localHead = ahead === undefined ? remoteHead : revisionId(ahead.commitId);
+      await context.port.updateRef({ name: 'refs/tau/evidence/exports', expectedHead: undefined, head: localHead });
+      const actors = createRevisionActors({
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+          fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/tau/evidence/exports', head: remoteHead }] }),
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      expect(fetched.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+      const projected = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
+
+      expect(projected.records).toEqual([{ name: 'refs/tau/evidence/exports', status: 'upToDate', head: remoteHead }]);
+      expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('edited since it was recorded\n');
+      expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
+    },
+    30_000,
+  );
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',
@@ -3275,6 +3977,69 @@ describe('independent sync record failures', () => {
     expect(offeredParents).toContain(head);
   }, 30_000);
 });
+
+/* D9, D10: a real merge writes its paths over the files the fence holds, so a fill that landed meanwhile stays landed. */
+it('keeps a placeholder a fill wrote during a real merge, writing only the merged paths', async () => {
+  const { port, filesystem } = await fixture({ 'a.txt': 'base\n' });
+  await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  await port.setHead('main');
+  const generated = await Promise.all(
+    [generatedGitattributesPath, generatedIgnorePath].map(
+      async (path) => [path, new TextDecoder().decode(await filesystem.readFile(path))] as const,
+    ),
+  );
+  const part = 'solid part\n'.repeat(8);
+  const write = async (content: Readonly<Record<string, string>>, parents: readonly string[]): Promise<string> => {
+    const written = await port.writeRevision({
+      parents: parents.map((parent) => revisionId(parent)),
+      tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Revision' },
+    });
+    return written.commitId;
+  };
+  const base = await write({ 'a.txt': 'base\n', 'models/part.step': part }, []);
+  const theirs = await write({ 'a.txt': 'theirs\n', 'models/part.step': part }, [base]);
+  const ours = await write({ 'a.txt': 'base\n', 'models/part.step': part, 'c.txt': 'ours\n' }, [base]);
+  await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(theirs) });
+  await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(ours) });
+  /* The checkout on `main`, the part still its placeholder. */
+  await filesystem.writeFile('c.txt', 'ours\n');
+  await filesystem.mkdir('models', { recursive: true });
+  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  /* The fill lands the part after the merge captured the checkout and before its write. */
+  const onApplyingTree = vi.fn(
+    (..._parameters: unknown[]) =>
+      (): void =>
+        undefined,
+  );
+  const actors = createRevisionActors({
+    port: {
+      ...port,
+      diff: async (input) => {
+        await filesystem.writeFile('models/part.step', part);
+        return port.diff(input);
+      },
+    },
+    projectId: 'project-1',
+    filesystem: async () => filesystem,
+    onApplyingTree,
+  });
+
+  const outcome = await run<{ status: string }>(actors.branch.merge, {
+    projectId: 'project-1',
+    branch: 'feature',
+    into: 'main',
+  });
+
+  expect(outcome.status).toBe('merged');
+  expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  expect(await filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
+  const treeWrites = onApplyingTree.mock.calls.filter(
+    (call) => (call[2] as { purpose?: string } | undefined)?.purpose === 'tree',
+  );
+  expect(treeWrites.map(([, paths]) => paths)).toStrictEqual([['a.txt']]);
+}, 30_000);
 
 for (const actorSet of actorSets) {
   describe.runIf(actorSet.enabled)(`merging two lines — ${actorSet.name}`, () => {
@@ -3559,6 +4324,27 @@ for (const actorSet of actorSets) {
       expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs });
       expect(await port.readRef('main')).toBe(theirs);
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
+    }, 30_000);
+
+    it('fast-forwards a line the files are not on as that line’s tree, never mixed with the checkout’s (W4 review 4)', async () => {
+      const { port, actors, filesystem, base, theirs } = await twoLines({
+        ours: 'mine\n',
+        theirs: 'base\n',
+        extra: { 'b.txt': 'theirs only\n' },
+      });
+      /* `other` has not moved from the base and has no checkout: the live one, on `main`, is the target. */
+      await port.updateRef({ name: 'other', expectedHead: undefined, head: revisionId(base) });
+
+      const outcome = await run<{ status: string; revisionId?: string }>(actors.branch.merge, {
+        projectId: 'project-1',
+        branch: 'feature',
+        into: 'other',
+      });
+
+      expect(outcome).toMatchObject({ status: 'merged', revisionId: theirs });
+      expect(await port.readRef('other')).toBe(theirs);
+      expect(await filesystem.readFile('a.txt', 'utf8')).toBe('base\n');
+      expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
     }, 30_000);
 
     it('says a line already merged is merged, rather than failing', async () => {
@@ -4128,6 +4914,10 @@ describe('connecting a remote', () => {
         ...port,
         listRemoteRefs: async (remote) => {
           asked.push(remote);
+          /* Tau Cloud answers `404` until the project is registered (P51). */
+          if (JSON.stringify(remote).includes('api.tau.new') && registerRemoteProject.mock.calls.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
           return [];
         },
       },
@@ -4153,7 +4943,9 @@ describe('connecting a remote', () => {
       { name: 'github-22', url: 'https://github.com/new/project.git' },
       { name: 'origin', url: 'https://gitlab.example.com/o/r.git' },
       { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
+      { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
     ]);
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
     expect(registerRemoteProject).toHaveBeenCalledWith('project-1');
     expect(await port.listRemotes()).toStrictEqual(before);
   });
@@ -4183,18 +4975,48 @@ describe('connecting a remote', () => {
     expect(await port.listRemotes()).toStrictEqual(before);
   });
 
-  it('registers the project on Tau Cloud, and only on Tau Cloud', async () => {
+  /* P51, D11: the registering PUT is conditional on the remote's `404`, so a reconnect sends none. */
+  it('registers the project on Tau Cloud only when it answers 404, and only on Tau Cloud', async () => {
     const registered: string[] = [];
     const registerRemoteProject = vi.fn(async (id: string) => {
       registered.push(id);
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const listed: string[] = [];
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/owner/repository.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async (remote) => {
+          listed.push(typeof remote === 'string' ? remote : remote.name);
+          if (registered.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
+          return [];
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+
+    await expect(
+      run(actors.remote.validate, { remote: 'origin', url: 'https://github.com/owner/repository.git' }),
+    ).rejects.toThrow('No repository here yet.');
+    expect(registered).toEqual([]);
 
     await run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    expect(registered).toEqual([]);
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau']);
 
-    await run(actors.remote.authorize, { kind: 'git', url: 'https://github.com/owner/repository.git' });
+    /* Registered: a reconnect lists once and sends no PUT. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau', 'tau']);
   });
 
   it('connects without a host that can register, as every host did before P51', async () => {
@@ -4204,14 +5026,51 @@ describe('connecting a remote', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('fails the connection when Tau Cloud refuses the registration', async () => {
+  it('fails the connection with the listing’s refusal when Tau Cloud refuses the registration', async () => {
     const registerRemoteProject = vi.fn(async () => {
       throw new Error('That project id already belongs to another account.');
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
     await expect(
-      run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
-    ).rejects.toThrow('another account');
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+    ).rejects.toThrow('No repository here yet.');
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
+  });
+
+  /* A `410` is a tombstoned project, which a registration cannot bring back. */
+  it('does not register a project Tau Cloud answers 410 for', async () => {
+    const registerRemoteProject = vi.fn(async () => undefined);
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'This project was deleted.', { status: 410 });
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+    await expect(
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+    ).rejects.toThrow('This project was deleted.');
+    expect(registerRemoteProject).not.toHaveBeenCalled();
   });
 });
 
@@ -4237,6 +5096,10 @@ describe('the path policy a project is given', () => {
       policy: testPolicy,
     });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    /* The ignore rules init derived from Tau's own registry, which a store under this policy
+     * would not carry: a cut honours a checkout's ignore rules, so only the policy is left to decide. */
+    await filesystem.writeFile('.gitignore', '');
+    await filesystem.writeFile('.git/info/exclude', '');
     await filesystem.writeFile('drawings/plan.dxf', 'DXF\n');
     await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
@@ -4502,6 +5365,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
@@ -4553,6 +5417,147 @@ describe('opening before large objects arrive', () => {
     });
     expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
   }, 30_000);
+  /* W11.3: a checkout over the host's store clones each object in place of writing bytes it read. */
+  it.runIf(gitToolchainOnPath)(
+    'lands each object from the store when the checkout declares large-object sources',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
+      const gate = Promise.withResolvers<void>();
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-store-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const reads: Array<string | undefined> = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects === 'local') {
+            return real.readTree(id, options);
+          }
+          reads.push(options?.largeObjects);
+          await gate.promise;
+          await writeFile(objectFile, held);
+          return real.readTree(id, options);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+      gate.resolve();
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(reads).toContain('stored');
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      const sourced = batches.mock.calls
+        .flatMap(([entries]) => entries)
+        .filter((entry) => entry.op === 'write' && 'largeObject' in entry.data);
+      expect(sourced).toHaveLength(1);
+      expect(sourced[0]).toMatchObject({ data: { largeObject: pointer.oid, size: part.byteLength } });
+    },
+    60_000,
+  );
+
+  /* W11.3 review: an object gone from the store between the read and the clone is brought as bytes, never a failed fill. */
+  it.runIf(gitToolchainOnPath)(
+    'writes the bytes of an object the store lost before its clone, fetched by its oid',
+    async () => {
+      const reports: LargeObjectsReport[] = [];
+      const part = new TextEncoder().encode('solid part\n'.repeat(4096));
+      const { pointer } = lfsPointerFor(part);
+      const harness = await nativeHarness('project-1', 'tau-revision-effects-unstored-');
+      roots.push(harness.root);
+      const real = harness.port;
+      await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await real.setHead('main');
+      const receipt = await real.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+          ['main.scad', 'import("models/part.step");\n'],
+          ['models/part.step', part],
+        ]),
+        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(receipt.commitId);
+      await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      const store = join(harness.liveRoot, '.git', 'lfs', 'objects');
+      const objectFile = join(harness.liveRoot, '.git', lfsObjectPath(pointer.oid));
+      const held = await readFile(objectFile);
+      await rm(objectFile);
+      const fetched: string[][] = [];
+      const port: RevisionPort = {
+        ...real,
+        readTree: async (id, options) => {
+          if (options?.largeObjects !== 'stored') {
+            return real.readTree(id, options);
+          }
+          /* The store holds it when the read answers, and loses it (a prune) before the clone. */
+          await writeFile(objectFile, held);
+          const tree = await real.readTree(id, options);
+          await rm(objectFile);
+          return tree;
+        },
+        fetchLargeObjects: async (pointers) => {
+          fetched.push(pointers.map(({ oid }) => oid));
+          return new Map([[pointer.oid, part]]);
+        },
+      };
+      const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
+      const batches = vi.spyOn(filesystem, 'applyBatch');
+      const actors = createRevisionActors({
+        port,
+        projectId: 'project-1',
+        filesystem: async () => filesystem,
+        onLargeObjects: (report) => reports.push(report),
+      });
+
+      await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+      await vi.waitFor(() => {
+        expect(reports.at(-1)?.facet).toBeUndefined();
+      });
+
+      expect(await filesystem.readFile('models/part.step')).toStrictEqual(part);
+      expect(fetched).toStrictEqual([[pointer.oid]]);
+      const writes = batches.mock.calls.flatMap(([entries]) => entries).filter((entry) => entry.op === 'write');
+      expect(writes.some((entry) => 'largeObject' in entry.data)).toBe(true);
+      expect(
+        writes.some((entry) => entry.data instanceof Uint8Array && entry.data.byteLength === part.byteLength),
+      ).toBe(true);
+      expect(reports.some((report) => report.facet?.error !== undefined)).toBe(false);
+    },
+    60_000,
+  );
+
   /* A project a reload left mid-download: its checkout holds the part's pointer, and the store lacks the bytes. */
   const leftMidDownload = async () => {
     const reports: LargeObjectsReport[] = [];
@@ -4564,6 +5569,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
@@ -4631,6 +5637,49 @@ describe('opening before large objects arrive', () => {
     expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
   }, 30_000);
 
+  /* D9: a placeholder reads as pending, never its pointer text; `materialize` makes it a file. */
+  it('reads a placeholder as pending until its object is here, and materializes it on request', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching' });
+    });
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toMatchObject({
+      outcome: 'pending',
+      reason: 'filling',
+    });
+    expect(await project.actors.readContent(undefined, 'main.scad')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode('import("models/part.step");\n'),
+    });
+    const materializing = project.actors.materialize(undefined, ['models/part.step']);
+    project.land();
+    await materializing;
+    expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    await expect(project.actors.readContent('nowhere', 'main.scad')).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+    });
+  }, 30_000);
+
+  it('reads a placeholder from the store when its object is here but not yet written', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.signals).toHaveLength(1);
+    });
+    const { pointer } = lfsPointerFor(new TextEncoder().encode(project.part));
+    await project.filesystem.writeFile(`.git/${lfsObjectPath(pointer.oid)}`, project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    /* Read, not written: the checkout still holds the pointer until the fill writes it. */
+    expect(await project.filesystem.readFile('models/part.step')).toStrictEqual(project.pointerBytes);
+    await project.actors.settled();
+  }, 30_000);
+
   it('stops the fill when the project closes, and writes nothing after', async () => {
     const project = await leftMidDownload();
     await vi.waitFor(() => {
@@ -4667,4 +5716,155 @@ describe('opening before large objects arrive', () => {
     });
     expect(project.signals[0]?.aborted).toBe(true);
   }, 30_000);
+});
+
+/*
+ * Rule 13 through the gate (I5): the cut predicts the tree the writer records,
+ * so both keep an entry unchanged from the checkout's head as the head holds
+ * it — here, a file committed as a blob before the attributes named it.
+ */
+for (const actorSet of actorSets) {
+  describe.runIf(actorSet.enabled)(
+    `a cut after the attributes start naming a committed blob — ${actorSet.name}`,
+    () => {
+      it('predicts the recorded tree, keeps the blob a blob and makes only new content a pointer', async () => {
+        const layer = 'layered art\n'.repeat(200);
+        const { port, actors, filesystem } = await fixture(
+          { 'main.scad': 'cube(1);\n', 'art.layer': layer },
+          undefined,
+          {
+            actorSet: actorSet.name,
+          },
+        );
+        await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        const cutOnce = async (parents: readonly string[]) => {
+          const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+            checkoutId: 'live',
+            trigger: 'save',
+          });
+          const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+            checkoutId: 'live',
+            cutId: cut.cutId,
+            treeId: cut.treeId,
+            parents,
+            trigger: 'save',
+            leaseIds: [],
+          });
+          await port.updateRef({
+            name: 'main',
+            expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
+            head: revisionId(written.revisionId),
+          });
+          return { cut, written };
+        };
+        const first = await cutOnce([]);
+        const attributes = await filesystem.readFile(generatedGitattributesPath, 'utf8');
+        await filesystem.writeFile(
+          generatedGitattributesPath,
+          `${attributes}*.layer filter=lfs diff=lfs merge=lfs -text\n`,
+        );
+        await filesystem.writeFile('new.layer', 'new art\n'.repeat(200));
+
+        const second = await cutOnce([first.written.revisionId]);
+
+        const recorded = await port.readRevision(revisionId(second.written.revisionId));
+        expect(recorded?.treeId).toBe(second.cut.treeId);
+        const listing = new Map(
+          ((await port.listTree?.(revisionId(second.written.revisionId))) ?? []).map((entry) => [entry.path, entry]),
+        );
+        const before = new Map(
+          ((await port.listTree?.(revisionId(first.written.revisionId))) ?? []).map((entry) => [entry.path, entry]),
+        );
+        expect(listing.get('art.layer')?.oid).toBe(before.get('art.layer')?.oid);
+        expect(listing.get('new.layer')?.oid).toBe(
+          blobOid(lfsPointerFor(new TextEncoder().encode('new art\n'.repeat(200))).bytes, 'sha1'),
+        );
+      }, 30_000);
+    },
+  );
+}
+
+/*
+ * The checkout's own Git ignore rules decide what a cut leaves out, on both
+ * legs alike (I5): its `.gitignore` files, nested, and the store's
+ * `info/exclude`, read as Git reads them; a tracked path is never left out.
+ */
+describe("a cut honours the checkout's own Git ignore rules on both legs", () => {
+  it.each([false, true])(
+    "records the same tree on each leg, leaving out ignored untracked files and keeping tracked ones (the store's core.ignoreCase %s)",
+    async (ignoreCase) => {
+      const cutTwice = async (actorSet: ActorSet['name']): Promise<readonly [string, readonly string[]]> => {
+        const { port, actors, filesystem, root } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, {
+          actorSet,
+        });
+        await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        /* The store's own setting, which both legs read: the native harness keeps its repository in `project/`. */
+        execFileSync('git', ['config', 'core.ignoreCase', String(ignoreCase)], {
+          cwd: actorSet === 'native-git' ? join(root, 'project') : root,
+        });
+        const cutOnce = async (parents: readonly string[]): Promise<string> => {
+          const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+            checkoutId: 'live',
+            trigger: 'save',
+          });
+          const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+            checkoutId: 'live',
+            cutId: cut.cutId,
+            treeId: cut.treeId,
+            parents,
+            trigger: 'save',
+            leaseIds: [],
+          });
+          await port.updateRef({
+            name: 'main',
+            expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
+            head: revisionId(written.revisionId),
+          });
+          return written.revisionId;
+        };
+        await filesystem.writeFile('notes.log', 'tracked before the rule\n');
+        const first = await cutOnce([]);
+        const ignore = await filesystem.readFile(generatedIgnorePath, 'utf8');
+        await filesystem.writeFile(generatedIgnorePath, `${ignore}*.log\nbuild/\n*.secret\n!keep.secret\n`);
+        await filesystem.writeFile('models/.gitignore', '/local.step\n');
+        for (const [path, content] of [
+          ['notes.log', 'tracked, and changed\n'],
+          ['new.log', 'untracked\n'],
+          ['build/out.stl', 'solid\n'],
+          ['docs/build/page.html', '<p>\n'],
+          ['a.secret', 'x\n'],
+          ['keep.secret', 'kept\n'],
+          ['models/local.step', 'solid local\n'],
+          ['models/deep/local.step', 'solid deep\n'],
+          ['Upper.LOG', 'ignored only where case folds\n'],
+          ['Build/case.stl', 'solid\n'],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
+          await filesystem.writeFile(path, content);
+        }
+        const second = await cutOnce([first]);
+        const record = await port.readRevision(revisionId(second));
+        const tree = await port.readTree(revisionId(second));
+        return [record!.treeId, (tree?.entries() ?? []).map(({ path }) => path).toSorted()];
+      };
+
+      const legs = await Promise.all(
+        actorSets.filter(({ enabled }) => enabled).map(async ({ name }) => cutTwice(name)),
+      );
+
+      expect(new Set(legs.map(([treeId]) => treeId)).size).toBe(1);
+      expect(legs[0]![1]).toStrictEqual([
+        '.gitattributes',
+        '.gitignore',
+        ...(ignoreCase ? [] : ['Build/case.stl']),
+        ...(ignoreCase ? [] : ['Upper.LOG']),
+        'keep.secret',
+        'main.scad',
+        'models/.gitignore',
+        'models/deep/local.step',
+        'notes.log',
+      ]);
+    },
+    60_000,
+  );
 });

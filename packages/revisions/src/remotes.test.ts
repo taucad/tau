@@ -31,10 +31,11 @@ import {
   remoteOf,
   remoteTrackingRef,
   remoteTransportError,
+  tauCatalogueUrl,
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';
-import type { GitRemoteCredential } from '#remotes.js';
+import type { GitRemoteCredential, RemoteTransportContext } from '#remotes.js';
 import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
@@ -68,6 +69,21 @@ describe('remotes', () => {
     expect(tauRemoteUrl('https://api.tau.new', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
     expect(tauRemoteUrl('https://api.tau.new/', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
     expect(tauRemoteUrl('https://api.tau.new///', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
+  });
+
+  it("finds a Tau repository's catalogue on the API's own origin, and no other remote's", () => {
+    const api = 'https://api.tau.new/';
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/v1/git/p1.git')).toBe(
+      'https://api.tau.new/v1/projects/p1/git/catalogue',
+    );
+    expect(tauCatalogueUrl('https://tau.test/api', 'https://tau.test/api/v1/git/p-2.git/')).toBe(
+      'https://tau.test/api/v1/projects/p-2/git/catalogue',
+    );
+    expect(tauCatalogueUrl(undefined, 'https://api.tau.new/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://github.com/acme/parts.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://evil.test/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/elsewhere/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/v1/git/p1.git?x=1')).toBeUndefined();
   });
 
   it('refuses a project id that could leave the repository path', () => {
@@ -288,10 +304,31 @@ describe('remoteTransportError', () => {
       );
 
     expect(refused('Write access to repository not granted.\n')).toMatchObject({
-      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      code: 'REMOTE_FORBIDDEN',
       message: 'Write access to repository not granted.',
     });
-    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe('The remote rejected the saved credentials.');
+    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe(
+      'GitHub refused access to this repository for the connected account.',
+    );
+  });
+
+  /* W7.3 review: GitHub's 403 to a live token is the repository's access withdrawn, which no reconnect restores. */
+  it('classes a GitHub 403 as access withdrawn, and only an expired token or a 401 as a credential to grant again', () => {
+    const answer = (statusCode: number, response: string, context: Partial<RemoteTransportContext> = {}) =>
+      remoteTransportError(
+        Object.assign(new Error(`HTTP Error: ${String(statusCode)}`), { data: { statusCode, response } }),
+        { remote: 'github-1', ...context },
+      ).code;
+
+    expect(answer(403, 'Repository access blocked.\n')).toBe('REMOTE_FORBIDDEN');
+    expect(answer(403, '', { authenticate: 'Bearer error="invalid_token"' })).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    expect(answer(403, 'The token has expired.\n')).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    expect(answer(403, '{"code":"GITHUB_RECONNECT_REQUIRED","message":"Reconnect GitHub."}')).toBe(
+      'REMOTE_REAUTHORIZATION_REQUIRED',
+    );
+    expect(answer(401, 'Bad credentials')).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
+    /* Another host's 403 is still a credential its person can grant again. */
+    expect(answer(403, 'Forbidden', { remote: 'origin' })).toBe('REMOTE_REAUTHORIZATION_REQUIRED');
   });
 
   /* D77: GitHub answers a revoked grant with a sentence about passwords. */

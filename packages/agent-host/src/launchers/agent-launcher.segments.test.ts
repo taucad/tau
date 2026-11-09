@@ -1760,7 +1760,21 @@ describe('a chat continued on a second device', () => {
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {
-      const clock = new SimulatedClock();
+      /* Records when the heartbeat was last armed (an interval of at most `runHeartbeat`): its row lands in the file a
+       * few ticks before the write re-arms it, and a clock step taken in between would arm the next heartbeat past
+       * every later step, so none would ever fire. */
+      class ArmedClock extends SimulatedClock {
+        public armedAt = -1;
+        public arms = 0;
+        public override setTimeout(callback: (...arguments_: unknown[]) => void, delayMilliseconds: number): number {
+          if (delayMilliseconds <= 10) {
+            this.armedAt = this.now();
+            this.arms++;
+          }
+          return super.setTimeout(callback, delayMilliseconds);
+        }
+      }
+      const clock = new ArmedClock();
       vi.useFakeTimers({ toFake: ['Date'] });
       try {
         const { root } = await pausedRunOn({ clock, runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
@@ -1769,11 +1783,26 @@ describe('a chat continued on a second device', () => {
           vi.setSystemTime(Date.now() + milliseconds);
           clock.increment(milliseconds);
         };
-        /* Wait for each real filesystem append before advancing the next interval. Worker starvation cannot
-         * consume the whole hold before the first scheduled callback gets CPU time. */
+        /* Step the clock over each heartbeat only once a timer was armed at the current instant and since the
+         * last step, then wait for its real filesystem append. A timer armed before the paused run re-armed its
+         * heartbeat (the running heartbeat it clears) also matches the instant, so one step after it could land
+         * before the paused heartbeat is armed and leave that one waiting past every later step (main push runs
+         * 42292889812 and 42429410014). Worker starvation cannot consume the hold: the clock only moves here. */
+        let stepped = -1;
         for (let count = 1; count <= 2; count++) {
-          advance(20);
-          // oxlint-disable-next-line no-await-in-loop -- each heartbeat must land before the next clock step.
+          for (let attempt = 0; attempt < 300; attempt++) {
+            // oxlint-disable-next-line no-await-in-loop -- each heartbeat must land before the next clock step.
+            if (heartbeatsAfter(await rowsUntil(root, () => true), 'paused').length >= count) {
+              break;
+            }
+            if (clock.armedAt === clock.now() && clock.arms !== stepped) {
+              stepped = clock.arms;
+              advance(20);
+            }
+            // oxlint-disable-next-line no-await-in-loop -- polling for the host's re-arm is sequential by nature.
+            await sleep(10);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- a heartbeat that never landed fails with the rows it saw.
           await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= count);
         }
         advance(300);

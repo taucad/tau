@@ -10,7 +10,7 @@
  * says; `versionedOnly` is the whole-project export's own choice.
  *
  * `search` and `statTree` are deliberately *not* here. They are not functions
- * of the port: they read the root's `TreeIndex`, which only the rooted
+ * of the port: they read the root's `ProjectIndex`, which only the rooted
  * filesystem owns, and they are masked by `composeView` itself — so they arrive
  * on the view already and this wrapper simply keeps them.
  *
@@ -29,13 +29,23 @@ import type { PathPolicy } from '#types.js';
  *
  * @public
  */
-export type ContentExportFilter = Readonly<{ versionedOnly?: boolean }>;
+export type ContentExportFilter = Readonly<{
+  versionedOnly?: boolean;
+  /**
+   * The caller's byte ceiling for an archive ({@link ArchiveOptions.maxBytes});
+   * `contents` ignores it. The archive itself holds no ceiling of its own.
+   */
+  maxBytes?: number;
+}>;
 
 /** What {@link withReadContentOps} adds to a view. @public */
 export type ReadContentOps = {
-  archive(path: string, filter?: ContentExportFilter): Promise<Blob>;
-  contents(path: string, filter?: ContentExportFilter): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+  archive(path: string, filter?: ContentExportFilter & Abortable): Promise<Blob>;
+  contents(path: string, filter?: ContentExportFilter & Abortable): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
 };
+
+/** A caller's abort signal, checked before each file is read. @public */
+export type Abortable = Readonly<{ signal?: AbortSignal }>;
 
 /**
  * Serve `archive` and `contents` over one composed view.
@@ -66,7 +76,8 @@ export const withReadContentOps = <View extends ContentFileSystem>(
    * can be any directory of the project. The join assumes the view is rooted at
    * the project root, as the file manager's is; a view rooted below it would
    * need its own root joined first (charter W12). */
-  const options = (path: string, filter?: ContentExportFilter): WalkOptions => ({
+  const options = (path: string, filter?: ContentExportFilter & Abortable): WalkOptions => ({
+    ...(filter?.signal === undefined ? {} : { signal: filter.signal }),
     admits: (relativePath, kind, provenance) => {
       if (provenance !== undefined && provenance.source !== 'project') {
         /* An overlay is composed above the project; its bytes are never the
@@ -83,9 +94,14 @@ export const withReadContentOps = <View extends ContentFileSystem>(
   });
 
   return Object.assign(view, {
-    archive: async (path: string, filter?: ContentExportFilter): Promise<Blob> =>
-      archive(view, path, options(path, filter)),
-    contents: async (path: string, filter?: ContentExportFilter): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
-      contents(view, path, options(path, filter)),
+    archive: async (path: string, filter?: ContentExportFilter & Abortable): Promise<Blob> =>
+      archive(view, path, {
+        ...options(path, filter),
+        ...(filter?.maxBytes === undefined ? {} : { maxBytes: filter.maxBytes }),
+      }),
+    contents: async (
+      path: string,
+      filter?: ContentExportFilter & Abortable,
+    ): Promise<Record<string, Uint8Array<ArrayBuffer>>> => contents(view, path, options(path, filter)),
   });
 };

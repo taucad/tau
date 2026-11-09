@@ -18,7 +18,10 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import fsPromises from 'node:fs/promises';
 import { join } from 'node:path';
+import { isRefusal } from '#changeset.js';
+import type { BatchEntry } from '#changeset.js';
 import { NodeFsChannel, NodeFsChannelClosedError, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -177,10 +180,10 @@ describe('node filesystem client/host round trip', () => {
     }
   });
 
-  it('keeps exact and head wire validators distinct', () => {
-    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
-    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
-    expect(nodeFsResultSchemas.readdirHeadWithStats.safeParse(row).success).toBe(true);
+  it('accepts head metadata rows at the wire boundary (I3)', () => {
+    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0 }];
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(true);
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse([{ name: 'file.txt', type: 'link' }]).success).toBe(false);
   });
 
   it('should reject malformed directory entry kinds at the wire boundary', () => {
@@ -191,18 +194,14 @@ describe('node filesystem client/host round trip', () => {
     ]);
   });
 
-  it('transports head-only metadata without weakening exact listing', async () => {
+  it('transports head metadata with no content facts (I3)', async () => {
     const { root, provider } = connect();
     writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
-    const head = await provider.readdirWithStats('', { content: 'head' });
-    const exact = await provider.readdirWithStats('');
-    expect(head).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text' }]);
-    expect(head[0]).not.toHaveProperty('lineCount');
-    expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
-    const headStat = await provider.stat('large.txt', { content: 'head' });
-    expect(headStat).toMatchObject({ size: 1028, contentKind: 'text' });
-    expect(headStat).not.toHaveProperty('lineCount');
-    expect(await provider.stat('large.txt')).toMatchObject({ lineCount: 2 });
+    const rows = await provider.readdirWithStats('');
+    const stat = await provider.stat('large.txt');
+    /* Exactly kind, size and time: no content fact rides along. */
+    expect(rows).toStrictEqual([{ name: 'large.txt', type: 'file', size: 1028, mtimeMs: stat.mtimeMs }]);
+    expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: rows[0]!.mtimeMs });
   });
 
   it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {
@@ -245,7 +244,7 @@ describe('node filesystem client/host round trip', () => {
     const results = await Promise.all([first.deleteFileChecked(input), second.deleteFileChecked(input)]);
     expect(results.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
     expect(existsSync(join(root, 'target.txt'))).toBe(false);
-    expect(await first.readdirWithStats('', { content: 'head' })).toEqual([]);
+    expect(await first.readdirWithStats('')).toEqual([]);
     expect(
       await first.deleteFileChecked({ path: 'target.txt', preconditions: [{ path: 'target.txt', expected: null }] }),
     ).toMatchObject({ status: 'unchanged' });
@@ -976,6 +975,39 @@ describe('node filesystem client/host round trip', () => {
     ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED' });
   });
 
+  it('applies one changeset phase in one request, fsynced once per directory (D16)', async () => {
+    const { root, provider, port } = connect();
+    writeFileSync(join(root, 'kept.txt'), 'kept');
+    const posted = vi.spyOn(port, 'postMessage');
+    const probe = await fsPromises.open(join(root, 'kept.txt'), 'r');
+    const sync = vi.spyOn(Object.getPrototypeOf(probe) as { sync(): Promise<void> }, 'sync');
+    await probe.close();
+    const entries: BatchEntry[] = [
+      ...['a', 'b'].flatMap((directory) =>
+        Array.from(
+          { length: 4 },
+          (_, index): BatchEntry => ({
+            op: 'write',
+            path: `${directory}/${String(index)}.txt`,
+            data: new Blob([`${directory}${String(index)}`]),
+          }),
+        ),
+      ),
+      { op: 'write', path: 'kept.txt', data: new TextEncoder().encode('again'), create: true },
+    ];
+
+    const receipts = await provider.applyBatch(entries);
+
+    expect(posted.mock.calls.map(([frame]) => (frame as { op: string }).op)).toEqual(['applyBatch']);
+    expect(receipts.slice(0, 8)).toEqual(Array.from({ length: 8 }, () => ({ outcome: 'applied', kind: 'file' })));
+    /* A refusal keeps its code across the port, so the pipeline still reads it as known-not-applied. */
+    expect(receipts[8]?.outcome).toBe('failed');
+    expect(isRefusal(receipts[8]?.error)).toBe(true);
+    expect(readFileSync(join(root, 'b', '3.txt'), 'utf8')).toBe('b3');
+    expect(readFileSync(join(root, 'kept.txt'), 'utf8')).toBe('kept');
+    expect(sync).toHaveBeenCalledTimes(process.platform === 'win32' ? 16 : 8 + 2);
+  });
+
   it('round-trips bytes through the port', async () => {
     const { provider } = connect();
 
@@ -985,7 +1017,6 @@ describe('node filesystem client/host round trip', () => {
     await expect(provider.stat('nested/file.txt')).resolves.toMatchObject({
       type: 'file',
       size: 5,
-      contentKind: 'text',
     });
   });
 

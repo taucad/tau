@@ -14,7 +14,6 @@ export const runtimeKernelIds = [
   'picogk',
   'picovoxel',
   'replicad',
-  'rhino',
   'smlib',
   'smlibpy',
   'tscircuit',
@@ -23,7 +22,6 @@ export const runtimeKernelIds = [
 
 /** First-party middleware names (`middleware.name`), as `middleware.wrap(<name>)` spans carry them. @public */
 export const middlewareIds = [
-  'DisplaySimplification',
   'GeometryCache',
   'GltfEdgeDetection',
   'ParameterCache',
@@ -69,7 +67,6 @@ export const exportFormats = [
 
 /** File formats: every kernel extension, every transcoder edge source and every export format. @public */
 export const fileFormats = [
-  '3dm',
   '3mf',
   'ac',
   'amf',
@@ -223,6 +220,7 @@ export const kernelIssueCodes = [
   'SOURCE_SNAPSHOT_CHANGED',
   'SOURCE_SNAPSHOT_INVALID',
   'SVG_DOCUMENT_INVALID',
+  // Retired (kernel budget program D9): no kernel emits it; older clients may still report it.
   'TESSELLATION_DOWNGRADED',
   'TRANSCODER_CAPABILITY_MISSING',
   'TRANSCODER_EXECUTION_FAILED',

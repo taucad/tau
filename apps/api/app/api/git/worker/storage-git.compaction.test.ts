@@ -11,7 +11,8 @@ import type { StorageGrant } from '#api/git/forwarding/contract/grant.js';
 import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
 import type { FaultPoint } from '#api/git/store/fault-points.js';
-import { livePackBound } from '#api/git/store/limits.js';
+import { livePackBound, retentionWindowMilliseconds } from '#api/git/store/limits.js';
+import { listingKeyFor, listingRetirementKeyFor } from '#api/git/store/listing-key.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { compactionCommitter, decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
@@ -455,5 +456,48 @@ describe('StorageGitService deferred compaction (push latency F2)', () => {
     const live = new Set(settled?.packs.map((pack) => path.posix.basename(pack.key)));
     expect(markers.filter((key) => live.has(key.slice(key.indexOf('-') + 1)))).toStrictEqual([]);
     expect(markers).toHaveLength((pushed?.packs.length ?? 0) - 1);
+  }, 120_000);
+});
+
+describe('StorageGitService listing sweep (D8)', () => {
+  it('should delete a due head listing after a push that did not compact', async () => {
+    const repository = newRepository();
+    const { service, posted } = newWorker(repository.store);
+    repository.revise();
+    await push(service, repository);
+    await service.settled();
+    const locator = repositoryLocator({ ownerId: repository.owner, projectId: repository.project });
+    /* A listing whose tip was retired past the window: due on the next listing sweep. */
+    const stale = 'f'.repeat(40);
+    await repository.store.putObject(locator, listingKeyFor(stale), new Uint8Array([1]), {
+      contentLength: 1,
+      sha256: '',
+    });
+    await repository.store.putObject(
+      locator,
+      listingRetirementKeyFor(stale, new Date(Date.now() - retentionWindowMilliseconds - 60_000)),
+      new Uint8Array(0),
+      { contentLength: 0, sha256: '' },
+    );
+    const listings = async (): Promise<string[]> => {
+      const keys: string[] = [];
+      for await (const stored of repository.store.listObjects(locator, 'listings/')) {
+        keys.push(stored.key);
+      }
+      return keys;
+    };
+    expect(await listings()).toContain(listingKeyFor(stale));
+
+    repository.revise();
+    const answered = await push(service, repository);
+    expect(answered.report).toContain('ok refs/heads/main');
+    await service.settled();
+
+    const pushed = await repository.read();
+    expect(pushed?.packs.length).toBeLessThan(livePackBound);
+    expect(await listings()).not.toContain(listingKeyFor(stale));
+    /* The tip this push listed is kept, and a listings-only sweep posts no retained bytes. */
+    expect(await listings()).toContain(listingKeyFor(pushed?.refs['refs/heads/main']?.oid ?? ''));
+    expect(posted).toStrictEqual([]);
   }, 120_000);
 });

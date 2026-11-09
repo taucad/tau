@@ -6,6 +6,7 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { decorateForNetworkFailure } from '#lib/network-failure.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
@@ -36,6 +37,22 @@ const userAgentOf = (headers: Readonly<Record<string, string>> | undefined): str
 };
 
 /**
+ * The environment an automated run reports under: its deployment's, marked `-e2e`, so the errors a suite causes on
+ * purpose never land among real users' (the staging observability harness, ui-e2e and desktop-e2e runs).
+ *
+ * @param environment - The deployment's environment.
+ * @returns `<environment>-e2e`, unchanged when already marked or absent.
+ * @public
+ */
+export const automatedRunEnvironment = (environment: string | undefined): string | undefined =>
+  environment === undefined || environment.endsWith('-e2e') ? environment : `${environment}-e2e`;
+
+/** Whether a browser automation driver (Playwright, WebDriver) controls this page. */
+const isAutomatedBrowser = (): boolean =>
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- navigator is absent during SSR.
+  globalThis.navigator?.webdriver ?? false;
+
+/**
  * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no
  * cookies, and no headers but `User-Agent` (so Sentry derives the browser, OS and device contexts).
  * The user keeps only its opaque Tau `id` (D1): no email, name, username or IP. Invitation tokens and
@@ -47,8 +64,12 @@ const userAgentOf = (headers: Readonly<Record<string, string>> | undefined): str
  */
 export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
   const harnessTags = observabilityHarnessTags();
-  if (Object.keys(harnessTags).length > 0) {
+  const isHarnessRun = Object.keys(harnessTags).length > 0;
+  if (isHarnessRun) {
     event.tags = { ...event.tags, ...harnessTags };
+  }
+  if (isHarnessRun || isAutomatedBrowser()) {
+    event.environment = automatedRunEnvironment(event.environment ?? sentryEnvironment());
   }
   if (event.request) {
     const { url, headers } = event.request;
@@ -85,13 +106,10 @@ export const sentryRelease = (id: number): string | undefined => (id === 0 ? und
  */
 export const sentryEnvironment = (): string | undefined => ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV;
 
-/**
- * The envelope endpoint of a DSN (`https://<key>@<host>[/<path>]/<project>`), as the SDK derives it.
- *
- * @param dsn - The DSN the host injected.
- * @returns The URL to post an envelope to, or `undefined` for a DSN that does not parse.
- */
-export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
+/** The scheme, host, path prefix, project and public key of a DSN (`https://<key>@<host>[/<path>]/<project>`). */
+const dsnParts = (
+  dsn: string,
+): { readonly origin: string; readonly path: string; readonly project: string; readonly key: string } | undefined => {
   try {
     const url = new URL(dsn);
     const segments = url.pathname.split('/').filter(Boolean);
@@ -100,12 +118,52 @@ export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
       return undefined;
     }
     const path = segments.length > 0 ? `/${segments.join('/')}` : '';
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's own query parameters.
-    const query = new URLSearchParams({ sentry_version: '7', sentry_key: url.username });
-    return `${url.protocol}//${url.host}${path}/api/${project}/envelope/?${query.toString()}`;
+    return { origin: `${url.protocol}//${url.host}`, path, project, key: url.username };
   } catch {
     return undefined;
   }
+};
+
+/**
+ * The envelope endpoint of a DSN, as the SDK derives it.
+ *
+ * @param dsn - The DSN the host injected.
+ * @returns The URL to post an envelope to, or `undefined` for a DSN that does not parse.
+ */
+export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
+  const parts = dsnParts(dsn);
+  if (parts === undefined) {
+    return undefined;
+  }
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's own query parameters.
+  const query = new URLSearchParams({ sentry_version: '7', sentry_key: parts.key });
+  return `${parts.origin}${parts.path}/api/${parts.project}/envelope/?${query.toString()}`;
+};
+
+/**
+ * The security-report endpoint of a DSN, which takes CSP violations in the Reporting API's own format and groups
+ * them as security issues (SB6, G24).
+ *
+ * @param dsn - The DSN the host injected.
+ * @param tags - The environment and release the reports are filed under, when known.
+ * @returns The URL to post reports to, or `undefined` for a DSN that does not parse.
+ */
+export const sentrySecurityUrl = (
+  dsn: string,
+  { environment, release }: { readonly environment?: string; readonly release?: string } = {},
+): string | undefined => {
+  const parts = dsnParts(dsn);
+  if (parts === undefined) {
+    return undefined;
+  }
+  /* eslint-disable @typescript-eslint/naming-convention -- Sentry's own query parameters. */
+  const query = new URLSearchParams({
+    sentry_key: parts.key,
+    ...(environment === undefined ? {} : { sentry_environment: environment }),
+    ...(release === undefined ? {} : { sentry_release: release }),
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- Sentry's own query parameters end here. */
+  return `${parts.origin}${parts.path}/api/${parts.project}/security/?${query.toString()}`;
 };
 
 /**
@@ -329,7 +387,7 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
   // Given the processor's context and the reporter's details, decorated as the SDK's own events are (principle 7).
-  const withContext = applyTauEventContext(applyErrorDetails(plain, error));
+  const withContext = decorateForNetworkFailure(applyTauEventContext(applyErrorDetails(plain, error)), error);
   const event = scrubSentryEvent(
     isStaleBuildTag(staleBuild) ? decorateForStaleBuild(withContext, staleBuild) : withContext,
   );

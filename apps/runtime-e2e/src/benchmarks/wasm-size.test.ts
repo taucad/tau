@@ -62,7 +62,6 @@ const wasmBudgets: WasmBudget[] = [
     path: dependencyPath('packages/plugins/gltf', 'draco3dgltf/draco_encoder.wasm'),
     maxBytes: 393_216,
   },
-  { name: 'Rhino', path: 'packages/plugins/rhino/src/wasm/rhino3dm.wasm', maxBytes: 2_686_976 },
   {
     name: 'OpenRSCAD',
     path: dependencyPath('packages/plugins/openrscad', '@taulabs/openrscad-engine/openrscad_bg.wasm'),

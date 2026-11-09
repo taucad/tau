@@ -1,7 +1,7 @@
 import { safeDispose } from '#topic.js';
 import { wrapMessagePort } from '#port.js';
 import { createBridgeServer } from '#bridge/bridge-server.js';
-import type { BridgeProtocolSchemas, StringKeyedObject } from '#bridge/bridge-protocol.js';
+import type { BridgeProtocolSchemas, BridgeServerLongCall, StringKeyedObject } from '#bridge/bridge-protocol.js';
 
 /**
  * Handle returned by {@link createBridgePort}: client-side {@link MessagePort} for
@@ -24,16 +24,21 @@ export type BridgePort = {
  */
 export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
   handlers: T,
-  options?: { hello?: Hello; protocolSchemas?: BridgeProtocolSchemas<Hello> },
+  options?: {
+    hello?: Hello;
+    protocolSchemas?: BridgeProtocolSchemas<Hello>;
+    bindLongCall?: (method: string, args: unknown[], longCall: BridgeServerLongCall) => unknown[];
+  },
 ): BridgePort {
   const channel = new MessageChannel();
   const serverWrapped = wrapMessagePort<unknown>(channel.port1, { label: 'bridge-port-server' });
   if (serverWrapped.start) {
     serverWrapped.start();
   }
-  createBridgeServer(handlers, serverWrapped, {
+  const server = createBridgeServer(handlers, serverWrapped, {
     hello: options?.hello,
     protocolSchemas: options?.protocolSchemas,
+    ...(options?.bindLongCall === undefined ? {} : { bindLongCall: options.bindLongCall }),
   });
   return {
     port: channel.port2,
@@ -43,6 +48,12 @@ export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
       });
       safeDispose(() => {
         channel.port2.close();
+      });
+      /* Then release what the server holds (its watches): a browser fires no `close` event on a port its own
+       * realm closed, so waiting for one would keep every watch registered for the authority's lifetime. The
+       * ports are closed first, so the peer still learns of the closure from its port, not a hard-close frame. */
+      safeDispose(() => {
+        server.dispose();
       });
     },
   };

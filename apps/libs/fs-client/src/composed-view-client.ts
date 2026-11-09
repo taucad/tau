@@ -1,5 +1,5 @@
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
@@ -7,13 +7,16 @@ import type {
   FileProvenance,
 } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
-import type { DirectoryStatRow, FileStatOptions, FileTreeNode, HeadFileStat } from '@taucad/filesystem';
+import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient, WorkspaceAuthorityClient } from '#file-system-client.js';
 import { resolveAuthorityPath } from '@taucad/utils/path';
 import { rootedPathOf } from '#rooted-content-client.js';
 import { isGlobalNodeModulesPath } from '#workspace-path-resolver.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
+
+/** One file's bytes and the authority's SHA-256 of exactly those bytes, from one read (charter D17). @public */
+export type FileWithDigest = Readonly<{ data: Uint8Array<ArrayBuffer>; sha256: string }>;
 
 /**
  * The rooted half of a filesystem bridge proxy opened as a composed view.
@@ -28,11 +31,9 @@ export type ComposedViewProxy = {
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
-  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   lstat(path: string): Promise<FileStat>;
   exists(path: string): Promise<boolean>;
   readdirWithStats(path: string): Promise<DirectoryStatRow[]>;
-  readdirWithStats(path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<HeadFileStat>>>;
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
   archive(path: string, options?: ContentExportFilter): Promise<Blob>;
@@ -46,7 +47,9 @@ export type ComposedViewProxy = {
    * port comes back to this client as somebody else's edit.
    */
   writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
-  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  writeFileChecked(input: Omit<AuthorityCheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  /** One read's bytes and the authority's SHA-256 of them (charter D17); absent on a peer that predates it. */
+  readFileWithDigest?(path: string): Promise<FileWithDigest>;
   deleteFileChecked(input: {
     path: string;
     preconditions: readonly FileWritePrecondition[];
@@ -76,6 +79,13 @@ export type ComposedViewProxy = {
 export type ComposedViewClient = FileSystemClient & {
   /** Exact one-level listing for agent RPCs; never served from the UI tree cache. */
   readDirectoryExact(path: string): Promise<DirectoryStatRow[]>;
+  /**
+   * One file's bytes and the authority's SHA-256 of those same bytes, from one
+   * read on the authority (charter D17): what a checked write names as its
+   * digest precondition, so this thread never hashes. Optional for clients
+   * that serve no rooted view.
+   */
+  readFileWithDigest?(absolutePath: string): Promise<FileWithDigest>;
   /**
    * Copy one file inside the view, mask-checked by it (charter D4).
    *
@@ -133,7 +143,7 @@ const outsideCheckoutProvenance: FileProvenance = Object.freeze({
 const dependencyMountName = 'node_modules';
 const dependencyMountPath = `/${dependencyMountName}`;
 
-const treeNode = (row: DirectoryStatRow<HeadFileStat>): FileTreeNode => {
+const treeNode = (row: DirectoryStatRow): FileTreeNode => {
   const common = {
     id: row.name,
     name: row.name,
@@ -144,7 +154,8 @@ const treeNode = (row: DirectoryStatRow<HeadFileStat>): FileTreeNode => {
   if (row.type === 'dir') {
     return { ...common, children: [] };
   }
-  return row.contentKind === 'text' ? { ...common, contentKind: 'text' } : { ...common, contentKind: 'binary' };
+  /* A tree row carries a known classification and never reads for one (I3). */
+  return row.contentKind === undefined ? common : { ...common, contentKind: row.contentKind };
 };
 
 /**
@@ -381,8 +392,12 @@ export const createComposedViewClient = (input: {
    * remembering its absence would let one transient authority failure — or one
    * listing that raced the mount — cost the session its row for good.
    */
-  let dependencyMount: Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> | undefined;
-  const dependencyMountStat = async (): Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> => {
+  let dependencyMount:
+    | Promise<({ readonly name: string } & Extract<FileStat, { type: 'dir' }>) | undefined>
+    | undefined;
+  const dependencyMountStat = async (): Promise<
+    ({ readonly name: string } & Extract<FileStat, { type: 'dir' }>) | undefined
+  > => {
     dependencyMount ??= (async () => {
       try {
         const mount = await dependencies.stat('');
@@ -522,16 +537,25 @@ export const createComposedViewClient = (input: {
     }
   };
 
+  const readFileWithDigest = async (absolutePath: string): Promise<FileWithDigest> => {
+    const { proxy, path } = servedBy(absolutePath);
+    if (proxy.readFileWithDigest === undefined) {
+      throw Object.assign(new Error(`ENOTSUP: no digested read serves ${absolutePath}`), { code: 'ENOTSUP' });
+    }
+    return proxy.readFileWithDigest(path);
+  };
+
   const overrides: Record<string, unknown> = {
     overrideUnit,
     readFile,
+    readFileWithDigest,
     readdir: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.readdir(path);
     },
-    stat: (async (absolutePath: string, options?: FileStatOptions) => {
+    stat: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
-      const result = options ? await proxy.stat(path, options) : await proxy.stat(path);
+      const result = await proxy.stat(path);
       if (isDependency(proxy)) {
         /* A dependency view classifies its own root as if it were a checkout, so
          * the mount's class is stamped here, where it is known (blueprint W3). */
@@ -539,7 +563,7 @@ export const createComposedViewClient = (input: {
       }
       remember(path, result.provenance);
       return result;
-    }) as FileSystemClient['stat'],
+    },
     lstat: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.lstat(path);
@@ -579,7 +603,7 @@ export const createComposedViewClient = (input: {
     },
     readDirectory: async (absolutePath: string) => {
       const { proxy, path: relative } = servedBy(absolutePath);
-      const rows = await proxy.readdirWithStats(relative, { content: 'head' });
+      const rows = await proxy.readdirWithStats(relative);
       if (isDependency(proxy)) {
         return rows.map((row) => treeNode({ ...row, provenance: outsideCheckoutProvenance }));
       }

@@ -2,6 +2,7 @@
 // @vitest-environment node
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -19,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { processTable } from '#shell/process-tree.js';
+import { processTable, terminationDeadline } from '#shell/process-tree.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
@@ -111,6 +112,22 @@ describe('createSandboxShellProvider admission', () => {
       requirement: 'environment',
       message: 'the shell may not receive BASH_ENV.',
     });
+  });
+
+  it('should refuse Zsh startup files on a pipe launch or any shell but the macOS Terminal Zsh', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const pipes = await provider.launch(
+      launchOf({ executablePath: '/bin/zsh', arguments: ['-c', 'true'], startupFiles: 'zsh' }),
+    );
+    const bash = await provider.launch(launchOf({ arguments: ['-c', 'true'], startupFiles: 'zsh' }));
+
+    for (const outcome of [pipes, bash]) {
+      expect(outcome).toStrictEqual({
+        status: 'unsupported',
+        requirement: 'filesystem-mask',
+        message: 'only the macOS Terminal running /bin/zsh may read Zsh startup files.',
+      });
+    }
   });
 
   it('should refuse a relative path', async () => {
@@ -261,6 +278,56 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody
 
     expect(outcome).toMatchObject({ status: 'sandbox-unavailable' });
     expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
+  });
+
+  it('should report a sandbox that failed to set up as not started, never as the workload exiting 1', async () => {
+    const fixture = custodial();
+    const sentinel = join(fixtureRoot(), 'ran');
+    const outcome = await fixture.launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', `touch ${sentinel} # TAU_FIXTURE_SETUP_FAILS`] }),
+    );
+
+    expect(outcome).toStrictEqual({
+      status: 'sandbox-unavailable',
+      message: 'the sandbox could not be set up, so nothing ran.',
+      diagnostic: "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory",
+      retryable: true,
+    });
+    expect(existsSync(sentinel)).toBe(false);
+    // The launch settled before it answered: its supervisor is gone, so the owner's claim is immediate.
+    expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
+  });
+
+  it('should report a terminal whose sandbox failed to set up as not started', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(
+      launchOf({
+        arguments: ['--noprofile', '--norc', '-i', '-c', 'true # TAU_FIXTURE_SETUP_FAILS'],
+        environment: { PATH: '/usr/bin:/bin', TERM: 'dumb' },
+        stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
+      }),
+    );
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable', retryable: true });
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.diagnostic : '').toContain(
+      "bwrap: Can't find source path",
+    );
+  }, 20_000);
+
+  it('should report the exit of a workload that prints a bwrap error and a forged marker, never a retry', async () => {
+    const forged = String.raw`printf '\033]7771;tau-launch;00000000000000000000000000000000\007' >&2`;
+    const bwrap = `echo "bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory" >&2`;
+    const shell = pipesOf(
+      await started(launchOf({ arguments: ['--noprofile', '--norc', '-c', `${forged}; ${bwrap}; exit 1`] })),
+    );
+
+    const [stderr, exit] = await Promise.all([text(shell.stderr), shell.exited]);
+
+    expect({ stderr, exit }).toStrictEqual({
+      stderr:
+        "\u001B]7771;tau-launch;00000000000000000000000000000000\u0007bwrap: Can't find source path /srv/project/thumbnail.webp: No such file or directory\n",
+      exit: { exitCode: 1 },
+    });
   });
 
   it('should never pass the custody lock to the workload', async () => {
@@ -450,26 +517,31 @@ describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
     expect(await output).toBe('done\n');
   });
 
-  it('should reject settlement when an owned process survives termination', async () => {
-    const root = { pid: 0 };
-    const lying = await custodial({
-      processTable: async () => {
-        const rows = await processTable();
-        return [
-          ...rows.filter((row) => row.pid !== root.pid),
-          { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
-        ];
-      },
-    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
-    if (lying.status !== 'started') {
-      throw new Error('expected a started launch');
-    }
-    const pipes = pipesOf(lying.process);
-    const printed = await text(pipes.stdout);
-    root.pid = Number(printed.trim());
+  it(
+    'should reject settlement when an owned process survives termination',
+    async () => {
+      const root = { pid: 0 };
+      const lying = await custodial({
+        processTable: async () => {
+          const rows = await processTable();
+          return [
+            ...rows.filter((row) => row.pid !== root.pid),
+            { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
+          ];
+        },
+      }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
+      if (lying.status !== 'started') {
+        throw new Error('expected a started launch');
+      }
+      const pipes = pipesOf(lying.process);
+      const printed = await text(pipes.stdout);
+      root.pid = Number(printed.trim());
 
-    await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
-  }, 20_000);
+      await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
+      /* A survivor is reported only once the whole termination deadline has passed. */
+    },
+    terminationDeadline + 15_000,
+  );
 });
 
 describe.runIf(process.platform === 'linux')('createSandboxShellProvider terminal', () => {
@@ -525,46 +597,23 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
-  it('should keep absent Linux containers uncreatable without applying macOS literal read denies', () => {
-    const root = fixtureRoot();
-    const missing = join(root, '.tau');
-    const profile = shellSandboxProfile({
-      filesystem: { readable: [], writable: [root], denied: [], masked: [missing] },
-      network: { domains: [] },
-    });
-    const filesystem = profile['filesystem'] as { denyRead: string[]; denyWrite: string[] };
-    if (process.platform === 'linux') {
-      expect(filesystem.denyRead).toContain(missing);
-      expect(filesystem.denyWrite).not.toContain(missing);
-      expect(filesystem.denyWrite).toContain(join(missing, '.tau-mask-boundary'));
-    } else {
-      expect(filesystem.denyRead).not.toContain(missing);
-      expect(filesystem.denyWrite).not.toContain(missing);
-    }
-  });
+  it('should reopen only the Zsh startup files, read-only, for the human Terminal Zsh', () => {
+    const home = '/Users/person';
+    const startup = ['.zshenv', '.zprofile', '.zshrc', '.zlogin'].map((name) => join(home, name));
+    const launch = { filesystem: { readable: [], writable: [], denied: [] }, network: { domains: [] } };
+    const clean = shellSandboxProfile(launch, { home }) as { filesystem: Record<string, string[]> };
+    const zsh = shellSandboxProfile({ ...launch, startupFiles: 'zsh' }, { home }) as {
+      filesystem: Record<string, string[]>;
+    };
 
-  it.runIf(process.platform === 'linux')('should pin authored descendants without rebinding a masked container', () => {
-    const root = fixtureRoot();
-    const masked = join(root, '.tau');
-    const authored = join(masked, 'parameters');
-    const nested = join(authored, 'nested');
-    mkdirSync(nested, { recursive: true });
-    const denied = join(nested, 'private');
-    const profile = shellSandboxProfile({
-      filesystem: {
-        readable: [],
-        writable: [root, authored],
-        readOnly: [join(masked, 'chats')],
-        denied: [denied],
-        masked: [masked],
-      },
-      network: { domains: [] },
-    });
-    const filesystem = profile['filesystem'] as { allowWrite: string[]; denyRead: string[]; denyWrite: string[] };
-    expect(filesystem.allowWrite).not.toContain(masked);
-    expect(filesystem.allowWrite).toEqual(expect.arrayContaining([root, authored, nested]));
-    expect(filesystem.denyRead).toEqual(expect.arrayContaining([masked, denied]));
-    expect(filesystem.denyWrite).toContain(denied);
+    expect(clean.filesystem['denyRead']).toStrictEqual(expect.arrayContaining(startup));
+    expect(startup.filter((path) => zsh.filesystem['denyRead']!.includes(path))).toStrictEqual([]);
+    expect(zsh.filesystem['allowRead']).toStrictEqual(expect.arrayContaining(startup));
+    expect(zsh.filesystem['denyWrite']).toStrictEqual(expect.arrayContaining(startup));
+    expect(zsh.filesystem['allowWrite']).toStrictEqual(clean.filesystem['allowWrite']);
+    expect(zsh.filesystem['denyRead']).toStrictEqual(
+      expect.arrayContaining([join(home, '.ssh'), join(home, '.bashrc'), join(home, '.config/git')]),
+    );
   });
 
   it('should allow exactly the granted names and deny every other destination', () => {
@@ -718,6 +767,22 @@ describe('shellSandboxCommand', () => {
       String.raw`HOME='/srv/it'\''s' exec '/bin/bash' '--noprofile' '--norc' '-c' 'echo '\''a'\'' $(b) ` + "`c`'",
     );
   });
+
+  it('should run the workload only once its announcement succeeded', () => {
+    const command = shellSandboxCommand(
+      {
+        executablePath: '/bin/bash',
+        arguments: ['-c', 'true'],
+        environment: { HOME: '/srv' },
+        stdio: { kind: 'pipes' },
+      },
+      String.raw`printf '\033]7771;tau-launch;n\007' >&2`,
+    );
+
+    expect(command).toBe(
+      String.raw`printf '\033]7771;tau-launch;n\007' >&2 && HOME='/srv' exec '/bin/bash' '-c' 'true'`,
+    );
+  });
 });
 
 describe('bindOwnPty', () => {
@@ -774,7 +839,7 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
     const project = join(root, 'project');
     const second = join(root, 'second');
     // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows; a
-    // second checkout's reserved container is masked and absent.
+    // second checkout's control row is absent, with its `.tau` absent too.
     const launch = {
       filesystem: {
         readable: [],
@@ -782,37 +847,25 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
         readOnly: [join(project, '.tau', 'runs')],
         denied: [join(project, '.git'), join(project, '.tau', 'binding.json'), join(second, '.tau', 'binding.json')],
         directories: [join(project, '.tau', 'runs'), join(project, '.git')],
-        masked: [join(second, '.tau')],
       },
       network: { domains: [] },
     };
     type Lists = { filesystem: { denyWrite: string[]; allowWrite: string[] } };
-    const hold = (profile: Lists) =>
-      holdProtectedStandIns({
-        ...profile.filesystem,
-        directories: launch.filesystem.directories,
-        masked: launch.filesystem.masked,
-        writable: launch.filesystem.writable,
-      });
-    // As a launch does: hold from the first profile, compute the profile again once the stand-ins exist, hold from it.
-    const releaseFirst = hold(shellSandboxProfile(launch, { home }) as Lists);
     const profile = shellSandboxProfile(launch, { home }) as Lists;
-    const releaseSecond = hold(profile);
-    const mounted = profile.filesystem.denyWrite.filter(
-      (path) =>
-        profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)) &&
-        // A masked container's children lie under the runtime's own mask, never on the host.
-        !path.startsWith(`${join(second, '.tau')}/`),
+    const release = holdProtectedStandIns({ ...profile.filesystem, directories: launch.filesystem.directories });
+    const mounted = profile.filesystem.denyWrite.filter((path) =>
+      profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)),
     );
     try {
-      expect(mounted).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(project, '.git')]));
-      expect(existsSync(join(second, '.tau'))).toBe(true);
+      expect(mounted).toStrictEqual(
+        expect.arrayContaining([join(home, '.ssh'), join(project, '.git'), join(second, '.tau', 'binding.json')]),
+      );
       // Every entry of the runtime's own deny list inside a writable root is now present: no runtime mount point.
       expect(mounted.filter((path) => !existsSync(path))).toStrictEqual([]);
-      expect(existsSync(join(second, '.tau', 'binding.json'))).toBe(false);
+      expect(lstatSync(join(second, '.tau', 'binding.json')).isFile()).toBe(true);
+      expect(lstatSync(join(project, '.tau', 'runs')).isDirectory()).toBe(true);
     } finally {
-      releaseSecond();
-      releaseFirst();
+      release();
     }
     expect(mounted.filter((path) => existsSync(path))).toStrictEqual([]);
     expect(existsSync(join(second, '.tau'))).toBe(false);

@@ -1,4 +1,4 @@
-import { Fn, convert, mix, textureSize, abs, float, max, select, vec2, vec3 } from 'three/tsl';
+import { Fn, clamp, convert, ivec2, textureSize, abs, float, max, select, vec2, vec3 } from 'three/tsl';
 import type { Node, TextureNode } from 'three/webgpu';
 
 /** Encode a view-space unit normal over both hemispheres into two UNORM channels. @internal */
@@ -31,23 +31,27 @@ export const decodeAoNormal = Fn(([encoded]: [Node<'vec2'>]) => {
 });
 
 /**
- * Interpolate directions, never folded octahedral coordinates, across texel boundaries.
+ * The full-resolution texel that contains `uv`, clamped to the attachment.
+ * @internal
+ * @param input - Any full-resolution scene attachment.
+ * @param uv - Top-first screen texture coordinates; Three flips loads for the execution backend.
+ * @returns Integer texel coordinate for `load`.
+ */
+export function aoTexel(input: TextureNode, uv: Node): Node<'ivec2'> {
+  const size = convert(textureSize(input), 'vec2') as Node<'vec2'>;
+  // Clamp in float space: TSL's integer clamp overloads are untyped, and off-screen GTAO taps must stay in bounds.
+  return ivec2(clamp((uv as Node<'vec2'>).mul(size), vec2(0), size.sub(1)));
+}
+
+/**
+ * Fetch one surface's normal, never a blend. AO pairs it with the depth of the same texel:
+ * interpolating at half-resolution texel corners mixed silhouettes with the cleared background
+ * or the occluded surface behind, and GTAO turned those false normals into dark dots.
  * @internal
  * @param input - The owned pass's RG8 normal attachment, cleared to zero.
- * @param uv - Top-first screen texture coordinates, adapted by Three for the execution backend.
- * @returns Bilinearly interpolated view-space direction; the AO consumer normalizes it.
+ * @param uv - Top-first screen texture coordinates.
+ * @returns Decoded view-space direction of the texel containing `uv`.
  */
-export function sampleAoNormal(input: TextureNode, uv: Node): Node<'vec3'> {
-  // oxlint-disable-next-line eslint/new-cap -- Three TSL shader-function factory.
-  return Fn(() => {
-    const size = (convert(textureSize(input), 'vec2') as Node<'vec2'>).toVar();
-    const position = (uv as Node<'vec2'>).mul(size).sub(0.5).toVar();
-    const base = position.floor().add(0.5).toVar();
-    const fraction = position.fract().toVar();
-    const a = decodeAoNormal(input.sample(base.div(size)).rg);
-    const b = decodeAoNormal(input.sample(base.add(vec2(1, 0)).div(size)).rg);
-    const c = decodeAoNormal(input.sample(base.add(vec2(0, 1)).div(size)).rg);
-    const d = decodeAoNormal(input.sample(base.add(1).div(size)).rg);
-    return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
-  })();
+export function loadAoNormal(input: TextureNode, uv: Node): Node<'vec3'> {
+  return decodeAoNormal(input.load(aoTexel(input, uv)).rg);
 }

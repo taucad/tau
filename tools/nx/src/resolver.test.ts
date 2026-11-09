@@ -91,19 +91,20 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-eight today', () => {
+  it('is every non-private type:package project, sorted — fifty-seven today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    // `geospec` left for taucad/geospec, taking the count from 59 to 58.
-    expect(names).toHaveLength(58);
+    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57).
+    expect(names).toHaveLength(57);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['archive-core', 'runtime', 'runtime-testing', 'cli']) {
       expect(names).toContain(name);
     }
     expect(names).not.toContain('geospec');
+    expect(names).not.toContain('rhino');
 
     // Dev-time tools and private libraries are outside the set by construction.
     for (const name of ['nx', 'scripts', 'oxlint', 'types', 'chat']) {
@@ -211,6 +212,28 @@ describe('validateTags()', () => {
       'fixture/app-lib-without-layer: expected exactly one layer: tag, found none',
       'fixture/two-layers: expected exactly one layer: tag, found layer:feature, layer:ui',
       'fixture/unknown-layer: unknown tag "layer:shell" (layer: must be one of feature, ui, data-access, util)',
+    ]);
+  });
+
+  it('requires one valid api name for API server libraries and refuses it on every other project', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('api-without-name', ['scope:api', 'type:app-lib', 'layer:util'], undefined),
+          project('api-two-names', ['scope:api', 'type:app-lib', 'layer:util', 'api:core', 'api:redis'], undefined),
+          project('api-unknown-name', ['scope:api', 'type:app-lib', 'layer:util', 'api:git'], undefined),
+          project('named-app', ['scope:api', 'type:app', 'api:core'], undefined),
+          project('named-ui-lib', ['scope:ui', 'type:app-lib', 'layer:util', 'api:core'], undefined),
+          project('valid-api-lib', ['scope:api', 'type:app-lib', 'layer:feature', 'api:billing'], undefined),
+          project('unnamed-api-app', ['scope:api', 'type:app'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/api-without-name: expected exactly one api: tag, found none',
+      'fixture/api-two-names: expected exactly one api: tag, found api:core, api:redis',
+      'fixture/api-unknown-name: unknown tag "api:git" (api: must be one of core, observability, lifecycle, database, redis, email, auth, hosts, llm-gateway, billing)',
+      'fixture/named-app: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
+      'fixture/named-ui-lib: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
     ]);
   });
 });

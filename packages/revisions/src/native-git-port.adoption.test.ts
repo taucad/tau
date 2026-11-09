@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
@@ -92,8 +93,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
       summary: { generated: 'Adopted' },
     });
 
-    const descriptor = await port.describe();
-    expect(descriptor.largeObjects).toBe(false);
+    /* No attributes file names them, so they are blobs: the tree's own rule (D16). */
     expect(git(project, ['rev-parse', `${receipt.commitId}:photo.png`])).toBe(
       git(project, ['rev-parse', 'HEAD:photo.png']),
     );
@@ -113,16 +113,23 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     expect(ignored?.toSorted()).toStrictEqual(['.env', 'dist/']);
   });
 
-  it('should answer no ignored paths for a store Tau created', async () => {
+  it("should answer a store Tau created with what its own ignore rules exclude, the person's lines included", async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-created-'));
     roots.push(root);
     const port = createNativeGitRevisionPort({ repositoryPath: root });
     await port.init({ author });
+    const ignore = await readFile(join(root, generatedIgnorePath), 'utf8');
+    await writeFile(join(root, generatedIgnorePath), `${ignore}*.secret\n`);
+    await writeFile(join(root, 'key.secret'), 'x\n');
+    await writeFile(join(root, 'notes.txt'), 'mine\n');
 
-    expect(await port.ignoredPaths?.()).toBeUndefined();
+    expect(await port.ignoredPaths?.()).toStrictEqual(['key.secret']);
     const descriptor = await port.describe();
     expect(descriptor.largeObjects).toBe(true);
+    expect(descriptor).not.toHaveProperty('largeObjectRule');
     expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(await readFile(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('# BEGIN Tau generated');
   });
 
   describe('refusal', () => {
@@ -141,12 +148,6 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
           await writeFile(join(project, '.tau', 'chats', 'old.json'), '{}\n');
         },
         reason: /\.tau\/chats\/old\.json is a path Tau reserves/u,
-      },
-      {
-        name: 'large files kept outside Git',
-        arrange: async (project) =>
-          writeFile(join(project, 'models', '.gitattributes'), '*.stl filter=lfs diff=lfs merge=lfs -text\n'),
-        reason: /stores large files outside Git/u,
       },
     ];
 
@@ -170,6 +171,156 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     }
   });
 
+  describe('with its own large-file attributes (D16)', () => {
+    const stlAttributes = '*.stl filter=lfs diff=lfs merge=lfs -text\n';
+    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 7) } as const;
+
+    it('should open it, and leave its attributes, ignore file and config as written', async () => {
+      const { project } = await personRepository({ 'models/.gitattributes': stlAttributes });
+      const config = await readFile(join(project, '.git', 'config'), 'utf8');
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+
+      await port.init({ author });
+
+      expect(await readFile(join(project, 'models', '.gitattributes'), 'utf8')).toBe(stlAttributes);
+      expect(await readdir(project)).not.toContain(generatedGitattributesPath);
+      expect(await readFile(join(project, generatedIgnorePath), 'utf8')).toBe('dist/\n.env\n');
+      expect(await readFile(join(project, '.git', 'config'), 'utf8')).toBe(config);
+      expect(await port.describe()).toMatchObject({ largeObjects: true, keepsLargeObjectFiles: true });
+    });
+
+    it("should store exactly the paths its attributes name as pointers, and never write Tau's block", async () => {
+      const { project } = await personRepository({ 'models/.gitattributes': stlAttributes });
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      await port.init({ author });
+      const scan = new Uint8Array(4096).fill(3);
+      const unnamed = new Uint8Array(2 * 1024 * 1024).fill(5);
+
+      const receipt = await port.writeRevision({
+        parents: [revisionId(git(project, ['rev-parse', 'HEAD']))],
+        tree: new ImmutableRevisionTree([
+          [generatedIgnorePath, 'dist/\n.env\n'],
+          ['models/.gitattributes', stlAttributes],
+          ['models/scan.stl', scan],
+          ['scan.stl', unnamed],
+          ['part.scad', 'cube(1);\n'],
+          ['photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])],
+        ]),
+        provenance,
+        summary: { generated: 'Adopted with LFS' },
+      });
+
+      const pointer = readLfsPointer(
+        new TextEncoder().encode(git(project, ['cat-file', 'blob', `${receipt.commitId}:models/scan.stl`]) + '\n'),
+      );
+      expect(pointer).toStrictEqual(lfsPointerFor(scan).pointer);
+      expect(await readFile(join(project, '.git', lfsObjectPath(pointer!.oid)))).toStrictEqual(Buffer.from(scan));
+      // Outside the directory its attributes cover, and never by Tau's size threshold or families.
+      expect(git(project, ['cat-file', '-s', `${receipt.commitId}:scan.stl`])).toBe(String(unnamed.byteLength));
+      expect(git(project, ['rev-parse', `${receipt.commitId}:photo.png`])).toBe(
+        git(project, ['rev-parse', 'HEAD:photo.png']),
+      );
+      expect(git(project, ['cat-file', 'blob', `${receipt.commitId}:models/.gitattributes`])).toBe(
+        stlAttributes.trimEnd(),
+      );
+      expect(git(project, ['ls-tree', '--name-only', receipt.commitId])).not.toContain(generatedGitattributesPath);
+    });
+
+    it('should keep a pointer its own Git recorded unchanged', async () => {
+      const content = new Uint8Array(512).fill(9);
+      const { bytes } = lfsPointerFor(content);
+      const { project } = await personRepository({
+        '.gitattributes': stlAttributes,
+        'scan.stl': bytes,
+      });
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      await port.init({ author });
+      const head = revisionId(git(project, ['rev-parse', 'HEAD']));
+      const tree = await port.readTree(head, { largeObjects: 'local' });
+
+      const receipt = await port.writeRevision({
+        parents: [head],
+        tree: tree!,
+        provenance,
+        summary: { generated: 'Same' },
+      });
+
+      expect(git(project, ['rev-parse', `${receipt.commitId}^{tree}`])).toBe(
+        git(project, ['rev-parse', 'HEAD^{tree}']),
+      );
+    });
+  });
+
+  describe('an entry unchanged from the parent keeps its representation (rule 13)', () => {
+    const psdAttributes = '*.psd filter=lfs diff=lfs merge=lfs -text\n';
+    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 8) } as const;
+    const blobOf = (project: string, rev: string, path: string): string =>
+      git(project, ['rev-parse', `${rev}:${path}`]);
+
+    it('keeps a blob a blob after `git lfs track`, and makes only new and changed content a pointer', async () => {
+      const art = new Uint8Array(3000).fill(4);
+      const { project } = await personRepository({ 'art.psd': art, 'old.psd': new Uint8Array(100).fill(1) });
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      await port.init({ author });
+      const head = revisionId(git(project, ['rev-parse', 'HEAD']));
+      const fresh = new Uint8Array(200).fill(6);
+      const edited = new Uint8Array(100).fill(2);
+
+      const receipt = await port.writeRevision({
+        parents: [head],
+        tree: new ImmutableRevisionTree([
+          [generatedIgnorePath, 'dist/\n.env\n'],
+          ['.gitattributes', psdAttributes],
+          ['part.scad', 'cube(1);\n'],
+          ['photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])],
+          ['art.psd', art],
+          ['old.psd', edited],
+          ['new.psd', fresh],
+        ]),
+        provenance,
+        summary: { generated: 'Tracked' },
+      });
+
+      expect(blobOf(project, receipt.commitId, 'art.psd')).toBe(blobOf(project, 'HEAD', 'art.psd'));
+      const pointerAt = (path: string) =>
+        readLfsPointer(
+          new TextEncoder().encode(git(project, ['cat-file', 'blob', `${receipt.commitId}:${path}`]) + '\n'),
+        );
+      expect(pointerAt('old.psd')).toStrictEqual(lfsPointerFor(edited).pointer);
+      expect(pointerAt('new.psd')).toStrictEqual(lfsPointerFor(fresh).pointer);
+    });
+
+    it('keeps a pointer a pointer when the attributes no longer name it, and makes changed content a blob', async () => {
+      const scan = new Uint8Array(700).fill(9);
+      const mesh = new Uint8Array(500).fill(8);
+      const { project } = await personRepository({
+        '.gitattributes': '*.stl filter=lfs diff=lfs merge=lfs -text\n',
+        'scan.stl': lfsPointerFor(scan).bytes,
+        'mesh.stl': lfsPointerFor(mesh).bytes,
+      });
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      await port.init({ author });
+      const head = revisionId(git(project, ['rev-parse', 'HEAD']));
+      const remeshed = new Uint8Array(500).fill(7);
+
+      const receipt = await port.writeRevision({
+        parents: [head],
+        tree: new ImmutableRevisionTree([
+          [generatedIgnorePath, 'dist/\n.env\n'],
+          ['part.scad', 'cube(1);\n'],
+          ['photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])],
+          ['scan.stl', scan],
+          ['mesh.stl', remeshed],
+        ]),
+        provenance,
+        summary: { generated: 'Untracked' },
+      });
+
+      expect(blobOf(project, receipt.commitId, 'scan.stl')).toBe(blobOf(project, 'HEAD', 'scan.stl'));
+      expect(git(project, ['cat-file', '-s', `${receipt.commitId}:mesh.stl`])).toBe(String(remeshed.byteLength));
+    });
+  });
+
   it('should not list a worktree the person made as one of its checkouts', async () => {
     const { root, project } = await personRepository();
     git(project, ['worktree', 'add', '--quiet', '-b', 'side', join(root, 'mine')]);
@@ -191,5 +342,101 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
       { id: 'live', kind: 'live' },
       { id: added.id, kind: 'linked' },
     ]);
+  });
+});
+
+/*
+ * Two opens of one fresh store at once: a caller's `init` and the effects'
+ * `ensureStore`, which the large-object resume reaches on a timer as the root
+ * starts. Each used to run `git init` and `git lfs install --local`, and the
+ * loser of `.git/config.lock` failed with "could not lock config file".
+ */
+describe.runIf(gitToolchainOnPath)('opening a fresh store from two places at once', () => {
+  it('creates the store once and answers every open', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one fresh repository per attempt.
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-concurrent-init-'));
+      roots.push(root);
+      const project = join(root, 'project');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await mkdir(project);
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      // oxlint-disable-next-line no-await-in-loop -- the opens race each other, not the attempts.
+      await expect(
+        Promise.all([port.init({ author }), port.init({ author }), port.init({ author })]),
+      ).resolves.toHaveLength(3);
+      expect(git(project, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      expect(await readdir(join(project, '.git'))).not.toContain('config.lock');
+    }
+  }, 120_000);
+});
+
+describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no repository', () => {
+  const folder = async (files: Readonly<Record<string, string>>): Promise<string> => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-folder-'));
+    roots.push(root);
+    await Promise.all(Object.entries(files).map(async ([path, content]) => writeFile(join(root, path), content)));
+    return root;
+  };
+  const sessionOf = async (root: string) => {
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+    await port.init({ author });
+    const ignored = await port.ignoredPaths?.();
+    return {
+      ignored: ignored?.toSorted(),
+      config: await readFile(join(root, '.git', 'config'), 'utf8'),
+    };
+  };
+
+  it("is the person's in the session that made the store and in every session after it", async () => {
+    const root = await folder({ [generatedIgnorePath]: 'dist/\n', [generatedGitattributesPath]: '*.psd filter=lfs\n' });
+    await mkdir(join(root, 'dist'));
+    await writeFile(join(root, 'dist', 'out.js'), 'built\n');
+
+    const first = await sessionOf(root);
+    const second = await sessionOf(root);
+
+    expect(first).toStrictEqual(second);
+    expect(first.ignored).toStrictEqual(['dist/']);
+    expect(first.config).not.toContain('[filter "lfs"]');
+    expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toBe('dist/\n');
+    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toBe('*.psd filter=lfs\n');
+  });
+
+  it("is Tau's in both sessions once init gave it Tau's attributes file", async () => {
+    const root = await folder({ [generatedIgnorePath]: 'dist/\n' });
+
+    const first = await sessionOf(root);
+    const second = await sessionOf(root);
+
+    expect(first).toStrictEqual(second);
+    expect(first.ignored).toStrictEqual([]);
+    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+  });
+
+  it('configures the LFS filters again on an open whose store lost them', async () => {
+    const root = await folder({});
+    await sessionOf(root);
+    git(root, ['config', '--local', '--remove-section', 'filter.lfs']);
+
+    const reopened = await sessionOf(root);
+
+    expect(reopened.config).toContain('[filter "lfs"]');
+  });
+});
+
+describe.runIf(gitToolchainOnPath)("the repository's core.ignoreCase", () => {
+  it('is read from the store init made', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-ignorecase-'));
+    roots.push(root);
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+
+    await port.init({ author });
+    /* What `git init` records on a case-insensitive disk, written by hand on this one. */
+    git(root, ['config', 'core.ignoreCase', 'true']);
+    const after = await port.describe();
+
+    expect(after.ignoreCase).toBe(true);
   });
 });

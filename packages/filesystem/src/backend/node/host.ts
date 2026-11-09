@@ -8,7 +8,8 @@
  */
 
 import type { NodeFsPort } from '#backend/node/port.js';
-import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type { NodeFsBatchReceipt, NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type { BatchEntry, BatchReceipt } from '#changeset.js';
 import {
   nodeFsMaxWatchBatch,
   nodeFsProtocolVersion,
@@ -316,6 +317,14 @@ export type NodeFsHostOptions = {
    * standing between a renderer-supplied string and the whole host filesystem.
    */
   allowRoot(root: string): boolean;
+  /**
+   * The repository LFS object directory an admitted root's large objects are
+   * cloned from (EQ13), asked per write, or `undefined` when it has none. A
+   * batch write that names a large object by its id is resolved here, by the
+   * authority, so no client ever names a `.git` path (I6). Omitted, no root
+   * accepts such a write.
+   */
+  largeObjectStore?(root: string): string | undefined;
 };
 
 declare const entryIdentityBrand: unique symbol;
@@ -948,6 +957,26 @@ const errorFrame = (id: number, error: unknown): NodeFsResponse => ({
     : {}),
 });
 
+/* A receipt as it crosses the port: its error keeps what tells a refusal apart (code, abort name). */
+const wireReceipt = ({ outcome, kind, created, largeObject, error }: BatchReceipt): NodeFsBatchReceipt => {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  return {
+    outcome,
+    ...(kind === undefined ? {} : { kind }),
+    ...(created === undefined ? {} : { created }),
+    ...(largeObject === undefined ? {} : { largeObject }),
+    ...(error === undefined
+      ? {}
+      : {
+          error: {
+            message: error instanceof Error ? error.message : typeof error === 'string' ? error : 'The entry failed.',
+            ...(typeof code === 'string' ? { code } : {}),
+            ...(typeof name === 'string' ? { name } : {}),
+          },
+        }),
+  };
+};
+
 const runOperation = async (
   provider: NodeFsProvider,
   request: NodeFsRequest,
@@ -971,6 +1000,12 @@ const runOperation = async (
         filled += chunk.byteLength;
       }
       return bytes.slice(0, filled);
+    }
+    case 'applyBatch': {
+      const entries = request.entries as readonly BatchEntry[];
+      const paths = entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+      const receipts = await mutate(request.root, paths, async () => provider.applyBatch(entries));
+      return receipts.map((receipt) => wireReceipt(receipt));
     }
     case 'writeFile': {
       const data = typeof request.data === 'string' ? request.data : new Uint8Array(request.data);
@@ -1059,12 +1094,6 @@ const runOperation = async (
     case 'readdirWithStats': {
       return provider.readdirWithStats(request.path);
     }
-    case 'readdirHeadWithStats': {
-      return provider.readdirWithStats(request.path, { content: 'head' });
-    }
-    case 'headStat': {
-      return provider.stat(request.path, { content: 'head' });
-    }
     case 'stat': {
       return provider.stat(request.path);
     }
@@ -1142,7 +1171,11 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     if (existing) {
       return existing;
     }
-    const provider = new NodeFsProvider(root, { policy: options.policy });
+    const { largeObjectStore } = options;
+    const provider = new NodeFsProvider(root, {
+      policy: options.policy,
+      ...(largeObjectStore === undefined ? {} : { largeObjectStore: () => largeObjectStore(root) }),
+    });
     providers.set(root, provider);
     return provider;
   };
@@ -1364,11 +1397,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
           encoding === undefined ? provider.readFile(rootedPath) : provider.readFile(rootedPath, encoding),
         )) as NodeFsRootScope['readFile'],
       readdir: async (rootedPath) => call(async () => provider.readdir(rootedPath)),
-      // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
-      stat: ((rootedPath: string, statOptions?: Parameters<NodeFsProvider['stat']>[1]) =>
-        call(async () =>
-          statOptions === undefined ? provider.stat(rootedPath) : provider.stat(rootedPath, statOptions),
-        )) as NodeFsRootScope['stat'],
+      stat: async (rootedPath) => call(async () => provider.stat(rootedPath)),
       exists: async (rootedPath) => call(async () => provider.exists(rootedPath)),
       writeFileChecked: async ({ signal: writeSignal, ...input }): Promise<CheckedFileWriteResult> =>
         mutate(writeSignal, [input.path], async () => writeNodeFileCheckedWithAuthority(provider, input, writer)),

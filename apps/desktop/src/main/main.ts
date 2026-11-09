@@ -43,6 +43,7 @@ import {
   utilityProcess,
 } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
@@ -66,6 +67,7 @@ import {
   forwardRendererDiagnostics,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
+  watchRendererHangs,
 } from '#main/diagnostics.js';
 import {
   clientEnvironment,
@@ -113,13 +115,25 @@ import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
-import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
+import { updaterFailureSignal } from '#main/desktop-signals.js';
+import {
+  initializeDesktopErrorReporting,
+  rendererErrorReportingEnvironment,
+  reportDesktopSignal,
+} from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import type { MoveToApplicationsHost } from '#main/app-location.js';
+import {
+  assessAppLocation,
+  locationBlocksUpdates,
+  moveToApplications,
+  offerMoveToApplications,
+} from '#main/app-location.js';
 import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
@@ -240,8 +254,12 @@ if (routeQualification) {
   app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
   app.commandLine.appendSwitch('remote-debugging-port', '0');
 }
-// Crashpad may create profile files, so initialize only after the pristine probe admission above.
-initializeDesktopErrorReporting(desktopChannel);
+// Crashpad may create profile files, so initialize only after the pristine probe admission above. A qualification
+// run or a package that honours test overrides is a test harness, and reports apart from real use.
+initializeDesktopErrorReporting(
+  desktopChannel,
+  routeQualification !== undefined || (app.isPackaged && !environmentLocked),
+);
 /* Sentry first registers its IPC scheme and wraps subsequent registrations.
  * Register app:// afterward so both schemes retain their privileges, still
  * before app.whenReady() starts the network service. */
@@ -537,6 +555,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log.log(loginShell.fallback ? 'warn' : 'info', 'main.login-shell-path', loginShell);
   }
 
+  /* On macOS, Squirrel.Mac cannot replace a copy run from Downloads (translocated) or from its disk image, so a
+   * release build offers once to move itself to Applications. Packages that honour test overrides, and the
+   * update and route probes, never ask. */
+  const appLocation = process.platform === 'darwin' && app.isPackaged ? assessAppLocation(process.execPath) : undefined;
+  const moveHost: MoveToApplicationsHost = {
+    ask: (options) => dialog.showMessageBoxSync(options),
+    move: (options) => app.moveToApplicationsFolder(options),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  };
+  if (
+    environmentLocked &&
+    otaProbe === undefined &&
+    routeQualification === undefined &&
+    offerMoveToApplications(appLocation, app.getPath('userData'), moveHost)
+  ) {
+    /* Electron relaunches Tau from Applications and quits this copy. */
+    return;
+  }
+
   /* L2's contract: the home root must exist before the renderer's first mount,
    * because `NodeFsProvider` realpath-checks its base. */
   const homeRoot = join(app.getPath('userData'), 'home');
@@ -573,9 +612,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
   let quitting = false;
-  /* Windows main reloads to restore the workspace after a quit was called off: their Terminal sessions were already
-   * covered by quit's own question, so their unload is not asked about again (T15). */
-  const restoringReloads = new Set<number>();
 
   const auth = createAuthService({
     callbackScheme: desktopScheme === 'tau-staging:' ? 'tau-staging' : 'tau',
@@ -758,6 +794,32 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return appMetrics.residentBytes.get(utility.pid);
   };
+  /*
+   * The Tau-owned bubblewrap, when this installation has one. Stock Ubuntu 24.04 and Debian 13 keep
+   * `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
+   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
+   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. Stock Ubuntu 26.04 also
+   * confines `/usr/bin/bwrap` itself with `bwrap-userns-restrict`, so the sandbox runtime's `apply-seccomp` cannot open
+   * its nested namespace and every native kernel worker exits 1 (`write /proc/self/setgroups (nested userns is
+   * capability-restricted …)`): build123d never prepares and no model renders (qualification 41865985263,
+   * ubuntu2604-apt-x11 and ubuntu2604-appimage-x11). The selector package installs a copy at this stable path and
+   * attaches the one AppArmor profile that grants `userns` to it, so both the shell sandbox and every native worker run
+   * through it. An unpackaged build has no such file, so both variables stay unset and the runtimes keep their default.
+   */
+  const ownedBwrap = ((): string | undefined => {
+    if (process.platform !== 'linux') {
+      return undefined;
+    }
+    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
+    return existsSync(bwrap) ? bwrap : undefined;
+  })();
+  const nativeSandboxBwrapEnvironment: Readonly<Record<string, string>> =
+    ownedBwrap === undefined ? {} : { [nativeSandboxBwrapVariable]: ownedBwrap };
+  /* Main seals prepared closures (their bytecode compile) in the native sandbox itself. */
+  Object.assign(process.env, nativeSandboxBwrapEnvironment);
+  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> =>
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    ownedBwrap === undefined ? {} : { TAU_DESKTOP_SHELL_BWRAP: ownedBwrap };
   const baseForkResolver = createKernelForkResolver({
     registry: roots,
     defaultRoot: homeRoot,
@@ -775,6 +837,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* The kernel utility launches every native worker (python, dotnet) in the native sandbox. */
+      ...nativeSandboxBwrapEnvironment,
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     /* A fork-loop guard, not a concurrency policy: a live project costs one to
@@ -936,23 +1000,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       connection.control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) }),
     );
   });
-
-  /*
-   * The Tau-owned bubblewrap the shell sandbox runs, when this installation has one. Stock Ubuntu 24.04 and Debian 13
-   * keep `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
-   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
-   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. The selector package installs
-   * a copy at this stable path and attaches the one AppArmor profile that grants `userns` to it. An unpackaged build has
-   * no such file, so the variable is left unset and the provider keeps its own default.
-   */
-  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> => {
-    if (process.platform !== 'linux') {
-      return {};
-    }
-    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-    return existsSync(bwrap) ? { TAU_DESKTOP_SHELL_BWRAP: bwrap } : {};
-  };
 
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
@@ -1681,7 +1728,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         preload: join(import.meta.dirname, '../preload/preload.cjs'),
         additionalArguments: [
           `${bootstrapArgumentPrefix}${JSON.stringify({
-            env: clientEnvironment(environment),
+            env: { ...clientEnvironment(environment), ...rendererErrorReportingEnvironment() },
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds(),
           })}`,
@@ -1705,43 +1752,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.on('enter-full-screen', publishFullscreen);
     window.on('leave-full-screen', publishFullscreen);
     window.webContents.on('did-finish-load', publishFullscreen);
-    /*
-     * A running Terminal's pane holds the page's unload (T15), so closing the window (its close button, Cmd/Ctrl+W, the
-     * last window on Windows and Linux, which would quit) and reloading it (Cmd/Ctrl+R) ask first. Keep open leaves
-     * the window and its session as they were; Close and stop lets the unload go on, which ends the session. Quit
-     * asked its own question already, and a restoring reload follows one, so neither asks again.
-     */
-    const { id: contentsId } = window.webContents;
+    /* Closing or reloading a window never asks: a page that holds its unload is let through, and a running Terminal
+     * session ends with the page. */
     window.webContents.on('will-prevent-unload', (event) => {
-      if (quitting || restoringReloads.delete(contentsId)) {
-        event.preventDefault();
-        return;
-      }
-      const response = dialog.showMessageBoxSync(window, {
-        type: 'warning',
-        buttons: ['Keep open', 'Close and stop'],
-        defaultId: 0,
-        cancelId: 0,
-        message: 'A Terminal session is running in this window.',
-        detail:
-          'Closing or reloading this window stops its Terminal session and anything running in it. Tau will not run its commands again.',
-      });
-      if (response === 1) {
-        event.preventDefault();
-      }
-    });
-    /* The restoring mark is one-shot: whichever way the restore load ends, the next close or reload asks again. */
-    window.webContents.on('did-finish-load', () => {
-      restoringReloads.delete(contentsId);
-    });
-    window.webContents.on('did-fail-load', (...failure) => {
-      /* Only the page's own load is the restore; a subframe that fails is not. */
-      if (failure[4]) {
-        restoringReloads.delete(contentsId);
-      }
-    });
-    window.webContents.on('render-process-gone', () => {
-      restoringReloads.delete(contentsId);
+      event.preventDefault();
     });
     window.once('close', () => {
       try {
@@ -1756,11 +1770,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
-    forwardRendererDiagnostics(window.webContents, log, () => {
-      if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-        window.webContents.reload();
-      }
+    forwardRendererDiagnostics(window.webContents, log, {
+      recover: () => {
+        if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.reload();
+        }
+      },
+      report: reportDesktopSignal,
     });
+    watchRendererHangs(window, log, { report: reportDesktopSignal });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is
@@ -1923,9 +1941,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       try {
         switch (stage) {
           case 'assessing': {
-            /* Running Terminals (T15) are counted by the utility that serves them, alongside the machine question;
-             * the quit's question also holds new Terminal starts until the quit is called off or quiesce stops them.
-             * An unanswered count is unknown, which asks rather than stopping them unseen, within the same bound. */
+            /* Running Terminals are counted by the utility that serves them, alongside the machine question. The count
+             * also holds new Terminal starts until the quit is called off or quiesce stops them. Terminals never make
+             * quit ask: only streaming machines do, and quitting stops every Terminal session. */
             const [terminalCount, machineAnswer] = await Promise.allSettled([
               services.terminalSessions(machineStreamingMilliseconds, context.attemptId),
               services.streamingMachines(machineStreamingMilliseconds, context.attemptId),
@@ -1934,38 +1952,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
             const counted = terminals === undefined ? {} : { terminals };
             if (machineAnswer.status === 'fulfilled') {
               const machines = machineAnswer.value;
-              done(machines.length === 0 && terminals === 0 ? 'clear' : 'review', { machines, ...counted });
+              done(machines.length === 0 ? 'clear' : 'review', { machines, ...counted });
             } else {
               done('review', { error: String(machineAnswer.reason), ...counted });
             }
             break;
           }
           case 'reviewing': {
-            const terminalNote =
-              context.terminals === 0
-                ? ''
-                : context.terminals === undefined
-                  ? ' Tau could not check whether a Terminal is running; quitting stops any that is.'
-                  : ` Quitting also stops ${context.terminals === 1 ? 'a running Terminal session' : `${String(context.terminals)} running Terminal sessions`}.`;
-            if (context.machines?.length === 0) {
-              /* Only Terminals to review: the machine question has nothing to say. */
-              const { response } = await dialog.showMessageBox({
-                type: 'warning',
-                buttons: ['Keep Tau open', context.purpose === 'restart' ? 'Restart anyway' : 'Quit anyway'],
-                defaultId: 0,
-                cancelId: 0,
-                message:
-                  context.terminals === undefined
-                    ? 'Tau could not check whether a Terminal is running.'
-                    : context.terminals === 1
-                      ? 'A Terminal session is running in Tau.'
-                      : `${String(context.terminals)} Terminal sessions are running in Tau.`,
-                detail:
-                  'Quitting stops each Terminal session and anything running in it. Tau will not run their commands again when it starts.',
-              });
-              done(response === 1 ? 'confirmed' : 'cancel');
-              break;
-            }
             const names = context.machines?.map(({ name }) => name);
             const { response } = await dialog.showMessageBox({
               type: 'warning',
@@ -1975,7 +1968,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
               message: names?.length
                 ? `Tau is streaming a program to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(names)}.`
                 : 'Tau could not check whether a machine needs this connection.',
-              detail: `Open Machines to review the run and use its stop control. Keep Tau open while it finishes, or explicitly quit and interrupt the connection. Quitting is not an emergency stop; buffered motion may continue.${terminalNote}`,
+              detail:
+                'Open Machines to review the run and use its stop control. Keep Tau open while it finishes, or explicitly quit and interrupt the connection. Quitting is not an emergency stop; buffered motion may continue.',
             });
             done(response === 0 ? 'view' : response === 2 ? 'force' : 'cancel');
             break;
@@ -2029,7 +2023,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops the Terminal sessions quit asked about.'}`,
+              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
             });
             done(
               context.retryable
@@ -2067,7 +2061,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
             quitting = false;
             try {
               for (const window of BrowserWindow.getAllWindows().filter((open) => !open.isDestroyed())) {
-                restoringReloads.add(window.webContents.id);
                 window.reload();
               }
               resumeQueuedNavigation();
@@ -2308,7 +2301,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
     openExternal: async (url) => shell.openExternal(url),
     log: (level, event, detail) => {
       log.log(level, event, detail);
+      reportDesktopSignal(updaterFailureSignal(event, detail, { channel: desktopChannel, version: app.getVersion() }));
     },
+    ...(appLocation === undefined
+      ? {}
+      : {
+          appLocation: {
+            blocksUpdates: locationBlocksUpdates(appLocation),
+            move: () => moveToApplications(moveHost),
+          },
+        }),
   };
   let platformUpdater;
   if (process.platform !== 'darwin' && app.isPackaged) {

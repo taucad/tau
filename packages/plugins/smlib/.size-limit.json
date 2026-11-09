@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS), @classcad/smlibwasm external — measured 11.26 kB brotlied on 2026-10-17",
+    "name": "total (ESM JS), @classcad/smlibwasm external — measured 13.15 kB brotlied on 2026-11-06 (batched edge and drawing reads, kernel batching program B3/B4)",
     "path": ["dist/**/*.mjs"],
-    "limit": "12 kB"
+    "limit": "14 kB"
   }
 ]

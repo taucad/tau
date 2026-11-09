@@ -107,8 +107,10 @@ describe('ChatQuestionQueue', () => {
     const trigger = screen.getByRole('button', { name: '1 question waiting · Form' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     const list = screen.getByRole('list', { name: 'Questions' });
+    fireEvent.click(within(list).getByRole('radio', { name: /^Form two/u }));
+    expect(answer).not.toHaveBeenCalled();
     await act(async () => {
-      fireEvent.click(within(list).getByRole('button', { name: /^B, Form two/u }));
+      fireEvent.click(within(list).getByRole('button', { name: 'Submit' }));
     });
 
     expect(answer).toHaveBeenCalledWith('ask_form', 'q', { choice: 'Form two' });
@@ -121,13 +123,16 @@ describe('ChatQuestionQueue', () => {
     try {
       render(<ChatQuestionQueue />);
       settle();
+      fireEvent.click(screen.getByRole('radio', { name: /^Form two/u }));
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));
+        fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
       });
       expect(screen.getByRole('alert')).toHaveTextContent('Your response was not saved. Try again.');
-      expect(screen.getByRole('button', { name: /^B, Form two/u })).not.toBeDisabled();
+      // The choice survives the failed write, so retrying is one click.
+      expect(screen.getByRole('radio', { name: /^Form two/u })).toBeChecked();
+      expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));
+        fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
       });
       expect(answer).toHaveBeenCalledTimes(2);
       expect(screen.queryByRole('alert')).toBeNull();
@@ -226,7 +231,7 @@ describe('ChatQuestionQueue', () => {
     );
     const { rerender } = render(view);
     settle();
-    screen.getByRole('button', { name: /^B, Form two/u }).focus();
+    screen.getByRole('radio', { name: /^Form two/u }).focus();
 
     answers = Object.fromEntries([['ask_form', answered('Form two')]]);
     rerender(

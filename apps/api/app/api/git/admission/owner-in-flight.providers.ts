@@ -1,6 +1,6 @@
 import type { Provider } from '@nestjs/common';
-import { RedisService } from '#redis/redis.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
+import { RedisService } from '@taucad/api-redis';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { OwnerInFlightGate, RedisOwnerInFlightCap } from '#api/git/admission/owner-in-flight.js';
 
 /**

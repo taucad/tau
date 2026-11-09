@@ -4,8 +4,8 @@ import { metrics } from '@opentelemetry/api';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { metrics as sdkMetrics } from '@opentelemetry/sdk-node';
 import { mock } from 'vitest-mock-extended';
-import { MetricsService } from '#telemetry/metrics.js';
-import type { DatabaseType } from '#database/database.service.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
+import type { DatabaseType } from '@taucad/api-database';
 import { accountingTasks, r2SourceOf } from '#api/storage-accounting/accounting-tasks.js';
 import { r2AnalyticsFixture } from '#api/storage-accounting/r2-analytics.fixture.js';
 import {

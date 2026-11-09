@@ -9,7 +9,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import { replicadKernel } from '#replicad.kernel.js';
 import type { GeometryReplicad } from '#replicad.types.js';
-import { measureShapesDiagonal, renderWithinBudget } from '#utils/render-output.js';
+import { measureShapesDiagonal, renderTessellated } from '#utils/render-output.js';
 
 const sphere = (radius: number): string =>
   `import { makeSphere } from 'replicad'; export default function main() { return makeSphere(${String(radius)}); }`;
@@ -92,7 +92,8 @@ describe('Replicad tessellation request (R1)', () => {
 describe('Replicad tessellation presets (P2)', () => {
   it('reports the requested form and the effective tolerances', async () => {
     const report = reportOf(await renderModel(sphere(5)));
-    expect(report).toMatchObject({ requested: 'medium', angularTolerance: 20, downgraded: 0 });
+    expect(report).toMatchObject({ requested: 'medium', angularTolerance: 20 });
+    expect(report).not.toHaveProperty('downgraded');
     // Bounding-box diagonal of a radius-5 sphere is 10 * sqrt(3) mm; medium divides it by 2000.
     expect(report.linearTolerance).toBeCloseTo((10 * Math.sqrt(3)) / 2000, 6);
     expect(report.triangles).toBeGreaterThan(0);
@@ -136,7 +137,6 @@ describe('Replicad tessellation presets (P2)', () => {
       requested: 'explicit',
       linearTolerance: 0.05,
       angularTolerance: 15,
-      downgraded: 0,
       triangles: mesh.triangles.length / 3,
       vertices: mesh.vertices.length / 3,
     });
@@ -144,42 +144,26 @@ describe('Replicad tessellation presets (P2)', () => {
   });
 });
 
-describe('Replicad preview budget (P4)', () => {
+describe('Replicad preview tessellation', () => {
   beforeAll(async () => {
     // Loads OpenCASCADE into the replicad module the direct calls below use.
     assertRenderingSuccess(await renderModel(sphere(1)));
   });
 
-  it('coarsens an over-budget preview one step at a time and reports the downgrade', async () => {
+  it('tessellates once at the requested tolerances, with no downgrade', async () => {
     const { makeSphere } = await import('replicad');
     const shape = makeSphere(50);
+    const shapes = [{ name: 'Sphere', shape }];
     const request = { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview } as const;
-    const fitted = renderWithinBudget([{ name: 'Sphere', shape }], { request, budget: Number.POSITIVE_INFINITY });
-    const budget = Math.floor(fitted.tessellation.triangles / 3);
-    const budgeted = renderWithinBudget([{ name: 'Sphere', shape }], { request, budget });
+    const rendered = renderTessellated(shapes, { request });
 
-    expect(fitted.issues).toEqual([]);
-    expect(budgeted.tessellation.downgraded).toBeGreaterThanOrEqual(1);
-    expect(budgeted.tessellation.downgraded).toBeLessThanOrEqual(3);
-    expect(budgeted.tessellation.triangles).toBeLessThan(fitted.tessellation.triangles);
-    const steps = budgeted.tessellation.downgraded!;
-    expect(budgeted.tessellation.linearTolerance).toBeCloseTo(fitted.tessellation.linearTolerance! * 2 ** steps, 9);
-    expect(budgeted.tessellation.angularTolerance).toBe(20 + 4 * steps);
-    expect(budgeted.issues).toEqual([
-      expect.objectContaining({
-        code: 'TESSELLATION_DOWNGRADED',
-        severity: 'warning',
-        details: expect.objectContaining({
-          producer: 'replicad',
-          requested: { form: 'medium', linearTolerance: fitted.tessellation.linearTolerance, angularTolerance: 20 },
-          effective: {
-            linearTolerance: budgeted.tessellation.linearTolerance,
-            angularTolerance: budgeted.tessellation.angularTolerance,
-          },
-          downgraded: steps,
-        }),
-      }),
-    ]);
+    expect(rendered.tessellation).toMatchObject({
+      requested: 'medium',
+      linearTolerance: measureShapesDiagonal(shapes) / 2000,
+      angularTolerance: 20,
+    });
+    expect(rendered.tessellation).not.toHaveProperty('downgraded');
+    expect(rendered).not.toHaveProperty('issues');
     shape.delete();
   });
 
@@ -187,14 +171,13 @@ describe('Replicad preview budget (P4)', () => {
     const replicad = await import('replicad');
     const original = replicad.makeBox([0, 0, 0], [10, 10, 10]);
     const copy = original.clone().translate([20, 0, 0]);
-    const { geometries } = renderWithinBudget(
+    const { geometries } = renderTessellated(
       [
         { name: 'original', shape: original },
         { name: 'copy', shape: copy },
       ],
       {
         request: { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview },
-        budget: Number.POSITIVE_INFINITY,
         openCascade: replicad.getOC(),
         collectBrepEdges: true,
         tessellationInstancing: true,

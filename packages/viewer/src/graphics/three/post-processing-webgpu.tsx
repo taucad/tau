@@ -1,6 +1,7 @@
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
-import { createSurfaceReuse } from '#graphics/three/surface-reuse.js';
+import { createSurfaceReuse, primeTargetDepth } from '#graphics/three/surface-reuse.js';
 import { createViewportFxaa } from '#graphics/three/fxaa.js';
+import { encodeFrameOutput } from '#graphics/three/frame-output.js';
 import { scheduleCameraPreparation } from '#graphics/three/camera-preparation.js';
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
@@ -26,7 +27,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import { encodeAoNormal, sampleAoNormal } from '#graphics/three/ao-normal.js';
+import { aoTexel, encodeAoNormal, loadAoNormal } from '#graphics/three/ao-normal.js';
 import { createAoDenoise } from '#graphics/three/ao-denoise.js';
 import {
   Mesh,
@@ -54,6 +55,7 @@ import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.jsx';
 import { pixelsToWorldUnits } from '#graphics/three/utils/spatial.utils.js';
 import { useOverlayDepthRestore } from '#graphics/three/scene-overlay.jsx';
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
 import { defaultPostProcessingSettings, resolveAoRadiusCssPixels } from '#graphics/three/post-processing-settings.js';
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { retireTransmissionCopy } from '#graphics/three/transmission-retirement.js';
@@ -91,7 +93,12 @@ type LinearFrame = {
 };
 
 // Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
-const gtaoThicknessToRadiusRatio = 1 / 0.09;
+const {
+  thicknessRatio: gtaoThicknessToRadiusRatio,
+  denoiseDepthTolerance: aoDenoiseDepthTolerance,
+  samples: gtaoSamples,
+  resolutionScale: aoResolutionScale,
+} = viewerRenderProfile.ambientOcclusion;
 const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
 
 const updateGtaoSpatialScale = ({
@@ -119,7 +126,7 @@ const updateGtaoSpatialScale = ({
       resource.aoNode.radius.value = radius;
       resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
       if (resource.denoiseNode) {
-        resource.denoiseNode.depthPhi.value = radius * 0.1;
+        resource.denoiseNode.depthPhi.value = radius * aoDenoiseDepthTolerance;
       }
     }
   }
@@ -190,7 +197,7 @@ const createLinearFrame = (renderer: WebGPURenderer, toneMapping: ToneMapping): 
   target.texture.name = 'Tau linear frame';
   target.depthTexture = new DepthTexture(1, 1, UnsignedInt248Type);
   target.depthTexture.format = DepthStencilFormat;
-  const finalOutput = createOutputQuad(renderOutput(texture(target.texture), NoToneMapping, renderer.outputColorSpace));
+  const finalOutput = createOutputQuad(encodeFrameOutput(texture(target.texture), renderer.outputColorSpace));
   finalOutput.name = 'Tau final output';
   const depthMaterial = new NodeMaterial();
   depthMaterial.colorWrite = false;
@@ -446,33 +453,31 @@ const createPipelineResources = ({
     }
     scenePass.getTexture('normal').type = UnsignedByteType;
     scenePass.getTexture('normal').format = compactNormals ? RGFormat : RGBAFormat;
+    // AO consumers want one surface per texel: depth and normal always come from the same texel.
+    const normalTexture = scenePass.getTextureNode('normal');
     const scenePassNormal = sample((uv) =>
       compactNormals
-        ? sampleAoNormal(scenePass.getTextureNode('normal'), uv)
-        : colorToDirection(scenePass.getTextureNode('normal').sample(uv)),
+        ? loadAoNormal(normalTexture, uv)
+        : colorToDirection(normalTexture.load(aoTexel(normalTexture, uv))),
     );
+    const loadDepth = (uv: Node): Node<'float'> => scenePassDepth.load(aoTexel(scenePassDepth, uv)).r;
 
     // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
     const logDepth = gpuRenderer.logarithmicDepthBuffer
-      ? createLogDepthAoAdapter(
-          camera,
-          sample((uv) => scenePassDepth.sample(uv).r),
-        )
+      ? createLogDepthAoAdapter(camera, sample(loadDepth))
       : undefined;
     const aoCamera = logDepth ?? createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API.
     const aoDepth =
       logDepth?.forwardDepth ??
-      sample((uv) =>
-        gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
-      );
+      sample((uv) => (gpuRenderer.reversedDepthBuffer ? loadDepth(uv).oneMinus() : loadDepth(uv)));
     aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
-    aoNode.resolutionScale = 0.5;
+    aoNode.resolutionScale = aoResolutionScale;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
-    aoNode.samples.value = 16;
+    aoNode.samples.value = gtaoSamples;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
 
     const aoTexture = aoNode.getTextureNode();
@@ -493,13 +498,18 @@ const createPipelineResources = ({
       stencilBuffer: false,
     };
     denoiseInput = rtt(denoiseNode.visibility(screenUV), 1, 1, denoiseTargetOptions);
-    // Performance candidate: filter at the AO budget, then bilinearly reconstruct.
-    // This avoids native-resolution depth/normal gathers; boundary halos remain a visual gate.
+    // Filter at the AO budget, then reconstruct with depth/normal-aware weights. Bilinear
+    // reconstruction smeared contact shading across silhouettes in 2x2 blocks; the joint
+    // upsample costs about what texel-exact normals save in the denoiser.
     const composedSample = (uv: Node<'vec2'>): Node<'vec4'> => {
       // Materialize tone-mapped surface/AO once before filtering the stored color.
       // CAD line color never enters surface composition or its filter.
       const color = scenePassColor.sample(uv);
-      const aoFactor = select<'float'>(aoNode!.scale.greaterThan(0), denoiseInput!.sample(uv).r, float(1));
+      const aoFactor = select<'float'>(
+        aoNode!.scale.greaterThan(0),
+        denoiseNode!.upsample(denoiseInput!, uv, !frame!.sharedDepth),
+        float(1),
+      );
       const visibility = select<'float'>(displayMode.equal(2), float(1), aoFactor);
       const beforeTone = select<'float'>(compositeStage.equal(0), visibility, float(1));
       const afterTone = select<'float'>(compositeStage.equal(1), visibility, float(1));
@@ -508,7 +518,8 @@ const createPipelineResources = ({
       );
       return mix(beauty, vec4(vec3(aoFactor), color.a), select<'float'>(displayMode.equal(1), float(1), float(0)));
     };
-    outputQuad = createOutputQuad(composedSample(screenUV), frame.sharedDepth ? undefined : depthRestoreMaterial);
+    // Composition is color-only; the filter writes the reuse view's own depth.
+    outputQuad = createOutputQuad(composedSample(screenUV));
     const composedTarget = frame.target;
     composedTarget.texture.name = 'Tau composed surface';
     const reuse = createSurfaceReuse({
@@ -518,12 +529,14 @@ const createPipelineResources = ({
     });
     const reuseTarget = reuse.target;
     frame.target = reuseTarget;
-    (frame.output.material as NodeMaterial).fragmentNode = renderOutput(
+    (frame.output.material as NodeMaterial).fragmentNode = encodeFrameOutput(
       texture(reuseTarget.texture),
-      NoToneMapping,
       gpuRenderer.outputColorSpace,
     );
-    const filtered = createOutputQuad(createViewportFxaa(texture(composedTarget.texture)));
+    const filtered = createOutputQuad(
+      createViewportFxaa(texture(composedTarget.texture)),
+      frame.sharedDepth ? undefined : depthRestoreMaterial,
+    );
     filtered.name = 'Tau reused surface FXAA';
     const compose = outputQuad.render.bind(outputQuad);
     outputQuad.render = (renderer) => {
@@ -669,17 +682,20 @@ function PostProcessingWebGpuActive({
       if (!selected.aoNode) {
         return;
       }
-      selected.aoNode.resolutionScale = 0.5;
+      selected.aoNode.resolutionScale = aoResolutionScale;
       if (selected.denoiseNode) {
         // One AO texel per tap, matching the half drawing-buffer estimate.
-        selected.denoiseNode.step.value.set(2 / (size.width * viewport.dpr), 2 / (size.height * viewport.dpr));
+        selected.denoiseNode.step.value.set(
+          1 / aoResolutionScale / (size.width * viewport.dpr),
+          1 / aoResolutionScale / (size.height * viewport.dpr),
+        );
       }
       if (selected.denoiseInput) {
         // Estimate and smooth at half drawing-buffer resolution, including on Retina displays.
         // r184 RTTNode has no resolutionScale. Own physical dimensions explicitly;
         // its pixelRatio stays 1 and ordinary frames never resize the allocation.
-        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * 0.5));
-        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * 0.5));
+        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * aoResolutionScale));
+        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * aoResolutionScale));
         if (selected.denoiseInput.width !== width || selected.denoiseInput.height !== height) {
           selected.denoiseInput.setSize(width, height);
         }
@@ -854,11 +870,12 @@ function PostProcessingWebGpuActive({
         frame.target.height !== drawingSize.current.y
       ) {
         // Both targets belong to this graph. Retire both before reinitializing
-        // either: r184 initialization dirties depth, so it must precede scene writes.
+        // either, then consume the frame's first-draw depth clear before scene writes.
         selected.scenePass.renderTarget.setSize(drawingSize.current.x, drawingSize.current.y);
         frame.target.setSize(drawingSize.current.x, drawingSize.current.y);
         renderer.initRenderTarget(selected.scenePass.renderTarget);
         renderer.initRenderTarget(frame.target);
+        primeTargetDepth(renderer, frame.target);
         frame.depthPrepared = true;
       }
     } else {

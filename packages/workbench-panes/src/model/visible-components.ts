@@ -1,7 +1,7 @@
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 
 /**
- * Preorder projection retaining matching ancestors, computed once per manifest/search.
+ * Preorder projection retaining matching ancestors, computed once per manifest/search. Face components are left out.
  *
  * @internal
  * @param manifest - The unit's component manifest.
@@ -20,7 +20,8 @@ export function getVisibleModelComponents(
   const pending = [...root.childIds].reverse();
   while (pending.length > 0) {
     const node = manifest.nodesById[pending.pop()!];
-    if (!node) {
+    // ponytail: faces are sub-entities of their body and stay out of the tree; add a toggle when face selection lands.
+    if (!node || node.kind === 'face') {
       continue;
     }
     ordered.push(node);

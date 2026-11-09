@@ -30,6 +30,7 @@
  */
 
 import type { PathClassification, PathPolicy } from '#types.js';
+import { foldPathSpelling } from '#path-fold.js';
 
 /** One reserved path family and its answers. @public */
 export type PathRegistryRow = PathClassification &
@@ -78,8 +79,11 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
  * `.tau` is Tau's own directory, so a member of it that no row names is either
  * a residue of a retired layout — the `.tau/workspaces` trees no migration
  * deletes (I15) — or a family this build does not know. Either way it is not
- * the user's design: never versioned, never the agent's. Watched on the UI
- * plane like the records rows, so the file tree still sees it move.
+ * the user's design, so it is never versioned. It is the agent's to read and
+ * write like the rest of the project: nothing Tau trusts lives under a name no
+ * row declares, and hiding names that do not exist yet is what made the shell
+ * mask every spelling of `.tau` (retired 2026-10-31). Watched on the UI plane
+ * like the records rows, so the file tree still sees it move.
  *
  * It is the fallback rather than a row because a row would name `.tau` itself:
  * the directory holds the authored controls too, and hiding the container hides
@@ -93,7 +97,7 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
 export const reservedTauPathClassification: PathClassification = Object.freeze({
   class: 'records',
   versioned: false,
-  agentAccess: 'hidden',
+  agentAccess: 'read-write',
   watch: 'ui',
 });
 
@@ -151,6 +155,20 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
   },
   {
     prefix: '.git',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+  /* The OPFS provider's staging directory: bytes a large write or a create is
+   * still writing, moved into place once whole and swept at the next open when
+   * their writer is gone (I1). It sits at the storage root; like every row
+   * above it matches by segment, so no depth ever shows it. */
+  {
+    prefix: '.tau-staging',
     class: 'control-plane',
     versioned: false,
     agentAccess: 'hidden',
@@ -366,6 +384,19 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     directory: false,
   },
 
+  /* The Project Index's snapshot (D5): regenerable, at the project root only,
+   * where every released client already leaves an unlisted `.tau` member
+   * unversioned. No agent lists or reads it, and no watcher echoes its writes. */
+  {
+    prefix: '.tau/index',
+    class: 'cache',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   /* Cache: regenerable, never versioned, never transferred, never watched. */
   {
     prefix: '.tau/cache',
@@ -397,20 +428,15 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
  * A `root` row matches at the project root only; a `segment` row matches
  * wherever its prefix sits on segment boundaries, so `lib/node_modules/x` is
  * cache and `vendor/dep/.git/config` is the control plane however deep the
- * repository is. A directory row covers itself and everything beneath it; a file
- * row covers that path alone — which still catches a `.git` that is a worktree
- * or submodule pointer file rather than a directory, because the directory row
- * matches the segment either way.
+ * repository is. Every row covers itself and everything beneath it: a file
+ * row's answer then never depends on whether someone built a directory of that
+ * name, and a `.git` that is a worktree or submodule pointer file rather than a
+ * directory matches the same way.
  */
 const covers = (row: PathRegistryRow, relative: string): boolean => {
-  if (row.directory) {
-    const bounded = `/${relative}/`;
-    const pattern = `/${row.prefix}/`;
-    return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
-  }
-  const bounded = `/${relative}`;
-  const pattern = `/${row.prefix}`;
-  return row.match === 'segment' ? bounded.endsWith(pattern) : bounded === pattern;
+  const bounded = `/${relative}/`;
+  const pattern = `/${row.prefix}/`;
+  return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
 };
 
 /**
@@ -427,48 +453,6 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
 );
 
 /**
- * Spellings whose fold can differ from the path as written.
- *
- * Cheap enough to run on every classified path: a lowercase printable-ASCII path
- * with no `:`, and no trailing dot or space on any segment, already *is* its
- * fold, and only the paths this admits pay for one below. Any other character
- * may fold under Unicode case folding (`ſ`, the Kelvin sign), so it folds.
- */
-const mayFold = /[A-Z:]|[^ -~]|[. ](?:\/|$)/u;
-
-/**
- * One path as the filesystem underneath will fold it.
- *
- * Every filesystem a `NodeFsProvider` runs on folds case; Win32 folds trailing
- * dots and spaces, and NTFS resolves an alternate data stream to the entry it
- * hangs off — so `vendor/.Git/config`, `vendor/.git./HEAD` and
- * `.git::$INDEX_ALLOCATION/config` all open the real store while a byte
- * comparison calls them the user's content (G0-1, G0-5, G0b-3). The same defence
- * `portable-tree.ts` applies to a revision tree, spelled the same way.
- * Normalization is in it for that reason rather than because it can change an
- * answer: every prefix is ASCII, which normalization never rewrites. Case folds
- * through upper then lower case, the full Unicode folding that ext4 casefold,
- * APFS and NTFS approximate: `ſ` (U+017F) becomes `s` and the Kelvin sign `k`,
- * which a lower-case mapping alone leaves for `ſ`.
- *
- * A `:` is legal in a name a person types, so the stream suffix is dropped here
- * rather than rejected by the canonicaliser: `notes: draft.md` stays the user's
- * file, it simply classifies as `notes` would. Win32 8.3 short names (`GIT~1`)
- * are a recorded non-goal — no Windows target ships, and the alias is minted by
- * the filesystem rather than spelled by a caller.
- *
- * @param relative - Path relative to the project root, leading `/` already dropped.
- * @returns The spelling every supported filesystem resolves this path to.
- */
-const foldSpelling = (relative: string): string =>
-  relative
-    .normalize('NFC')
-    .toUpperCase()
-    .toLowerCase()
-    .replaceAll(/:[^/]*(?=\/|$)/gu, '')
-    .replaceAll(/[. ]+(?=\/|$)/gu, '');
-
-/**
  * Every row with its prefix folded, so one comparison answers every spelling.
  *
  * Built once at module load. A row's prefix is a literal this repository owns,
@@ -477,7 +461,7 @@ const foldSpelling = (relative: string): string =>
  * instructions file (G0b-8).
  */
 const foldedRegistry: readonly PathRegistryRow[] = Object.freeze(
-  pathRegistry.map((row) => Object.freeze({ ...row, prefix: foldSpelling(row.prefix) })),
+  pathRegistry.map((row) => Object.freeze({ ...row, prefix: foldPathSpelling(row.prefix) })),
 );
 
 /**
@@ -501,7 +485,7 @@ export const classify = (projectRelativePath: string): PathClassification => {
    * filesystem resolves onto a reserved path is that path, and `portable-tree`
    * has always refused to carry one as the user's content. A path that is
    * already its own fold pays one regex test and allocates nothing. */
-  const subject = mayFold.test(relative) ? foldSpelling(relative) : relative;
+  const subject = foldPathSpelling(relative);
   const index = foldedRegistry.findIndex((row) => covers(row, subject));
   return (
     rowClassifications[index] ??

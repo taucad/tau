@@ -9,7 +9,7 @@
 
 /* oxlint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
-import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
+import { computeEventRelay, exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -19,6 +19,7 @@ import {
   createRevisionHttpClient,
   recordLastPush,
   sendKeepalivePush,
+  tauCatalogueUrl,
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
 import { serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -32,12 +33,13 @@ import {
   MountTable,
   ProviderRegistry,
   ResourceQueue,
+  reservedIndexPaths,
   WorkspaceFileService,
+  workerTimings,
 } from '@taucad/filesystem';
-import type { MountEntry, WorkspaceScope } from '@taucad/filesystem';
+import type { MountEntry, RootedFileSystem, WorkspaceScope } from '@taucad/filesystem';
 import type { MachineSettingsService } from '@taucad/types';
 
-import { SharedPool } from '@taucad/memory';
 import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extractor/authoring-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
@@ -51,6 +53,7 @@ import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 import {
   createCheckoutRoutes,
+  createPendingObjectSource,
   createWorkerRevisionRegistry,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
@@ -58,8 +61,12 @@ import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
+import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
+import { createRevisionCompute } from '#machines/revision-compute.js';
+import { linkedImportPort, stageLinkedImport } from '#machines/import-linked.js';
+import { importConnectMessageType, serveImportChannel } from '#machines/import-staging.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -106,8 +113,21 @@ const providerRegistry = new ProviderRegistry({
     return port;
   },
 });
-const resourceQueue = new ResourceQueue();
+/* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
+const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+/*
+ * The compute worker's news for every rooted connection's event channel
+ * (charter D14, W10). The revision compute worker's one supervisor (W5's
+ * `createSupervisedComputeWorker`) owns restarts; it reports each death to
+ * `computeEvents.onCrash`, and the bridge only relays it.
+ */
+const computeEvents = computeEventRelay();
+/** One compute worker for every revision store this worker opens (charter D7), started on first use. */
+const revisionCompute = createRevisionCompute(computeEvents.onCrash);
+eventBus.subscribe(() => {
+  workerTimings.count('events.change');
+});
 const mountTable = new MountTable();
 
 /**
@@ -350,13 +370,47 @@ const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSet
   };
 };
 
-exposeFileSystem(workspaceBridgeService(fileService), {
+/**
+ * The root's index as the language worker's mirror reads it: whole once, then
+ * its changes after each change set. A rooted surface without an index offers
+ * none, and the worker's slot answers every probe.
+ */
+const languageIndexSource = (
+  rooted: RootedFileSystem,
+  root: string,
+): Partial<Pick<SyncFsWorkspaceAdapter, 'index'>> => {
+  if (rooted.changedSince === undefined || rooted.statTree === undefined || rooted.watchChangeSets === undefined) {
+    return {};
+  }
+  const base = root.endsWith('/') ? root : `${root}/`;
+  return {
+    index: {
+      changedSince: async (since, options) => rooted.changedSince!(since, options),
+      statTree: async (path) => rooted.statTree!(path),
+      watch: (onChange) => rooted.watchChangeSets!({ paths: [''], recursive: true }, onChange),
+      /* What the index never holds besides the policy's unwatched rows: its reserved paths and each nested mount (I9). */
+      excluded: () => [
+        ...reservedIndexPaths,
+        ...mountTable.prefixes.filter((prefix) => prefix.startsWith(base)).map((prefix) => prefix.slice(base.length)),
+      ],
+    },
+  };
+};
+
+exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   /*
    * Every rooted connection names the surface it reads (architecture L4, W2):
    * `'user'` and `'agent'` get that consumer's composed view, `'working-copy'`
    * gets the checkout itself, because the host's own capture, apply and language
    * planes must read the working copy and never the overlays composed above it
    * (V6). A connection that names neither never reaches here (CI2).
+   *
+   * Only `'user'` composes the system skills overlay. The page's `'agent'`
+   * connections are executors of project code — the editor's kernel runtime
+   * (`cad.machine.ts`) and the file manager's runtime bridge
+   * (`use-file-manager.tsx`) — and an executor never sees `.agents/skills`
+   * (I1). The agent's tools open `'working-copy'` and compose their own overlay
+   * above it, as `agent-host.impl.ts` does.
    */
   // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
   handlerForRoot: (root, context, consumer, policy) => {
@@ -364,7 +418,7 @@ exposeFileSystem(workspaceBridgeService(fileService), {
     /* A skill bundle belongs to a checkout, not to the dependency mount: the
      * mount is opened as its own root since W11, and composing the overlay there
      * would grow an `.agents` row inside `node_modules`. */
-    const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
+    const overlays = consumer === 'user' && root !== dependencyMountRoot ? [systemSkillsOverlay()] : [];
     const view = consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, overlays, policy });
     /*
      * The read content operations run here, over the view the connection asked
@@ -375,9 +429,11 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * batch and the view mask-checks before any provider I/O (D4).
      */
     const handlers = withReadContentOps(view, policy);
-    return root === dependencyMountRoot
-      ? withLazyBundledTypesReads(handlers)
-      : Object.assign(handlers, settingsForRoot(root, policy));
+    return withPendingGauge(
+      root === dependencyMountRoot
+        ? withLazyBundledTypesReads(handlers)
+        : Object.assign(handlers, settingsForRoot(root, policy)),
+    );
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */
@@ -385,6 +441,7 @@ exposeFileSystem(workspaceBridgeService(fileService), {
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
+  computeEvents: computeEvents.source,
 });
 
 /**
@@ -441,14 +498,23 @@ const revisionRegistry = createWorkerRevisionRegistry({
           reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
           name: 'observability.projectOpen',
           duration: durationMilliseconds,
-          detail,
+          detail: { ...detail, spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
         });
       },
     });
     projectOpenTimers.set(projectId, openTimer);
     return createIsomorphicGitRevisionPort({
-      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
+      /*
+       * D8: a Tau project's first open reads its hosted catalogue (heads by
+       * listing, objects by Range through stored indexes) instead of one
+       * `upload-pack` of the whole history. The catalogue request carries the
+       * session cookie and the files links carry their own signature; where
+       * the catalogue does not answer, the open goes over smart HTTP as before.
+       */
+      catalogue: { url: (remoteUrl) => tauCatalogueUrl(credential()?.apiBaseUrl, remoteUrl) },
       /* The page's session is a cookie on the API's origin, so `include` is the
        * whole of "this browser is signed in" (I8, S24). The worker never holds
        * a token and never puts one in a URL. A *third-party* remote is reached
@@ -467,15 +533,16 @@ const revisionRegistry = createWorkerRevisionRegistry({
           reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
           name: 'observability.lfsFetch',
           duration: durationMilliseconds,
-          detail: { ...detail, placement: 'browser' },
+          detail: { ...detail, placement: 'browser', spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
         });
       },
     });
   },
   createCandidatePort: (projectId, credential, signal) =>
     createIsomorphicGitRevisionPort({
-      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
       http: createRevisionHttpClient({
         credentials: 'include',
         ...createGitRemoteTransport(credential),
@@ -501,7 +568,8 @@ const revisionRegistry = createWorkerRevisionRegistry({
       markProjectOpen(timer, status);
     }
   },
-  filesystem: (root) => fileService.createRootedFileSystem(root),
+  /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
+  filesystem: (root) => fileService.createRootedFileSystem(root, undefined, { placeholders: 'raw' }),
   /* Every write in this worker raises its change event inside the write, so a
    * cut can capture only the paths the bus named (E1). */
   completeChanges: true,
@@ -515,6 +583,8 @@ const revisionRegistry = createWorkerRevisionRegistry({
   /* W8 TS-S5: the agent channel's own transport, injected so the registry holds no rpc (R3). */
   servePlacement: ({ port, projectId, session }) => serveTurnPlacementChannel({ port, projectId, session }),
 });
+/* Slice (a): the authority's reads of a pending entry go through to its object, by oid. */
+fileService.setPendingObjectSource(createPendingObjectSource(revisionRegistry.roots));
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
 let computeStore: ReturnType<typeof createIndexedDbComputeEngine> | undefined;
@@ -663,12 +733,6 @@ self.addEventListener(
       }
       return;
     }
-    if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
-      fileService.setFilePool(new SharedPool(data.buffer));
-      console.debug('[FM-Worker] filePool attached');
-      return;
-    }
-
     if (data.type === 'revisionsConnect' && data.port instanceof MessagePort) {
       if (typeof data.projectId === 'string' && data.projectId.length > 0) {
         if (data.hostServesRevisions === true) {
@@ -695,6 +759,30 @@ self.addEventListener(
       } else {
         revisionRegistry.connectReader(data.port, data.projectId);
       }
+      return;
+    }
+
+    /* W7: a streaming import plans, stages and decodes here, off the page (D12). */
+    if (data.type === importConnectMessageType && data.port instanceof MessagePort) {
+      serveImportChannel(data.port, {
+        importStaging: async (scope) => fileService.importStaging(scope),
+        decode: async (request) => revisionCompute.decodeImportEntry(request),
+        /* Each written file's one hash, from its read-back, on the compute worker (EQ6, I2). */
+        measure: async (bytes, expectedSize) => revisionCompute.measureImportBytes(bytes, expectedSize),
+        policy: tauPathPolicy,
+        /* A linked repository is fetched here, into the staging, by the revisions authority: `.git` never reaches the page (I6). */
+        stageLinked: async (input) =>
+          stageLinkedImport({
+            ...input,
+            revisions: (gitDirectory) =>
+              linkedImportPort({
+                provider: input.port.provider,
+                gitDirectory,
+                request: input.request,
+                compute: revisionCompute,
+              }),
+          }),
+      });
       return;
     }
 
@@ -736,6 +824,8 @@ self.addEventListener(
           return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
         },
         listDirectories: async (path) => listWorkspaceDirectories(rootedFileSystem, path),
+        /* The language worker mirrors this root's index (charter D13): presence and versions never cross back here. */
+        ...languageIndexSource(rootedFileSystem, data.rootDirectory),
       };
       languageFsSyncDispose = attachSyncFsServer({
         port: data.port,

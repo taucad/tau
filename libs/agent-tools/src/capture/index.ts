@@ -17,3 +17,10 @@ export {
   type WorkbenchViewCamera,
   type WorkbenchViewSections,
 } from '#capture/capture-workbench-view.js';
+export {
+  buildViewerCaptureImageOptions,
+  resolveViewerCapturePixelRatio,
+  type ViewerCaptureImageOptions,
+  type ViewerCaptureImageOptionsInput,
+  viewerCaptureReferenceViewport,
+} from '#capture/viewer-capture-options.js';

@@ -384,3 +384,54 @@ describe('quiet update snapshots', () => {
     });
   });
 });
+
+describe('a copy of Tau that cannot update in place (macOS)', () => {
+  it('should ask to move Tau to Applications instead of starting a Squirrel download', async () => {
+    const autoUpdater = squirrel();
+    const move = vi.fn(() => true);
+    const updater = startDesktopUpdater(options({ autoUpdater, appLocation: { blocksUpdates: true, move } }));
+    expect(await updater.check()).toMatchObject({ version: '0.3.0' });
+    expect(autoUpdater.setFeedURL).not.toHaveBeenCalled();
+    expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+    expect(updater.snapshot()).toMatchObject({ phase: 'move-required', version: '0.3.0' });
+    expect(updater.snapshot().detail).toContain('Move Tau to Applications to receive updates');
+    expect(updater.status()).toContain('Move Tau to Applications');
+
+    /* A later check keeps asking, and the card's action moves Tau. */
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('move-required');
+    await updater.download();
+    expect(move).toHaveBeenCalledOnce();
+  });
+
+  it('should report up to date without asking when there is no update', async () => {
+    const updater = startDesktopUpdater(
+      options({ fetchJson: vi.fn(async () => feed('0.2.0')), appLocation: { blocksUpdates: true, move: vi.fn() } }),
+    );
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('current');
+    expect(updater.snapshot().detail).toBeUndefined();
+  });
+
+  it('should turn Squirrel’s read-only volume refusal into the move request', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(
+      options({ autoUpdater, appLocation: { blocksUpdates: false, move: vi.fn(() => true) } }),
+    );
+    await updater.check();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    autoUpdater.listeners.get('error')?.(new Error('Cannot update while running on a read-only volume.'));
+    expect(updater.snapshot()).toMatchObject({ phase: 'move-required', version: '0.3.0' });
+    expect(updater.status()).not.toContain('read-only volume.');
+  });
+
+  it('should keep the ordinary error for other failures, and update normally from a writable place', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(options({ autoUpdater, appLocation: { blocksUpdates: false, move: vi.fn() } }));
+    await updater.check();
+    expect(autoUpdater.setFeedURL).toHaveBeenCalledOnce();
+    autoUpdater.listeners.get('error')?.(new Error('signature mismatch'));
+    expect(updater.snapshot().phase).toBe('error');
+    expect(updater.status()).toContain('signature mismatch');
+  });
+});

@@ -102,7 +102,11 @@ export type NodeHostTelemetry = Readonly<{
   status: () => NodeTelemetryStatus;
   /** `tau telemetry on|off`. */
   setPreference: (preference: TelemetryPreference) => Promise<void>;
-  /** Flush once, bounded by {@link nodeShutdownWait}. */
+  /**
+   * Flush once: first wait for the identity read under way and the policy probe the first record started, so a
+   * short-lived command's entries are sent rather than dropped. The whole wait is bounded by {@link nodeShutdownWait};
+   * a host that recorded nothing returns at once.
+   */
   shutdown: () => Promise<void>;
   /** Entries the pre-resolution hold dropped, for the CLI ledger. */
   droppedBeforeIdentity: () => number;
@@ -227,17 +231,20 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
   let serverPreferenceFor: string | undefined;
   let reporter: IngestReporter | undefined;
   let bootstrapStarted = false;
+  /** Whether any producer recorded on this host; a shutdown with nothing recorded returns at once. */
+  let recordedAny = false;
+  /** The account's usage-metrics read under way, which consent waits for while signed in. */
+  let serverPreferenceLoad: Promise<void> | undefined;
+  /** Settles once the first resolved identity read has drained the hold. */
+  const drained = Promise.withResolvers<void>();
   const held: Array<Readonly<{ heldAt: number; entry: RuntimeIngestEntry }>> = [];
   let heldDropped = 0;
 
   const signedInAsLastSeen = (): boolean =>
     resolvedOnce ? lastPrincipal !== undefined : Boolean(input.env['TAU_AUTH_TOKEN']);
 
-  /** `GET /v1/privacy` with the bearer, once per principal; `undefined` until it answers (held as `unknown`). */
-  const loadServerPreference = async (principal: string, authorization: string): Promise<void> => {
-    if (serverPreferenceFor === principal) {
-      return;
-    }
+  /** One `GET /v1/privacy` read with the bearer. */
+  const readServerPreference = async (principal: string, authorization: string): Promise<void> => {
     serverPreferenceFor = principal;
     serverPreference = undefined;
     try {
@@ -259,6 +266,20 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
       if (serverPreferenceFor === principal) {
         serverPreferenceFor = undefined;
       }
+    }
+  };
+
+  /** `GET /v1/privacy` with the bearer, once per principal; `undefined` until it answers (held as `unknown`). */
+  const loadServerPreference = async (principal: string, authorization: string): Promise<void> => {
+    if (serverPreferenceFor === principal) {
+      return;
+    }
+    const loaded = Promise.withResolvers<void>();
+    serverPreferenceLoad = loaded.promise;
+    try {
+      await readServerPreference(principal, authorization);
+    } finally {
+      loaded.resolve();
     }
   };
 
@@ -312,12 +333,25 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
       credentials: 'omit',
     });
 
+  /**
+   * Checked on every call, not only at creation: before identity resolves, a set `TAU_AUTH_TOKEN` is only a guess
+   * at signed-in, and an invalid or expired token resolves signed-out. Until then a host that reports only when
+   * signed in neither composes nor prints its notice.
+   */
+  const reportingAllowed = (): boolean => {
+    const host = deployment();
+    if (!resolvedOnce && !isCloudHost({ ...host, signedIn: false })) {
+      return false;
+    }
+    return isCloudHost(host) && consent() !== 'denied';
+  };
+
   const ensureReporter = (): IngestReporter | undefined => {
+    if (!reportingAllowed()) {
+      return undefined;
+    }
     if (reporter !== undefined) {
       return reporter;
-    }
-    if (!isCloudHost(deployment()) || consent() === 'denied') {
-      return undefined;
     }
     try {
       input.firstRunNotice?.();
@@ -371,6 +405,7 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
           return;
         }
         drain();
+        drained.resolve();
       } catch {
         /* Telemetry never throws into a host. */
       }
@@ -380,6 +415,7 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
 
   const record = (entry: RuntimeIngestEntry): void => {
     try {
+      recordedAny = true;
       if (!resolvedOnce) {
         const at = now();
         expireHeld(at);
@@ -424,11 +460,21 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
         client.observe?.(policy === 'on' ? 'facts' : 'off');
       });
     };
+    let subscribed = true;
     listenPolicy();
+    /* A signed-in host composes only once its token resolves; ask again then, so its first operation gets facts. */
+    const listenOnceResolved = async (): Promise<void> => {
+      await drained.promise;
+      if (subscribed) {
+        listenPolicy();
+      }
+    };
+    void listenOnceResolved();
     const offFirst = client.on('operation', () => {
       listenPolicy();
     });
     return () => {
+      subscribed = false;
       client.observe?.('off');
       offPolicy?.();
       offFirst();
@@ -463,18 +509,58 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
     },
     setPreference: async (next) => preference.write(next),
     shutdown: async () => {
-      if (reporter === undefined) {
+      if (!recordedAny) {
         return;
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        reporter.flush({ reason: 'shutdown' }).catch(() => undefined),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, nodeShutdownWait);
-          timer.unref();
-        }),
-      ]);
-      clearTimeout(timer);
+      const expired = new Promise<'expired'>((resolve) => {
+        timer = setTimeout(() => {
+          resolve('expired');
+        }, nodeShutdownWait);
+        /* Kept referenced: a host awaiting shutdown must not see its event loop drain while the identity read, the
+         * policy probe or the account's answer is pending on an unreferenced retry timer. The bound still applies. */
+      });
+      const within = async <T>(step: Promise<T>): Promise<T | 'expired'> => Promise.race([step, expired]);
+      let offPolicy: (() => void) | undefined;
+      try {
+        /* Entries held for identity: let the read that is under way resolve and drain them into the reporter. */
+        if (!resolvedOnce && held.length > 0) {
+          startIdentityBootstrap();
+          if ((await within(drained.promise)) === 'expired') {
+            return;
+          }
+        }
+        if (resolvedOnce && held.length > 0) {
+          drain();
+        }
+        const target = reporter;
+        if (target === undefined || consent() === 'denied') {
+          return;
+        }
+        /* The first record started the policy probe; a flush before it answers drops the queue as `policy-unknown`. */
+        const answered = new Promise<void>((resolve) => {
+          offPolicy = target.onPolicy(() => {
+            resolve();
+          });
+        });
+        if ((await within(answered)) === 'expired') {
+          return;
+        }
+        /* Signed in, consent waits for the account's answer; a flush before it keeps the queue unsent. */
+        if (
+          consent() === 'unknown' &&
+          serverPreferenceLoad !== undefined &&
+          (await within(serverPreferenceLoad)) === 'expired'
+        ) {
+          return;
+        }
+        await within(target.flush({ reason: 'shutdown' }).catch(() => undefined));
+      } catch {
+        /* Telemetry never throws into a host. */
+      } finally {
+        offPolicy?.();
+        clearTimeout(timer);
+      }
     },
     droppedBeforeIdentity: () => heldDropped,
   };

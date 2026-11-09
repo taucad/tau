@@ -130,7 +130,11 @@ const state = vi.hoisted(() => ({
   servicesPost: vi.fn(),
 }));
 
-vi.mock('#main/error-reporting.js', () => ({ initializeDesktopErrorReporting: state.initializeErrorReporting }));
+vi.mock('#main/error-reporting.js', () => ({
+  initializeDesktopErrorReporting: state.initializeErrorReporting,
+  reportDesktopSignal: vi.fn(),
+  rendererErrorReportingEnvironment: vi.fn(() => ({})),
+}));
 
 vi.mock('#tau/native-preparation.js', () => ({
   createDesktopKernelPreparer: (options: unknown) => {
@@ -365,6 +369,7 @@ vi.mock('#main/diagnostics.js', () => ({
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
+  watchRendererHangs: vi.fn(),
 }));
 vi.mock('#main/environment.js', async (importOriginal) => ({
   /* The packaged lock (`packagedOverridesEnabled`, `stripPackagedOverrides`) runs for real. */
@@ -1232,43 +1237,15 @@ describe('desktop main compute owner', () => {
   );
 
   it(
-    'asks before quitting stops running Terminal sessions, and Keep Tau open tears nothing down (T15)',
+    'quits with running Terminal sessions without asking, and the quit stops them (T15)',
     async () => {
       await bootstrap();
       state.servicesTerminals.mockResolvedValueOnce(2);
-      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
-      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
-      await vi.waitFor(() => {
-        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
-      });
-      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        message: '2 Terminal sessions are running in Tau.',
-        buttons: ['Keep Tau open', 'Quit anyway'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      expect(state.servicesQuiesce).not.toHaveBeenCalled();
-      expect(state.servicesDispose).not.toHaveBeenCalled();
-      expect(app.quit).not.toHaveBeenCalled();
-    },
-    bootMilliseconds,
-  );
-
-  it(
-    'quits once the person chooses to stop the running Terminal, without the machine interruption prompt (T15)',
-    async () => {
-      await bootstrap();
-      state.servicesTerminals.mockResolvedValueOnce(1);
-      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
       state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
-      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        message: 'A Terminal session is running in Tau.',
-      });
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
       expect(state.servicesQuiesce).toHaveBeenCalledWith(
         expect.any(Number),
         expect.objectContaining({ forceMachines: false }),
@@ -1278,25 +1255,21 @@ describe('desktop main compute owner', () => {
   );
 
   it(
-    'asks rather than hangs when the Terminal count is unanswered, and Quit anyway still quits (T15)',
+    'quits without asking when the Terminal count is unanswered (T15)',
     async () => {
       await bootstrap();
       state.servicesTerminals.mockRejectedValueOnce(new Error('The desktop shell service did not answer'));
-      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
       state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        message: 'Tau could not check whether a Terminal is running.',
-        buttons: ['Keep Tau open', 'Quit anyway'],
-      });
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );
 
   it(
-    'keeps the machine review and names running Terminals in it (T15)',
+    'keeps the machine review without a Terminal note when Terminals are running (T15)',
     async () => {
       await bootstrap();
       state.servicesTerminals.mockResolvedValueOnce(1);
@@ -1308,48 +1281,22 @@ describe('desktop main compute owner', () => {
       });
       const [options] = dialog.showMessageBox.mock.calls[0] as unknown as [{ buttons: string[]; detail: string }];
       expect(options.buttons).toEqual(['View machines', 'Keep Tau open', 'Quit anyway']);
-      expect(options.detail).toContain('Quitting also stops a running Terminal session.');
+      expect(options.detail).not.toContain('Terminal');
       expect(state.servicesQuiesce).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );
 
   it(
-    'asks before a window close or reload stops a running Terminal, and Keep open keeps the window (T15)',
+    'lets a window close or reload without asking, even when the page holds its unload (T15)',
     async () => {
       await bootstrap();
       const unload = fakeWindow.webContents.on.mock.calls.findLast(([name]) => name === 'will-prevent-unload')?.[1];
       expect(unload).toBeDefined();
-
-      /* Keep open: the page's hold stands, so the window neither closes nor reloads. */
-      dialog.showMessageBoxSync.mockReturnValueOnce(0);
-      const kept = { preventDefault: vi.fn() };
-      unload!(kept);
-      expect(dialog.showMessageBoxSync).toHaveBeenCalledOnce();
-      expect(dialog.showMessageBoxSync.mock.calls[0]?.[1]).toMatchObject({
-        message: 'A Terminal session is running in this window.',
-        buttons: ['Keep open', 'Close and stop'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      expect(kept.preventDefault).not.toHaveBeenCalled();
-
-      /* Close and stop: the unload goes on. */
-      dialog.showMessageBoxSync.mockReturnValueOnce(1);
-      const stopped = { preventDefault: vi.fn() };
-      unload!(stopped);
-      expect(stopped.preventDefault).toHaveBeenCalledOnce();
-
-      /* Negative control: once quit owns the close, the window unloads without a second question. */
-      dialog.showMessageBoxSync.mockClear();
-      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
-      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
-      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
-      const quitting = { preventDefault: vi.fn() };
-      unload!(quitting);
-      expect(quitting.preventDefault).toHaveBeenCalledOnce();
+      const held = { preventDefault: vi.fn() };
+      unload!(held);
+      expect(held.preventDefault).toHaveBeenCalledOnce();
       expect(dialog.showMessageBoxSync).not.toHaveBeenCalled();
-      assessment.resolve([]);
     },
     bootMilliseconds,
   );
@@ -1363,8 +1310,8 @@ describe('desktop main compute owner', () => {
         await bootstrap();
         expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
         getWindows.mockReturnValue([]);
-        state.servicesTerminals.mockResolvedValueOnce(1);
-        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
         state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
         await vi.waitFor(() => {
           expect(fakeWindow.loadURL).toHaveBeenCalledTimes(2);
@@ -1386,8 +1333,8 @@ describe('desktop main compute owner', () => {
         await bootstrap();
         expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
         getWindows.mockReturnValue([]);
-        state.servicesTerminals.mockResolvedValueOnce(1);
-        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
         state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
         await vi.waitFor(() => {
           expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
@@ -1414,8 +1361,8 @@ describe('desktop main compute owner', () => {
         await bootstrap();
         getWindows.mockReturnValue([]);
         fakeWindow.loadURL.mockRejectedValueOnce(new Error('renderer failed to load'));
-        state.servicesTerminals.mockResolvedValueOnce(1);
-        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
         state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
         await vi.waitFor(() => {
           expect(fakeWindow.loadURL).toHaveBeenCalledTimes(2);
@@ -1454,56 +1401,6 @@ describe('desktop main compute owner', () => {
       } finally {
         Object.defineProperty(process, 'platform', platform);
       }
-    },
-    bootMilliseconds,
-  );
-
-  it(
-    'skips the window prompt for one restoring reload only, however that reload ends (T15)',
-    async () => {
-      await bootstrap();
-      const listener = (name: string): ((...args: unknown[]) => void) =>
-        fakeWindow.webContents.on.mock.calls.findLast(([event]) => event === name)![1];
-      const unload = listener('will-prevent-unload');
-      const restore = async (reloads: number): Promise<void> => {
-        state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
-        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
-        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
-        await vi.waitFor(() => {
-          expect(fakeWindow.reload).toHaveBeenCalledTimes(reloads);
-        });
-      };
-      const asks = (): boolean => {
-        dialog.showMessageBoxSync.mockClear();
-        dialog.showMessageBoxSync.mockReturnValueOnce(0);
-        unload({ preventDefault: vi.fn() });
-        return dialog.showMessageBoxSync.mock.calls.length === 1;
-      };
-
-      /* The restoring reload itself is not asked about, and only that one unload. */
-      await restore(1);
-      const restoring = { preventDefault: vi.fn() };
-      dialog.showMessageBoxSync.mockClear();
-      unload(restoring);
-      expect(restoring.preventDefault).toHaveBeenCalledOnce();
-      expect(dialog.showMessageBoxSync).not.toHaveBeenCalled();
-      expect(asks()).toBe(true);
-
-      /* A restore load that fails in the main frame leaves no mark behind; a subframe failure is not the restore. */
-      await restore(2);
-      listener('did-fail-load')({}, -2, 'failed', 'app://tau/', false);
-      listener('did-fail-load')({}, -2, 'failed', 'app://tau/', true);
-      expect(asks()).toBe(true);
-
-      /* Nor does a renderer that is gone before the restore load finishes. */
-      await restore(3);
-      listener('render-process-gone')({}, { reason: 'crashed', exitCode: 1 });
-      expect(asks()).toBe(true);
-
-      /* Nor a restore load that finishes. */
-      await restore(4);
-      listener('did-finish-load')();
-      expect(asks()).toBe(true);
     },
     bootMilliseconds,
   );

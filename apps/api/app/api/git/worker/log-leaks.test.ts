@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loggingRedactPaths } from '#constants/app.constant.js';
+import { loggingRedactPaths } from '@taucad/api-core/constants/app';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { grantHeader, mintGrant, storagePath } from '#api/git/forwarding/contract/grant.js';
 import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';

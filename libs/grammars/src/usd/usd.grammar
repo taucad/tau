@@ -1,0 +1,84 @@
+// USD ASCII layers (.usda): prims, properties, metadata and their values.
+
+@top UsdLayer { Header? item* }
+
+item {
+  PrimHeader |
+  Keyword |
+  TypeName |
+  Atom |
+  Identifier |
+  String |
+  AssetPath |
+  PathReference |
+  Number |
+  Block |
+  Group |
+  List |
+  "=" | "," | ";" | "." | ":" | "-"
+}
+
+PrimHeader { specifier PrimType? PrimName }
+
+PrimName { String }
+
+specifier { @specialize[@name=Keyword]<Identifier, "def" | "over" | "class"> }
+
+PrimType { Identifier }
+
+Keyword {
+  @specialize<Identifier,
+    "uniform" | "custom" | "rel" | "varying" | "config" | "prepend" | "append" | "delete" | "add" | "reorder" |
+    "references" | "payload" | "inherits" | "specializes" | "variantSet" | "variantSets" | "variants" |
+    "timeSamples" | "connect" | "subLayers" | "kind" | "doc" | "instanceable" | "active" | "hidden">
+}
+
+TypeName {
+  @specialize<Identifier,
+    "bool" | "uchar" | "int" | "uint" | "int64" | "uint64" | "half" | "float" | "double" | "timecode" |
+    "string" | "token" | "asset" | "opaque" | "pathExpression" | "dictionary" |
+    "matrix2d" | "matrix3d" | "matrix4d" | "quatd" | "quatf" | "quath" |
+    "double2" | "double3" | "double4" | "float2" | "float3" | "float4" | "half2" | "half3" | "half4" |
+    "int2" | "int3" | "int4" | "point3d" | "point3f" | "point3h" | "normal3d" | "normal3f" | "normal3h" |
+    "vector3d" | "vector3f" | "vector3h" | "color3d" | "color3f" | "color3h" | "color4d" | "color4f" | "color4h" |
+    "frame4d" | "texCoord2d" | "texCoord2f" | "texCoord2h" | "texCoord3d" | "texCoord3f" | "texCoord3h">
+}
+
+Atom { @specialize<Identifier, "None" | "true" | "false" | "inf" | "nan"> }
+
+Block { "{" item* "}" }
+Group { "(" item* ")" }
+List { "[" item* "]" }
+
+@skip { whitespace | LineComment | BlockComment }
+
+@tokens {
+  whitespace { @whitespace+ }
+  Header[isolate] { "#usda" ![\n]* }
+  LineComment[isolate] { "#" ![\n]* }
+  @precedence { Header, LineComment }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  Identifier { $[A-Za-z_] $[A-Za-z0-9_:]* }
+  String[isolate] {
+    '"""' longDouble |
+    "'''" longSingle |
+    '"' ("\\" _ | !["\\\n])* '"'? |
+    "'" ("\\" _ | !['\\\n])* "'"?
+  }
+  longDouble { @eof | !["] longDouble | '"' longDouble1 }
+  longDouble1 { @eof | !["] longDouble | '"' longDouble2 }
+  longDouble2 { @eof | '"' | !["] longDouble }
+  longSingle { @eof | !['] longSingle | "'" longSingle1 }
+  longSingle1 { @eof | !['] longSingle | "'" longSingle2 }
+  longSingle2 { @eof | "'" | !['] longSingle }
+  AssetPath { "@@@" ![@]* "@@@" | "@" ![@\n]* "@" }
+  PathReference { "<" ![>\n]* ">" }
+  Number { "-"? (@digit+ ("." @digit*)? | "." @digit+) ($[eE] $[+\-]? @digit+)? }
+  @precedence { Number, Identifier }
+  @precedence { Number, ".", "-" }
+  "{" "}" "(" ")" "[" "]" "=" "," ";" "." ":" "-"
+}
+
+@detectDelim

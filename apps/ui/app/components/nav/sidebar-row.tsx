@@ -33,7 +33,6 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 
 /*
@@ -127,14 +126,12 @@ export function SidebarRowContextMenu({
   readonly className: string;
   readonly children: ReactNode;
 }): React.JSX.Element {
-  const isMobile = useIsMobile();
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={isDisabled}>
         {children}
       </ContextMenuTrigger>
-      {/* A long press on a phone opens it from the sidebar sheet (z-100), which it must clear. */}
-      <ContextMenuContent className={cn(className, isMobile && 'z-110')}>{items(contextParts)}</ContextMenuContent>
+      <ContextMenuContent className={className}>{items(contextParts)}</ContextMenuContent>
     </ContextMenu>
   );
 }
@@ -160,8 +157,7 @@ export function SidebarRowMenuButton({
   readonly side?: ComponentProps<typeof DropdownMenuContent>['side'];
   readonly align?: ComponentProps<typeof DropdownMenuContent>['align'];
   /**
-   * Open the items in a bottom drawer on a phone. The sidebar's rows need it: the phone sidebar is a sheet (z-100)
-   * that a dropdown (z-50) would open behind.
+   * Open the items in a bottom drawer on a phone, as touch rows, as the sidebar's rows do.
    */
   readonly isResponsive?: boolean;
 }): React.JSX.Element {
@@ -292,15 +288,21 @@ export function SidebarFailureRow({
 }
 
 /**
- * One loading row: a bar where the name will be.
+ * One loading row: the remembered name where the name will be, or a bar when no
+ * name is remembered. Either sits exactly where the real row's name starts.
  *
+ * @param props - The remembered name, if any.
  * @returns The row's content.
  * @public
  */
-export function SidebarRowSkeleton(): React.JSX.Element {
+export function SidebarRowSkeleton({ name }: { readonly name?: string } = {}): React.JSX.Element {
   return (
     <div className='flex h-7 items-center pr-2 pl-7.5'>
-      <Skeleton className='h-3.5 flex-1' />
+      {name === undefined ? (
+        <Skeleton className='h-3.5 flex-1' />
+      ) : (
+        <span className='fade-label min-w-0 flex-1 text-sm whitespace-nowrap text-muted-foreground'>{name}</span>
+      )}
     </div>
   );
 }

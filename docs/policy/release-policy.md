@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-24'
+updated: '2026-11-06'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -265,16 +265,16 @@ The script reads the public registry and refuses the whole plan if any package o
 
 Every command is idempotent, so a rerun after a failure continues. The superseded packages and their pointers live in the script:
 
-| Package version                    | Deprecation message                                               |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| `@taucad/converter@0.1.0-beta.0`   | Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino. |
-| `@taucad/events@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
-| `@taucad/memory@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
-| `@taucad/types@0.1.0-beta.0`       | Use @taucad/runtime/types.                                        |
-| `@taucad/json-schema@0.1.0-beta.0` | Bundled into @taucad/runtime.                                     |
-| `@taucad/utils@0.1.0-beta.0`       | Bundled into @taucad/runtime.                                     |
-| `@taucad/fs-client@0.1.0-beta.0`   | Use @taucad/runtime/filesystem.                                   |
-| `@taucad/telemetry@0.1.0-beta.0`   | Internal Tau application package; no public replacement.          |
+| Package version                    | Deprecation message                                      |
+| ---------------------------------- | -------------------------------------------------------- |
+| `@taucad/converter@0.1.0-beta.0`   | Use @taucad/assimp, @taucad/brep, or @taucad/gltf.       |
+| `@taucad/events@0.1.0-beta.0`      | Bundled into @taucad/runtime.                            |
+| `@taucad/memory@0.1.0-beta.0`      | Bundled into @taucad/runtime.                            |
+| `@taucad/types@0.1.0-beta.0`       | Use @taucad/runtime/types.                               |
+| `@taucad/json-schema@0.1.0-beta.0` | Bundled into @taucad/runtime.                            |
+| `@taucad/utils@0.1.0-beta.0`       | Bundled into @taucad/runtime.                            |
+| `@taucad/fs-client@0.1.0-beta.0`   | Use @taucad/runtime/filesystem.                          |
+| `@taucad/telemetry@0.1.0-beta.0`   | Internal Tau application package; no public replacement. |
 
 The retired `@taucad/testing` package has no one-to-one replacement: its chat schema and prompt/harness concerns moved to their owners before the narrower `@taucad/runtime-testing` package was created. Do not deprecate it with a misleading replacement pointer.
 
@@ -288,7 +288,7 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 - **Staging desktop**: dispatching `.github/workflows/release-desktop-staging.yml` from `main` creates a `desktop-staging@<version>-staging.<n>` prerelease with the release GitHub App. `release-build.yml` builds it exactly like a desktop release, packaged for the staging channel (taucad.dev endpoints, no update checks) and signed from the `desktop-staging` environment; it attaches the archives without update feeds and never marks the prerelease latest.
 - **Production**: merging a UI or API release pull request is the release, with no further approval. Its `release-build.yml` run verifies the application at its tag and then deploys only that application (the API to Fly; the UI and docs to Netlify); the other application stays where it is. The desktop keeps its `desktop` approval, because a shipped desktop build updates installed apps and can only be replaced, not rolled back. Rollbacks and redeploys dispatch `.github/workflows/deploy-production.yml` from `main` with one `ui@` or `api@` tag: it requires the release build to have verified that tag and dispatches the same deploys. Deploying an older version than the application's last production deploy requires `rollback: true`.
 - **Who releases**: merging a `release/*` pull request ships production, so it is the operator's act. An agent merges one only on the operator's explicit instruction for that release.
-- **Schema migrations**: the API's Fly release command migrates the database before new machines boot, and every API build becomes ready only on exactly the schema it was generated for (`assertSchemaCompatibility`). Staging runs each migration first on every push to `main`. A rollback never undoes a migration, so an API release whose diff adds a migration under `apps/api/app/database/migrations` cannot be rolled back by redeploying an older image: it is fixed forward. Check that diff before merging an API release pull request.
+- **Schema migrations**: the API's Fly release command migrates the database before new machines boot, and every API build becomes ready only on exactly the schema it was generated for (`assertSchemaCompatibility`). Staging runs each migration first on every push to `main`. A rollback never undoes a migration, so an API release whose diff adds a migration under `apps/libs/api-database/src/migrations` cannot be rolled back by redeploying an older image: it is fixed forward. Check that diff before merging an API release pull request.
 
 ## Security Considerations
 

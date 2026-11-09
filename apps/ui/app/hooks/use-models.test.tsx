@@ -9,6 +9,10 @@ import type { Model } from '#hooks/use-models.js';
 import { store } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { redeemLoopbackHandOff, resetLoopbackAgentHosts } from '#lib/agent-host-placement.js';
+
+const flags = vi.hoisted(() => ({ modelPinning: true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (name: 'modelPinning') => flags[name] }));
 
 const codex: AcpAgentExecution = {
   kind: 'acp',
@@ -17,10 +21,11 @@ const codex: AcpAgentExecution = {
   model: 'gpt-6-astra',
   config: { mode: 'high' },
 };
-const catalogRow = (id: string, recommended = false) => ({
+const catalogRow = (id: string, recommended = false, isDefault = false) => ({
   id,
   name: id,
   recommended,
+  ...(isDefault ? { default: true } : {}),
   provider: { id: 'anthropic', name: 'Anthropic' },
   details: { family: 'claude', contextWindow: 200_000 },
 });
@@ -49,6 +54,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetLoopbackAgentHosts();
+  flags.modelPinning = true;
   for (const key of storageKeys) {
     store.remove(key);
   }
@@ -92,11 +99,35 @@ describe('useModels', () => {
       expect(result.current.defaultExecution).toEqual(codex);
     });
 
-    it('should ignore a stored execution that fails the execution schema', () => {
-      respond([]);
+    it('should ignore a stored execution that fails the execution schema', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true)]);
       store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, { kind: 'acp', agentId: 'codex' });
       const { result } = renderHook(() => useModels(), { wrapper });
-      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-4.8' });
+      await waitFor(() => {
+        expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-5.5' });
+      });
+    });
+
+    it('should start a first visit on the model the catalog marks as default', async () => {
+      respond([catalogRow('anthropic-claude-sonnet-5.5', true), catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      expect(result.current.selectedModelId).toBe('');
+      await waitFor(() => {
+        expect(result.current.selectedModelId).toBe('anthropic-claude-opus-5.5');
+      });
+      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-5.5' });
+    });
+
+    it('should keep a chosen Tau model over the catalog default', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true), catalogRow('anthropic-claude-haiku-5.5')]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      act(() => {
+        result.current.setSelectedModelId('anthropic-claude-haiku-5.5');
+      });
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2);
+      });
+      expect(result.current.selectedModelId).toBe('anthropic-claude-haiku-5.5');
     });
 
     it('should move a remembered Tau model the catalog no longer offers to the recommended model', async () => {
@@ -112,6 +143,44 @@ describe('useModels', () => {
           effort: 'high',
         });
       });
+    });
+  });
+
+  describe('loopback daemon placement', () => {
+    const daemon = 'http://127.0.0.1:4100';
+    const onDaemon: TauAgentExecution = {
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      hostId: `loopback:${daemon}`,
+    };
+    /** Redeem a hand-off of the daemon in this tab, as `tau open --desktop` does. */
+    const handOver = async (): Promise<void> => {
+      const daemonFetch = vi.fn(async (url: string) =>
+        url.endsWith('/.well-known/tau-host/session')
+          ? new Response(JSON.stringify({ v: 1, session: 'tab-session' }))
+          : new Response('{}', { status: 404 }),
+      );
+      await redeemLoopbackHandOff(
+        { origin: daemon, code: 'one-time-code' },
+        { fetch: daemonFetch as unknown as typeof fetch },
+      );
+    };
+
+    it('should start a new chat locally when another tab remembered a loopback daemon this tab was never handed', () => {
+      respond([]);
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, onDaemon);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-4.8' });
+    });
+
+    it('should start a new chat on the remembered loopback daemon once this tab is handed it', async () => {
+      respond([]);
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, onDaemon);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      await act(async () => {
+        await handOver();
+      });
+      expect(result.current.defaultExecution).toEqual(onDaemon);
     });
   });
 
@@ -152,6 +221,54 @@ describe('useModels', () => {
       const catalog = await result.current.ensureModelCatalog();
       expect(catalog.status).toBe('loaded');
       expect(result.current.resolveModel('anthropic-claude-opus-4.8').provider.id).toBe('anthropic');
+    });
+
+    it('should fill a Tau execution chosen before the catalog answered with the catalog default', async () => {
+      respond([catalogRow('anthropic-claude-sonnet-5.5', true), catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      const execution = result.current.defaultExecution;
+      expect(execution).toEqual({ kind: 'tau', model: '' });
+      await expect(result.current.withCatalogDefaultModel(execution)).resolves.toEqual({
+        kind: 'tau',
+        model: 'anthropic-claude-opus-5.5',
+      });
+      await expect(result.current.withCatalogDefaultModel(codex)).resolves.toBe(codex);
+    });
+  });
+
+  describe('model label before and after the catalog', () => {
+    const neverAnswers = async (): Promise<Response> =>
+      new Promise<Response>(() => {
+        /* The catalog is still in flight for the whole test. */
+      });
+
+    it('should mark a stored model as pending, not named by its id, while the catalog has not answered', () => {
+      vi.stubGlobal('fetch', vi.fn(neverAnswers));
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatModel}`, 'anthropic-claude-haiku-5.5');
+      const { result } = renderHook(() => useModels(), { wrapper });
+
+      expect(result.current.selectedModel.isNamePending).toBe(true);
+      expect(result.current.selectedModel.isResolved).toBe(false);
+    });
+
+    it('should mark a first visit with no model as pending rather than an empty name', () => {
+      vi.stubGlobal('fetch', vi.fn(neverAnswers));
+      const { result } = renderHook(() => useModels(), { wrapper });
+
+      expect(result.current.selectedModelId).toBe('');
+      expect(result.current.selectedModel.isNamePending).toBe(true);
+    });
+
+    it('should name a model the loaded catalog no longer offers by its id, without a pending placeholder', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      await waitFor(() => {
+        expect(result.current.catalog.status).toBe('loaded');
+      });
+
+      const retired = result.current.resolveModel('anthropic-claude-haiku-3');
+
+      expect(retired).toMatchObject({ name: 'anthropic-claude-haiku-3', isResolved: false, isNamePending: false });
     });
   });
 
@@ -217,6 +334,15 @@ describe('useModels', () => {
         store.update(pinnedKey, { opus: true });
       });
       expect(result.current.pinnedIds).toEqual([]);
+    });
+
+    it('should ignore stored pins while the pinning flag is off', async () => {
+      flags.modelPinning = false;
+      store.update(pinnedKey, ['hidden']);
+      const { result } = await loaded();
+      expect(result.current.isPinningEnabled).toBe(false);
+      expect(result.current.pinnedIds).toEqual([]);
+      expect(result.current.isAvailable(row('hidden'))).toBe(false);
     });
 
     it('should keep pins the catalog cannot confirm while it is unavailable', () => {

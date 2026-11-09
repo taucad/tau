@@ -5,6 +5,7 @@
 
 import { classify } from '@taucad/filesystem/path-registry';
 import { joinRelativePath } from '@taucad/utils/path';
+import type { ImportSourceDescriptor } from '#machines/import-staging.js';
 
 export type FileData = {
   filename: string;
@@ -69,254 +70,110 @@ export function createImportedProjectFiles(
 }
 
 /**
- * Read a FileSystemFileEntry and return a File object.
+ * A file an import will read, by reference, with its path in the source.
  */
-async function getFileFromEntry(entry: FileSystemFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => {
+export type ImportFileReference = Readonly<{ file: File; path: string }>;
+
+const fileOfEntry = async (entry: FileSystemFileEntry): Promise<File> =>
+  new Promise((resolve, reject) => {
     entry.file(resolve, reject);
   });
-}
 
-/**
- * Read all entries from a FileSystemDirectoryReader.
- * Handles the case where readEntries() returns entries in batches.
- */
-async function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  const entries: FileSystemEntry[] = [];
-
-  const readBatch = async (): Promise<FileSystemEntry[]> =>
-    new Promise((resolve, reject) => {
+const childrenOf = async (directory: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> => {
+  const reader = directory.createReader();
+  const children: FileSystemEntry[] = [];
+  /* `readEntries` answers in batches until one is empty. */
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- batches are read one after another.
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
       reader.readEntries(resolve, reject);
     });
-
-  // ReadEntries returns entries in batches, need to call until empty
-  let batch = await readBatch();
-  while (batch.length > 0) {
-    entries.push(...batch);
-    // oxlint-disable-next-line no-await-in-loop -- need to read batches sequentially
-    batch = await readBatch();
+    if (batch.length === 0) {
+      return children;
+    }
+    children.push(...batch);
   }
+};
 
-  return entries;
-}
+/* A folder an import leaves behind whole (`.git`, `node_modules`): its children are never walked or listed. */
+const isLeftBehindFolder = (path: string): boolean => isExcludedImportPath(joinRelativePath(path, '_'));
 
-type ProgressCallback = (processed: number, total: number) => void;
-type ProgressStats = { processed: number; total: number };
-
-/**
- * Recursively read a FileSystemEntry (file or directory) and add to files map.
- */
-async function readEntry({
-  entry,
-  basePath,
-  files,
-  progressInfo,
-}: {
-  entry: FileSystemEntry;
-  basePath: string;
-  files: FileMap;
-  progressInfo?: { onProgress?: ProgressCallback; stats?: ProgressStats };
-}): Promise<void> {
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry;
-    const file = await getFileFromEntry(fileEntry);
-    const path = basePath ? joinRelativePath(basePath, entry.name) : entry.name;
-    const arrayBuffer = await file.arrayBuffer();
-    files.set(path, {
-      filename: path,
-      content: new Uint8Array(arrayBuffer),
-    });
-
-    if (progressInfo?.stats && progressInfo.onProgress) {
-      progressInfo.stats.processed++;
-      progressInfo.onProgress(progressInfo.stats.processed, progressInfo.stats.total);
-    }
-  } else if (entry.isDirectory) {
-    const directoryEntry = entry as FileSystemDirectoryEntry;
-    const reader = directoryEntry.createReader();
-    const entries = await readAllEntries(reader);
-    const newBase = basePath ? joinRelativePath(basePath, entry.name) : entry.name;
-
-    // Update total count
-    if (progressInfo?.stats) {
-      progressInfo.stats.total += entries.filter((entryItem) => entryItem.isFile).length;
-    }
-
-    for (const child of entries) {
-      // oxlint-disable-next-line no-await-in-loop -- need to read sequentially for progress
-      await readEntry({ entry: child, basePath: newBase, files, progressInfo });
+/* Whether any folder above this path is left behind. */
+const isUnderLeftBehindFolder = (path: string): boolean => {
+  const segments = path.split('/');
+  for (let depth = 1; depth < segments.length; depth += 1) {
+    if (isLeftBehindFolder(segments.slice(0, depth).join('/'))) {
+      return true;
     }
   }
-}
+  return false;
+};
 
 /**
- * Read files from a DataTransferItemList (drag-and-drop).
- * Handles both files and folders via the FileSystemEntry API.
+ * What a drop carries, without reading a byte of it (charter D12: the import
+ * worker reads it, on the compute worker).
+ *
+ * Where the browser hands a drop over as handles
+ * (`DataTransferItem.getAsFileSystemHandle`), the handles go to the worker,
+ * which walks the folders itself, so the page walks nothing. Elsewhere the
+ * page walks the drop's entries for references, never entering a folder the
+ * import leaves behind. Either way the items are taken synchronously, before
+ * the first await, because a `DataTransferItemList` is only readable during
+ * its event.
+ *
+ * @param items - The drop's items.
+ * @returns The drop as an import source.
  */
-export async function readFromDataTransfer(
-  items: DataTransferItemList,
-  onProgress?: ProgressCallback,
-): Promise<FileMap> {
-  const files: FileMap = new Map();
-  const entries: FileSystemEntry[] = [];
-
-  // Collect all entries first
-  for (const item of items) {
-    if (item.kind === 'file') {
-      const entry = item.webkitGetAsEntry();
-      if (entry) {
-        entries.push(entry);
+export async function listDataTransfer(items: DataTransferItemList): Promise<ImportSourceDescriptor> {
+  const all = [...items].filter((item) => item.kind === 'file');
+  /* Chromium's handle getter answers `null` for an item that is not a file or folder; typed loosely for it. */
+  const withHandles = all as Array<DataTransferItem & { getAsFileSystemHandle?: () => Promise<unknown> }>;
+  if (all.length > 0 && withHandles.every((item) => typeof item.getAsFileSystemHandle === 'function')) {
+    const pending = withHandles.map(async (item) => item.getAsFileSystemHandle!());
+    const settled = await Promise.all(pending);
+    const handles = settled.filter((handle): handle is FileSystemHandle => Boolean(handle));
+    return { kind: 'handles', handles };
+  }
+  const roots: FileSystemEntry[] = [];
+  for (const item of all) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) {
+      roots.push(entry);
+    }
+  }
+  const files: ImportFileReference[] = [];
+  const walk = async (entry: FileSystemEntry, prefix: string): Promise<void> => {
+    const path = prefix ? joinRelativePath(prefix, entry.name) : entry.name;
+    if (entry.isFile) {
+      files.push({ file: await fileOfEntry(entry as FileSystemFileEntry), path });
+      return;
+    }
+    if (entry.isDirectory && !isLeftBehindFolder(path)) {
+      for (const child of await childrenOf(entry as FileSystemDirectoryEntry)) {
+        // oxlint-disable-next-line no-await-in-loop -- a folder is walked one child after another.
+        await walk(child, path);
       }
     }
-  }
-
-  // Count initial files (not directories, they'll be counted during traversal)
-  const stats: ProgressStats = {
-    processed: 0,
-    total: entries.filter((entryItem) => entryItem.isFile).length,
   };
-
-  // Process all entries
-  for (const entry of entries) {
-    // oxlint-disable-next-line no-await-in-loop -- need to read sequentially for progress
-    await readEntry({
-      entry,
-      basePath: '',
-      files,
-      progressInfo: { onProgress, stats },
-    });
+  for (const root of roots) {
+    // oxlint-disable-next-line no-await-in-loop -- each dropped root is walked in turn.
+    await walk(root, '');
   }
-
-  return normalizeFilePaths(files);
+  return { kind: 'files', files };
 }
 
 /**
- * Read files from a FileList (file input or webkitdirectory input).
- * Preserves relative paths from webkitRelativePath if available.
+ * The files of an `<input>` pick, with their paths: a folder pick's
+ * `webkitRelativePath`, else the file's name. What sits under a folder the
+ * import leaves behind is dropped here, so it never counts toward the limits.
+ *
+ * @param fileList - The picked files.
+ * @returns Each file and its path.
  */
-export async function readFromFileList(fileList: FileList | File[], onProgress?: ProgressCallback): Promise<FileMap> {
-  const files: FileMap = new Map();
-  const fileArray = [...fileList];
-  const total = fileArray.length;
-
-  for (const [index, file] of fileArray.entries()) {
-    // Use webkitRelativePath if available (folder upload), otherwise just filename
-    const path = file.webkitRelativePath || file.name;
-
-    // oxlint-disable-next-line no-await-in-loop -- need to read sequentially for progress
-    const arrayBuffer = await file.arrayBuffer();
-    files.set(path, {
-      filename: path,
-      content: new Uint8Array(arrayBuffer),
-    });
-
-    onProgress?.(index + 1, total);
-  }
-
-  return normalizeFilePaths(files);
-}
-
-/**
- * Recursively read files from a FileSystemDirectoryHandle (File System Access API).
- * Used for importing directories via showDirectoryPicker().
- * The files are read as copies -- the resulting FileMap is not a live link to the OS folder.
- */
-export async function readFromDirectoryHandle(
-  handle: FileSystemDirectoryHandle,
-  onProgress?: ProgressCallback,
-): Promise<FileMap> {
-  const files: FileMap = new Map();
-  const stats: ProgressStats = { processed: 0, total: 0 };
-
-  // First pass: count files for progress
-  await countDirectoryFiles(handle, stats);
-  stats.total = stats.processed;
-  stats.processed = 0;
-
-  // Second pass: read files
-  await readDirectoryHandleRecursive({
-    handle,
-    basePath: '',
-    files,
-    progressInfo: { onProgress, stats },
-  });
-
-  return files;
-}
-
-/**
- * Count all files in a directory handle recursively (for progress tracking).
- */
-async function countDirectoryFiles(handle: FileSystemDirectoryHandle, stats: ProgressStats): Promise<void> {
-  const entries = await collectDirectoryEntries(handle);
-  for (const entry of entries) {
-    if (entry.kind === 'file') {
-      stats.processed++;
-    } else {
-      // oxlint-disable-next-line no-await-in-loop -- sequential counting required
-      await countDirectoryFiles(entry, stats);
-    }
-  }
-}
-
-/**
- * Collect all entries from a FileSystemDirectoryHandle into an array.
- * Materialises the async iterator to avoid TypeScript narrowing issues.
- */
-async function collectDirectoryEntries(
-  handle: FileSystemDirectoryHandle,
-): Promise<Array<FileSystemFileHandle | FileSystemDirectoryHandle>> {
-  const entries: Array<FileSystemFileHandle | FileSystemDirectoryHandle> = [];
-  for await (const entry of handle.values()) {
-    entries.push(entry);
-  }
-
-  return entries;
-}
-
-/**
- * Recursively read files from a FileSystemDirectoryHandle into a FileMap.
- */
-async function readDirectoryHandleRecursive({
-  handle,
-  basePath,
-  files,
-  progressInfo,
-}: {
-  handle: FileSystemDirectoryHandle;
-  basePath: string;
-  files: FileMap;
-  progressInfo?: { onProgress?: ProgressCallback; stats?: ProgressStats };
-}): Promise<void> {
-  const entries = await collectDirectoryEntries(handle);
-  for (const entry of entries) {
-    const entryPath = basePath ? joinRelativePath(basePath, entry.name) : entry.name;
-
-    if (entry.kind === 'file') {
-      // oxlint-disable-next-line no-await-in-loop -- sequential file reading for progress tracking
-      const file = await entry.getFile();
-      // oxlint-disable-next-line no-await-in-loop -- sequential file reading for progress tracking
-      const arrayBuffer = await file.arrayBuffer();
-      files.set(entryPath, {
-        filename: entryPath,
-        content: new Uint8Array(arrayBuffer),
-      });
-
-      if (progressInfo?.stats && progressInfo.onProgress) {
-        progressInfo.stats.processed++;
-        progressInfo.onProgress(progressInfo.stats.processed, progressInfo.stats.total);
-      }
-    } else {
-      // oxlint-disable-next-line no-await-in-loop -- sequential traversal required
-      await readDirectoryHandleRecursive({
-        handle: entry,
-        basePath: entryPath,
-        files,
-        progressInfo,
-      });
-    }
-  }
-}
+export const listFileList = (fileList: FileList | readonly File[]): ImportFileReference[] =>
+  [...fileList]
+    .map((file) => ({ file, path: file.webkitRelativePath || file.name }))
+    .filter(({ path }) => !isUnderLeftBehindFolder(path));
 
 /**
  * Check if a file is a ZIP archive based on extension or MIME type.
@@ -325,101 +182,4 @@ export function isZipFile(file: File): boolean {
   const extension = file.name.split('.').pop()?.toLowerCase();
 
   return extension === 'zip' || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
-}
-
-/**
- * Normalize file paths by stripping common root directory if all files share one.
- * This handles the case where a folder is uploaded and all files are under that folder.
- */
-export function normalizeFilePaths(files: FileMap): FileMap {
-  const paths = [...files.keys()];
-
-  if (paths.length === 0) {
-    return files;
-  }
-
-  // Split all paths into segments
-  const segments = paths.map((p) => p.split('/'));
-
-  // Find the minimum segment count (excluding the filename itself)
-  const minDepth = Math.min(...segments.map((s) => s.length));
-
-  if (minDepth <= 1) {
-    // No common prefix possible
-    return files;
-  }
-
-  // Find common prefix (full directory segments only, not including the file itself)
-  const commonDepth = findCommonDepth(segments, minDepth);
-
-  if (commonDepth === 0) {
-    return files;
-  }
-
-  // Strip common prefix
-  const normalized: FileMap = new Map();
-  for (const [path, data] of files) {
-    const newPath = path.split('/').slice(commonDepth).join('/');
-    if (newPath) {
-      normalized.set(newPath, { ...data, filename: newPath });
-    }
-  }
-
-  return normalized;
-}
-
-/**
- * Find the common directory depth shared by all path segments.
- */
-function findCommonDepth(segments: string[][], minDepth: number): number {
-  let commonDepth = 0;
-
-  for (let i = 0; i < minDepth - 1; i++) {
-    const segment = segments[0]?.[i];
-    if (!segment) {
-      break;
-    }
-
-    const allMatch = segments.every((segs) => segs[i] === segment);
-    if (!allMatch) {
-      break;
-    }
-
-    commonDepth = i + 1;
-  }
-
-  return commonDepth;
-}
-
-/**
- * Get the name to use for a disk import based on the files.
- * Uses the common root directory name if one exists, otherwise uses the first file's name.
- */
-export function getImportName(files: FileMap, originalName?: string): string {
-  if (originalName) {
-    // Strip .zip extension if present
-    return originalName.replace(/\.zip$/i, '');
-  }
-
-  const paths = [...files.keys()];
-  if (paths.length === 0) {
-    return 'Untitled Import';
-  }
-
-  // If there's only one file, use its name without extension
-  if (paths.length === 1) {
-    const fileName = paths[0]?.split('/').pop() ?? 'Untitled';
-
-    return fileName.replace(/\.[^.]+$/, '');
-  }
-
-  // Try to find a common root
-  const segments = paths.map((p) => p.split('/'));
-  const firstRoot = segments[0]?.[0];
-
-  if (firstRoot && segments.every((s) => s[0] === firstRoot)) {
-    return firstRoot;
-  }
-
-  return 'Uploaded Files';
 }

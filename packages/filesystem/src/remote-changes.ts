@@ -2,25 +2,26 @@
  * Cross-tab remote-change application: the one place a fact another tab
  * published becomes local state (charter D13, D14).
  *
- * Extracted from `WorkspaceFileService` unchanged. A peer's notification names
+ * Extracted from `WorkspaceFileService`. A peer's notification names
  * a physical authority, not a logical path this authority still routes, so
  * every fact is checked against the live mount table before it invalidates a
  * derivative or emits an event, and the whole sequence runs in arrival order on
- * one tail. A refresh that fails turns into one global reset rather than a lost
- * fact.
+ * one tail. One sibling changeset arrives as one notice; its facts cost one
+ * refresh scoped to the paths they name and one change event per storage root,
+ * and evict only the derivatives those paths feed. A refresh that fails, or a
+ * notice that follows a lost one, turns into one reset rather than a lost fact.
  *
  * @module
  */
 
 import type { FileSystemBackend } from '@taucad/types';
-import type { SharedPool } from '@taucad/memory';
-import type { ChangeEvent, FileSystemProvider } from '#types.js';
+import type { FileSystemProvider, PathChangeEvent } from '#types.js';
 import type { MountEntry, MountResolution, MountTable } from '#mount-table.js';
-import type { ChangeNotification, PhysicalAuthority } from '#cross-tab-coordinator.js';
+import type { ChangeNotice, ChangeNotification, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResolvedDiscoveryRoot } from '#project-directories.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import type { WatchRegistry } from '#watch-registry.js';
 
 /**
@@ -33,7 +34,7 @@ import type { WatchRegistry } from '#watch-registry.js';
 const remoteChangeEvent = (
   notification: Exclude<ChangeNotification, { type: 'project-unavailable' | 'directory-change' }>,
   backend: FileSystemBackend,
-): ChangeEvent => {
+): PathChangeEvent => {
   const { path } = notification;
   switch (notification.type) {
     case 'write': {
@@ -60,10 +61,8 @@ export class RemoteChanges {
   private readonly _registry: ProviderRegistry;
   private readonly _mountTable: MountTable;
   private readonly _pipeline: MutationPipeline;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   private readonly _watchRegistry: WatchRegistry;
-  /** Read through a function: the writer-side pool arrives after construction. */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Read through a function: the authority replaces the array on every topology pass. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
@@ -78,124 +77,186 @@ export class RemoteChanges {
     registry: ProviderRegistry;
     mountTable: MountTable;
     pipeline: MutationPipeline;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     watchRegistry: WatchRegistry;
-    filePool: () => SharedPool | undefined;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
     this._registry = options.registry;
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._watchRegistry = options.watchRegistry;
-    this._filePool = options.filePool;
     this._discoveryRoots = options.discoveryRoots;
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
 
   /**
-   * Apply one peer notification behind every earlier one. A rejected predecessor
-   * never strands a later fact, and a rejected application resets instead.
+   * Apply one peer notice behind every earlier one. A rejected predecessor
+   * never strands a later notice, and a rejected application resets instead.
    *
-   * @param notification - The fact a sibling authority published.
+   * @param notice - Every fact one sibling changeset published.
    */
-  public apply(notification: ChangeNotification): void {
+  public apply(notice: ChangeNotice): void {
     const predecessor = this._remoteChangeTail;
     const applyInOrder = async (): Promise<void> => {
       try {
         await predecessor;
-        await this._applyRemoteChange(notification);
+        await this._applyNotice(notice);
       } catch {
-        this._handleRemoteFailure(notification);
+        for (const notification of notice.changes) {
+          this._handleRemoteFailure(notification);
+        }
       }
     };
     this._remoteChangeTail = applyInOrder();
   }
 
   /**
-   * Apply one peer notification, in arrival order.
+   * Apply one peer notice, in arrival order: revoked projects first, then each
+   * storage root's facts with one scoped refresh and one change event (I4).
    *
-   * @param notification - The fact a sibling authority published.
+   * @param notice - Every fact one sibling changeset published.
    */
-  private async _applyRemoteChange(notification: ChangeNotification): Promise<void> {
-    if (notification.type === 'project-unavailable') {
-      const current = this._mountTable.getExactMount(notification.path);
-      if (
-        current?.storageRootKey !== notification.authority.storageRootKey ||
-        current.providerBasePath !== notification.authority.providerBasePath
-      ) {
-        return;
+  private async _applyNotice(notice: ChangeNotice): Promise<void> {
+    this._projectIndexes.noteNotice(notice.tabId, notice.seq, notice.gap === true);
+    const facts: Array<Exclude<ChangeNotification, { type: 'project-unavailable' }>> = [];
+    for (const notification of notice.changes) {
+      if (notification.type === 'project-unavailable') {
+        this._applyProjectUnavailable(notification);
+      } else {
+        facts.push(notification);
       }
-      this._revokeProjectRoute(notification.path, false);
+    }
+    if (notice.gap === true) {
+      await this._resetEveryStorageRoot(facts);
       return;
     }
-    await this._applyRemoteFact(notification);
+    const byStorageRoot = Map.groupBy(facts, ({ authority }) => authority.storageRootKey);
+    for (const group of byStorageRoot.values()) {
+      // oxlint-disable-next-line no-await-in-loop -- storage roots apply in arrival order on the one tail.
+      await this._applyRemoteFacts(group);
+    }
+  }
+
+  private _applyProjectUnavailable(notification: ChangeNotification): void {
+    const current = this._mountTable.getExactMount(notification.path);
+    if (
+      current?.storageRootKey !== notification.authority.storageRootKey ||
+      current.providerBasePath !== notification.authority.providerBasePath
+    ) {
+      return;
+    }
+    this._revokeProjectRoute(notification.path, false);
   }
 
   /**
-   * Apply one peer notification that names changed bytes rather than a lost
-   * project, against the projection this authority still routes.
+   * After a lost notice, nothing this authority holds is trustworthy: the lost
+   * notice could have named any storage root, so the facts that did arrive
+   * bound nothing. Refresh every storage root this authority owns, drop its
+   * projections whole, and say so once per backend — even when the notice that
+   * revealed the gap carried only revoked projects.
    *
-   * @param notification - The fact a sibling authority published.
+   * @param facts - The arriving notice's path facts, whose roots are reset too.
    */
-  private async _applyRemoteFact(
-    notification: Exclude<ChangeNotification, { type: 'project-unavailable' }>,
+  private async _resetEveryStorageRoot(
+    facts: ReadonlyArray<Exclude<ChangeNotification, { type: 'project-unavailable' }>>,
   ): Promise<void> {
-    const pendingProvider = this._registry.getOwnedProvider(notification.authority.storageRootKey);
+    const owned = this._registry.ownedStorageRootKeys();
+    await Promise.all(
+      owned.map(async (storageRootKey) => {
+        try {
+          const provider = await this._registry.getOwnedProvider(storageRootKey);
+          await provider?.refresh?.();
+        } catch {
+          // The reset below is the answer to a refresh that failed as well.
+        }
+      }),
+    );
+    const backends = new Set<FileSystemBackend>([
+      ...this._mountTable.listMounts().flatMap((mount) => (mount.storageRootKey === undefined ? [] : [mount.backend])),
+      ...owned.map((storageRootKey) => this._backendForPhysicalAuthority({ storageRootKey, providerBasePath: '' })),
+      ...facts.map(({ authority }) => this._backendForPhysicalAuthority(authority)),
+    ]);
+    this._projectIndexes.invalidate('/');
+    if (backends.size === 0) {
+      this._watchRegistry.emitResetAll();
+    }
+    for (const backend of backends) {
+      this._pipeline.emitChangeEvent({ type: 'backendChanged', backend });
+    }
+  }
+
+  /**
+   * Apply one storage root's facts against the projection this authority still
+   * routes: one refresh scoped to the paths they name, path-scoped invalidation,
+   * and one change event for the lot.
+   *
+   * @param facts - The notice's facts on one storage root, in entry order.
+   */
+  private async _applyRemoteFacts(
+    facts: ReadonlyArray<Exclude<ChangeNotification, { type: 'project-unavailable' }>>,
+  ): Promise<void> {
+    const [first] = facts;
+    if (first === undefined) {
+      return;
+    }
+    const { storageRootKey } = first.authority;
+    const pendingProvider = this._registry.getOwnedProvider(storageRootKey);
     if (pendingProvider === undefined) {
       return;
     }
     const provider = await pendingProvider;
-    if (this._registry.getOwnedProvider(notification.authority.storageRootKey) !== pendingProvider) {
+    if (this._registry.getOwnedProvider(storageRootKey) !== pendingProvider) {
       return;
     }
-    const entry = this._findMountForPhysicalAuthority(notification.path, notification.authority, provider);
-    const isDiscoveryRootChange =
-      notification.type === 'directory-change' &&
-      notification.path === '/' &&
-      notification.authority.providerBasePath === '' &&
-      this._discoveryRoots().some((root) => root.storageRootKey === notification.authority.storageRootKey);
-    if (entry === undefined && !isDiscoveryRootChange) {
-      return;
-    }
-    const backend = this._backendForPhysicalAuthority(notification.authority);
-    try {
-      await provider.refresh?.();
-    } catch {
-      this._handleRemoteFailure(notification, backend);
-      return;
-    }
-
-    const resolution =
-      entry === undefined
-        ? undefined
-        : this._remoteResolution({ path: notification.path, authority: notification.authority, provider, entry });
-    const isCurrent = resolution !== undefined && this._pipeline.isCurrentResolution(notification.path, resolution);
-    if (!isCurrent && !isDiscoveryRootChange) {
-      return;
-    }
-
-    if (isCurrent || isDiscoveryRootChange) {
-      this._filePool()?.clear();
-      this._treeIndexes.clear();
-    }
-
-    if (notification.type === 'directory-change') {
-      this._pipeline.emitChangeEvent(
-        { type: 'directoryChanged', path: notification.path, backend },
-        undefined,
-        resolution === undefined ? undefined : { operations: [{ path: notification.path, resolution }] },
-      );
-      return;
-    }
-    if (resolution === undefined) {
-      return;
-    }
-
-    this._pipeline.emitChangeEvent(remoteChangeEvent(notification, backend), undefined, {
-      operations: [{ path: notification.path, resolution }],
+    const routed = facts.flatMap((notification) => {
+      const entry = this._findMountForPhysicalAuthority(notification.path, notification.authority, provider);
+      const isDiscoveryRootChange =
+        notification.type === 'directory-change' &&
+        notification.path === '/' &&
+        notification.authority.providerBasePath === '' &&
+        this._discoveryRoots().some((root) => root.storageRootKey === storageRootKey);
+      if (entry === undefined && !isDiscoveryRootChange) {
+        return [];
+      }
+      const resolution =
+        entry === undefined
+          ? undefined
+          : this._remoteResolution({ path: notification.path, authority: notification.authority, provider, entry });
+      return [{ notification, resolution, isDiscoveryRootChange }];
     });
+    if (routed.length === 0) {
+      return;
+    }
+    const backend = this._backendForPhysicalAuthority(first.authority);
+    const prefixes = routed.some(({ resolution }) => resolution === undefined)
+      ? undefined
+      : [...new Set(routed.map(({ resolution }) => resolution!.path))];
+    try {
+      await provider.refresh?.(prefixes);
+    } catch {
+      this._handleRemoteFailure(first, backend);
+      return;
+    }
+
+    const events: Array<{ event: PathChangeEvent; operations: Array<{ path: string; resolution: MountResolution }> }> =
+      [];
+    for (const { notification, resolution, isDiscoveryRootChange } of routed) {
+      const isCurrent = resolution !== undefined && this._pipeline.isCurrentResolution(notification.path, resolution);
+      if (!isCurrent && !isDiscoveryRootChange) {
+        continue;
+      }
+      /* Scoped (D5): only the named path is unknown, re-observed at the next answer. */
+      this._projectIndexes.invalidate(isDiscoveryRootChange ? '/' : notification.path);
+      const operations = resolution === undefined ? [] : [{ path: notification.path, resolution }];
+      if (notification.type === 'directory-change') {
+        events.push({ event: { type: 'directoryChanged', path: notification.path, backend }, operations });
+      } else if (resolution !== undefined) {
+        events.push({ event: remoteChangeEvent(notification, backend), operations });
+      }
+    }
+    this._pipeline.emitChangeEvents(events);
   }
 
   private _findMountForPhysicalAuthority(
@@ -259,8 +320,7 @@ export class RemoteChanges {
   }
 
   private _handleRemoteFailure(notification: ChangeNotification, backend?: FileSystemBackend): void {
-    this._filePool()?.clear();
-    this._treeIndexes.clear();
+    this._projectIndexes.invalidate('/');
     if (notification.type === 'project-unavailable') {
       this._watchRegistry.emitResetAll();
       return;

@@ -4,7 +4,7 @@ import { Button } from '@taucad/ui/components/button';
 import { SiteLink } from '#www/site-link.js';
 import { Badge } from '@taucad/ui/components/badge';
 import type { ReactNode } from 'react';
-import { appOrigin, docsOrigin } from '#www/environment.js';
+import { appHref, docsOrigin } from '#www/environment.js';
 import { ecosystem, exampleUrl, plans, principles, sourceUrl, storyChapters, useCases } from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
 import { diagrams } from '#www/principle-diagrams.js';
@@ -22,7 +22,8 @@ export const cta: (label?: string, path?: string, placement?: string) => ReactNo
 ) => (
   <SiteLink
     className='button primary'
-    href={path === '/download/' ? path : `${appOrigin}${path}`}
+    href={path === '/download/' ? path : appHref(path as `/${string}`)}
+    isAppLink={path !== '/download/'}
     data-event='cta'
     data-placement={placement}
     data-host-download={path === '/download/' ? 'page' : undefined}
@@ -252,15 +253,15 @@ const evidenceList = () => (
 export const storyMarkup = (): React.JSX.Element => (
   <section className='band story' id='story' aria-labelledby='story-title'>
     <header className='cell section-head'>
-      {kicker('One idea, start to finish')}
+      {kicker('Example')}
       <h2 id='story-title'>
-        Watch a gearbox
+        Designing a
         <br />
-        come together.
+        planetary gearbox.
       </h2>
       <p>
-        A 4:1 planetary gearbox from Tau’s authored example: 34 named parts, three planets, one sun and socket screws on
-        top. Follow the design through assembly, geometric checks and one way to make it.
+        A 4:1 planetary gearbox from Tau’s example library: 34 named parts, three planets, a sun gear and socket-head
+        screws. Scroll through the design, assembly, geometry checks and export.
       </p>
     </header>
     <div className='story-layout'>
@@ -359,15 +360,15 @@ export const workspaceFigure = (loading: 'lazy' | 'eager' = 'lazy'): React.JSX.E
 export const ecosystemGrid = (): React.JSX.Element => (
   <section className='band ecosystem' aria-labelledby='ecosystem-title'>
     <header className='cell section-head'>
-      {kicker('Open by design')}
+      {kicker('Open source')}
       <h2 id='ecosystem-title'>
-        Your tools,
+        Works with the
         <br />
-        working together.
+        tools you use.
       </h2>
       <p>
-        Choose the engine that suits the part and the model that suits the job. Apache-2.0 source you can read, run and
-        build on.
+        Pick a CAD kernel for the part and an AI model for the task, or bring your own coding agent. All of Tau’s source
+        is on GitHub.
       </p>
     </header>
     {ecosystem.map((group) => (
@@ -387,9 +388,9 @@ export const ecosystemGrid = (): React.JSX.Element => (
       </div>
     ))}
     <div className='cell eco-foot'>
-      <p>Open source. Apache-2.0. Yours to build on.</p>
+      <p>Tau is open source under the Apache-2.0 license.</p>
       <SiteLink className='text-link' href={sourceUrl}>
-        Explore the source {out}
+        View on GitHub {out}
       </SiteLink>
     </div>
   </section>
@@ -463,7 +464,8 @@ export const planCards = (compact = false): React.JSX.Element => (
         ) : (
           <SiteLink
             className={`button${plan.id === 'pro' ? ' primary' : ''}`}
-            href={`${appOrigin}${plan.cta[1]}`}
+            href={appHref(plan.cta[1] as `/${string}`)}
+            isAppLink
             data-event='cta'
             data-placement={`pricing-${plan.id}`}
           >
@@ -474,19 +476,15 @@ export const planCards = (compact = false): React.JSX.Element => (
     ))}
   </div>
 );
-export const closing = (
-  title = (
-    <>
-      What will you
-      <br />
-      make real?
-    </>
-  ),
-): React.JSX.Element => (
+export const closing = (): React.JSX.Element => (
   <section className='band closing' aria-labelledby='closing-title'>
     <div className='cell closing-copy'>
       {kicker('Design. Verify. Make.')}
-      <h2 id='closing-title'>{title}</h2>
+      <h2 id='closing-title'>
+        Get started
+        <br />
+        with Tau.
+      </h2>
       <div className='actions'>
         {cta('Download Tau', '/download/', 'closing')}
         <SiteLink className='text-link' href={`${docsOrigin}/`}>
@@ -531,7 +529,7 @@ export function UseCase({ item }: { item: (typeof useCases)[number] }): React.JS
       <section className='band use-case'>
         {intro({
           eyebrow: item.audience,
-          title: item.title,
+          title: item.heading,
           body: item.description,
           aside: (
             <img
@@ -557,7 +555,7 @@ export function UseCase({ item }: { item: (typeof useCases)[number] }): React.JS
           ))}
         </ol>
         <p className='cell fine'>
-          Images show authored Tau examples, not customer case studies.{' '}
+          Images show example models from the Tau library, not customer projects.{' '}
           <SiteLink href='/use-cases/'>All use cases →</SiteLink>
         </p>
       </section>

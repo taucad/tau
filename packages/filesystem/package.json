@@ -34,6 +34,7 @@
     "./path-registry": "./src/path-registry.ts",
     "./backend/stream-utils": "./src/backend/stream-utils.ts",
     "./content-ops": "./src/content-ops/index.ts",
+    "./importer": "./src/importer/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts",
     "./package.json": "./package.json"
   },
@@ -80,6 +81,11 @@
         "import": "./dist/content-ops/index.mjs",
         "default": "./dist/content-ops/index.mjs"
       },
+      "./importer": {
+        "types": "./dist/importer/index.d.mts",
+        "import": "./dist/importer/index.mjs",
+        "default": "./dist/importer/index.mjs"
+      },
       "./storage-root-key": {
         "types": "./dist/storage-root-key.d.mts",
         "import": "./dist/storage-root-key.mjs",
@@ -96,7 +102,6 @@
   "dependencies": {
     "@taucad/kinematics": "workspace:*",
     "@taucad/project-core": "workspace:*",
-    "jszip": "^3.10.1",
     "nanoid": "catalog:",
     "type-fest": "catalog:",
     "xstate": "catalog:"
@@ -104,11 +109,11 @@
   "devDependencies": {
     "@parcel/watcher": "catalog:",
     "@taucad/events": "workspace:*",
-    "@taucad/memory": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "fast-check": "catalog:",
+    "jszip": "^3.10.1",
     "vitest": "catalog:",
     "zod": "catalog:"
   },

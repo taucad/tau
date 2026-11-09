@@ -45,7 +45,6 @@
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
-    "@taucad/rhino": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/skills": "workspace:*",

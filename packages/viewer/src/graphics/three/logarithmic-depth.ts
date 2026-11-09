@@ -29,12 +29,23 @@ export const logarithmicGeometryDepth = (viewZ: Node<'float'>): Node<'float'> =>
   );
 
 const geometryDepth = logarithmicGeometryDepth(positionView.z);
+const logarithmicDepthOverrides = new WeakMap<Material, Node<'float'>>();
+
+/**
+ * Give a material its own depth on the logarithmic path only. Other paths keep rasterizer depth,
+ * and with it the material's polygon offset, which fragment depth would discard.
+ * @param material - A material whose fragments do not lie at `positionView`, or that needs a bias.
+ * @param depth - Depth in the logarithmic/orthographic convention of {@link logarithmicGeometryDepth}.
+ */
+export function setLogarithmicDepthOverride(material: Material, depth: Node<'float'>): void {
+  logarithmicDepthOverrides.set(material, depth);
+}
 
 /** Install the camera-independent default only; preserve authored depth and depth-copy materials. */
 export function installLogarithmicGeometryDepth(material: Material): void {
   const target = material as Material & { depthNode?: MeshStandardNodeMaterial['depthNode'] };
   if (material.depthTest && !target.depthNode) {
-    target.depthNode = geometryDepth;
+    target.depthNode = logarithmicDepthOverrides.get(material) ?? geometryDepth;
     material.needsUpdate = true;
   }
 }

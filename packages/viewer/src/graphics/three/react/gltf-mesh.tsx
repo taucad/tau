@@ -7,6 +7,7 @@ import {
   gltfSurfacePresentationTag,
 } from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfSurfaceBatches } from '#graphics/three/utils/gltf-surface-batches.js';
+import { separateGltfNodeChildren } from '#graphics/three/utils/gltf-node-groups.js';
 import { subscribeToMatcapLoad } from '#graphics/three/materials/matcap-material.js';
 import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { invalidateSceneTransparency } from '#graphics/three/utils/scene-transparency-revision.js';
@@ -59,6 +60,7 @@ import {
   getGltfPrimitiveComponentId,
   hasComponentOrAncestor,
   hasComponentOrDescendant,
+  resolvePickableComponentId,
 } from '#graphics/metadata/gltf-component-visibility.js';
 import {
   applyInPlaceGeometryUpdate,
@@ -831,6 +833,8 @@ function usePresentationPreparation({
           stats.activeParses -= 1;
         }
         timings.parse = performance.now() - parseStartedAt;
+        // A primitive's visibility must not decide its node's child nodes (OpenRSCAD module edges above its solids).
+        separateGltfNodeChildren(gltf.scene, gltf.parser.associations as Map<Object3D, GltfLoaderAssociation>);
         // The presentation keeps the parser for section topology and keeps `gltfFile`; one copy of the
         // binary data is enough.
         releaseGltfBinaryChunk(gltf.parser, gltfFile);
@@ -1502,6 +1506,14 @@ function resolveModelComponentEmphasisWithManifest(
 
 function getObjectComponentId(object: Object3D | undefined): string | undefined {
   return getModelComponentIdInHierarchy(object);
+}
+
+function getPickedComponentId(
+  object: Object3D | undefined,
+  manifest: GeometryComponentManifest | undefined,
+): string | undefined {
+  const componentId = getObjectComponentId(object);
+  return componentId && manifest ? resolvePickableComponentId(manifest, componentId) : componentId;
 }
 
 /**
@@ -2582,7 +2594,7 @@ export function GltfMesh({
 
       event.stopPropagation();
       // The scene's raycast owner already resolved the nearest visible, unclipped surface.
-      const componentId = getObjectComponentId(event.object);
+      const componentId = getPickedComponentId(event.object, componentManifest);
       const hoverUpdate = resolveViewerHoverUpdate({
         isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
         previousComponentId: lastHoveredComponentIdRef.current,
@@ -2598,7 +2610,7 @@ export function GltfMesh({
         });
       }
     },
-    [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId],
+    [componentManifest, graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId],
   );
 
   const handlePointerOut = useCallback(() => {
@@ -2628,7 +2640,7 @@ export function GltfMesh({
       const graphicsContext = graphicsActor.getSnapshot().context;
       const clickAction = resolveModelPointerClickAction({
         intersections: event.intersections,
-        modelComponentId: getObjectComponentId(event.object),
+        modelComponentId: getPickedComponentId(event.object, componentManifest),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
@@ -2645,7 +2657,7 @@ export function GltfMesh({
         graphicsActor.send(dispatchEvent);
       }
     },
-    [graphicsActor, unitId],
+    [componentManifest, graphicsActor, unitId],
   );
 
   const resolveContextMenuActionFromEvent = useCallback(
@@ -2653,12 +2665,12 @@ export function GltfMesh({
       const graphicsContext = graphicsActor.getSnapshot().context;
       return resolveModelContextMenuAction({
         intersections: event.intersections,
-        modelComponentId: getObjectComponentId(event.object),
+        modelComponentId: getPickedComponentId(event.object, componentManifest),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
     },
-    [graphicsActor],
+    [componentManifest, graphicsActor],
   );
 
   const publishSecondaryPointerAction = useCallback(

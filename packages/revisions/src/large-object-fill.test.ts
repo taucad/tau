@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createLargeObjectFill, largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -22,7 +22,7 @@ const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as con
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
-const setup = () => {
+const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean }> = {}) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
@@ -44,6 +44,18 @@ const setup = () => {
         fail = reject;
       }),
   );
+  /* Fetches by pointer alone, answered by the test as the remote would: the network may be down. */
+  let fetched: PromiseWithResolvers<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> | undefined;
+  const fetchLargeObjects = vi.fn(
+    async (
+      _pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+      fetchOptions?: Pick<ReadTreeOptions, 'onLargeObject' | 'signal'>,
+    ) => {
+      onLargeObject = fetchOptions?.onLargeObject;
+      fetched = Promise.withResolvers();
+      return fetched.promise;
+    },
+  );
   /* Writers that move the checkout under the next materialization, as an editor's save would. */
   let conflicts = 0;
   const fullTree = (): ImmutableRevisionTree =>
@@ -51,9 +63,23 @@ const setup = () => {
       ['main.scad', files.get('main.scad')!],
       ...Object.entries(parts).map(([path, content]) => [path, encoder.encode(content)] as const),
     ]);
-  const capture = async (): Promise<ImmutableRevisionTree> =>
-    new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
-  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree) => {
+  let captures = 0;
+  const capture = async (): Promise<ImmutableRevisionTree> => {
+    captures += 1;
+    return new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
+  };
+  /* A gate the test may close, so a materialization waits like a slow OPFS write; open by default. */
+  let gate: Promise<void> = Promise.resolve();
+  let writing = 0;
+  let mostWriting = 0;
+  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree, _materialization?: unknown) => {
+    writing += 1;
+    mostWriting = Math.max(mostWriting, writing);
+    try {
+      await gate;
+    } finally {
+      writing -= 1;
+    }
     if (conflicts > 0) {
       conflicts -= 1;
       throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
@@ -63,13 +89,14 @@ const setup = () => {
     }
   });
   const fill = createLargeObjectFill({
-    port: { readTree },
+    port: options.byOid === true ? { readTree, fetchLargeObjects } : { readTree },
     capture,
     withCheckoutFence: async (_id, operation) => operation(),
     materializeTree,
     report: (report) => reports.push(report),
-    flushMilliseconds: 1,
+    flushMilliseconds: options.flushMilliseconds ?? 1,
     reportMilliseconds: 1,
+    ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
   });
   const land = (path: keyof typeof parts): void => {
     onLargeObject?.(pointerOf(parts[path]).pointer.oid, encoder.encode(parts[path]));
@@ -79,6 +106,8 @@ const setup = () => {
     files,
     reports,
     readTree,
+    fetchLargeObjects,
+    fetched: () => fetched,
     materializeTree,
     fill,
     land,
@@ -94,6 +123,17 @@ const setup = () => {
     conflictNext: (count: number) => {
       conflicts = count;
     },
+    holdWrites: (): (() => void) => {
+      const held = Promise.withResolvers<void>();
+      gate = held.promise;
+      return () => {
+        gate = Promise.resolve();
+        held.resolve();
+      };
+    },
+    mostWriting: () => mostWriting,
+    /** How many sweeps (one capture each) have run. */
+    captures: () => captures,
   };
 };
 
@@ -104,6 +144,171 @@ describe('large-object fill', () => {
       ['models/a.step', pointerOf('solid a').bytes],
     ]);
     expect([...largeObjectPlaceholders(tree).keys()]).toStrictEqual(['models/a.step']);
+  });
+
+  /* D10: a host reads `filled` only from the fill's word, never from its silence. */
+  it('tells its pointers before it asks for the first object', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.reports[0]?.facet).toMatchObject({
+      phase: 'fetching',
+      paths: ['models/a.step', 'models/b.step'],
+      objects: 0,
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* D10: an opened path jumps the fill queue, and is written the moment its object lands. */
+  it('asks for an opened path’s object first and writes it without waiting for the timer', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const first = harness.readTree.mock.calls[0]?.[1]?.firstLargeObjects;
+    expect([...(first?.() ?? [])]).toStrictEqual([]);
+    harness.reports.at(-1)?.prioritize(['models/b.step', 'main.scad', 'missing.step']);
+    expect([...(first?.() ?? [])]).toStrictEqual([pointerOf(parts['models/b.step']).pointer.oid]);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    /* Long before the minute-long timer: the flush also writes whatever else has landed. */
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  it('writes an opened path at once when its object has already landed', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
+    harness.reports.at(-1)?.prioritize(['models/a.step']);
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
+  it('writes a promoted object past the byte bound of a flush', async () => {
+    const harness = setup({ flushBytes: 1, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.reports.at(-1)?.prioritize(['models/a.step', 'models/b.step']);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    expect(harness.materializeTree.mock.calls.length).toBeLessThanOrEqual(2);
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
+  /* D9: what a read and `materialize` ask of a running fill. */
+  it('says what it knows of an object: coming, landed, or not its to fetch', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const { oid } = pointerOf('solid a').pointer;
+    expect(harness.fill.look(place.id, oid)).toStrictEqual({ state: 'filling' });
+    expect(harness.fill.look(place.id, 'f'.repeat(64))).toBeUndefined();
+    expect(harness.fill.look('other', oid)).toBeUndefined();
+    const arriving = harness.fill.arrival(place.id, oid);
+    harness.land('models/a.step');
+    expect(decoder.decode(await arriving)).toBe('solid a');
+    expect(harness.fill.look(place.id, oid)).toStrictEqual({ state: 'filling', bytes: encoder.encode('solid a') });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.fill.look(place.id, oid)).toBeUndefined();
+    expect(await harness.fill.arrival(place.id, oid)).toBeUndefined();
+  });
+
+  it('answers `written` once the paths hold their bytes, promoting them first', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const writing = harness.fill.written(place.id, ['models/b.step']);
+    expect([...(harness.readTree.mock.calls[0]?.[1]?.firstLargeObjects?.() ?? [])]).toStrictEqual([
+      pointerOf('solid bb').pointer.oid,
+    ]);
+    harness.land('models/b.step');
+    expect(await writing).toBe('written');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(await harness.fill.written(place.id, ['models/a.step'])).toBe('idle');
+  });
+
+  it('answers `failed` when the transfer fails first, and stops waiting on its signal', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const controller = new AbortController();
+    const aborted = harness.fill.written(place.id, ['models/a.step'], { signal: controller.signal });
+    controller.abort(new Error('closed'));
+    await expect(aborted).rejects.toThrow('closed');
+    const writing = harness.fill.written(place.id, ['models/a.step']);
+    harness.fail(new Error('offline'));
+    expect(await writing).toBe('failed');
+    await done;
+  });
+
+  it('answers `stalled` when the transfer makes no progress for the stall bound, and waits while it does (W4 review 5)', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const waiting = harness.fill.written(place.id, ['models/a.step', 'models/b.step'], { stall: 200 });
+    const delay = async (milliseconds: number): Promise<'waiting'> => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds);
+      });
+      return 'waiting';
+    };
+    /* An arrival is progress: the bound starts again. */
+    await delay(120);
+    harness.land('models/a.step');
+    /* 240 ms in: past the bound from the start, within it from the arrival. */
+    expect(await Promise.race([waiting, delay(120)])).toBe('waiting');
+    expect(await waiting).toBe('stalled');
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
+  it('gives its word once on a checkout with nothing to fill', async () => {
+    const harness = setup();
+    harness.files.set('models/a.step', encoder.encode(parts['models/a.step']));
+    harness.files.set('models/b.step', encoder.encode(parts['models/b.step']));
+    await harness.fill.fill(place, head);
+    expect(harness.reports.map((report) => report.facet)).toStrictEqual([undefined]);
+    await harness.fill.resume(place, head);
+    expect(harness.reports).toHaveLength(1);
+    expect(harness.readTree).not.toHaveBeenCalled();
   });
 
   it('writes each object as it lands, tells its progress, and reports done', async () => {
@@ -134,6 +339,110 @@ describe('large-object fill', () => {
     await done;
     expect(harness.text('models/b.step')).toBe('solid bb');
     expect(harness.text('main.scad')).toBe('import("models/a.step");');
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('writes at most one batch of bytes per flush, and the rest in the flush right after', async () => {
+    /* Each object is 7 or 8 bytes: a 10-byte batch holds one of them. */
+    const harness = setup({ flushBytes: 10, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    /* Two objects reach the batch: the flush starts without waiting out the minute-long timer. */
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    /* What each flush filled: the model paths that hold real bytes now and held a pointer before it. */
+    const filledSoFar = harness.materializeTree.mock.calls.map(([, target]) =>
+      target
+        .entries()
+        .filter(({ path, content }) => path.startsWith('models/') && !decoder.decode(content).startsWith('version '))
+        .map(({ path }) => path),
+    );
+    const written = filledSoFar.map((paths, index) =>
+      paths.filter((path) => !(filledSoFar[index - 1] ?? []).includes(path)),
+    );
+    expect(written).toStrictEqual([['models/a.step'], ['models/b.step']]);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('runs one timed flush at a time, flushing again after a slow one instead of queueing behind it', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const release = harness.holdWrites();
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.materializeTree).toHaveBeenCalledTimes(1);
+    });
+    /* A fill's flush tells the host's bracket what it is, so the host need not hold a file tree for it. */
+    expect(harness.materializeTree.mock.calls[0]?.[2]).toMatchObject({ purpose: 'fill' });
+    /* Arrivals and timers while the first flush is still writing: each would have queued a flush of its own. */
+    const sweepsBefore = harness.captures();
+    for (let landing = 0; landing < 3; landing++) {
+      harness.land('models/b.step');
+      // oxlint-disable-next-line no-await-in-loop -- each landing outlasts the flush timer.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+    expect(harness.materializeTree).toHaveBeenCalledTimes(1);
+    release();
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    /* One flush again after the slow one, not one per timer that fired behind it. */
+    expect(harness.captures() - sweepsBefore).toBe(1);
+    expect(harness.mostWriting()).toBe(1);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* An object whose placeholder is gone is owed to nobody: counted as unwritten, it made every flush start the next at once. */
+  it('stops counting an object whose placeholder is gone, rather than flushing again and again', async () => {
+    const harness = setup({ flushBytes: 7, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/a.step', encoder.encode('solid mine'));
+    const sweepsBefore = harness.captures();
+    /* Seven bytes reach the batch, so one flush starts at once and finds nothing to fill. */
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.captures()).toBeGreaterThan(sweepsBefore);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    /* The transfer tells of it again: owed to nobody, it waits for the timer instead of flushing at once. */
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid mine');
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 
@@ -213,7 +522,11 @@ describe('large-object fill', () => {
     expect(harness.files.get('models/a.step')).toStrictEqual(old.bytes);
     expect(harness.files.get('models/c.step')).toStrictEqual(old.bytes);
     expect(harness.materializeTree).not.toHaveBeenCalled();
-    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    /* With no store to fetch it by its oid, the placeholder is still owed: never done (D10). */
+    expect(harness.reports.at(-1)?.facet).toMatchObject({
+      phase: 'failed',
+      paths: ['models/a.step', 'models/c.step'],
+    });
   });
 
   it('fills an object the head holds at another path, found by its hash', async () => {
@@ -310,6 +623,68 @@ describe('large-object fill', () => {
     expect(harness.text('models/a.step')).toBe('solid a');
   });
 
+  it('fetches a placeholder no head names by its own oid: failed while offline, filled once the network answers', async () => {
+    const harness = setup({ byOid: true });
+    const done = harness.fill.fill(place, head);
+    const headless = new ImmutableRevisionTree([['main.scad', harness.files.get('main.scad')!]]);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(headless);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalled();
+    });
+    expect(harness.fetchLargeObjects.mock.calls[0]?.[0]).toStrictEqual(
+      Object.values(parts).map((content) => pointerOf(content).pointer),
+    );
+    harness.fetched()?.reject(new Error('The remote did not answer in time.'));
+    await done;
+    const failed = harness.reports.at(-1)!;
+    expect(failed.facet).toMatchObject({ phase: 'failed', paths: ['models/a.step', 'models/b.step'] });
+    expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
+    failed.retry();
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(2);
+    });
+    harness.finish(headless);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalledTimes(2);
+    });
+    harness.land('models/a.step');
+    harness.fetched()?.resolve(new Map([[pointerOf('solid bb').pointer.oid, encoder.encode('solid bb')]]));
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('answers a caller that names what it wrote every time, even when that is nothing (D10)', async () => {
+    const harness = setup();
+    await harness.fill.fill(place, head, new Map());
+    await harness.fill.fill(place, head, new Map());
+    expect(harness.reports.map((report) => report.facet)).toStrictEqual([undefined, undefined]);
+    expect(harness.readTree).not.toHaveBeenCalled();
+  });
+
+  it('forgets a checkout’s fill without a word when its tree is replaced (D10, I7)', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const told = harness.reports.length;
+    harness.fill.forget(place.id);
+    await done;
+    expect(harness.signal()?.aborted).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(harness.reports).toHaveLength(told);
+    expect(harness.fill.look(place.id, pointerOf('solid a').pointer.oid)).toBeUndefined();
+  });
+
   it('stops on close: the transfer is aborted, timers clear, and nothing more is written or told', async () => {
     const harness = setup();
     const done = harness.fill.fill(place, head);
@@ -327,5 +702,72 @@ describe('large-object fill', () => {
     expect(harness.materializeTree).not.toHaveBeenCalled();
     expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
     expect(harness.reports).toHaveLength(told);
+  });
+});
+
+/*
+ * W11.3 re-review: a store-landing fill whose final flush finds another object
+ * gone from the store fetches that one too, each object at most once.
+ */
+describe('a fill over the host store', () => {
+  it('fetches as bytes an object the store loses during the final flush, once', async () => {
+    const a = encoder.encode('solid a\n'.repeat(64));
+    const b = encoder.encode('solid b\n'.repeat(64));
+    const pa = lfsPointerFor(a);
+    const pb = lfsPointerFor(b);
+    const files = new Map<string, Uint8Array<ArrayBuffer>>([
+      ['a.step', pa.bytes],
+      ['b.step', pb.bytes],
+    ]);
+    /* The store lacks `a` from the start; `b` is lost once `a` has been fetched. */
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>([[pb.pointer.oid, b]]);
+    const remote = new Map([
+      [pa.pointer.oid, a],
+      [pb.pointer.oid, b],
+    ]);
+    const asked: string[][] = [];
+    const reports: LargeObjectsReport[] = [];
+    const fill = createLargeObjectFill({
+      port: {
+        readTree: async () =>
+          new ImmutableRevisionTree([
+            ['a.step', pa.bytes],
+            ['b.step', pb.bytes],
+          ]),
+        fetchLargeObjects: async (pointers) => {
+          asked.push(pointers.map(({ oid }) => oid));
+          if (asked.length === 1) {
+            /* Meanwhile `b`'s placeholder is copied, and a prune takes `b` from the store. */
+            files.set('c.step', pb.bytes);
+            stored.delete(pb.pointer.oid);
+          }
+          return new Map(pointers.map(({ oid }) => [oid, remote.get(oid)!] as const));
+        },
+      },
+      capture: async () => new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+      withCheckoutFence: async (_id, operation) => operation(),
+      landsFromStore: async () => true,
+      materializeTree: async (_place, target, { largeObjects }) => {
+        const lacking = [...(largeObjects?.values() ?? [])].flatMap(({ oid }) => (stored.has(oid) ? [] : [oid]));
+        if (lacking.length > 0) {
+          throw new UnstoredLargeObjectsError(lacking);
+        }
+        for (const { path, content } of target.entries()) {
+          const object = largeObjects?.get(path);
+          files.set(path, object === undefined ? content : stored.get(object.oid)!);
+        }
+      },
+      report: (report) => reports.push(report),
+      flushMilliseconds: 0,
+    });
+
+    await fill.fill(place, head);
+
+    expect(asked).toStrictEqual([[pa.pointer.oid], [pb.pointer.oid]]);
+    expect(decoder.decode(files.get('a.step'))).toBe(decoder.decode(a));
+    expect(decoder.decode(files.get('b.step'))).toBe(decoder.decode(b));
+    expect(decoder.decode(files.get('c.step'))).toBe(decoder.decode(b));
+    expect(reports.at(-1)?.facet).toBeUndefined();
+    await fill.stop();
   });
 });

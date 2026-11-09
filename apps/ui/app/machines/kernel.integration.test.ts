@@ -283,7 +283,9 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     const document = client.open({ source: { path: 'main.scad' } });
     const view = document.view('model', { content: { includeEdges: true } });
     try {
-      expect(glbPrimitiveModes(expectNonEmptyGlb(await view.rendering()))).toEqual([[4, 1]]);
+      // Engine 0.11 keeps the solid's EXT_mesh_manifold mesh triangles-only and writes its feature lines as a
+      // separate LINES-only mesh: one native line primitive and no JavaScript fallback edges.
+      expect(glbPrimitiveModes(expectNonEmptyGlb(await view.rendering()))).toEqual([[4], [1]]);
     } finally {
       view.close();
       document.close();

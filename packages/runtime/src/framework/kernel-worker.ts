@@ -4958,7 +4958,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (!meshResult.success) {
         return meshResult;
       }
-      meshSpanAttributes = tessellationSpanAttributes(meshResult.data.tessellation, meshResult.issues);
+      meshSpanAttributes = tessellationSpanAttributes(meshResult.data.tessellation);
       const observed = this.activeOperation?.observed;
       const triangles = meshResult.data.tessellation?.triangles;
       if (observed && typeof triangles === 'number' && Number.isFinite(triangles) && triangles >= 0) {

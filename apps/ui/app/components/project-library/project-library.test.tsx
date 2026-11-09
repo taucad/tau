@@ -14,6 +14,7 @@ import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+import type { ProjectListShape } from '#lib/project-list-shape.lib.js';
 
 const routerContent = createContext<React.ReactNode>(null);
 
@@ -82,6 +83,10 @@ vi.mock('#hooks/use-projects.js', () => ({
       : mockUseProjectsResult;
   },
 }));
+
+/** The remembered list shape (R5) the library reads before the worker lists. */
+let mockRememberedShape: ProjectListShape | undefined;
+vi.mock('#hooks/use-project-list-shape.js', () => ({ useProjectListShape: () => mockRememberedShape }));
 
 const { mockDiscardRecovery, mockRepairWorkspaceBindings } = vi.hoisted(() => ({
   mockDiscardRecovery: vi.fn(async () => undefined),
@@ -258,6 +263,7 @@ describe('ProjectLibrary', () => {
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
     mockTrashedProjects = [];
+    mockRememberedShape = undefined;
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => Response.json(cloudListing.current)),
@@ -775,7 +781,8 @@ describe('ProjectLibrary', () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it('mounts the shared creation composer for an empty project library', () => {
+  /* R12: one line under the heading, the controls row intact; the hero is the way to start. */
+  it('says an empty library is empty in one line and keeps its controls', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
 
     render(
@@ -786,7 +793,101 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
+    expect(screen.getByText('No projects yet. Your first project appears here.')).toBeInTheDocument();
+    const controls = screen.getByRole('group', { name: 'Project controls' });
+    expect(within(controls).getByRole('searchbox', { name: 'Search projects' })).toBeDisabled();
+    expect(within(controls).getByRole('button', { name: 'Sort' })).toBeEnabled();
+    expect(within(controls).getByRole('button', { name: 'View mode' })).toBeInTheDocument();
+    expect(screen.queryByTestId('new-project-chat-composer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Build from code')).not.toBeInTheDocument();
+  });
+
+  /* R5: a remembered empty list is known before the worker lists, so no skeleton stands in for it. */
+  it('renders the empty state while loading when the last listing had no projects', () => {
+    mockRememberedShape = { count: 0, projects: [] };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    expect(screen.queryByRole('status', { name: 'Loading projects' })).not.toBeInTheDocument();
+    expect(screen.getByText('No projects yet. Your first project appears here.')).toBeInTheDocument();
+  });
+
+  it('reserves one card per remembered project while the listing loads', () => {
+    mockRememberedShape = { count: 3, projects: [] };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    expect(screen.getByRole('status', { name: 'Loading projects' }).children).toHaveLength(3);
+    expect(screen.queryByTestId('project-pagination-placeholder')).not.toBeInTheDocument();
+  });
+
+  /* R14: the paging row is reserved with the grid when the remembered list spans pages. */
+  it('reserves a page of cards and the paging row when the remembered list spans pages', () => {
+    mockRememberedShape = { count: 45, projects: [] };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    expect(screen.getByRole('status', { name: 'Loading projects' }).children).toHaveLength(20);
+    expect(screen.getByTestId('project-pagination-placeholder')).toBeInTheDocument();
+  });
+
+  it('offers no paging for a list that fits one page', () => {
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    expect(screen.getByText('Gearbox Alpha')).toBeInTheDocument();
+    expect(screen.queryByText(/^Page \d/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Go to next page' })).not.toBeInTheDocument();
+  });
+
+  /* R13: selection and preview are reached, not resting chrome. */
+  it('keeps card selection and preview controls out of the resting card', () => {
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Select Gearbox Alpha' });
+    expect(checkbox.parentElement).toHaveClass(
+      'opacity-0',
+      'group-hover/card:opacity-100',
+      'pointer-coarse:opacity-100',
+    );
+    const preview = screen.getAllByRole('button', { name: 'Preview model' })[0];
+    expect(preview).toHaveClass('opacity-0', 'group-hover/card:opacity-100', 'pointer-coarse:opacity-100');
+
+    fireEvent.click(checkbox);
+
+    expect(screen.getByRole('checkbox', { name: 'Select Bracket Beta' }).parentElement).not.toHaveClass('opacity-0');
   });
 
   it('shows the project skeleton instead of the empty state while the listing is loading', () => {
@@ -1082,8 +1183,9 @@ describe('ProjectLibrary', () => {
       });
       expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
       fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'Project 43' } });
+      /* R14: a single page needs no paging row. */
       await waitFor(() => {
-        expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+        expect(screen.queryByText(/^Page \d/u)).not.toBeInTheDocument();
       });
     });
 
@@ -1155,13 +1257,14 @@ describe('ProjectLibrary', () => {
       expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: false });
     });
 
-    it('writes and clears the parameter from the Settings checkbox', async () => {
+    /* R15: the Trash toggle is a filter, so it lives in the sort menu rather than behind a gear. */
+    it('writes and clears the parameter from the sort menu checkbox', async () => {
       Element.prototype.hasPointerCapture = vi.fn(() => false);
       Element.prototype.scrollIntoView = vi.fn();
       useProjectsOptions.length = 0;
       const route = renderAt('/projects?page=2');
 
-      fireEvent.keyDown(screen.getByRole('button', { name: 'Settings' }), { key: 'Enter' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Sort' }), { key: 'Enter' });
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
 
       await waitFor(() => {
@@ -1171,7 +1274,7 @@ describe('ProjectLibrary', () => {
       expect(route.search()).toContain('trash=1');
       expect(route.search()).toContain('page=2');
 
-      fireEvent.keyDown(screen.getByRole('button', { name: 'Settings' }), { key: 'Enter' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Sort' }), { key: 'Enter' });
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
 
       await waitFor(() => {

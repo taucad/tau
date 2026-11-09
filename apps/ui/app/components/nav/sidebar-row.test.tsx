@@ -39,7 +39,6 @@ describe('SidebarRowMenuButton on a phone', () => {
     await userEvent.click(screen.getByRole('button', { name: 'More actions for Bracket' }));
 
     const drawer = await screen.findByRole('dialog', { name: 'Bracket' });
-    expect(drawer).toHaveClass('z-110');
     expect(within(drawer).getByRole('button', { name: 'Move to Trash' })).toHaveAttribute(
       'data-variant',
       'destructive',

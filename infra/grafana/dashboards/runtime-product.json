@@ -658,7 +658,7 @@
     {
       "title": "Entry Formats by Kernel",
       "type": "table",
-      "description": "§11 panel 35. Completed evaluates by entry file format (py, cs, kcl, scad, ts, step, stl, 3dm, …). Evaluates are edit-weighted: an editing session evaluates many times, so this is not documents opened. Population: the Population variable (default signed-in).",
+      "description": "§11 panel 35. Completed evaluates by entry file format (py, cs, kcl, scad, ts, step, stl, …). Evaluates are edit-weighted: an editing session evaluates many times, so this is not documents opened. Population: the Population variable (default signed-in).",
       "targets": [
         {
           "expr": "sum by (kernel_id, tau_runtime_entry_format) (increase(tau_runtime_entry_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
@@ -1642,6 +1642,40 @@
       "id": 57
     },
     {
+      "title": "GeoSpec Runs by Outcome (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 29. GeoSpec verify runs by terminal outcome; the pass rate of their tests is GeoSpec Pass Rate. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_outcome) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"verify\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 177
+      },
+      "id": 71
+    },
+    {
       "title": "Plugin usage",
       "type": "row",
       "collapsed": false,
@@ -1649,7 +1683,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 177
+        "y": 185
       },
       "panels": [],
       "id": 58
@@ -1684,7 +1718,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 59
     },
@@ -1711,7 +1745,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 178
+        "y": 186
       },
       "id": 60
     },
@@ -1745,7 +1779,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 186
+        "y": 194
       },
       "id": 61
     },
@@ -1779,7 +1813,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 186
+        "y": 194
       },
       "id": 62
     },
@@ -1806,7 +1840,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 194
+        "y": 202
       },
       "id": 63
     },
@@ -1833,7 +1867,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 194
+        "y": 202
       },
       "id": 64
     },
@@ -1865,11 +1899,45 @@
       "interval": "1d",
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
-        "y": 202
+        "y": 210
       },
       "id": 65
+    },
+    {
+      "title": "Machine Provider Usage (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 34. New machine operations of every kind (action, stop, hold, transfer, start) by provider, on the plugin usage counter; kinds and action families are on the machine panels below. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"machine\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}} {{tau_runtime_operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 210
+      },
+      "id": 72
     },
     {
       "title": "Machine Operations by Provider and Kind",
@@ -1894,7 +1962,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 210
+        "y": 218
       },
       "id": 66
     },
@@ -1921,7 +1989,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 210
+        "y": 218
       },
       "id": 67
     },
@@ -1948,7 +2016,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 210
+        "y": 218
       },
       "id": 68
     },
@@ -1976,7 +2044,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 210
+        "y": 218
       },
       "id": 69
     },
@@ -2007,7 +2075,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 218
+        "y": 226
       },
       "id": 70
     }

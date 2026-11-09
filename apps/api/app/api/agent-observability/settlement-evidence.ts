@@ -1,27 +1,15 @@
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
-import type { creditOperation } from '#database/schema.js';
-import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';
-import { executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
+import { apiVersions, executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 
 /** Bumped whenever the facts written for the same settlement change. */
 export const apiSettlementMapper = 'api-settlement-v2';
 
 type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
-
-/** One funded operation the ledger has just terminalized, live or by recovery. */
-export type ObservedSettlement = Readonly<{
-  operation: Pick<
-    typeof creditOperation.$inferSelect,
-    'id' | 'accountId' | 'environment' | 'attemptKey' | 'projectHint' | 'chatHint' | 'admittedAt' | 'activationId'
-  >;
-  receipt: Pick<TerminalReceipt, 'terminalRevision' | 'chargedAtoms' | 'supplierCostPicoUsd' | 'resolvedAt'>;
-  /** The terminal evidence's normalization version, when it carries one. */
-  normalization: string | undefined;
-}>;
 
 /** One credit atom is one micro-USD; supplier cost is in pico-USD. */
 const atomsPerUsd = 1_000_000;
@@ -88,18 +76,7 @@ export const settlementEvidence = async (
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
     run,
     execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
-    versions: {
-      hostBuild: null,
-      apiBuild: null,
-      harness: null,
-      compaction: null,
-      prompts: [],
-      skills: [],
-      tools: [],
-      kernels: [],
-      mapper: apiSettlementMapper,
-      policy: 'purposes-v1',
-    },
+    versions: apiVersions(apiSettlementMapper),
     task: null,
     clocks: { occurredAt: receipt.resolvedAt.getTime(), sourceOrder: ledger, intervals: [] },
     authority: 'api-reported',

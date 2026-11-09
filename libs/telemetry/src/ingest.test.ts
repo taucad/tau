@@ -82,6 +82,34 @@ describe('clientMetricEntrySchema', () => {
     ).toBe(false);
   });
 
+  it('should accept worker span totals by span name, and refuse an unknown name or a negative total', () => {
+    const fetch = {
+      name: IngestEntryName.LFS_FETCH,
+      duration: 6000,
+      detail: {
+        placement: 'browser',
+        networkObjects: 2,
+        networkBytes: 20,
+        localObjects: 0,
+        localBytes: 0,
+        spans: { 'lfs.store': 1200, 'queue.wait': 40 },
+      },
+    };
+    expect(clientMetricEntrySchema.parse(fetch)).toEqual(fetch);
+    const open = {
+      name: IngestEntryName.PROJECT_OPEN,
+      duration: 6100,
+      detail: { phase: 'first_view', cache: 'cold', spans: { 'apply.hold': 900 } },
+    };
+    expect(clientMetricEntrySchema.parse(open)).toEqual(open);
+    expect(
+      clientMetricEntrySchema.safeParse({ ...open, detail: { ...open.detail, spans: { 'models/a.step': 1 } } }).success,
+    ).toBe(false);
+    expect(
+      clientMetricEntrySchema.safeParse({ ...fetch, detail: { ...fetch.detail, spans: { 'lfs.store': -1 } } }).success,
+    ).toBe(false);
+  });
+
   it('should accept a project open of two bounded words, and refuse any other word', () => {
     const entry = {
       name: IngestEntryName.PROJECT_OPEN,

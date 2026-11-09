@@ -294,13 +294,12 @@ describe('a Home composer record', () => {
   /** Home, as the file-manager worker mounts it: one provider at `/`. */
   const home = (): MemoryProvider => new MemoryProvider();
 
-  it('should be refused by the composed view every consumer reads', async () => {
+  it('should be reachable through the composed view every consumer reads', async () => {
     const view = composeView({ filesystem: home() }, { consumer: 'user', policy: tauPathPolicy });
 
-    /* Which is why the consumer is `'working-copy'` and not `'user'`: this row
-     * fails the moment a lane routes a record through a masked view. */
-    await expect(view.writeFile(recordPath.slice(1), encoder.encode('{}'))).rejects.toMatchObject({ code: 'EPERM' });
-    await expect(view.readFile(recordPath.slice(1))).rejects.toMatchObject({ code: 'EPERM' });
+    /* Unlisted `.tau` names are ordinary project files since the mask was retired (2026-10-31). */
+    await view.writeFile(recordPath.slice(1), encoder.encode('{}'));
+    expect(new TextDecoder().decode(await view.readFile(recordPath.slice(1)))).toBe('{}');
   });
 
   it('should round-trip through the working copy the rooted content client opens', async () => {

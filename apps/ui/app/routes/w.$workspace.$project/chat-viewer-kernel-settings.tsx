@@ -6,7 +6,11 @@ import { KernelSettings, kernelSettingsGroups } from '@taucad/viewer/cad/kernel-
 import { useProject } from '#hooks/use-project.js';
 import { selectCadEvaluateOptions, selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { getLiveViewOptions, setLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
+import {
+  discardLiveViewOptions,
+  setLiveViewOptions,
+  useLiveViewOptions,
+} from '#workbench-records/live-view-options.js';
 import type { LiveViewOptions } from '#workbench-records/live-view-options.js';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
@@ -80,10 +84,10 @@ export function ViewerKernelSettings({
     readonly save: (draft: LiveViewOptions) => Promise<void>;
     readonly timer: ReturnType<typeof setTimeout>;
   }>(undefined);
-  /* The record is the durable copy; the live draft keeps the viewer on what the menu shows until the record has it,
-   * and a newer draft stays in place. */
+  /* The record is the durable copy; the live draft keeps the viewer on what the menu shows until the pane sees the
+   * record hold it (`settleLiveViewOptions` in the viewer), and a newer draft stays in place. */
   const save = async (draft: LiveViewOptions): Promise<void> => {
-    await viewCommands.edit(viewId, (current) => {
+    const saved = await viewCommands.edit(viewId, (current) => {
       const nextRecord = current ?? newViewRecord(entryPath);
       const states = nextRecord.kernelViews ?? [];
       const prior = states.find((view) => view.id === draft.viewId) ?? { id: draft.viewId };
@@ -92,8 +96,8 @@ export function ViewerKernelSettings({
         kernelViews: [...states.filter((view) => view.id !== draft.viewId), { ...prior, options: draft.options }],
       });
     });
-    if (getLiveViewOptions(viewId) === draft) {
-      setLiveViewOptions(viewId, undefined);
+    if (!saved) {
+      discardLiveViewOptions(viewId, draft);
     }
   };
   const flush = useCallback((): void => {

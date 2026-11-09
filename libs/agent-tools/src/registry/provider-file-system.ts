@@ -25,7 +25,8 @@
  * @module
  */
 
-import type { DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
+import { fileMetadataFields, getFileContentMetadata, lineCountByteCap } from '@taucad/filesystem';
+import type { ContentFacts, DirectoryStatRow, FileStatEntry, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
@@ -44,6 +45,11 @@ const manifestPath = 'tau.json';
 const maximumCheckedPreconditions = 32;
 const maximumCheckedBytes = 8 * 1024 * 1024;
 const maximumReadBytes = 256 * 1024 * 1024;
+/**
+ * Largest file a kind-only facts request may read whole: only a source with no
+ * ranged read does, and a search reads a file that size in full anyway.
+ */
+const contentKindByteCap = 4 * 1024 * 1024;
 
 const manifestRefusal = (message: string): Error =>
   Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
@@ -163,6 +169,29 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       throw manifestRefusal(refusal);
     }
   };
+  /*
+   * A stat or listing carries content facts only when the view already knows
+   * them (I3), so the missing ones are asked for in one call (D4, EQ15): the
+   * kind from each file's head, a line count only for text within the byte
+   * cap. A listing past the cap shows the size alone; a single stat counts.
+   */
+  const factsOf = async (
+    files: ReadonlyArray<
+      Readonly<{ path: string; size: number; mtimeMs: number; contentKind?: string; lineCount?: number }>
+    >,
+    byteCap?: number,
+  ): Promise<ReadonlyMap<string, ContentFacts>> => {
+    const unknown = files.filter(
+      (file) => file.contentKind === undefined || (file.contentKind === 'text' && file.lineCount === undefined),
+    );
+    /* The listing's own size and mtime let facts an earlier read measured be checked as current without a stat. */
+    return unknown.length === 0
+      ? new Map()
+      : provider.facts(
+          unknown.map((file) => file.path),
+          { lineCount: true, byteCap, listed: unknown.map(({ size, mtimeMs }) => ({ size, mtimeMs })) },
+        );
+  };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);
     const value = await provider.stat(target);
@@ -171,14 +200,21 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     if (value.type === 'dir') {
       return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date, provenance };
     }
-    return value.contentKind === 'text'
+    const facts = await factsOf([{ ...value, path: target }]);
+    const known = facts.get(target) ?? value;
+    /* A stat asks with no cap, so only a view that cannot answer facts leaves a gap; one read fills it. */
+    const measured =
+      known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)
+        ? known
+        : getFileContentMetadata(await bytes(target));
+    return measured.contentKind === 'text' && measured.lineCount !== undefined
       ? {
           size: value.size,
           isDirectory: false,
           createdAt: date,
           modifiedAt: date,
           contentKind: 'text',
-          lineCount: value.lineCount,
+          lineCount: measured.lineCount,
           provenance,
         }
       : {
@@ -232,7 +268,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
     });
-  const directoryEntry = (row: DirectoryStatRow): RpcDirectoryEntry => {
+  const directoryEntry = (row: DirectoryStatRow, facts: ContentFacts | undefined): RpcDirectoryEntry => {
     const { name, provenance } = row;
     const modifiedAt = row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : undefined;
     if (row.type === 'dir') {
@@ -252,13 +288,91 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       name,
       type: 'file',
       size: row.size,
-      ...(row.contentKind === 'text' ? { contentKind: 'text', lineCount: row.lineCount } : { contentKind: 'binary' }),
+      ...fileMetadataFields(facts ?? row),
       ...(modifiedAt ? { modifiedAt } : {}),
       ...(provenance ? { provenance } : {}),
     };
   };
 
+  const { pendingPaths, statTree, facts } = provider;
+  /* Set once the view says it serves no index: kinds would then be measured by reading each file the search reads anyway. */
+  let indexUnavailable = statTree === undefined;
   return {
+    /*
+     * The index answers a whole subtree in one call (charter D13): what grep
+     * and glob search instead of a walk. The view passes its mask down as
+     * `admits` and the index never holds an ignored directory, so an empty
+     * answer for a named directory may be one it does not hold (a
+     * `node_modules`); the handlers walk that one instead.
+     */
+    ...(statTree === undefined
+      ? {}
+      : {
+          indexedFiles: async (path: string) => {
+            assertNotAborted(signal);
+            const directory = assertRootedPath(path);
+            let rows: readonly FileStatEntry[];
+            try {
+              rows = await statTree.call(provider, directory, signal === undefined ? undefined : { signal });
+            } catch (error) {
+              /* A view over a connection that serves no index: the handlers walk. */
+              if (getErrno(error) === 'ENOTSUP') {
+                indexUnavailable = true;
+                return undefined;
+              }
+              throw error;
+            }
+            if (rows.length === 0 && directory !== '') {
+              return undefined;
+            }
+            /* The index lists files only; a directory row would be no file to search. */
+            return rows.flatMap((row) =>
+              row.type === 'file'
+                ? [
+                    {
+                      path: directory === '' ? row.path : `${directory}/${row.path}`,
+                      size: row.size,
+                      ...fileMetadataFields(row),
+                      ...(row.mtimeMs > 0 ? { modifiedAt: new Date(row.mtimeMs).toISOString() } : {}),
+                    },
+                  ]
+                : [],
+            );
+          },
+        }),
+    /* Kinds only, from each file's head where the index has not measured one (D4): no line count, no full read. */
+    contentKinds: async (paths: readonly string[]) => {
+      if (indexUnavailable) {
+        return new Map();
+      }
+      const targets = paths.map((path) => assertRootedPath(path));
+      let measured: ReadonlyMap<string, ContentFacts>;
+      try {
+        measured = await facts.call(provider, targets, { lineCount: false, byteCap: contentKindByteCap });
+      } catch (error) {
+        /* No index to ask: the search reads these files and learns their kind from the bytes. */
+        if (getErrno(error) === 'ENOTSUP') {
+          return new Map();
+        }
+        throw error;
+      }
+      return new Map(
+        paths.flatMap((path, index) => {
+          const kind = measured.get(targets[index]!)?.contentKind;
+          return kind === undefined ? [] : [[path, kind] as const];
+        }),
+      );
+    },
+    /* Pending entries come from the view's index, so a search learns them without a read (D9). */
+    ...(pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => assertRootedPath(path));
+            const pending = new Set(await pendingPaths.call(provider, targets));
+            return paths.filter((_, index) => pending.has(targets[index]!));
+          },
+        }),
     async readBinaryFile(path) {
       assertNotAborted(signal);
       const target = assertRootedPath(path);
@@ -385,9 +499,18 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         await (value.type === 'dir' ? provider.rmdir(target) : provider.unlink(target));
       });
     },
-    async readdir(path) {
-      const rows = await provider.readdirWithStats(assertRootedPath(path));
-      return rows.map((row) => directoryEntry(row));
+    async readdir(path, options) {
+      const directory = assertRootedPath(path);
+      const rows = await provider.readdirWithStats(directory);
+      const pathOf = (name: string): string => (directory === '' ? name : `${directory}/${name}`);
+      const facts =
+        options?.contentFacts === false
+          ? new Map<string, ContentFacts>()
+          : await factsOf(
+              rows.flatMap((row) => (row.type === 'file' ? [{ ...row, path: pathOf(row.name) }] : [])),
+              lineCountByteCap,
+            );
+      return rows.map((row) => directoryEntry(row, facts.get(pathOf(row.name))));
     },
     async exists(path) {
       return provider.exists(assertRootedPath(path));

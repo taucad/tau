@@ -2,7 +2,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 
-import { shellBaselineDenied } from '#shell/shell-baseline.js';
+import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 
 describe('shellBaselineDenied', () => {
   it('should deny Linux credential stores, startup files and runtime sockets', () => {
@@ -46,6 +46,22 @@ describe('shellBaselineDenied', () => {
         String.raw`C:\Users\person\AppData\Roaming\Microsoft\Credentials`,
         String.raw`C:\Users\person\AppData\Local\Microsoft\Vault`,
       ]),
+    );
+  });
+});
+
+describe('zshStartupFiles', () => {
+  it('should name exactly the four Zsh startup files, each still in the baseline', () => {
+    const files = zshStartupFiles('/Users/person');
+
+    expect(files).toStrictEqual([
+      '/Users/person/.zshenv',
+      '/Users/person/.zprofile',
+      '/Users/person/.zshrc',
+      '/Users/person/.zlogin',
+    ]);
+    expect(shellBaselineDenied({ platform: 'darwin', home: '/Users/person', environment: {} })).toStrictEqual(
+      expect.arrayContaining([...files]),
     );
   });
 });

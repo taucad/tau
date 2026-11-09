@@ -110,6 +110,45 @@ export const sandboxRuntimeSeccomp = (
 };
 
 /**
+ * The environment variable naming the bubblewrap every Linux native worker starts through.
+ *
+ * Absent, the runtime runs `bwrap` from `PATH`. Stock Ubuntu 26.04 confines `/usr/bin/bwrap` with its
+ * `bwrap-userns-restrict` AppArmor profile, which lets bubblewrap create its user namespace but strips the
+ * capabilities the sandbox runtime's `apply-seccomp` helper needs to open its nested one, so every worker exits 1 with
+ * `write /proc/self/setgroups (nested userns is capability-restricted …)`. A packaged desktop app ships its own copy
+ * under an AppArmor profile of its own and names it here, the same binary its shell sandbox already runs.
+ *
+ * @public
+ */
+export const nativeSandboxBwrapVariable = 'TAU_NATIVE_SANDBOX_BWRAP';
+
+/**
+ * The bubblewrap {@link nativeSandboxBwrapVariable} names, when it names one on Linux.
+ *
+ * The path is spliced, unquoted, ahead of the seccomp descriptor the worker reads, so only an absolute path of plain
+ * characters is accepted; anything else refuses every launch rather than running a different binary.
+ *
+ * @internal
+ * @param environment - Environment to read; defaults to this process's.
+ * @param platform - Host operating system.
+ * @returns The absolute bubblewrap path, or `undefined` to use `bwrap` from `PATH`.
+ * @throws {NativeRuntimeUnavailableError} When the variable holds anything but a plain absolute path.
+ */
+export const nativeSandboxBwrap = (
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined => {
+  const path = environment[nativeSandboxBwrapVariable];
+  if (platform !== 'linux' || path === undefined || path === '') {
+    return undefined;
+  }
+  if (!/^\/[\w./+-]+$/u.test(path) || path.split('/').includes('..')) {
+    throw new NativeRuntimeUnavailableError(`${nativeSandboxBwrapVariable} must be a plain absolute path.`);
+  }
+  return path;
+};
+
+/**
  * Resolve the Linux proxy agent on the physical filesystem for bubblewrap mounts.
  *
  * @internal
@@ -150,6 +189,7 @@ export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((p
  */
 export type NativeSandboxProfile = {
   seccomp?: { applyPath: string };
+  bwrapPath?: string;
   javaAgentJarPath?: string;
   network: { allowedDomains: string[]; deniedDomains: string[]; strictAllowlist: boolean };
   filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
@@ -176,19 +216,23 @@ export type NativeSandboxProfile = {
  */
 export const nativeSandboxPolicy = (
   launch?: Pick<NativeSandboxLaunch, 'readablePaths' | 'writablePath'>,
-): NativeSandboxProfile => ({
-  seccomp: sandboxRuntimeSeccomp(),
-  javaAgentJarPath: sandboxRuntimeJavaAgent(),
-  network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
-  filesystem: {
-    denyRead: deniedReadRoots(),
-    allowRead: launch
-      ? physicalVariants([...launch.readablePaths, launch.writablePath, ...sandboxRuntimeReadRoots()])
-      : [],
-    allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
-    denyWrite: deniedWriteRoots(),
-  },
-});
+): NativeSandboxProfile => {
+  const bwrapPath = nativeSandboxBwrap();
+  return {
+    seccomp: sandboxRuntimeSeccomp(),
+    ...(bwrapPath === undefined ? {} : { bwrapPath }),
+    javaAgentJarPath: sandboxRuntimeJavaAgent(),
+    network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
+    filesystem: {
+      denyRead: deniedReadRoots(),
+      allowRead: launch
+        ? physicalVariants([...launch.readablePaths, launch.writablePath, ...sandboxRuntimeReadRoots()])
+        : [],
+      allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
+      denyWrite: deniedWriteRoots(),
+    },
+  };
+};
 
 const unavailable = (error: unknown): NativeRuntimeUnavailableError =>
   error instanceof NativeRuntimeUnavailableError
@@ -243,6 +287,89 @@ export const releaseNativeSandbox = async (): Promise<void> => {
   await release;
 };
 
+/**
+ * How many times one launch starts the sandbox runtime before reporting its Linux network bridge as unavailable.
+ *
+ * @internal
+ */
+export const bridgeStartAttempts = 3;
+
+/** Milliseconds to pause before the next start, growing with each failed one: a host slow to start `socat` is usually a busy one. */
+const bridgeRetryDelay = 250;
+
+/**
+ * Whether a failed {@link SandboxManager.initialize} is the Linux network bridge starting too slowly.
+ *
+ * The runtime starts two `socat` bridges and gives their sockets about 600 ms to appear before it kills them and
+ * rejects with `Failed to create bridge sockets after 5 attempts` (or reports a bridge that died or never started).
+ * On a loaded host that window is sometimes too short, and nothing about the next start depends on the last one.
+ */
+const isBridgeStartFailure = (error: unknown): boolean => error instanceof Error && /\bbridge\b/iu.test(error.message);
+
+/**
+ * Initialize the sandbox runtime, starting it again after a transient Linux bridge failure.
+ *
+ * The runtime clears its own state after a failed start, but runs that cleanup without awaiting it; the reset here is
+ * awaited, and the pause after it outlasts the runtime's own, so the next start never races the last one's teardown.
+ * Every other failure, and the last bridge failure, is reported as it is.
+ *
+ * @param profile - The process-wide baseline profile.
+ */
+const initializeWithBridgeRetry = async (profile: NativeSandboxProfile): Promise<void> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each start must finish before the next one begins.
+      await SandboxManager.initialize(profile);
+      return;
+    } catch (error) {
+      if (attempt >= bridgeStartAttempts || !isBridgeStartFailure(error)) {
+        throw error;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- the failed start's bridges and proxy must be gone first.
+        await SandboxManager.reset();
+      } catch {
+        // The runtime already started its own cleanup; a second one that fails leaves nothing more to stop.
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the pause is the point.
+      await new Promise((resolve) => {
+        setTimeout(resolve, bridgeRetryDelay * attempt);
+      });
+    }
+  }
+};
+
+/**
+ * How many times one launch checks the sandbox runtime's host prerequisites before reporting one as missing.
+ *
+ * @internal
+ */
+export const dependencyCheckAttempts = 3;
+
+/**
+ * The sandbox runtime's prerequisite errors that persist across {@link dependencyCheckAttempts} checks.
+ *
+ * On Linux the runtime finds `rg`, `bwrap` and `socat` with `spawnSync('which', …, { timeout: 1000 })` and reads a
+ * `which` that has not answered within that second as a missing binary, so a host busy enough to delay one spawn
+ * reports `ripgrep (rg) not found` with ripgrep installed. A binary that is really missing is missing every time; a
+ * slow spawn rarely is twice. Only the last check's errors are reported.
+ *
+ * @returns The errors of the last check; empty once any check passes.
+ */
+const missingDependencies = async (): Promise<string[]> => {
+  for (let attempt = 1; ; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each check runs only when the previous one failed.
+    const { errors } = await SandboxManager.checkDependenciesAsync();
+    if (errors.length === 0 || attempt >= dependencyCheckAttempts) {
+      return errors;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- the pause is the point.
+    await new Promise((resolve) => {
+      setTimeout(resolve, bridgeRetryDelay * attempt);
+    });
+  }
+};
+
 const ensureInitialized = async (): Promise<void> => {
   // A launch never initializes into a runtime whose reset is still under way.
   try {
@@ -258,15 +385,15 @@ const ensureInitialized = async (): Promise<void> => {
     if (!SandboxManager.isSupportedPlatform()) {
       throw new NativeRuntimeUnavailableError(`${process.platform} has no supported sandbox backend.`);
     }
-    const dependencies = await SandboxManager.checkDependenciesAsync();
-    if (dependencies.errors.length > 0) {
-      throw new NativeRuntimeUnavailableError(dependencies.errors.join('; '));
+    const errors = await missingDependencies();
+    if (errors.length > 0) {
+      throw new NativeRuntimeUnavailableError(errors.join('; '));
     }
     const profile = nativeSandboxPolicy();
     if (profile.seccomp) {
       accessSync(profile.seccomp.applyPath, constants.X_OK);
     }
-    await SandboxManager.initialize(profile);
+    await initializeWithBridgeRetry(profile);
   })();
   const attempt = initialization;
   try {
@@ -387,10 +514,11 @@ const refuseLinkCreation = (argv: readonly string[]): readonly string[] => {
     throw new NativeRuntimeUnavailableError('the sandbox runtime returned a vector Tau cannot refuse links in.');
   }
   if (process.platform === 'linux') {
-    if (!wrapped.startsWith('bwrap ')) {
+    const bwrap = `${nativeSandboxBwrap() ?? 'bwrap'} `;
+    if (!wrapped.startsWith(bwrap)) {
       throw new NativeRuntimeUnavailableError('the sandbox runtime did not start bwrap, so links cannot be refused.');
     }
-    return [shell!, flag, `bwrap --seccomp ${String(linkRefusalDescriptor)} ${wrapped.slice('bwrap '.length)}`];
+    return [shell!, flag, `${bwrap}--seccomp ${String(linkRefusalDescriptor)} ${wrapped.slice(bwrap.length)}`];
   }
   if (process.platform === 'darwin') {
     /* The runtime single-quotes the profile, spelling each quote inside it as '"'"'. */

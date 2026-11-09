@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { markGeometryReceipt, observeLongAnimationFrames, onViewerEvent } from '#lib/renderer-telemetry.js';
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
-import { resetViewerEvents, viewerContextLost, viewerFirstFrame, viewerRendererCreated } from '#lib/viewer-events.js';
+import {
+  longFrameWindow,
+  resetViewerEvents,
+  viewerContextLost,
+  viewerFirstFrame,
+  viewerLongFrameBurst,
+  viewerRendererCreated,
+} from '#lib/viewer-events.js';
 
 const unsubscribes: Array<() => void> = [];
 const listen = (): ViewerTelemetryEvent[] => {
@@ -16,6 +23,7 @@ afterEach(() => {
   }
   resetViewerEvents();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('viewer events (FR-17)', () => {
@@ -68,6 +76,51 @@ describe('viewer events (FR-17)', () => {
       { event: 'download', backend: 'webgl', format: 'glb' },
       { event: 'long-frame-burst', backend: 'webgl', duration: 140 },
     ]);
+  });
+
+  it('should sum long-frame batches into one event per window, never one per batch', () => {
+    vi.useFakeTimers();
+    const seen = listen();
+    viewerRendererCreated('webgl');
+    for (let batch = 0; batch < 200; batch++) {
+      viewerLongFrameBurst(60);
+    }
+    expect(seen).toEqual([]);
+
+    vi.advanceTimersByTime(longFrameWindow);
+    expect(seen).toEqual([{ event: 'long-frame-burst', backend: 'webgl', duration: 12_000 }]);
+
+    viewerLongFrameBurst(70);
+    vi.advanceTimersByTime(longFrameWindow - 1);
+    expect(seen).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(seen).toEqual([
+      { event: 'long-frame-burst', backend: 'webgl', duration: 12_000 },
+      { event: 'long-frame-burst', backend: 'webgl', duration: 70 },
+    ]);
+  });
+
+  it('should send the summed long frames before the backend changes', () => {
+    vi.useFakeTimers();
+    const seen = listen();
+    viewerRendererCreated('webgpu');
+    viewerLongFrameBurst(50);
+    viewerRendererCreated('webgl');
+    viewerLongFrameBurst(80);
+    vi.advanceTimersByTime(longFrameWindow);
+    expect(seen).toEqual([
+      { event: 'long-frame-burst', backend: 'webgpu', duration: 50 },
+      { event: 'long-frame-burst', backend: 'webgl', duration: 80 },
+    ]);
+  });
+
+  it('should hold no long frames when no host listens', () => {
+    vi.useFakeTimers();
+    viewerRendererCreated('webgl');
+    viewerLongFrameBurst(60);
+    const seen = listen();
+    vi.advanceTimersByTime(longFrameWindow);
+    expect(seen).toEqual([]);
   });
 
   it('should contain a handler that throws', () => {

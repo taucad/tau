@@ -1,6 +1,8 @@
 import type { Route } from './+types/route.js';
 import { getEnvironment } from '#environment.config.js';
 import { sentryEnvelopeUrl } from '#lib/sentry-event.lib.js';
+import { clientOf, createClientRateLimiter, readCapped } from '#lib/request.server.js';
+import type { ClientRateLimiter } from '#lib/request.server.js';
 
 /**
  * Same-origin tunnel for Sentry envelopes (browser observability SB5), so a content blocker that
@@ -20,45 +22,18 @@ export const tunnelBodyLimit = 1024 * 1024;
 /** Envelopes one client address may send per window, and the window in milliseconds. */
 export const tunnelRateLimit = { envelopes: 60, windowMilliseconds: 60_000 } as const;
 
-/** Client addresses tracked at once, at most; the oldest window is forgotten first. */
-const trackedClientLimit = 10_000;
-
-/** A fixed-window counter per client address, bounded in the addresses it remembers. */
-export type TunnelRateLimiter = (client: string, now: number) => boolean;
+/** A fixed-window counter per client address (see {@link createClientRateLimiter}). */
+export type TunnelRateLimiter = ClientRateLimiter;
 
 /**
- * Create a per-client fixed-window limiter.
+ * Create the tunnel's per-client limiter.
  *
  * @param limit - Envelopes per window and the window's length.
  * @returns `true` while a client is within its window's allowance.
  */
 export const createTunnelRateLimiter = (
   limit: Readonly<{ envelopes: number; windowMilliseconds: number }> = tunnelRateLimit,
-): TunnelRateLimiter => {
-  const windows = new Map<string, { start: number; count: number }>();
-  return (client, now) => {
-    const current = windows.get(client);
-    if (current === undefined || now - current.start >= limit.windowMilliseconds) {
-      windows.delete(client);
-      if (windows.size >= trackedClientLimit) {
-        const oldest = windows.keys().next();
-        if (oldest.done !== true) {
-          windows.delete(oldest.value);
-        }
-      }
-      windows.set(client, { start: now, count: 1 });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= limit.envelopes;
-  };
-};
-
-/** The address a request came from: Netlify's client connection IP, else the first forwarded hop. */
-const clientOf = (request: Request): string =>
-  request.headers.get('x-nf-client-connection-ip') ??
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-  'unknown';
+): TunnelRateLimiter => createClientRateLimiter(limit);
 
 /** The host, path prefix and project of a DSN, as the envelope endpoint is built from them. */
 const dsnTarget = (dsn: string): { readonly host: string; readonly path: string } | undefined => {
@@ -96,41 +71,6 @@ export const isEnvelopeForDsn = (body: string, configured: string): boolean => {
     return false;
   }
   return expected.host === actual.host && expected.path === actual.path;
-};
-
-/** Read a body up to `limit` bytes; `undefined` once it is larger. */
-const readCapped = async (request: Request, limit: number): Promise<string | undefined> => {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > limit) {
-    return undefined;
-  }
-  if (request.body === null) {
-    return '';
-  }
-  const reader = request.body.getReader();
-  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-  let size = 0;
-  // oxlint-disable no-await-in-loop -- A stream is read in order, one chunk at a time.
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  // oxlint-enable no-await-in-loop
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
 };
 
 /** Response headers the SDK reads from Sentry's answer (its rate limits). */

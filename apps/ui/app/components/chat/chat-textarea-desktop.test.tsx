@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
+import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -83,7 +85,10 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
+const catalogHealth = vi.hoisted(() => ({
+  status: 'ready' as 'registering' | 'ready' | 'error' | 'closed',
+  retry: vi.fn(),
+}));
 vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
@@ -373,12 +378,15 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       enableAutoFocus?: boolean;
       enableMobileCollapse?: boolean;
       isFocused?: boolean;
+      earlyInput?: EarlyChatInput;
+      setDraftText?: (text: string) => void;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
-    const element = (session: AcpSessionData): React.JSX.Element => (
+    const element = (session: AcpSessionData, text = inputText): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
+          earlyInput={options.earlyInput}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
           enableMobileCollapse={options.enableMobileCollapse}
@@ -387,7 +395,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           isSubmitting={options.isSubmitting ?? false}
           isAttaching={false}
           canResume={canResume}
-          inputText={inputText}
+          inputText={text}
           attachments={[]}
           attachmentDirectory={undefined}
           sendBlockReason={undefined}
@@ -397,7 +405,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           formattedCancelKeyCombination='⇧⌘⌫'
           treeService={undefined}
           chats={[]}
-          setDraftText={noop}
+          setDraftText={options.setDraftText ?? noop}
           acpAgentId={options.useTauSkills ? undefined : 'codex'}
           acpSessionData={session}
           fileInputReference={{ current: null }}
@@ -423,8 +431,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = render(element(acpSessionData));
     return {
       ...view,
-      rerenderWith: (session: AcpSessionData): void => {
-        view.rerender(element(session));
+      rerenderWith: (session: AcpSessionData, text?: string): void => {
+        view.rerender(element(session, text));
       },
     };
   };
@@ -451,6 +459,77 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       });
     },
   );
+
+  /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The editor
+   * takes focus in the same commit, so no frame paints the box unfocused and no key typed during the
+   * handover lands on the page. */
+  it('should hand focus to the editor in the commit that replaces a focused native input', () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    renderComposer('', codexSession, {
+      enableAutoFocus: true,
+      earlyInput: {
+        text: '',
+        edited: false,
+        focused: true,
+        focusUnclaimed: false,
+        start: 0,
+        end: 0,
+        direction: 'none',
+      },
+    });
+    // No waiting: a frame's delay is where typed keys were lost.
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+    // The editor's own focus outline has taken over from the handover outline.
+    expect(box).not.toHaveClass('focus-outline');
+    expect(box).toHaveClass('has-[.tiptap:focus-visible]:focus-outline');
+  });
+
+  it('should leave focus where it moved and drop the handover outline', () => {
+    const other = document.createElement('button');
+    document.body.append(other);
+    other.focus();
+    try {
+      renderComposer('', codexSession, {
+        earlyInput: {
+          text: '',
+          edited: false,
+          focused: true,
+          focusUnclaimed: false,
+          start: 0,
+          end: 0,
+          direction: 'none',
+        },
+      });
+      const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+      expect(box).not.toHaveClass('focus-outline');
+      expect(other).toHaveFocus();
+    } finally {
+      other.remove();
+    }
+  });
+
+  it('should not draw a focus outline when the native input was not focused', () => {
+    renderComposer('', codexSession, {
+      earlyInput: {
+        text: '',
+        edited: false,
+        focused: false,
+        focusUnclaimed: true,
+        start: 0,
+        end: 0,
+        direction: 'none',
+      },
+    });
+    const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
+    expect(box).not.toHaveClass('focus-outline');
+  });
 
   describe('enableMobileCollapse', () => {
     const composerBox = (): HTMLElement =>
@@ -581,13 +660,69 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
   });
 
-  it('should show skill recovery in the functional composer after catalog closure', async () => {
-    catalogHealth.status = 'closed';
-    renderComposer('Keep this draft', codexSession, { useTauSkills: true });
-    expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
-    expect(catalogHealth.retry).toHaveBeenCalledOnce();
-    expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+  it.each(['closed', 'error'] as const)(
+    'should offer skill recovery inside the bar after the catalog %s',
+    async (status) => {
+      catalogHealth.status = status;
+      renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+      expect(screen.getByRole('status')).toHaveTextContent('Skill updates unavailable');
+      const retry = screen.getByRole('button', { name: 'Retry skill updates' });
+      // A control in the bar, not a row of its own: the composer keeps its height.
+      expect(retry.closest('[data-slot=composer-bar]')).not.toBeNull();
+      await userEvent.click(retry);
+      expect(catalogHealth.retry).toHaveBeenCalledOnce();
+      expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+    },
+  );
+
+  it('should show no skill recovery while the catalog has not started', () => {
+    catalogHealth.status = 'registering';
+    renderComposer('', codexSession, { useTauSkills: true });
+    expect(screen.queryByText('Skill updates unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry skill updates' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the same bar and editor when the catalog becomes ready', async () => {
+    catalogHealth.status = 'registering';
+    const view = renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+    const bar = view.container.querySelector('[data-slot=composer-bar]');
+    const editor = screen.getByRole('textbox');
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('Keep this draft');
+    });
+    catalogHealth.status = 'ready';
+    view.rerenderWith(codexSession);
+    expect(view.container.querySelector('[data-slot=composer-bar]')).toBe(bar);
+    expect(screen.getByRole('textbox')).toBe(editor);
+    expect(editor).toHaveTextContent('Keep this draft');
+  });
+
+  /* When tokens arrive mid-typing, a render can still carry a text the editor reported a keystroke ago.
+   * Writing that back deleted what was typed since. */
+  it('should not write back an older text the editor itself reported', async () => {
+    const reported: string[] = [];
+    const view = renderComposer('', codexSession, {
+      setDraftText(text) {
+        reported.push(text);
+      },
+    });
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    expect(editor).toBeDefined();
+    act(() => {
+      editor!.commands.insertContent('A');
+    });
+    act(() => {
+      editor!.commands.insertContent('B');
+    });
+    expect(reported).toEqual(['A', 'AB']);
+    // The parent has rendered only the first report, and the agent's commands arrive with it.
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] }, 'A');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(editor!.getText()).toBe('AB');
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] }, 'AB');
+    expect(editor!.getText()).toBe('AB');
   });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {

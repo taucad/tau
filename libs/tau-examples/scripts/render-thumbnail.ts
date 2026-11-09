@@ -5,6 +5,7 @@
 
 import sharp from 'sharp';
 import { asKnownArtifact } from '@taucad/runtime';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import type { createExampleRuntimeClient, createWorkspaceRuntimeClient } from '#scripts/runtime.js';
 
 /* The example or the workspace runtime client: they differ only in the kernels they list. */
@@ -15,6 +16,15 @@ export const thumbnailOptions = { width: 1536, height: 1152 } as const;
 /** WebP quality for every generated thumbnail. */
 export const thumbnailQuality = 0.95;
 const thumbnailMargin = 0.1;
+/** A card thumbnail is shown at a third of its width (512 CSS px); a featured card at two thirds. */
+export const cardDisplayWidth = 512;
+export const featuredCardDisplayWidth = 1024;
+/**
+ * The light-scheme viewer's look on a card shown `displayWidth` CSS px wide: the card edge weight, the viewer's rest.
+ * Captures use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
+ */
+const cardLook = (displayWidth: number) =>
+  buildViewerCaptureImageOptions({ ...thumbnailOptions, colorScheme: 'light', displayWidth });
 
 export const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   bytes.byteLength >= 12 &&
@@ -41,7 +51,9 @@ const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>>
 };
 
 /**
- * Evaluate `sourcePath` and render one WebP per requested edge width, in order.
+ * Evaluate `sourcePath` and render one WebP per requested card display width, in order. Each takes the profile's card
+ * edge weight at that display width, so a card shown at another size keeps its line weight; every other look value is
+ * the viewer's.
  * Throws with the project label on any evaluation, render or export failure.
  */
 export async function renderThumbnails(
@@ -49,12 +61,12 @@ export async function renderThumbnails(
   {
     label,
     sourcePath,
-    lineWidths,
+    displayWidths,
     isExactLane = false,
   }: {
     readonly label: string;
     readonly sourcePath: string;
-    readonly lineWidths: readonly number[];
+    readonly displayWidths: readonly number[];
     readonly isExactLane?: boolean;
   },
 ): Promise<Array<Uint8Array<ArrayBuffer>>> {
@@ -83,7 +95,7 @@ export async function renderThumbnails(
     const artifact = outcome.rendering.success ? asKnownArtifact(outcome.rendering.artifact) : undefined;
     if (artifact?.mimeType === 'image/svg+xml') {
       const bytes = await renderSvgThumbnail(artifact.content);
-      return lineWidths.map(() => bytes);
+      return displayWidths.map(() => bytes);
     }
     const exported = await document.export('glb', { content: { includeEdges: true } });
     if (!exported.success) {
@@ -92,7 +104,7 @@ export async function renderThumbnails(
       );
     }
     const images: Array<Uint8Array<ArrayBuffer>> = [];
-    for (const lineWidth of lineWidths) {
+    for (const displayWidth of displayWidths) {
       // oxlint-disable-next-line no-await-in-loop -- Each variant has a distinct edge width on the shared render queue.
       const result = await client.transcode({
         from: 'glb',
@@ -101,7 +113,7 @@ export async function renderThumbnails(
         options: {
           mode: 'single',
           ...thumbnailOptions,
-          lineWidth,
+          ...cardLook(displayWidth),
           camera: {
             framing: 'bounds',
             direction: [0.6123724357, -0.6123724357, 0.5],
@@ -110,7 +122,6 @@ export async function renderThumbnails(
             projection: { kind: 'perspective', verticalFieldOfView: 45 },
           },
           quality: thumbnailQuality,
-          ao: {},
         },
       });
       if (!result.success) {

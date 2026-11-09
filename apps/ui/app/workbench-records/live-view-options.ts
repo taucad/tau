@@ -1,9 +1,14 @@
 import { useSyncExternalStore } from 'react';
 import { Topic } from '@taucad/events';
+import { canonicalJson } from '@taucad/utils/hash';
 
 /**
  * View options a pane shows before its record has them. The options panel writes here on every change, so the
  * viewer re-renders at once, and saves the record when edits pause; the record is the durable copy.
+ *
+ * A draft yields only to a record that says the same thing (`settleLiveViewOptions`), never when its write resolves:
+ * the pane learns of a write through the record file's watcher, later, so a draft cleared on the write would show the
+ * record's older options for a frame and the view would render them in between.
  */
 export type LiveViewOptions = Readonly<{
   /** The kernel view the options belong to. */
@@ -31,4 +36,25 @@ export const setLiveViewOptions = (paneId: string, draft: LiveViewOptions | unde
     drafts.delete(paneId);
   }
   changes.emit();
+};
+
+/**
+ * Retire a pane's draft once its record holds the same options for the same kernel view, so the pane's options never
+ * step back to an older record on the way. Only the draft the pane rendered is retired, never a newer one.
+ */
+export const settleLiveViewOptions = (paneId: string, draft: LiveViewOptions, record: LiveViewOptions): void => {
+  if (
+    drafts.get(paneId) === draft &&
+    draft.viewId === record.viewId &&
+    canonicalJson(draft.options) === canonicalJson(record.options)
+  ) {
+    setLiveViewOptions(paneId, undefined);
+  }
+};
+
+/** Drop a draft that never reached the record (a refused or failed write), unless a newer draft replaced it. */
+export const discardLiveViewOptions = (paneId: string, draft: LiveViewOptions): void => {
+  if (drafts.get(paneId) === draft) {
+    setLiveViewOptions(paneId, undefined);
+  }
 };

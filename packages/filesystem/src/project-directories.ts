@@ -55,8 +55,8 @@ import type {
   ProjectManifestParseIssue,
 } from '@taucad/types';
 import { assertRootedPath, isSafeRelativePath, joinRelativePath } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type { FileSystemProvider, WorkspaceMutationContext } from '#types.js';
+import type { BatchEntry } from '#changeset.js';
 import type {
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
@@ -72,11 +72,24 @@ import type { ResourceQueue } from '#resource-queue.js';
 import type { CrossTabCoordinator, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import { isProjectDirectoryPath } from '#mutation-pipeline.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { isDurableScope, projectLocatorFor } from '#backend/scope.js';
 import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
+import {
+  importStagingDirectory,
+  isTauControlPath,
+  ownsImportTarget,
+  placeStagedControl,
+  readStagedImport,
+  releaseStagedImport,
+} from '#importer/staging.js';
+import type { ImportStagingPort, StagedImport } from '#importer/staging.js';
+import { importFactsPath } from '#importer/facts.js';
+import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
+import { isReservedImportPath } from '#importer/path-policy.js';
+import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
 const manifestProbeConcurrency = 64;
@@ -198,6 +211,7 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
     scope: pendingProjectScopeSchema,
     files: z.record(z.string(), pendingProjectFileDescriptorSchema),
     manifest: z.instanceof(Uint8Array),
+    staging: z.object({ operationId: z.string().regex(/^[\w-]{1,128}$/u) }).optional(),
   })
   .superRefine((input, context) => {
     try {
@@ -239,13 +253,8 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
         });
         continue;
       }
-      if (
-        relativePath === 'tau.json' ||
-        relativePath.endsWith('/tau.json') ||
-        relativePath.toLowerCase() === '.tau' ||
-        relativePath.toLowerCase() === projectIdentityPath ||
-        relativePath.toLowerCase().startsWith(`${projectIdentityPath}/`)
-      ) {
+      /* Every spelling a filesystem resolves onto the manifest or the identity (case, trailing dots, streams). */
+      if (isReservedImportPath(relativePath)) {
         context.addIssue({
           code: 'custom',
           path: ['files', relativePath],
@@ -307,10 +316,9 @@ export class ProjectDirectories {
   private readonly _resourceQueue: ResourceQueue;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _pipeline: MutationPipeline;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   /** The configured discovery roots, owned by the authority's mount lifecycle. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
-  private readonly _filePool: () => SharedPool | undefined;
   /** Retire one logical project route the authority installed, as a delete must. */
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
 
@@ -324,9 +332,8 @@ export class ProjectDirectories {
     resourceQueue: ResourceQueue;
     crossTabCoordinator: CrossTabCoordinator;
     pipeline: MutationPipeline;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
-    filePool: () => SharedPool | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
     this._observedIdentityResolver = createProjectIdentityResolver({
@@ -354,9 +361,8 @@ export class ProjectDirectories {
     this._resourceQueue = options.resourceQueue;
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._pipeline = options.pipeline;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._discoveryRoots = options.discoveryRoots;
-    this._filePool = options.filePool;
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
 
@@ -575,7 +581,7 @@ export class ProjectDirectories {
     const locks = [`project:${projectId}`, physicalLock];
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
-        await provider.refresh?.();
+        await provider.refresh?.([path]);
         if (!(await provider.exists(path))) {
           return { status: 'absent' };
         }
@@ -605,8 +611,7 @@ export class ProjectDirectories {
         try {
           await this._deleteProjectDirectory({ provider, directoryPath: path, manifest, identity: identityBytes });
         } finally {
-          this._filePool()?.clear();
-          this._treeIndexes.clear();
+          this._projectIndexes.clear();
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
@@ -623,15 +628,19 @@ export class ProjectDirectories {
    * project directory. The manifest is the commit marker and is always
    * written last.
    *
+   * The commit publishes no bus event — the route is not mounted until the
+   * caller configures it — so a mutation origin has nothing to tag.
+   *
    * @param input - Owned journal snapshot and exact target locator.
-   * @param context - Optional mutation origin metadata.
+   * @param _context - Mutation origin metadata, which the unmounted commit does not publish.
    * @returns Replay-safe commit outcome.
    */
   public async commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,
-    context?: WorkspaceMutationContext,
+    _context?: WorkspaceMutationContext,
   ): Promise<CommitPendingProjectDirectoryResult> {
-    const { path, files, manifest, scope, storageRootKey, projectId } = this._validatePendingProjectCommit(input);
+    const { path, files, manifest, scope, storageRootKey, projectId, staging } =
+      this._validatePendingProjectCommit(input);
     const provider = await this._registry.getProvider(scope);
     const logicalRoot = projectRoute(projectId);
     const physicalLock = `${storageRootKey}:${path}`;
@@ -641,7 +650,17 @@ export class ProjectDirectories {
       this._resourceQueue.queueForMany(locks, async () => {
         let mutationBegan = false;
         try {
-          await provider.refresh?.();
+          await provider.refresh?.([path]);
+          /* A staging written straight into this directory (where a move would copy) is the directory's residue. */
+          const staged = staging === undefined ? undefined : await readStagedImport(provider, staging.operationId);
+          if (staged?.inPlace !== undefined && staged.inPlace !== path) {
+            throw new TypeError(`The staged import ${staged.operationId} was written for another directory.`);
+          }
+          /* Written in place, the directory is the import's only while its owner marker names the operation. */
+          const stagedInPlace = staged?.inPlace === path;
+          if (stagedInPlace && !(await ownsImportTarget(provider, path, staged.operationId))) {
+            throw new TypeError(`The project folder ${path} no longer belongs to the import ${staged.operationId}.`);
+          }
           if (await provider.exists(path)) {
             const targetStat = await provider.stat(path);
             if (targetStat.type !== 'dir') {
@@ -662,6 +681,10 @@ export class ProjectDirectories {
               if (identity.projectId !== projectId) {
                 return { status: 'identity-mismatch', actualProjectId: identity.projectId };
               }
+              /* A commit that stopped after its manifest left its staging: the project is whole, so it goes now. */
+              if (staging !== undefined) {
+                await this._removeStaging(provider, staging.operationId);
+              }
               return { status: 'already-committed' };
             }
             let residueIdentity: ProjectIdentityRecord | undefined;
@@ -670,20 +693,22 @@ export class ProjectDirectories {
             } catch {
               return { status: 'unidentifiable-manifest' };
             }
-            if (residueIdentity === undefined) {
+            if (residueIdentity === undefined && !stagedInPlace) {
               return { status: 'unidentifiable-manifest' };
             }
-            if (residueIdentity.projectId !== projectId) {
+            if (residueIdentity !== undefined && residueIdentity.projectId !== projectId) {
               return { status: 'identity-mismatch', actualProjectId: residueIdentity.projectId };
             }
             mutationBegan = true;
-            await this._clearProjectDirectoryContents(provider, path);
+            /* A staged import's residue is the entries an earlier attempt already moved in: they stay. */
+            if (staging === undefined) {
+              await this._clearProjectDirectoryContents(provider, path);
+            }
           }
 
           mutationBegan = true;
           await provider.mkdir(path, { recursive: true });
-          this._filePool()?.clear();
-          this._treeIndexes.removeDirectory(logicalRoot);
+          this._projectIndexes.removeDirectory(logicalRoot);
           const identity = await this._resolveIdentity({
             provider,
             directory: path,
@@ -696,46 +721,122 @@ export class ProjectDirectories {
             throw new Error(`Pending project identity could not be established: ${JSON.stringify(identity)}`);
           }
 
-          for (const [relativePath, descriptor] of files) {
-            const logicalPath = `${logicalRoot}/${relativePath}`;
-            const providerPath = `${path}/${relativePath}`;
-            // oxlint-disable-next-line no-await-in-loop -- deterministic manifest-last transaction
-            await this._pipeline.writeFileUnlocked({
-              path: logicalPath,
-              resolution: { provider, path: providerPath, backend: scope.backend },
-              data: descriptor.content,
-              context,
-            });
-            if (descriptor.mode !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- mode belongs to the file just written.
-              await provider.setFileMode?.(providerPath, descriptor.mode);
+          /* The payload lands in bounded batches, then the manifest — the commit
+           * marker — alone, after every payload byte applied (D2 phases). */
+          const commitPhase = async (entries: readonly BatchEntry[]): Promise<void> => {
+            const receipts = await this._pipeline.applyUnlocked(provider, entries);
+            const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+            if (failure !== undefined) {
+              throw failure.error instanceof Error ? failure.error : new Error('Pending project commit failed.');
             }
+          };
+          let importFacts: BatchEntry[] = [];
+          if (staging !== undefined) {
+            if (staged === undefined) {
+              throw new Error(`The staged import ${staging.operationId} is gone.`);
+            }
+            const written = new Set(files.map(([relativePath]) => relativePath));
+            const placed = await this._placeStagedImport({ provider, staged, target: path, written });
+            /* A linked import's `.git`, which the revisions authority fetched into the staging: moved, never written here (I6). */
+            await placeStagedControl(provider, staged.operationId, path);
+            /* Each file's mtime as placed: the index takes a fact only for a file still at exactly this (size, mtime). */
+            const observed = await mapConcurrent(placed, directoryConcurrency, async (entry) =>
+              provider.stat(`${path}/${entry.path}`).catch(() => undefined),
+            );
+            const entries: RecordedImportEntry[] = [];
+            for (const [index, entry] of placed.entries()) {
+              const stat = observed[index];
+              if (stat?.type === 'file' && stat.size === entry.size) {
+                entries.push({ ...entry, mtimeMs: stat.mtimeMs });
+              }
+            }
+            const record: ImportFactsRecord = {
+              version: 1,
+              operationId: staged.operationId,
+              pin: staged.pin,
+              at: Date.now(),
+              entries,
+            };
+            importFacts = [
+              {
+                op: 'write',
+                path: `${path}/${importFactsPath}`,
+                data: new TextEncoder().encode(JSON.stringify(record)),
+              },
+            ];
           }
-
-          await this._pipeline.writeFileUnlocked({
-            path: `${logicalRoot}/tau.json`,
-            resolution: { provider, path: `${path}/tau.json`, backend: scope.backend },
-            data: manifest,
-            context,
-          });
+          await commitPhase([
+            ...files.map(
+              ([relativePath, descriptor]): BatchEntry => ({
+                op: 'write',
+                path: `${path}/${relativePath}`,
+                data: descriptor.content,
+                ...(descriptor.mode === undefined ? {} : { mode: descriptor.mode }),
+              }),
+            ),
+            ...importFacts,
+          ]);
+          /* The staging lets go of the directory before the manifest makes it a project, so none names a committed one. */
+          if (staging !== undefined) {
+            await releaseStagedImport(
+              { provider, apply: async (entries) => this._pipeline.applyUnlocked(provider, entries) },
+              staging.operationId,
+            );
+          }
+          await commitPhase([{ op: 'write', path: `${path}/tau.json`, data: manifest }]);
           const committed = parseProjectManifestBytes(await provider.readFile(`${path}/tau.json`));
           const committedIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
           if (!committed.success || committedIdentity?.projectId !== projectId) {
             throw new Error(`Pending project manifest verification failed for ${projectId}`);
           }
 
+          if (staging !== undefined) {
+            await this._removeStaging(provider, staging.operationId);
+          }
+
           this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           return { status: 'committed' };
         } catch (error) {
           if (mutationBegan) {
-            this._filePool()?.clear();
-            this._treeIndexes.removeDirectory(logicalRoot);
+            this._projectIndexes.removeDirectory(logicalRoot);
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
           throw error;
         }
       }),
     );
+  }
+
+  /**
+   * Where an import stages on one durable storage root (charter D12): the
+   * root's provider and the unlocked batch apply over it. Staging is private
+   * to its operation, under the reserved `.tau-staging/` folder no discovery
+   * or index reads, so it takes no lock; the commit takes the project's. An
+   * import written straight into its project directory claims, writes and
+   * removes that directory under the lock its commit takes (`exclusive`), so
+   * neither interleaves with a create of the same folder.
+   *
+   * @param scope - A durable storage root.
+   * @returns The staging port.
+   * @throws TypeError for a scope that is not durable.
+   */
+  public async importStaging(scope: StorageRootConfig): Promise<ImportStagingPort> {
+    const parsed = pendingProjectScopeSchema.safeParse(scope);
+    if (!parsed.success) {
+      throw new TypeError(parsed.error.issues[0]?.message ?? 'An import stages on durable storage only.');
+    }
+    const provider = await this._registry.getProvider(parsed.data);
+    const storageRootKey = this._registry.resolveStorageRootKey(parsed.data);
+    return {
+      provider,
+      apply: async (entries) => this._pipeline.applyUnlocked(provider, entries),
+      exclusive: async <Result>(path: string, work: () => Promise<Result>): Promise<Result> => {
+        const physicalLock = `${storageRootKey}:${path}`;
+        return this._crossTabCoordinator.withLocks([physicalLock], async () =>
+          this._resourceQueue.queueForMany([physicalLock], work),
+        );
+      },
+    };
   }
 
   private async _readIdentity(authority: DirectoryAuthority): Promise<ProjectIdentityRecord | undefined> {
@@ -909,8 +1010,7 @@ export class ProjectDirectories {
     if (result.status === 'applied') {
       const relativePath = input.path.slice(input.directory.length + 1);
       const logicalPath = `${projectRoute(input.projectId)}/${relativePath}`;
-      this._filePool()?.invalidate(logicalPath);
-      this._treeIndexes.evict(logicalPath);
+      this._projectIndexes.invalidate(logicalPath);
       if (input.alreadyLocked !== true) {
         this._pipeline.emitChangeEvent({ type: 'fileWritten', path: logicalPath, backend: input.scope.backend });
         this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(input.scope, ''));
@@ -1106,6 +1206,7 @@ export class ProjectDirectories {
     scope: StorageRootConfig;
     storageRootKey: string;
     projectId: string;
+    staging: { readonly operationId: string } | undefined;
   } {
     const parsedInput = pendingProjectCommitInputSchema.safeParse(input);
     if (!parsedInput.success) {
@@ -1135,7 +1236,131 @@ export class ProjectDirectories {
       scope,
       storageRootKey,
       projectId,
+      staging: parsedInput.data.staging,
     };
+  }
+
+  /**
+   * Remove an import's staging once its project is whole. The project does
+   * not depend on it, so a removal that fails is left to the next sweep,
+   * which finds it owned by nothing (W7).
+   */
+  private async _removeStaging(provider: FileSystemProvider, operationId: string): Promise<void> {
+    const directory = importStagingDirectory(operationId);
+    try {
+      if (!(await provider.exists(directory))) {
+        return;
+      }
+      const receipts = await this._pipeline.applyUnlocked(provider, [
+        { op: 'delete', path: directory, kind: 'dir', recursive: true },
+      ]);
+      const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+      if (failure !== undefined) {
+        console.warn(`[ProjectDirectories] The staging ${directory} is left for the sweep.`, failure.error);
+      }
+    } catch (error) {
+      console.warn(`[ProjectDirectories] The staging ${directory} is left for the sweep.`, error);
+    }
+  }
+
+  /**
+   * Put a staged import's files in the project. Staged under `tree/` (where a
+   * move is a metadata operation) they move, as bounded changesets: every
+   * directory first, then the moves. Written in place (where a move would
+   * copy) they are already there, and each is checked by its size, except
+   * those under `.tau`, which wait in `tree/` and move in here, so the pending
+   * folder never looks adoptable. No byte is written again either way, beyond
+   * those few `.tau` files a copying rename writes twice (I2, I3). Replay-safe: an entry no longer in
+   * staging was moved by an earlier attempt, and must be at the target with
+   * its recorded size.
+   *
+   * @returns The entries the project now holds from the import, with their facts.
+   */
+  private async _placeStagedImport(input: {
+    readonly provider: FileSystemProvider;
+    readonly staged: StagedImport;
+    readonly target: string;
+    readonly written: ReadonlySet<string>;
+  }): Promise<StagedImportEntry[]> {
+    const { provider, staged, target, written } = input;
+    const entries = staged.entries.filter((entry) => !written.has(entry.path));
+    /* The ledger is on disk, so its paths are held to the rules `files` is held to, in every spelling. */
+    for (const { path } of entries) {
+      if (!isSafeRelativePath(path) || isReservedImportPath(path)) {
+        throw new TypeError(`A staged import path is not a project file: ${path}`);
+      }
+    }
+    const isAt = async (entry: StagedImportEntry): Promise<boolean> => {
+      const stat = await provider.stat(`${target}/${entry.path}`).catch(() => undefined);
+      return stat?.type === 'file' && stat.size === entry.size;
+    };
+    const missing = (entry: StagedImportEntry): Error => new Error(`A staged import entry is missing: ${entry.path}`);
+    /* Written in place, all but `.tau` is already there; `.tau` (and, staged to move, everything) moves from `tree/`. */
+    const moves = staged.inPlace === undefined ? entries : entries.filter(({ path }) => isTauControlPath(path));
+    const fixed = staged.inPlace === undefined ? [] : entries.filter(({ path }) => !isTauControlPath(path));
+    if (moves.length > 0) {
+      const tree = `${staged.directory}/tree`;
+      const present = await mapConcurrent(moves, directoryConcurrency, async (entry) =>
+        provider.exists(`${tree}/${entry.path}`),
+      );
+      const directories = new Set<string>();
+      for (const { path } of moves) {
+        const slash = path.lastIndexOf('/');
+        if (slash > 0) {
+          directories.add(path.slice(0, slash));
+        }
+      }
+      /* Only the deepest folders: a recursive mkdir makes every ancestor. */
+      const ancestors = new Set<string>();
+      for (const directory of directories) {
+        for (let slash = directory.indexOf('/'); slash > 0; slash = directory.indexOf('/', slash + 1)) {
+          ancestors.add(directory.slice(0, slash));
+        }
+      }
+      const leaves = [...directories].filter((directory) => !ancestors.has(directory));
+      const settle = async (batch: readonly BatchEntry[], what: string): Promise<void> => {
+        const receipts = await this._pipeline.applyUnlocked(provider, batch);
+        const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+        if (failure !== undefined) {
+          throw failure.error instanceof Error ? failure.error : new Error(`The staged import's ${what} failed.`);
+        }
+      };
+      await settle(
+        leaves.map((directory) => ({ op: 'mkdir', path: `${target}/${directory}`, recursive: true })),
+        'folders',
+      );
+      const moving: StagedImportEntry[] = [];
+      const moved: StagedImportEntry[] = [];
+      for (const [index, entry] of moves.entries()) {
+        (present[index] === true ? moving : moved).push(entry);
+      }
+      await settle(
+        moving.map((entry) => ({
+          op: 'move',
+          from: `${tree}/${entry.path}`,
+          to: `${target}/${entry.path}`,
+          replace: true,
+        })),
+        'moves',
+      );
+      const arrived = await mapConcurrent(moved, directoryConcurrency, isAt);
+      const lost = moved.find((_, index) => arrived[index] !== true);
+      if (lost !== undefined) {
+        throw missing(lost);
+      }
+    }
+    const inPlace = await mapConcurrent(fixed, directoryConcurrency, isAt);
+    const absent = fixed.find((_, index) => inPlace[index] !== true);
+    if (absent !== undefined) {
+      throw missing(absent);
+    }
+    const executable = entries.filter((entry) => entry.mode === '100755');
+    if (provider.setFileMode !== undefined) {
+      await mapConcurrent(executable, directoryConcurrency, async (entry) =>
+        provider.setFileMode?.(`${target}/${entry.path}`, '100755'),
+      );
+    }
+    return entries;
   }
 
   private _scopedPhysicalAuthority(scope: WorkspaceScope, providerBasePath: string): PhysicalAuthority {
@@ -1147,23 +1372,21 @@ export class ProjectDirectories {
 
   private async _clearProjectDirectoryContents(provider: FileSystemProvider, directoryPath: string): Promise<void> {
     const stateDirectory = joinRelativePath(directoryPath, '.tau');
-    const entries = await provider.readdir(directoryPath);
-    for (const entry of entries) {
-      const canonicalName = entry.toLowerCase();
-      if (canonicalName === 'tau.json' || canonicalName === '.tau') {
-        continue;
+    const removal = async (entries: readonly string[], parent: string, kept: ReadonlySet<string>): Promise<void> => {
+      const receipts = await this._pipeline.applyUnlocked(
+        provider,
+        entries
+          .filter((entry) => !kept.has(entry.toLowerCase()))
+          .map((entry) => ({ op: 'delete', path: joinRelativePath(parent, entry), recursive: true })),
+      );
+      const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+      if (failure !== undefined) {
+        throw failure.error instanceof Error ? failure.error : new Error('Project directory removal failed.');
       }
-      // oxlint-disable-next-line no-await-in-loop -- Preserve both identity markers until every sibling is gone.
-      await this._pipeline.removeRecursive(provider, joinRelativePath(directoryPath, entry));
-    }
-    const stateEntries = await provider.readdir(stateDirectory);
-    for (const entry of stateEntries) {
-      if (entry.toLowerCase() === 'project.json') {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- Preserve identity while removing sibling records.
-      await this._pipeline.removeRecursive(provider, joinRelativePath(stateDirectory, entry));
-    }
+    };
+    /* Both identity markers stay until every sibling is gone: two batches, the state directory's last. */
+    await removal(await provider.readdir(directoryPath), directoryPath, new Set(['tau.json', '.tau']));
+    await removal(await provider.readdir(stateDirectory), stateDirectory, new Set(['project.json']));
   }
 
   private async _deleteProjectDirectory(input: {

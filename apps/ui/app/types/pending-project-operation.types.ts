@@ -33,6 +33,18 @@ export type PendingCreateProjectOperation = PendingProjectStorage & {
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>;
+  /**
+   * An import staged on this operation's storage root (W7, charter D12): the
+   * intent and source pin live in its staging directory, and the commit moves
+   * its files in. The journal holds this locator, never the imported bytes.
+   */
+  readonly staging?: { readonly operationId: string };
+  /**
+   * The authored `tau.json` bytes to commit, kept only while they declare
+   * `manifest` exactly: a linked repository's own (W7.3). Absent, the commit
+   * writes the canonical encoding of `manifest`.
+   */
+  readonly manifestBytes?: Uint8Array<ArrayBuffer>;
   /** Absent when the project is created without one (W18 DEF-2, review R5). */
   readonly chat?: Chat;
   /**

@@ -3,7 +3,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingMessage, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentPublicKeysJson, developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { grantContractVersion, grantHeader, mintGrant, storagePath } from '#api/git/forwarding/contract/grant.js';
 import type { StorageGrantFacts, StorageOperation } from '#api/git/forwarding/contract/grant.js';

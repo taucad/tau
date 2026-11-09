@@ -45,4 +45,19 @@ describe('@taucad/skills/resources', () => {
       ),
     );
   });
+
+  it('should declare each SKILL.md as exactly the UTF-8 bytes of its catalog body', () => {
+    for (const bundle of systemSkillBundles) {
+      const body = new TextEncoder().encode(bundle.body);
+      const [skillMd] = bundle.files;
+      expect({ slug: bundle.slug, byteLength: body.byteLength }).toStrictEqual({
+        slug: bundle.slug,
+        byteLength: skillMd?.byteLength,
+      });
+      expect({ slug: bundle.slug, sha256: createHash('sha256').update(body).digest('hex') }).toStrictEqual({
+        slug: bundle.slug,
+        sha256: skillMd?.sha256,
+      });
+    }
+  });
 });

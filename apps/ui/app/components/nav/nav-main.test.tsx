@@ -120,7 +120,6 @@ describe('NavMain', () => {
       await userEvent.click(screen.getByRole('button', { name: 'More' }));
 
       const drawer = await screen.findByRole('dialog', { name: 'More' });
-      expect(drawer).toHaveClass('z-110');
       expect(screen.queryByRole('menu')).toBeNull();
       expect(within(drawer).getByRole('link', { name: 'Community' })).toHaveAttribute('href', '/community');
       expect(within(drawer).getByRole('link', { name: 'Import' })).toHaveAttribute('href', '/import');

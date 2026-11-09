@@ -281,6 +281,42 @@ describe('ErrorPage', () => {
     expect(await screen.findByLabelText('Stack trace')).toHaveTextContent('controlled render failure');
   });
 
+  it('should offer a retry of the failed navigation, not the crash page, for a request that never reached the server', async () => {
+    const failure = new TypeError('Failed to fetch (taucad.dev)');
+    const navigations: string[] = [];
+    const LocationProbe = (): undefined => {
+      const { key } = useLocation();
+      navigations.push(key);
+      return undefined;
+    };
+    mocks.routeError = failure;
+    render(
+      <MemoryRouter initialEntries={['/w/home/turbofan-engine-fork']}>
+        <ErrorPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Couldn’t reach Tau' })).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Stack trace')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(reportedValues()).toEqual([failure]);
+    });
+
+    const before = new Set(navigations).size;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    await waitFor(() => {
+      expect(new Set(navigations).size).toBe(before + 1);
+    });
+    act(() => {
+      globalThis.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => {
+      expect(new Set(navigations).size).toBe(before + 2);
+    });
+  });
+
   it('should judge each error on its own outcome', async () => {
     supersededOutcome();
     const view = renderPage(moduleImportFailure());

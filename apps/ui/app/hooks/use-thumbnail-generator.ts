@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/geometry-presentation-admission';
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
@@ -13,11 +14,17 @@ import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';
-// Twice the largest card slot so 2× displays and share previews stay sharp; edges are output pixels, so they scale with it.
+// Twice the largest card slot so 2× displays and share previews stay sharp.
 const thumbnailWidth = 1536;
 const thumbnailHeight = 1152;
-const thumbnailLineWidth = 6;
 const thumbnailQuality = 0.95;
+// The light-scheme viewer at the thumbnail's pixel ratio: edges, ambient occlusion, tone mapping and lights. Captures
+// use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
+const thumbnailLook = buildViewerCaptureImageOptions({
+  width: thumbnailWidth,
+  height: thumbnailHeight,
+  colorScheme: 'light',
+});
 
 const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
   if (
@@ -142,7 +149,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
                   mode: 'single',
                   width: thumbnailWidth,
                   height: thumbnailHeight,
-                  lineWidth: thumbnailLineWidth,
+                  ...thumbnailLook,
                   camera: {
                     framing: 'bounds',
                     direction: [0.6123724357, -0.6123724357, 0.5],
@@ -151,7 +158,6 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
                     projection: { kind: 'perspective', verticalFieldOfView: 45 },
                   },
                   quality: thumbnailQuality,
-                  ao: {},
                 },
               },
         );
@@ -244,7 +250,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
         clearThumbnail(event.rendering.evaluationId);
         return;
       }
-      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLook.lineWidth}:camera-bounds-v1:edges:viewer-profile-v3`;
       if (identityRef.current !== identity) {
         generationRef.current += 1;
         identityRef.current = identity;

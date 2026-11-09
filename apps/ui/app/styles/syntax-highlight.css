@@ -1,0 +1,139 @@
+/*
+ * One syntax palette for every code surface: the editor, its tooltips, chat code blocks,
+ * the code viewer and diffs. Token classes come from `tauHighlighter` in `@taucad/grammars`.
+ * GitHub theme hues, expressed in OKLCH for the app colour policy.
+ *
+ * The Terminal's 16 ANSI colours are GitHub's terminal palette from the same theme, so shell output and the editor
+ * use one set of hues: red is the keyword red, green the type green, magenta the function purple.
+ */
+@layer base {
+  :root {
+    --cm-keyword: oklch(55.175% 0.2051 24.53);
+    --cm-function: oklch(56.307% 0.2069 294.97);
+    --cm-variable: oklch(46.567% 0.1371 43.35);
+    --cm-number: oklch(45.095% 0.1641 258.18);
+    --cm-string: oklch(32.103% 0.1084 259.11);
+    --cm-comment: oklch(56.511% 0.0189 250.97);
+    --cm-type: oklch(43.906% 0.1179 148.07);
+    --cm-punctuation: oklch(55.419% 0.1169 75.01);
+
+    --terminal-ansi-black: oklch(27.85% 0.0132 253.04);
+    --terminal-ansi-red: oklch(55.17% 0.2051 24.53);
+    --terminal-ansi-green: oklch(43.91% 0.1179 148.07);
+    --terminal-ansi-yellow: oklch(32.98% 0.0722 68.31);
+    --terminal-ansi-blue: oklch(53.99% 0.1906 257.48);
+    --terminal-ansi-magenta: oklch(56.31% 0.2069 294.97);
+    --terminal-ansi-cyan: oklch(53.7% 0.0845 202.4);
+    --terminal-ansi-white: oklch(56.51% 0.0189 250.97);
+    --terminal-ansi-bright-black: oklch(48.49% 0.0196 251.02);
+    --terminal-ansi-bright-red: oklch(45.91% 0.1777 21.87);
+    --terminal-ansi-bright-green: oklch(52.44% 0.1401 148.04);
+    --terminal-ansi-bright-yellow: oklch(39.37% 0.0852 68.93);
+    --terminal-ansi-bright-blue: oklch(64.18% 0.1951 254.98);
+    --terminal-ansi-bright-magenta: oklch(66.9% 0.1902 297.44);
+    --terminal-ansi-bright-cyan: oklch(61.44% 0.0945 217.77);
+    --terminal-ansi-bright-white: oklch(66.58% 0.0181 250.92);
+  }
+
+  .dark {
+    --cm-keyword: oklch(73.45% 0.1626 25.78);
+    --cm-function: oklch(80.051% 0.1275 305.86);
+    --cm-variable: oklch(79.915% 0.1412 60.1);
+    --cm-number: oklch(78.565% 0.1153 246.66);
+    --cm-string: oklch(85.599% 0.0768 244.09);
+    --cm-comment: oklch(66.247% 0.0181 250.92);
+    --cm-type: oklch(84.16% 0.1641 145.75);
+    --cm-punctuation: oklch(79.045% 0.1386 85.24);
+
+    --terminal-ansi-black: oklch(42.47% 0.0175 254.72);
+    --terminal-ansi-red: oklch(73.45% 0.1626 25.78);
+    --terminal-ansi-green: oklch(69.51% 0.1809 145.62);
+    --terminal-ansi-yellow: oklch(71.96% 0.1401 79.91);
+    --terminal-ansi-blue: oklch(71.53% 0.1518 253.31);
+    --terminal-ansi-magenta: oklch(73.23% 0.1668 301.69);
+    --terminal-ansi-cyan: oklch(75.55% 0.1155 202.14);
+    --terminal-ansi-white: oklch(78.49% 0.0174 250.88);
+    --terminal-ansi-bright-black: oklch(56.29% 0.0196 256.33);
+    --terminal-ansi-bright-red: oklch(80.14% 0.1134 25.81);
+    --terminal-ansi-bright-green: oklch(77.17% 0.188 145.48);
+    --terminal-ansi-bright-yellow: oklch(79.04% 0.1386 85.24);
+    --terminal-ansi-bright-blue: oklch(78.57% 0.1153 246.66);
+    --terminal-ansi-bright-magenta: oklch(80.05% 0.1275 305.86);
+    --terminal-ansi-bright-cyan: oklch(80.36% 0.1107 201.78);
+    --terminal-ansi-bright-white: oklch(100% 0 0);
+  }
+
+  .dark.high-contrast {
+    --cm-keyword: oklch(77.882% 0.1293 21.59);
+    --cm-function: oklch(84.54% 0.0908 307.26);
+    --cm-variable: oklch(83.443% 0.1125 59.73);
+    --cm-number: oklch(85.599% 0.0768 244.09);
+    --cm-string: oklch(90.974% 0.0481 241.64);
+    --cm-comment: oklch(74.638% 0.0194 250.65);
+    --cm-type: oklch(89.243% 0.1391 148.25);
+    --cm-punctuation: oklch(85.741% 0.1331 89.95);
+  }
+
+  @media (prefers-contrast: more) {
+    :root:not(.dark) {
+      --cm-keyword: oklch(45.5% 0.19 25.5);
+      --cm-function: oklch(45.8% 0.21 295);
+      --cm-variable: oklch(40.2% 0.13 43.4);
+      --cm-number: oklch(38.4% 0.16 258.2);
+      --cm-string: oklch(27.6% 0.104 259.1);
+      --cm-comment: oklch(45.1% 0.019 251);
+      --cm-type: oklch(36.4% 0.115 148.1);
+      --cm-punctuation: oklch(43.6% 0.11 75);
+    }
+  }
+
+  .tok-keyword {
+    color: var(--cm-keyword);
+  }
+  .tok-function {
+    color: var(--cm-function);
+  }
+  .tok-variable {
+    color: var(--cm-variable);
+  }
+  .tok-property,
+  .tok-number,
+  .tok-atom {
+    color: var(--cm-number);
+  }
+  .tok-string,
+  .tok-monospace,
+  .tok-link {
+    color: var(--cm-string);
+  }
+  .tok-comment,
+  .tok-meta {
+    color: var(--cm-comment);
+  }
+  .tok-type {
+    color: var(--cm-type);
+  }
+  .tok-punctuation,
+  .tok-operator {
+    color: var(--cm-punctuation);
+  }
+  .tok-heading {
+    color: var(--cm-function);
+    font-weight: 600;
+  }
+  .tok-strong {
+    font-weight: 700;
+  }
+  .tok-emphasis {
+    font-style: italic;
+  }
+  .tok-strikethrough {
+    text-decoration: line-through;
+  }
+  .tok-link {
+    text-decoration: underline;
+  }
+  .tok-invalid {
+    text-decoration: underline wavy var(--destructive);
+  }
+}

@@ -156,8 +156,7 @@ describe('createUiRuntimeConfig', () => {
     expect(standard?.['computeReuse']).toBeUndefined();
   });
 
-  // D-RT-05 / D-GFX-10: a 2,000,000-triangle preview costs ~230 MiB steady on a phone and over 1 GiB with Section.
-  it('should give previews the phone triangle budget and PicoVoxel the phone recycle threshold on a memory-constrained device', async () => {
+  it('should give PicoVoxel the phone recycle threshold on a memory-constrained device', async () => {
     const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
       tauApiUrl: 'https://api.tau.test',
       tauWebSocketUrl: 'wss://api.tau.test',
@@ -165,22 +164,22 @@ describe('createUiRuntimeConfig', () => {
     });
     const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
 
-    expect(kernelOptions('replicad')).toMatchObject({ previewTriangleBudget: 400_000 });
-    expect(kernelOptions('opencascade')).toMatchObject({ previewTriangleBudget: 400_000 });
-    expect(resolvedRuntime.middleware.find(({ id }) => id === 'displaySimplification')).toMatchObject({
-      options: { maxTriangles: 400_000 },
-    });
     expect(kernelOptions('picovoxel')).toMatchObject({ recycleHeapBytes: 512 * 2 ** 20 });
   });
 
-  it('should keep the policy preview budgets on a standard device', async () => {
-    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
-      tauApiUrl: 'https://api.tau.test',
-      tauWebSocketUrl: 'wss://api.tau.test',
-    });
-    const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
+  // Kernel budget program D1: no preview triangle budget on any device, so previews mesh at the requested tessellation.
+  it.each([true, false])(
+    'should pass no preview budget to any kernel (memory-constrained: %s)',
+    async (memoryConstrained) => {
+      const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+        tauApiUrl: 'https://api.tau.test',
+        tauWebSocketUrl: 'wss://api.tau.test',
+        memoryConstrained,
+      });
 
-    expect(kernelOptions('replicad')?.['previewTriangleBudget']).toBeUndefined();
-    expect(kernelOptions('opencascade')?.['previewTriangleBudget']).toBeUndefined();
-  });
+      for (const kernel of resolvedRuntime.kernels) {
+        expect(Object.keys(kernel.options ?? {}).filter((key) => /budget/i.test(key))).toEqual([]);
+      }
+    },
+  );
 });

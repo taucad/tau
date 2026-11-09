@@ -277,7 +277,7 @@ describe('DirectIdbProvider', () => {
         await writer.refresh();
         await writer.rmdir('replaced');
         await writer.writeFile('replaced', 'current');
-        await expect(reader.stat('replaced', { content: 'head' })).resolves.toMatchObject({ type: 'file', size: 7 });
+        await expect(reader.stat('replaced')).resolves.toMatchObject({ type: 'file', size: 7 });
         await expect(reader.readFile('replaced', 'utf8')).resolves.toBe('current');
       } finally {
         reader.dispose();
@@ -363,16 +363,16 @@ describe('DirectIdbProvider', () => {
       const reader = new DirectIdbProvider(prefix);
       await reader.initialize();
       try {
-        await expect(reader.stat('log.txt', { content: 'head' })).resolves.toEqual({
+        await expect(reader.stat('log.txt')).resolves.toEqual({
           type: 'file',
           size: 4,
           mtimeMs: 0,
           contentKind: 'text',
+          lineCount: 2,
         });
-        await expect(reader.stat('log.txt')).resolves.toMatchObject({ size: 4, lineCount: 2 });
         await reader.rename('log.txt', 'sub/log.txt');
         await reader.rename('sub', 'moved');
-        await expect(reader.stat('moved/log.txt', { content: 'head' })).resolves.toMatchObject({ size: 4 });
+        await expect(reader.stat('moved/log.txt')).resolves.toMatchObject({ size: 4 });
         await expect(reader.stat('sub/log.txt')).rejects.toThrow('ENOENT');
         await reader.unlink('moved/log.txt');
         await expect(reader.stat('moved/log.txt')).rejects.toThrow('ENOENT');
@@ -401,7 +401,7 @@ describe('DirectIdbProvider', () => {
           }
           return request;
         });
-      await expect(provider.stat('legacy.txt', { content: 'head' })).rejects.toThrow('Metadata read');
+      await expect(provider.stat('legacy.txt')).rejects.toThrow('Metadata read');
       put.mockRestore();
       await provider.writeFile('legacy.txt', 'current\ncontent\n');
       await expect(provider.stat('legacy.txt')).resolves.toMatchObject({ size: 16, lineCount: 3 });
@@ -929,18 +929,11 @@ describe('DirectIdbProvider', () => {
   });
 
   describe('readdirWithStats', () => {
-    it('omits text counts in head mode and reuses warm metadata', async () => {
+    it('answers the facts its metadata rows already know and reuses warm metadata (I3)', async () => {
       await provider.writeFile('large.txt', `${'x'.repeat(1024)}\nend`);
       const get = vi.spyOn(IDBObjectStore.prototype, 'get');
-      const head = await provider.readdirWithStats('', { content: 'head' });
-      const exact = await provider.readdirWithStats('');
-      expect(head[0]).toMatchObject({
-        name: 'large.txt',
-        contentKind: 'text',
-        size: 1028,
-      });
-      expect(head[0]).not.toHaveProperty('lineCount');
-      expect(exact[0]).toMatchObject({ contentKind: 'text', lineCount: 2 });
+      const rows = await provider.readdirWithStats('');
+      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', lineCount: 2, size: 1028 });
       expect(get).not.toHaveBeenCalled();
     });
 
@@ -1043,6 +1036,58 @@ describe('DirectIdbProvider', () => {
       await expect(provider.readFile('target/live.txt', 'utf8')).resolves.toBe('live');
       await expect(provider.exists('target/deleted.txt')).resolves.toBe(false);
       peer.dispose();
+    });
+
+    it('re-reads only the scoped prefixes a peer changed', async () => {
+      await provider.writeFile('scoped/kept.txt', 'kept');
+      await provider.writeFile('outside/kept.txt', 'kept');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      await peer.writeFile('scoped/added.txt', 'added');
+      await peer.unlink('scoped/kept.txt');
+      await peer.writeFile('outside/added.txt', 'added');
+
+      await provider.refresh(['scoped']);
+
+      await expect(provider.readdir('scoped')).resolves.toEqual(['added.txt']);
+      /* Outside the scope the projection is as it was until its own refresh. */
+      await expect(provider.readdir('outside')).resolves.toEqual(['kept.txt']);
+      await provider.refresh(['outside']);
+      await expect(provider.readdir('outside')).resolves.toEqual(['added.txt', 'kept.txt']);
+      peer.dispose();
+    });
+  });
+
+  describe('applyBatch', () => {
+    it('should apply a batch of writes, a move and a delete, each with its receipt', async () => {
+      await provider.writeFile('old.txt', 'old');
+      await provider.writeFile('gone.txt', 'gone');
+
+      const receipts = await provider.applyBatch([
+        { op: 'write', path: 'dir/a.txt', data: encoder.encode('a') },
+        { op: 'write', path: 'dir/b.txt', data: encoder.encode('b'), create: true },
+        { op: 'move', from: 'old.txt', to: 'new.txt' },
+        { op: 'delete', path: 'gone.txt', kind: 'file' },
+        { op: 'write', path: 'new-dir-taken.txt', data: encoder.encode('x') },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'applied', 'applied', 'applied', 'applied']);
+      await expect(provider.readFile('dir/b.txt', 'utf8')).resolves.toBe('b');
+      await expect(provider.readFile('new.txt', 'utf8')).resolves.toBe('old');
+      await expect(provider.exists('gone.txt')).resolves.toBe(false);
+    });
+
+    it('should refuse a create over an existing file and leave it as it was', async () => {
+      await provider.writeFile('taken.txt', 'mine');
+
+      const [receipt] = await provider.applyBatch([
+        { op: 'write', path: 'taken.txt', data: encoder.encode('theirs'), create: true },
+      ]);
+
+      expect(receipt).toMatchObject({ outcome: 'failed', error: { code: 'EEXIST' } });
+      await expect(provider.readFile('taken.txt', 'utf8')).resolves.toBe('mine');
     });
   });
 });

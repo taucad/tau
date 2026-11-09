@@ -15,6 +15,8 @@ import { join } from 'node:path';
 import { prettyFactory } from 'pino-pretty';
 
 import type { RegisterElectronRuntimeMainOptions } from '@taucad/runtime/electron/main';
+import { appLoadFailureSignal, rendererGoneSignal, rendererHangSignal } from '#main/desktop-signals.js';
+import type { DesktopSignal } from '#main/desktop-signals.js';
 
 /** One line's severity. Nothing here is user-facing; it is all operator text. */
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -289,20 +291,30 @@ type ObservableEmitter = {
  *
  * @param webContents - The window's web contents.
  * @param log - Diagnostics sink.
- * @param recover - Optional recovery to run after an unexpected renderer exit.
+ * @param handlers - Handlers for what the forwarder sees.
+ * @param handlers.recover - Optional recovery to run after an unexpected renderer exit.
+ * @param handlers.report - Sends a failure signal to Sentry (SB11); the default sends nothing.
  * @returns Nothing.
  */
 export const forwardRendererDiagnostics = (
   webContents: ObservableEmitter,
   log: DiagnosticsLog,
-  recover?: () => void,
+  {
+    recover,
+    report = () => undefined,
+  }: {
+    readonly recover?: () => void;
+    readonly report?: (signal: DesktopSignal | undefined) => void;
+  } = {},
 ): void => {
   webContents.on('did-fail-load', (...details) => {
-    const [, errorCode, errorDescription, url] = details;
+    const [, errorCode, errorDescription, url, isMainFrame] = details;
     log.log('error', 'renderer.did-fail-load', { errorCode, errorDescription, url });
+    report(appLoadFailureSignal({ errorCode, errorDescription, url, isMainFrame }));
   });
   webContents.on('render-process-gone', (_event, details) => {
     log.log('error', 'renderer.render-process-gone', details);
+    report(rendererGoneSignal(details));
     const reason = typeof details === 'object' && details !== null && 'reason' in details ? details.reason : undefined;
     if (reason !== 'clean-exit') {
       recover?.();
@@ -329,6 +341,42 @@ export const forwardRendererDiagnostics = (
       source: sourceId,
       line: lineNumber,
     });
+  });
+};
+
+/**
+ * Watch a window for renderer hangs: log each one when it starts and ends, and report one that lasted longer than
+ * five seconds, with its duration, once it ends (SB11). A hang that ends in the renderer's exit is reported by that
+ * exit instead.
+ *
+ * @param window - The browser window (`unresponsive` and `responsive` are window events).
+ * @param log - Diagnostics sink.
+ * @param handlers - Where signals go.
+ * @param handlers.report - Sends a failure signal to Sentry.
+ * @param handlers.now - The clock, for tests.
+ * @returns Nothing.
+ */
+export const watchRendererHangs = (
+  window: ObservableEmitter,
+  log: DiagnosticsLog,
+  {
+    report,
+    now = Date.now,
+  }: { readonly report: (signal: DesktopSignal | undefined) => void; readonly now?: () => number },
+): void => {
+  let since: number | undefined;
+  window.on('unresponsive', () => {
+    since ??= now();
+    log.log('warn', 'renderer.unresponsive');
+  });
+  window.on('responsive', () => {
+    if (since === undefined) {
+      return;
+    }
+    const duration = now() - since;
+    since = undefined;
+    log.log('info', 'renderer.responsive', { milliseconds: duration });
+    report(rendererHangSignal(duration));
   });
 };
 

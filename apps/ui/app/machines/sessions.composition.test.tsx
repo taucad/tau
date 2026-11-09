@@ -1841,6 +1841,9 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     await settle();
 
     expect(view.getByRole('status').textContent).toContain('Closing your projects');
+    /* On the shared overlay layer, portalled as it appears so it covers any overlay already open. */
+    expect(view.getByRole('status')).toHaveClass('z-50');
+    expect(view.getByRole('status').parentElement).toBe(document.body);
     expect(answers).toEqual([]);
     expect(freshActor.getSnapshot().matches('quiesced')).toBe(false);
 

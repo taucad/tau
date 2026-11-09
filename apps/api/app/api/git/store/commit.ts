@@ -24,7 +24,14 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
-import { putRetirementMarker, sweepRepository } from '#api/git/store/sweep.js';
+import {
+  listedHeadsOf,
+  listingPuts,
+  listingRetirementPuts,
+  prepareListings,
+  retiredHeadsOf,
+} from '#api/git/store/listing.js';
+import { putRetirementMarker, sweepListings, sweepRepository } from '#api/git/store/sweep.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
   ManifestError,
@@ -374,13 +381,22 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   // git error on first read instead — the trade W1's port makes, since git
   // verifies what it reads.
   assertDeadline();
-  const files = await timed(args.onPhase, 'hash', async () =>
-    readyFiles(
-      uploads.flatMap((upload) => [
-        { key: upload.key, file: upload.file },
-        { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
-      ]),
-    ),
+  const [files, listings] = await timed(args.onPhase, 'hash', async () =>
+    Promise.all([
+      readyFiles(
+        uploads.flatMap((upload) => [
+          { key: upload.key, file: upload.file },
+          { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
+        ]),
+      ),
+      // The head listing of every branch this push moved (D8): derived and never rejecting.
+      prepareListings({
+        locator: lease.locator,
+        directory: lease.directory,
+        commits: listedHeadsOf(lease.manifest?.refs ?? {}, references),
+        deadlineAt,
+      }),
+    ]),
   );
   assertDeadline();
   await timed(args.onPhase, 'object_puts', async () =>
@@ -405,6 +421,14 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         ),
       async (signal: AbortSignal) =>
         writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
+      // In the same round, so the manifest that names a tip is never ahead of its listing.
+      ...listingPuts(store, lease.locator, listings),
+      ...listingRetirementPuts({
+        store,
+        locator: lease.locator,
+        commits: retiredHeadsOf(lease.manifest?.refs ?? {}, references),
+        at,
+      }),
     ]),
   );
   await args.faults?.('after-pack-upload');
@@ -484,16 +508,30 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
               ...(options.faults === undefined && args.faults !== undefined ? { faults: args.faults } : {}),
             }),
         }),
-    sweep: async () =>
-      compacted
-        ? sweepQuietly({
-            store,
-            locator: lease.locator,
-            committed,
-            at,
-            ...(args.faults === undefined ? {} : { faults: args.faults }),
-          })
-        : undefined,
+    sweep: async () => {
+      if (!compacted) {
+        /* Every push sweeps the listings: production defers compaction, and a listing is no pack (D8). */
+        await sweepListings({ store, locator: lease.locator, committed, at });
+        return undefined;
+      }
+      const outcome = await sweepQuietly({
+        store,
+        locator: lease.locator,
+        committed,
+        at,
+        ...(args.faults === undefined ? {} : { faults: args.faults }),
+      });
+      /*
+       * No listing sweep here: this sweep lists only `retired/` and `packs/`,
+       * and neither holds a listing or its `retired-listings/` marker. The
+       * listings wait for the next push that does not compact, whose sweep
+       * the worker runs after its reply, or for the next deferred
+       * compaction's sweep. Both run `sweepListings` (D8). An inline
+       * compaction leaves at most the bound live, so the next deferring push
+       * does not compact inline.
+       */
+      return outcome;
+    },
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
   };
 };
@@ -831,14 +869,17 @@ export const compactCommitted = async (
     outcome: 'committed',
     manifest: next,
     token,
-    sweep: async () =>
-      sweepQuietly({
+    sweep: async () => {
+      const outcome = await sweepQuietly({
         store,
         locator: lease.locator,
         committed: next,
         at,
         ...(args.faults === undefined ? {} : { faults: args.faults }),
-      }),
+      });
+      await sweepListings({ store, locator: lease.locator, committed: next, at });
+      return outcome;
+    },
   };
 };
 

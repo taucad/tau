@@ -238,6 +238,41 @@ const memberOrdering = [
 ];
 
 /**
+ * Dependency direction between the API server libraries (`apps/libs/api-<name>`,
+ * tagged `api:<name>`). `layer:` tags leave libraries of one layer unordered, so a
+ * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
+ * instead names the API libraries it may depend on (the "May depend on" column of
+ * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
+ * project. Every edge points down `billing -> llm-gateway -> hosts -> auth ->
+ * {database, email, redis} -> lifecycle -> observability -> core`; no library may
+ * depend on the `api` app (its `type:app` tag is outside every `type:app-lib`
+ * allowlist). Entries marked "measured" are downward edges the moved code already
+ * had that the blueprint's column did not list.
+ */
+const apiLibraryDependencies = {
+  core: [],
+  observability: ['core'],
+  // measured: the WebSocket upgrade transport (from app/api/websocket) reads `Environment` and `httpBodyLimit`.
+  lifecycle: ['observability', 'core'],
+  database: ['core'],
+  redis: ['core', 'observability'],
+  email: ['core'],
+  // measured: `bearer-auth.logging.test.ts` builds the API's pino logger.
+  auth: ['database', 'email', 'core', 'observability'],
+  // measured: `HostsGateway` records WebSocket metrics through `MetricsService`.
+  hosts: ['auth', 'database', 'redis', 'lifecycle', 'core', 'observability'],
+  // measured: `LlmGatewayService` aborts streams through `ShutdownService`.
+  'llm-gateway': ['hosts', 'auth', 'core', 'observability', 'lifecycle'],
+  // measured: `createBillingTestApp` boots `RedisModule`.
+  billing: ['llm-gateway', 'hosts', 'auth', 'database', 'email', 'core', 'observability', 'lifecycle', 'redis'],
+};
+
+const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({
+  sourceTag: `api:${name}`,
+  onlyDependOnLibsWithTags: [...dependencies.map((dependency) => `api:${dependency}`), 'scope:shared'],
+}));
+
+/**
  * Nx module boundaries. The options are shared so the runtime-e2e override can add its
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
@@ -261,9 +296,16 @@ const moduleBoundaryOptions = {
    * probe and the integration tests import the same packages directly.
    * Entries are matched as regular expressions against the import
    * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
-   * `@taucad/runtime-testing`.
+   * `@taucad/runtime-testing`. The API's command entries load
+   * `@taucad/api-observability/otel` late, after the process has decided it
+   * needs tracing, while the server imports it first.
    */
-  checkDynamicDependenciesExceptions: ['@taucad/runtime(/|$)', '@taucad/agent-host(/|$)', '@taucad/fs-bridge(/|$)'],
+  checkDynamicDependenciesExceptions: [
+    '@taucad/runtime(/|$)',
+    '@taucad/agent-host(/|$)',
+    '@taucad/fs-bridge(/|$)',
+    '@taucad/api-observability(/|$)',
+  ],
   depConstraints: [
     {
       sourceTag: 'scope:api',
@@ -340,8 +382,193 @@ const moduleBoundaryOptions = {
       sourceTag: 'layer:util',
       onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
     },
+    ...apiLibraryConstraints,
   ],
 };
+
+/**
+ * Identifiers retired by the workspace-filesystem north star. A shim, alias or
+ * re-export must not bring one back.
+ */
+const retiredIdentifiers = [
+  // Six private path classifiers, replaced by @taucad/filesystem/path-registry.
+  'isDesignPath',
+  'revisionPathPolicy',
+  'excludedRevisionPaths',
+  'maskedDirectories',
+  'isMaskedPath',
+  'maskWorkspaceWrites',
+  // The Jujutsu adapter and its generated per-project configuration.
+  'generatedJjConfigContent',
+  'generatedJjConfigPath',
+  'pinnedJjRelease',
+  'resolveJjExecutable',
+  'createJjRevisionPort',
+  // The dead native-git persistence wrapper.
+  'createNativeGitRevisionPersistence',
+  // Bundles as a wire; git smart HTTP is the only transport. The
+  // selector is anchored, so `createBundler`/`createBundlerSourceHost`
+  // in the bundler toolkits are untouched (review R3).
+  'importBundle',
+  'createBundle',
+  'fetchBundle',
+  'RevisionBundleInput',
+  'ImportRevisionBundleInput',
+  'CreateNativeGitBundleInput',
+  'FetchNativeGitBundleInput',
+  // The hand-rolled browser store, superseded by `isomorphic-git` (EQ12, W3).
+  'createBrowserRevisionPort',
+  'BrowserRevisionPortOptions',
+  // The hand-rolled blob, tree and pack codec beside `isomorphic-git` and `git`.
+  // Under charter D7 Tau owns the object store and pack reader, and the tree
+  // codec lives only in `packages/revisions/src/object-store/tree-codec.ts`
+  // (see `treeCodecFiles`); everywhere else these names stay retired.
+  'encodeTreeGraph',
+  'encodeTree',
+  'encodeBlob',
+  'decodeTree',
+  'EncodedTreeGraph',
+  'FlatTreeEntry',
+  'GitMode',
+  // Publications are named versions of the synced graph (D11): no blob
+  // store of uploaded files stands beside it.
+  'BlobStore',
+  // The compiled wasm revision algebra and its out-of-tree artifact.
+  'loadRevisionAlgebra',
+  'RevisionAlgebra',
+  'algebraContract',
+  'algebraSourceRevision',
+  'algebraProvenanceDigest',
+  'algebraRawWasmSha256',
+  'algebraNativeDarwinArm64Sha256',
+  'resolveAlgebraArtifact',
+  'algebraArtifactEnvironmentVariable',
+  // The turn recorder and its branch-per-chat placement (D7, I18, W3c):
+  // a turn attaches to a checkout through `turn.machine` and never
+  // creates one, and the effects behind it are `createRevisionActors`.
+  'TurnRevisionRecorder',
+  'TurnRevisionMode',
+  'turnRevisionBranch',
+  'defaultTurnCaptureExclusions',
+  'withTurnRevisions',
+  'sweepTurnWorkspaces',
+  'hostRevisionModes',
+  'hostTurnCaptureExclusions',
+  // The materialized workspace and its claim file (D7, A38, W3d): a
+  // turn is placed on a checkout the revision root already holds,
+  // there is no second copy of the tree and no claim beside it.
+  'MaterializedWorkspace',
+  'MaterializedWorkspaceAuthority',
+  'MaterializedWorkspaceError',
+  'MaterializedWorkspaceId',
+  'MaterializedWorkspaceIdentity',
+  'MaterializedWorkspaceMetrics',
+  'MaterializedWorkspaceMode',
+  'materializedWorkspaceId',
+  'WorkspaceClaim',
+  'PersistedChatWorkspaceClaim',
+  // Revision *mode* as a wire word (D7, I18, P12): placement is
+  // non-branching by default, so nothing picks one.
+  'ChatRevisionMode',
+  'chatRevisionModeSchema',
+  'useChatRevisionMode',
+  'revisionMode',
+  'placementRevisionModes',
+];
+
+/** The tree codec's own names, which only its module may declare (charter D7). */
+const treeCodecIdentifiers = new Set(['decodeTree', 'encodeTree']);
+
+/** The one module the tree codec lives in, and its test against native git. */
+const treeCodecFiles = [
+  'packages/revisions/src/object-store/tree-codec.ts',
+  'packages/revisions/src/object-store/tree-codec.test.ts',
+];
+
+/**
+ * @param {readonly string[]} names - Retired identifiers.
+ * @returns {string} A selector matching any of them exactly.
+ */
+const retiredIdentifierSelector = (names) => `Identifier[name=/^(${names.join('|')})$/]`;
+
+const retiredIdentifierRule = {
+  // Retired by the workspace-filesystem north star (D2, D3, D30, A31).
+  // Path classification is one registry, and the unreachable git code
+  // is gone; no shim, alias or re-export brings either name back.
+  selector: retiredIdentifierSelector(retiredIdentifiers),
+  message:
+    'This identifier is retired. Path classification is `classify` from ' +
+    '`@taucad/filesystem/path-registry`; the jj adapter, the dead native-git persistence ' +
+    'wrapper, the bundle transport, the hand-rolled browser codec and the wasm revision ' +
+    'algebra are deleted — the browser store is `createIsomorphicGitRevisionPort` and the ' +
+    'disk host is `createNativeGitRevisionPort`. Do not reintroduce a shim or alias. ' +
+    'The turn recorder, its `agent/<chat>` branches and the Node revision modes are ' +
+    'replaced by `projectRevisionsMachine` over `createRevisionActors`. ' +
+    'The materialized workspace, its `.tau/workspaces` claim file and the revision-mode ' +
+    "wire word are gone with it: a turn is placed on its chat's checkout and the host " +
+    'records the revision. ' +
+    'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D7, D30, EQ12, EQ14).',
+};
+
+/** Restricted syntax for every TypeScript file. */
+const restrictedSyntax = [
+  {
+    // The materialized-workspace directory the north star deleted (W3d).
+    // A residual one is inert — `reservedTauPathClassification` keeps any
+    // unlisted `.tau` member out of revisions and out of the agent's
+    // hands (P13) — but nothing in the product may name it again.
+    // Both halves: a plain string and a template literal's text, which is
+    // how the e2e specs spell it.
+    selector: 'Literal[value=/\\.tau\\/workspaces/], TemplateElement[value.raw=/\\.tau\\/workspaces/]',
+    message:
+      "`.tau/workspaces` is retired. A turn is placed on its chat's checkout; leases live " +
+      'at `.tau/runs/<runId>.json` and the store at `.git`. ' +
+      'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
+  },
+  {
+    // The browser's second name for the repository, retired by D29: one
+    // `.git` on every host, in the project's own filesystem. A residual
+    // directory is inert — it falls to `reservedTauPathClassification`
+    // like any unlisted `.tau` member (P13) — but nothing may name it
+    // again. Three halves: a plain string, a template literal's text, and
+    // the path-segment array the desktop e2e specs build, which is the
+    // spelling that survived the first sweep of this rename.
+    // (Comments are not AST nodes, so the two prose mentions that explain
+    // the history are untouched, and so is this rule's own source: this
+    // config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+    selector:
+      'Literal[value=/\\.tau\\/revisions/], TemplateElement[value.raw=/\\.tau\\/revisions/], ArrayExpression > Literal[value=".tau"] + Literal[value="revisions"]',
+    message:
+      '`.tau/revisions` is retired. The repository is `.git` in the project root on every ' +
+      'host, browser included, and the durable sync queue is `.git/sync-pending`. ' +
+      'See docs/policy/revisions-policy.md and the charter (D29, ND23).',
+  },
+  {
+    // The three modules S43 deleted, by name: the Jujutsu adapter, the
+    // wasm revision algebra and the multipart publication upload. A
+    // module path is a string, so this is the string half of the pin
+    // below — an import, a dynamic import, a mock path or a test fixture
+    // that names one of them fails here. (Comments are not AST nodes, so
+    // the two prose mentions of the algebra spike in `object-hash.ts` and
+    // `git-objects.ts` are untouched, and so is this rule's own source:
+    // this config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+    selector:
+      'Literal[value=/(jj-adapter|revision-algebra|publish-multipart)/], TemplateElement[value.raw=/(jj-adapter|revision-algebra|publish-multipart)/]',
+    message:
+      'That module is retired. The disk host is `createNativeGitRevisionPort`, the browser ' +
+      'store is `createIsomorphicGitRevisionPort`, and a publication is a named version of ' +
+      'the synced graph — there is no jj adapter, no wasm algebra and no multipart upload. ' +
+      'See docs/research/workspace-filesystem-revisions-charter.md (D11, D30, EQ14).',
+  },
+  {
+    selector: 'TSAsExpression > TSNeverKeyword',
+    message:
+      '`as never` erases all type information and masks underlying type errors. ' +
+      'Fix the root cause: use proper typing, type narrowing, or `as unknown as Type`. ' +
+      'See docs/policy/typescript-policy.md.',
+  },
+  retiredIdentifierRule,
+];
 
 /** @type {import('eslint').Linter.Config[]} */
 const config = [
@@ -527,164 +754,29 @@ const config = [
       // TODO: Move to .oxlintrc.json once oxlint ships native `object-shorthand` (oxc-project/oxc#17688).
       'object-shorthand': ['error', 'always'],
       'id-denylist': ['error', 'temp', 'tmp', 'val', 'vals', 'obj', 'cb'],
+      'no-restricted-syntax': ['error', ...restrictedSyntax],
+      'import-x/no-extraneous-dependencies': ['error', noExtraneousDependenciesOptions],
+    },
+  },
+
+  {
+    // The tree codec's module may name its own encoder and decoder (charter D7);
+    // every other retirement still applies to it.
+    files: treeCodecFiles,
+    rules: {
       'no-restricted-syntax': [
         'error',
-        {
-          // The materialized-workspace directory the north star deleted (W3d).
-          // A residual one is inert — `reservedTauPathClassification` keeps any
-          // unlisted `.tau` member out of revisions and out of the agent's
-          // hands (P13) — but nothing in the product may name it again.
-          // Both halves: a plain string and a template literal's text, which is
-          // how the e2e specs spell it.
-          selector: 'Literal[value=/\\.tau\\/workspaces/], TemplateElement[value.raw=/\\.tau\\/workspaces/]',
-          message:
-            "`.tau/workspaces` is retired. A turn is placed on its chat's checkout; leases live " +
-            'at `.tau/runs/<runId>.json` and the store at `.git`. ' +
-            'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
-        },
-        {
-          // The browser's second name for the repository, retired by D29: one
-          // `.git` on every host, in the project's own filesystem. A residual
-          // directory is inert — it falls to `reservedTauPathClassification`
-          // like any unlisted `.tau` member (P13) — but nothing may name it
-          // again. Three halves: a plain string, a template literal's text, and
-          // the path-segment array the desktop e2e specs build, which is the
-          // spelling that survived the first sweep of this rename.
-          // (Comments are not AST nodes, so the two prose mentions that explain
-          // the history are untouched, and so is this rule's own source: this
-          // config is `.mjs` and the block only lints `.ts`/`.tsx`.)
-          selector:
-            'Literal[value=/\\.tau\\/revisions/], TemplateElement[value.raw=/\\.tau\\/revisions/], ArrayExpression > Literal[value=".tau"] + Literal[value="revisions"]',
-          message:
-            '`.tau/revisions` is retired. The repository is `.git` in the project root on every ' +
-            'host, browser included, and the durable sync queue is `.git/sync-pending`. ' +
-            'See docs/policy/revisions-policy.md and the charter (D29, ND23).',
-        },
-        {
-          // The three modules S43 deleted, by name: the Jujutsu adapter, the
-          // wasm revision algebra and the multipart publication upload. A
-          // module path is a string, so this is the string half of the pin
-          // below — an import, a dynamic import, a mock path or a test fixture
-          // that names one of them fails here. (Comments are not AST nodes, so
-          // the two prose mentions of the algebra spike in `object-hash.ts` and
-          // `git-objects.ts` are untouched, and so is this rule's own source:
-          // this config is `.mjs` and the block only lints `.ts`/`.tsx`.)
-          selector:
-            'Literal[value=/(jj-adapter|revision-algebra|publish-multipart)/], TemplateElement[value.raw=/(jj-adapter|revision-algebra|publish-multipart)/]',
-          message:
-            'That module is retired. The disk host is `createNativeGitRevisionPort`, the browser ' +
-            'store is `createIsomorphicGitRevisionPort`, and a publication is a named version of ' +
-            'the synced graph — there is no jj adapter, no wasm algebra and no multipart upload. ' +
-            'See docs/research/workspace-filesystem-revisions-charter.md (D11, D30, EQ14).',
-        },
-        {
-          selector: 'TSAsExpression > TSNeverKeyword',
-          message:
-            '`as never` erases all type information and masks underlying type errors. ' +
-            'Fix the root cause: use proper typing, type narrowing, or `as unknown as Type`. ' +
-            'See docs/policy/typescript-policy.md.',
-        },
-        {
-          // Retired by the workspace-filesystem north star (D2, D3, D30, A31).
-          // Path classification is one registry, and the unreachable git code
-          // is gone; no shim, alias or re-export brings either name back.
-          selector: `Identifier[name=/^(${[
-            // Six private path classifiers, replaced by @taucad/filesystem/path-registry.
-            'isDesignPath',
-            'revisionPathPolicy',
-            'excludedRevisionPaths',
-            'maskedDirectories',
-            'isMaskedPath',
-            'maskWorkspaceWrites',
-            // The Jujutsu adapter and its generated per-project configuration.
-            'generatedJjConfigContent',
-            'generatedJjConfigPath',
-            'pinnedJjRelease',
-            'resolveJjExecutable',
-            'createJjRevisionPort',
-            // The dead native-git persistence wrapper.
-            'createNativeGitRevisionPersistence',
-            // Bundles as a wire; git smart HTTP is the only transport. The
-            // selector is anchored, so `createBundler`/`createBundlerSourceHost`
-            // in the bundler toolkits are untouched (review R3).
-            'importBundle',
-            'createBundle',
-            'fetchBundle',
-            'RevisionBundleInput',
-            'ImportRevisionBundleInput',
-            'CreateNativeGitBundleInput',
-            'FetchNativeGitBundleInput',
-            // The hand-rolled browser store, superseded by `isomorphic-git` (EQ12, W3).
-            'createBrowserRevisionPort',
-            'BrowserRevisionPortOptions',
-            // The blob, tree and pack codec `isomorphic-git` and `git` now own.
-            'encodeTreeGraph',
-            'encodeTree',
-            'encodeBlob',
-            'decodeTree',
-            'EncodedTreeGraph',
-            'FlatTreeEntry',
-            'GitMode',
-            // Publications are named versions of the synced graph (D11): no blob
-            // store of uploaded files stands beside it.
-            'BlobStore',
-            // The compiled wasm revision algebra and its out-of-tree artifact.
-            'loadRevisionAlgebra',
-            'RevisionAlgebra',
-            'algebraContract',
-            'algebraSourceRevision',
-            'algebraProvenanceDigest',
-            'algebraRawWasmSha256',
-            'algebraNativeDarwinArm64Sha256',
-            'resolveAlgebraArtifact',
-            'algebraArtifactEnvironmentVariable',
-            // The turn recorder and its branch-per-chat placement (D7, I18, W3c):
-            // a turn attaches to a checkout through `turn.machine` and never
-            // creates one, and the effects behind it are `createRevisionActors`.
-            'TurnRevisionRecorder',
-            'TurnRevisionMode',
-            'turnRevisionBranch',
-            'defaultTurnCaptureExclusions',
-            'withTurnRevisions',
-            'sweepTurnWorkspaces',
-            'hostRevisionModes',
-            'hostTurnCaptureExclusions',
-            // The materialized workspace and its claim file (D7, A38, W3d): a
-            // turn is placed on a checkout the revision root already holds,
-            // there is no second copy of the tree and no claim beside it.
-            'MaterializedWorkspace',
-            'MaterializedWorkspaceAuthority',
-            'MaterializedWorkspaceError',
-            'MaterializedWorkspaceId',
-            'MaterializedWorkspaceIdentity',
-            'MaterializedWorkspaceMetrics',
-            'MaterializedWorkspaceMode',
-            'materializedWorkspaceId',
-            'WorkspaceClaim',
-            'PersistedChatWorkspaceClaim',
-            // Revision *mode* as a wire word (D7, I18, P12): placement is
-            // non-branching by default, so nothing picks one.
-            'ChatRevisionMode',
-            'chatRevisionModeSchema',
-            'useChatRevisionMode',
-            'revisionMode',
-            'placementRevisionModes',
-          ].join('|')})$/]`,
-          message:
-            'This identifier is retired. Path classification is `classify` from ' +
-            '`@taucad/filesystem/path-registry`; the jj adapter, the dead native-git persistence ' +
-            'wrapper, the bundle transport, the hand-rolled browser codec and the wasm revision ' +
-            'algebra are deleted — the browser store is `createIsomorphicGitRevisionPort` and the ' +
-            'disk host is `createNativeGitRevisionPort`. Do not reintroduce a shim or alias. ' +
-            'The turn recorder, its `agent/<chat>` branches and the Node revision modes are ' +
-            'replaced by `projectRevisionsMachine` over `createRevisionActors`. ' +
-            'The materialized workspace, its `.tau/workspaces` claim file and the revision-mode ' +
-            "wire word are gone with it: a turn is placed on its chat's checkout and the host " +
-            'records the revision. ' +
-            'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D7, D30, EQ12, EQ14).',
-        },
+        ...restrictedSyntax.map((rule) =>
+          rule === retiredIdentifierRule
+            ? {
+                ...rule,
+                selector: retiredIdentifierSelector(
+                  retiredIdentifiers.filter((name) => !treeCodecIdentifiers.has(name)),
+                ),
+              }
+            : rule,
+        ),
       ],
-      'import-x/no-extraneous-dependencies': ['error', noExtraneousDependenciesOptions],
     },
   },
 
@@ -1012,7 +1104,7 @@ const config = [
     },
   },
   {
-    files: ['apps/api/**/*.{ts,tsx,mts,cts}'],
+    files: ['apps/api/**/*.{ts,tsx,mts,cts}', 'apps/libs/api-*/**/*.{ts,tsx,mts,cts}'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

@@ -12,6 +12,12 @@ import { ChatMarkdownHyperlink, rehypeChatFileLinks } from '#components/markdown
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
 
+/**
+ * Streamdown caps tables at 300px and scrolls them vertically by default.
+ * Chat messages already scroll, so tables render at their full height.
+ */
+const chatTableMaxHeight = 0;
+
 const chatRehypePlugins: StreamdownProps['rehypePlugins'] = [rehypeAtReferences];
 const chatPreHardenPlugins: StreamdownProps['rehypePlugins'] = [rehypeChatFileLinks];
 
@@ -90,6 +96,7 @@ export const MarkdownViewerChat = memo(function ({
         isStreaming={isStreaming}
         components={memoizedComponents}
         controls={chatMarkdownControls}
+        tableMaxHeight={chatTableMaxHeight}
         rehypePlugins={chatRehypePlugins}
         rehypePluginsBeforeHarden={chatPreHardenPlugins}
       >
@@ -108,6 +115,7 @@ export const MarkdownViewerChat = memo(function ({
           isStreaming={isStreaming}
           components={memoizedComponents}
           controls={chatMarkdownControls}
+          tableMaxHeight={chatTableMaxHeight}
           rehypePlugins={chatRehypePlugins}
           rehypePluginsBeforeHarden={chatPreHardenPlugins}
           BlockComponent={ChatStreamingBlock}

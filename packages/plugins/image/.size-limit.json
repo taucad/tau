@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 9.5 kB brotli on 2026-08-31",
+    "name": "total (ESM JS) — measured 11.07 kB brotli on 2026-11-05 (viewer-parity image options passed straight to nanoraster 0.9)",
     "path": "dist/**/*.mjs",
-    "limit": "11 kB"
+    "limit": "12 kB"
   },
   {
     "name": "@taucad/image/camera — measured 606 B brotli on 2026-08-31",

@@ -38,7 +38,7 @@ import type { Handle } from '#types/matches.types.js';
  * disallows crawling; only this meta tag keeps an already-known URL out of the
  * index.
  */
-export const meta: MetaFunction = () => [{ title: 'Tau usage' }, { name: 'robots', content: 'noindex, nofollow' }];
+export const meta: MetaFunction = () => [{ title: 'Usage · Tau' }, { name: 'robots', content: 'noindex, nofollow' }];
 
 export const handle: Handle = {
   title: 'Tau usage',

@@ -101,12 +101,42 @@ export function subShapes(oc: Oc, shape: TopoDS_Shape, kind: ShapeKind): TopoDS_
   return out;
 }
 
+/**
+ * Sub-shapes cast to their typed wrapper; each raw wrapper is freed once its typed copy exists.
+ *
+ * @param oc - libcascade instance
+ * @param shape - shape to explore
+ * @param kind - sub-shape kind
+ * @param cast - typed cast for the kind
+ * @returns typed sub-shapes, each listed once
+ */
+const typedSubShapes = <T>(oc: Oc, shape: TopoDS_Shape, kind: ShapeKind, cast: (raw: TopoDS_Shape) => T): T[] =>
+  subShapes(oc, shape, kind).map((raw) => {
+    const typed = cast(raw);
+    raw.delete();
+    return typed;
+  });
+
 export const faces = (oc: Oc, shape: TopoDS_Shape): TopoDS_Face[] =>
-  subShapes(oc, shape, 'TopAbs_FACE').map((s) => oc.TopoDS.Face(s));
+  typedSubShapes(oc, shape, 'TopAbs_FACE', (raw) => oc.TopoDS.Face(raw));
 export const edges = (oc: Oc, shape: TopoDS_Shape): TopoDS_Edge[] =>
-  subShapes(oc, shape, 'TopAbs_EDGE').map((s) => oc.TopoDS.Edge(s));
+  typedSubShapes(oc, shape, 'TopAbs_EDGE', (raw) => oc.TopoDS.Edge(raw));
 export const vertices = (oc: Oc, shape: TopoDS_Shape): TopoDS_Vertex[] =>
-  subShapes(oc, shape, 'TopAbs_VERTEX').map((s) => oc.TopoDS.Vertex(s));
+  typedSubShapes(oc, shape, 'TopAbs_VERTEX', (raw) => oc.TopoDS.Vertex(raw));
+
+/**
+ * Frees every wrapper in a list except the ones kept.
+ *
+ * @param shapes - wrappers to free
+ * @param kept - wrappers the caller keeps
+ */
+export function deleteAllBut(shapes: ReadonlyArray<{ delete(): void }>, ...kept: readonly unknown[]): void {
+  for (const shape of shapes) {
+    if (!kept.includes(shape)) {
+      shape.delete();
+    }
+  }
+}
 
 /**
  * Membership test for sub-shapes of a shape (orientation-insensitive).
@@ -193,20 +223,11 @@ export function planarFaceFrame(oc: Oc, face: TopoDS_Face): Frame | undefined {
     const position = surface.Plane().Position();
     const origin = fromPnt(position.Location());
     const x = fromPnt(position.XDirection());
-    let y = fromPnt(position.YDirection());
-    let z = fromPnt(position.Direction());
+    const y = fromPnt(position.YDirection());
+    // The surface normal is X × Y, which is -Direction() on an indirect (left-handed) placement such as a chamfer's
+    // plane; a reversed face points the other way. Keep the frame right-handed with z outward.
     const reversed = face.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
-    if (reversed) {
-      z = vec3(-z.x, -z.y, -z.z);
-    }
-
-    // Keep the frame right-handed with z outward.
-    const cz = { x: x.y * y.z - x.z * y.y, y: x.z * y.x - x.x * y.z, z: x.x * y.y - x.y * y.x };
-    if (cz.x * z.x + cz.y * z.y + cz.z * z.z < 0) {
-      y = vec3(-y.x, -y.y, -y.z);
-    }
-
-    return frameFromAxes(origin, x, y);
+    return frameFromAxes(origin, x, reversed ? vec3(-y.x, -y.y, -y.z) : y);
   } finally {
     surface.delete();
   }

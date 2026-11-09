@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -60,43 +62,47 @@ beforeEach(() => {
     .mockResolvedValueOnce({ status: 'complete', reclaimed: 3 });
 });
 
-it('offers labelled keyboard-native modes and applies the chosen mode', () => {
-  render(<ComputeReuseSettings />);
-  expect(screen.getByRole('radio', { name: /Saved on this device/ })).toBeChecked();
-  expect(screen.getByRole('radio', { name: /This session only/ })).not.toBeChecked();
-  fireEvent.click(screen.getByRole('radio', { name: /Off/ }));
+it('shows the current mode in a labelled select and applies the chosen mode', async () => {
+  render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  const select = screen.getByRole('combobox', { name: 'Reuse results' });
+  expect(select).toHaveTextContent('On this device');
+  Element.prototype.scrollIntoView = vi.fn();
+  select.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(await screen.findByRole('option', { name: 'Off' })).toBeInTheDocument();
+  await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
   expect(state.set).toHaveBeenCalledWith('off');
 });
 
 it('reports bounded collection and continues from its returned cursor', async () => {
-  render(<ComputeReuseSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'Collect' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('7 bytes reclaimed; more remain');
-  fireEvent.click(screen.getByRole('button', { name: 'Continue collect' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('3 bytes reclaimed; complete');
+  render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  fireEvent.click(screen.getByRole('button', { name: 'Free space' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Freed 7 B. More can be freed.');
+  fireEvent.click(screen.getByRole('button', { name: 'Free more' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Freed 3 B.');
   expect(state.collect).toHaveBeenLastCalledWith({ budget: 20, cursor: 'next' });
 });
 
 it('disables controls without authority and reports failures and retained clear bytes', async () => {
   state.available = false;
-  const unavailable = render(<ComputeReuseSettings />);
-  expect(screen.getByRole('button', { name: 'Inspect' })).toBeDisabled();
+  const unavailable = render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  expect(screen.getByRole('button', { name: 'Check size' })).toBeDisabled();
   unavailable.unmount();
 
   state.available = true;
   state.inspect.mockRejectedValueOnce(new Error('inspect failed'));
   state.clear.mockResolvedValueOnce({ status: 'cleared', generation: 2, retained: 11 });
-  render(<ComputeReuseSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+  render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  fireEvent.click(screen.getByRole('button', { name: 'Check size' }));
   expect(await screen.findByRole('status')).toHaveTextContent('inspect failed');
   fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
   expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('11 bytes retained');
+  expect(await screen.findByRole('status')).toHaveTextContent('Cleared. 11 B still in use.');
 });
 
 it('keeps cache controls unavailable without an active project', () => {
   state.projectId = undefined;
-  render(<ComputeReuseSettings />);
+  render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
   expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
 });

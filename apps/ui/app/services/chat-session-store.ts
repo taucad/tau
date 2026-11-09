@@ -704,11 +704,9 @@ type ProjectHostConnector = Readonly<{
 /** The account's rating of one ended run, on the page's clock (T12). @public */
 export type RunRating = Readonly<{ chatId: string; runId: string; value: 'positive' | 'negative'; at: number }>;
 
-/** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
+/** A client that may say when a file last changed on this device (the worker filesystem's metadata-only stat). */
 type SegmentStatClient = Readonly<{
-  stat?:
-    | ((path: string, options: Readonly<{ content: 'head' }>) => Promise<Readonly<{ mtimeMs?: number | undefined }>>)
-    | undefined;
+  stat?: ((path: string) => Promise<Readonly<{ mtimeMs?: number | undefined }>>) | undefined;
 }>;
 
 /**
@@ -718,7 +716,7 @@ type SegmentStatClient = Readonly<{
  */
 const receivedAtOf = async (client: SegmentStatClient, path: string): Promise<Readonly<{ receivedAt?: number }>> => {
   const mtimeMs = await client
-    .stat?.(path, { content: 'head' })
+    .stat?.(path)
     .then((stat) => stat.mtimeMs)
     .catch(() => undefined);
   return mtimeMs === undefined || mtimeMs <= 0 ? {} : { receivedAt: mtimeMs };

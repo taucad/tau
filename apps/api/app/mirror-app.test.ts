@@ -12,14 +12,14 @@ const read = (relative: string): string => readFileSync(new URL(relative, import
 const dockerfile = read('../Dockerfile');
 
 describe.each([
-  ['fly.staging.toml', 'tau-mirror-staging'],
-  ['fly.prod.toml', 'tau-mirror'],
-])('apps/mirror/%s', (file, app) => {
+  ['fly.staging.toml', 'tau-mirror-staging', 'syd'],
+  ['fly.prod.toml', 'tau-mirror', 'sjc'],
+])('apps/mirror/%s', (file, app, region) => {
   const config = read(`../../mirror/${file}`);
 
-  it('should name its app and the Sydney region', () => {
+  it('should name its app and its region (staging Sydney, production US West)', () => {
     expect(config).toMatch(new RegExp(`^app = '${app}'$`, 'mu'));
-    expect(config).toMatch(/^primary_region = 'syd'$/mu);
+    expect(config).toMatch(new RegExp(`^primary_region = '${region}'$`, 'mu'));
   });
 
   it('should declare no service of any kind, so the app has no address', () => {

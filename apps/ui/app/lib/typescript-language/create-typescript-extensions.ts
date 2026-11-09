@@ -1,5 +1,6 @@
 import { definitionProvider } from '#components/code/editor-definition.js';
-import { languageFeatures } from '#components/code/editor-language-features.js';
+import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
+import { startAfterLineBreaks } from '#components/code/editor-lint.js';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
@@ -578,18 +579,8 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
     if (!prepared.canRename || !unchanged(options, version)) {
       return;
     }
-    const oldName = view.state.doc.sliceString(
-      prepared.triggerSpan.start,
-      prepared.triggerSpan.start + prepared.triggerSpan.length,
-    );
-    const dialog = showDialog(view, {
-      label: 'Rename symbol',
-      input: { value: oldName },
-      submitLabel: 'Rename',
-      focus: true,
-    });
-    const submitted = await dialog.result;
-    const newName = submitted?.querySelector('input')?.value.trim();
+    const { start, length } = prepared.triggerSpan;
+    const newName = await promptRename(view, { from: start, to: start + length });
     if (newName && unchanged(options, version)) {
       await actions.rename(position, newName);
     }
@@ -819,10 +810,11 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           if (!attachedViews.has(view) || !unchanged(options, version)) {
             return [];
           }
-          const { length } = view.state.doc;
           const diagnostics: Diagnostic[] = result.map((entry) => ({
-            from: Math.min(entry.start, length),
-            to: Math.min(entry.start + Math.max(entry.length, 1), length),
+            ...startAfterLineBreaks(view.state.doc, {
+              from: entry.start,
+              to: entry.start + Math.max(entry.length, 1),
+            }),
             severity: entry.category === 1 ? 'error' : entry.category === 0 ? 'warning' : 'info',
             message: entry.message,
             source: 'typescript',

@@ -24,15 +24,23 @@ import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
  * stop (AR-W5-04, AR-W6-02), and in every phase it names what the switch never governs (AR-W7-01).
  */
 export const telemetryCopy = {
-  label: 'Share usage and diagnostics data',
+  label: 'Share usage and diagnostics',
+  description: 'Send anonymous data about how Tau runs, such as speed and errors',
+  /** The detail behind the switch, shown from its info glyph. */
+  details: [
+    'Includes which kernels run, how long operations take, how often they fail, memory use, parameter counts, export formats, project sync outcomes and agent usage.',
+    'Never includes prompts, code, parameter values, file names or geometry.',
+    'Signed in, data is rate-limited per account but not stored against it. Signed out, nothing identifies you.',
+    'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use "tau telemetry off".',
+    'Error reports and product analytics are separate. Analytics follows your cookie preferences.',
+  ],
   untilActivation: {
-    description:
-      'Sends counts about how Tau runs on this device: which kernels run, how long operations take, how often they fail, memory, parameter counts and export formats, plus how the agent is used. Never prompts, code, parameter values, file names or geometry. When you are signed in, batches are rate-limited per account and not stored against it; signed out, nothing identifies you. Turning this off stops the diagnostics above from this browser and from the Tau desktop app. Until the next telemetry release, three things are still sent whatever this switch says: the status and duration of each kernel operation (sent whether or not you are signed in, and kept only for signed-in sessions), the outcome of each project sync, and how the agent is used when your account preference allows it. That release brings all three under this switch. Not governed by this switch: error reports (crash and error details, with personal data minimised, sent so that failures can be fixed) and product analytics, which follows your Cookie preferences. The Tau command line, MCP server and self-hosted server have their own setting (`tau telemetry off`).',
+    /** True to the switch's current reach: three legacy producers still ignore it. */
+    caveat:
+      'For now, kernel operation timings, project sync outcomes and agent usage may still be sent while this is off.',
   },
-  afterActivation: {
-    description:
-      'Sends counts about how Tau runs on this device: which kernels run, how long operations take, how often they fail, memory, parameter counts and export formats, project sync outcomes, plus how the agent is used. Never prompts, code, parameter values, file names or geometry. When you are signed in, batches are rate-limited per account and not stored against it; signed out, nothing identifies you. Turning this off stops all of these from this browser and from the Tau desktop app, including project sync outcomes and agent usage. Not governed by this switch: error reports (crash and error details, with personal data minimised, sent so that failures can be fixed) and product analytics, which follows your Cookie preferences. The Tau command line, MCP server and self-hosted server have their own setting (`tau telemetry off`).',
-  },
+  afterActivation: { caveat: undefined },
+  forcedOff: 'Off because your browser sends Global Privacy Control or you declined analytics cookies',
   keywords: ['telemetry', 'usage', 'metrics', 'diagnostics', 'privacy'],
 } as const;
 
@@ -54,7 +62,8 @@ export type TelemetrySwitch = Readonly<{
   /** The resolved consent the switch displays. */
   consent: ReportingConsent;
   onCheckedChange: (next: boolean) => void;
-  description: string;
+  /** The details the info glyph shows, the current caveat included. */
+  details: readonly string[];
 }>;
 
 /**
@@ -81,6 +90,7 @@ export function useTelemetrySwitch(): TelemetrySwitch {
     pageTelemetry()?.onConsentInputsChanged({ updatePending: isUpdating, observed: { server, device, analytics } });
   }, [server, device, analytics, isUpdating]);
 
+  const caveat: string | undefined = telemetryCopy[telemetryCopyPhase].caveat;
   const consent = resolveTelemetryConsent({ globalPrivacyControl, analytics, device, server });
   return {
     checked: consent === 'granted',
@@ -93,6 +103,6 @@ export function useTelemetrySwitch(): TelemetrySwitch {
         updatePreferences({ allowsUsageMetrics: next });
       }
     },
-    description: telemetryCopy[telemetryCopyPhase].description,
+    details: caveat === undefined ? telemetryCopy.details : [...telemetryCopy.details, caveat],
   };
 }

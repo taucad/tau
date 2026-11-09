@@ -41,6 +41,24 @@ const createLogSurfaceDepth = (previous?: AuthoredDepth): Node<'float'> =>
     return min(1, geometric.add(min(webGlDepthClamp, slope.mul(nodeSlopeScale).add(webGlDepthStep))));
   })();
 
+/**
+ * Logarithmic depth for an overlay that must stay behind a coplanar biased surface, such as the
+ * ground grid under a face on its plane. On a shared plane both see the same depth gradient, so
+ * one more pixel of slope and twice the constant and clamp always land past the surface's bias.
+ * @param viewZ - Negative view-space depth of the overlay fragment.
+ * @returns Depth in the convention of {@link logarithmicGeometryDepth}.
+ */
+export const logarithmicDepthBehindGltfSurface = (viewZ: Node<'float'>): Node<'float'> =>
+  // oxlint-disable-next-line new-cap -- Three TSL function factory.
+  Fn(() => {
+    const geometric = logarithmicGeometryDepth(viewZ).toVar();
+    // @types/three r184 omits the scalar overload supported by TSL/GLSL.
+    const derivativeX = dFdx as unknown as (value: Node<'float'>) => Node<'float'>;
+    const derivativeY = dFdy as unknown as (value: Node<'float'>) => Node<'float'>;
+    const slope = vec2(derivativeX(geometric), derivativeY(geometric)).length();
+    return min(1, geometric.add(min(webGlDepthClamp * 2, slope.mul(nodeSlopeScale.add(1)).add(webGlDepthStep * 2))));
+  })();
+
 // Equivalent surfaces must share the same executable depth identity to remain batchable.
 // Weak keys preserve authored-node lifetime without a permanent material cache.
 const biasedDepthNodes = new WeakMap<Node, Node<'float'>>();

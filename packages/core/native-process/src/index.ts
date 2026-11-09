@@ -26,6 +26,7 @@ export { runInNativeSandbox } from '#native-command.js';
 export type { NativeSandboxCommand, NativeSandboxCommandResult } from '#native-command.js';
 export {
   launchInNativeSandbox,
+  nativeSandboxBwrapVariable,
   nativeSandboxPolicy,
   NativeRuntimeUnavailableError,
   spawnInNativeSandbox,

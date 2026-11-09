@@ -284,6 +284,100 @@ class GeometryTest(unittest.TestCase):
         arrays = worker._edge_arrays([(4, numpy.array([(0, 0, 0), (1, 0, 0), (1, 1, 0)]))])
         self.assertEqual(arrays["edgeGroups"], [{"start": 0, "count": 12, "edgeId": 4}])
 
+    def test_edge_polylines_follow_the_face_mesh(self) -> None:
+        # A spline-toothed wheel on a boss: curved edges whose own samples cut across the faceted surface.
+        teeth = [(20 if i % 4 < 2 else 17) for i in range(72)]
+        outline = [(r * math.cos(2 * math.pi * i / 72), r * math.sin(2 * math.pi * i / 72), 0) for i, r in enumerate(teeth)]
+        from smlibpy._kernel import ext
+
+        wheel = smlibpy.fuse(smlibpy.extrude(smlibpy.make_face(smlibpy.Spline(*outline, outline[0])), 6), Cylinder(6, 14))
+        for tolerance in (0.2, 0.02):
+            surface = worker._surface(wheel, tolerance, 20)
+            faces = worker._face_arrays(surface[0], surface[1])
+            owner = numpy.zeros(len(faces["triangles"]) // 3, dtype=numpy.int64)
+            for group in faces["faceGroups"]:
+                owner[group["start"] // 3 : (group["start"] + group["count"]) // 3] = group["faceId"]
+            sides: dict[tuple[Any, ...], set[int]] = {}
+            vertices = [tuple(vertex) for vertex in faces["vertices"].tolist()]
+            for triangle, corners in enumerate(faces["triangles"].reshape(-1, 3).tolist()):
+                for a, b in ((0, 1), (1, 2), (2, 0)):
+                    sides.setdefault(tuple(sorted((vertices[corners[a]], vertices[corners[b]]))), set()).add(int(owner[triangle]))
+            boundary = {segment for segment, owners in sides.items() if len(owners) > 1}
+            polylines = worker._edge_polylines(wheel, 20, surface, tolerance)
+            seams = set(ext.seam_edges(wheel._brep))
+            self.assertEqual({index for index, _ in polylines}, set(range(len(wheel.edges(seams=True)))) - seams)
+            drawn = {
+                tuple(sorted((tuple(a), tuple(b))))
+                for _, line in polylines
+                for a, b in zip(line[:-1].tolist(), line[1:].tolist())
+            }
+            self.assertEqual(drawn, boundary, "every edge segment is a face mesh boundary segment, and every one is drawn")
+            self.assertGreater(len(drawn), len(wheel.edges()) * 20)
+
+    def test_edge_polylines_fall_back_to_the_kernel_samples(self) -> None:
+        from smlibpy._kernel import k
+
+        box = Box(1, 1, 1)
+        kernel = worker._edge_polylines(box, 15)
+        self.assertEqual(len(kernel), 12)
+        # A body the mesh pass cannot measure against keeps the kernel's own samples of every edge.
+        with patch.object(worker, "_mesh_boundary_polylines", side_effect=RuntimeError("no distance")):
+            fallback = worker._edge_polylines(box, 15, worker._surface(box, 0.1, 15), 0.1)
+        self.assertEqual([index for index, _ in fallback], [index for index, _ in kernel])
+        # An edge the kernel samples at a single point draws nothing.
+        flat, counts, rest = k.tessellate_boundaries(box._brep, angle_tolerance_deg=15)
+        points = numpy.vstack([numpy.asarray(flat, dtype=numpy.float64).reshape(-1, 3), numpy.zeros((1, 3))])
+        degenerate = (points, list(counts) + [1], rest)
+        with patch.object(k, "tessellate_boundaries", return_value=degenerate):
+            self.assertEqual(len(worker._edge_polylines(box, 15)), 12)
+
+    def test_vertex_locator(self) -> None:
+        find = worker._vertex_locator([(0.0, 0.0, 0.0), (0.5, 0.0, 0.0)], 1.0)
+        self.assertEqual(find((0.1, 0.0, 0.0)), 0)
+        self.assertEqual(find((0.4, 0.0, 0.0)), 1)
+        self.assertEqual(find((0.9, 0.9, 0.9)), -1, "a vertex in a neighbouring cell but beyond reach is not found")
+
+    def test_mesh_boundary_polylines_assignment(self) -> None:
+        def edge(distance: Any) -> Any:
+            return types.SimpleNamespace(distance_to=distance)
+
+        def vertex(x: float, y: float, z: float) -> Any:
+            return types.SimpleNamespace(x=x, y=y, z=z)
+
+        triangle = types.SimpleNamespace(vertices=[(0, 0, 0), (1, 0, 0), (0, 1, 0)], triangles=[(0, 1, 2)])
+        empty = types.SimpleNamespace(vertices=[], triangles=numpy.zeros((0, 3)))
+        self.assertEqual(worker._mesh_boundary_polylines(empty, None, [edge(lambda _: 0)], [], [], 0.1), {})
+        self.assertEqual(worker._mesh_boundary_polylines(triangle, None, [], [], [], 0.1), {})
+
+        # No B-rep vertex on the border: one closed loop, given to the edge nearest its middle point.
+        loop = worker._mesh_boundary_polylines(
+            triangle, None, [edge(lambda _: 0.0)], [], [numpy.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], dtype=float)], 0.1
+        )
+        self.assertEqual(list(loop), [0])
+        self.assertEqual(len(loop[0][0]), 4)
+
+        # Every corner a vertex: three one-segment chains.
+        bottom = numpy.array([(0, 0, 0), (1, 0, 0)], dtype=float)
+        edges = [
+            edge(lambda _: 5.0),  # joins vertices 0 and 1 but lies far from the chain
+            edge(lambda probe: 0.0 if probe[1] == 0 else 5.0),  # joins vertices 0 and 1 too, along the chain
+            edge(lambda _: 5.0),  # the only edge joining vertices 1 and 2
+            edge(lambda _: 0.0),  # no samples
+            edge(lambda _: 0.0),  # samples whose ends are not vertices, far from the triangle
+        ]
+        samples = [
+            bottom,
+            bottom,
+            numpy.array([(1, 0, 0), (0, 1, 0)], dtype=float),
+            numpy.zeros((0, 3)),
+            numpy.array([(0.5, 0.5, 9), (0.6, 0.6, 9)], dtype=float),
+        ]
+        vertices = [vertex(0, 0, 0), vertex(1, 0, 0), vertex(0, 1, 0), vertex(50, 0, 0), vertex(0, 0, 7)]
+        result = worker._mesh_boundary_polylines(triangle, None, edges, vertices, samples, 0.1)
+        self.assertEqual(sorted(result), [1, 2], "the chain from vertex 0 to 2 is near no edge, so it is left out")
+        numpy.testing.assert_array_equal(result[1][0], bottom)
+        numpy.testing.assert_array_equal(sorted(result[2][0].tolist()), sorted(samples[2].tolist()))
+
     def test_bundle_pads_slices(self) -> None:
         bundle = worker._Bundle()
         self.assertEqual(bundle.add(b"abc"), [0, 3])
@@ -319,11 +413,12 @@ class WorkerTest(unittest.TestCase):
             self.assertNotIn("compute", built)
             handle = built["handleId"]
             self.assertGreater(space.dispatch("measure", {"handleId": handle})["diagonal"], 10)
-            refused = space.dispatch(
+            # No triangle budget: a request carrying the retired maxTriangles still writes the bundle.
+            unbudgeted = space.dispatch(
                 "mesh", {"handleId": handle, "linearTolerance": 0.1, "angularTolerance": 15, "maxTriangles": 1}
             )
-            self.assertNotIn("artifactPath", refused)
-            self.assertGreater(refused["triangles"], 1)
+            self.assertIn("artifactPath", unbudgeted)
+            self.assertGreater(unbudgeted["triangles"], 1)
             meshed = space.dispatch("mesh", {"handleId": handle, "linearTolerance": 0.1, "angularTolerance": 15})
             header, body = read_bundle(Path(meshed["artifactPath"]))
             self.assertEqual(len(body) + len(json.dumps(header)) > 0, True)

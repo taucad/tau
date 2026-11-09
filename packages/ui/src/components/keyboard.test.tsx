@@ -188,3 +188,21 @@ it('suppresses app shortcuts inside a dialog, except those a sidebar dialog allo
   fireEvent.keyDown(inSidebar, { key: 'b' });
   expect(onB).toHaveBeenCalledOnce();
 });
+
+it('suppresses app shortcuts inside any element named by a shortcut scope, dialog or not', () => {
+  const onB = vi.fn();
+  render(
+    <KeyboardProvider>
+      <AllowedBinding onKey={onB} />
+      <div data-shortcut-scope='image-carousel'>
+        <button type='button'>Next image</button>
+      </div>
+      <button type='button'>On the page</button>
+    </KeyboardProvider>,
+  );
+
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Next image' }), { key: 'b' });
+  expect(onB).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole('button', { name: 'On the page' }), { key: 'b' });
+  expect(onB).toHaveBeenCalledOnce();
+});

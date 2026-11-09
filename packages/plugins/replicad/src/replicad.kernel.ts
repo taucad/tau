@@ -59,18 +59,15 @@ import {
   resolveOcctModuleFactory,
   wrapOcWithTracing,
   wrapOcForExceptions,
-  createTessellationBudgetExceededIssue,
   occtExplicitTessellationDefaults,
-  occtTriangleBudgets,
 } from '@taucad/occt-core';
-import type { OcctModuleFactory, OcctResolvedTessellation, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
 
 import {
-  countMesh,
   isDrawingShape,
   normalizeRenderShapes,
   render,
-  renderWithinBudget,
+  renderTessellated,
   resolveReplicadTessellation,
 } from '#utils/render-output.js';
 import * as tauReplicadAnnotations from '#annotations/index.js';
@@ -300,8 +297,6 @@ type ReplicadContext = {
   occt: RealmHold<OpenCascadeInstance>;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
-  /** Triangles a preview may carry before it is coarsened. */
-  previewTriangleBudget: number;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
   exportNameMap: Map<string, string>;
@@ -492,13 +487,6 @@ export type ReplicadOptions = {
    * @default true
    */
   tessellationInstancing?: boolean;
-  /**
-   * Triangles a preview may carry before it is coarsened one step at a time (and a `TESSELLATION_DOWNGRADED`
-   * warning reported). A host on a memory-constrained device passes a smaller budget.
-   *
-   * @default occtTriangleBudgets.preview (2,000,000)
-   */
-  previewTriangleBudget?: number;
   /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
   withSourceMapping?: boolean;
 };
@@ -520,7 +508,7 @@ export const replicadKernel = defineKernel({
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
   // snapshots from 1.4.0 stop matching and age out; there is nothing to migrate.
-  version: '1.5.0',
+  version: '1.6.0',
   optionsSchema: replicadOptionsSchema,
   views: {
     model: {
@@ -562,7 +550,6 @@ export const replicadKernel = defineKernel({
       libraryTracing,
       withSourceMapping,
       tessellationInstancing,
-      previewTriangleBudget,
       wasm,
       computeReuse: computeReuseOption,
     } = options;
@@ -713,7 +700,6 @@ export const replicadKernel = defineKernel({
         occt,
         replicadLibrary,
         tessellationInstancing,
-        previewTriangleBudget,
         replicadInitialised: true,
         librarySourceMapCache,
         exportNameMap,
@@ -948,9 +934,8 @@ export const replicadKernel = defineKernel({
       }));
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
-      // The render hook cannot tell a viewer preview from a capture, so every render takes the
-      // preview budget.
-      const budgeted = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
+      // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+      const rendered = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         const renderOutputSpan = tracer.startSpan('replicad.render-output', {
           phase: 'computingGeometry',
           stage: 'render-output',
@@ -959,9 +944,8 @@ export const replicadKernel = defineKernel({
           return context.libraryTrace.runInScope({
             scope: 'render-output',
             operation: () =>
-              renderWithinBudget(namedShapes, {
+              renderTessellated(namedShapes, {
                 request: { tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-                budget: context.previewTriangleBudget,
                 collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
@@ -972,11 +956,13 @@ export const replicadKernel = defineKernel({
               }),
           });
         } finally {
+          // Render's OC calls get their own `oc.summary`, not the next evaluation's.
+          context.tracingSummary?.flush();
           renderOutputSpan.end({ renderMode });
         }
       });
 
-      const renderedShapes = budgeted.geometries;
+      const renderedShapes = rendered.geometries;
       const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.format === 'replicad');
       if (shapes3d.length === 0) {
         runtime.logger.warn('meshGeometry returning empty: render-output-filtered-empty', {
@@ -1019,8 +1005,8 @@ export const replicadKernel = defineKernel({
       });
       return {
         content: gltfBlob,
-        tessellation: budgeted.tessellation,
-        issues: [...budgeted.issues, ...mechanismIssues],
+        tessellation: rendered.tessellation,
+        issues: mechanismIssues,
       };
     } catch (error) {
       const issue = formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, {}));
@@ -1029,204 +1015,205 @@ export const replicadKernel = defineKernel({
   },
 
   async export(input, runtime, context) {
-    return context.libraryTrace.runInScope({
-      scope: 'export',
-      operation: async () => {
-        const { exportId, handle } = input;
-        const { shapes: entries, mechanism } = handle;
-        const emptyGltfExport = (format: 'glb' | 'gltf') => ({
-          files: [
-            createExportFile(
-              format,
-              format === 'glb' ? 'model.glb' : 'model.gltf',
-              asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
-            ),
-          ] as const,
-        });
-        const noGeometryExportError = (): never => {
-          throw new ReplicadBuildError([
-            { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
-          ]);
-        };
-        const stepExportError = (error: unknown): never => {
-          throw new ReplicadBuildError([
-            {
-              message: error instanceof Error ? error.message : String(error),
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ]);
-        };
-
-        switch (exportId) {
-          case 'glb':
-          case 'gltf': {
-            const { options, content } = input;
-            if (entries.length === 0) {
-              return emptyGltfExport(exportId);
-            }
-
-            const { coordinateSystem, unit } = options;
-            const namedShapes = entries.map((shapeConfig, index) => ({
-              ...shapeConfig,
-              name: resolveShapeName({
-                index,
-                name: shapeConfig.name,
-                source: 'generated',
-              }),
-            }));
-            const requested = resolveReplicadTessellation(namedShapes, {
-              tessellation: options.tessellation,
-              explicitDefaults: occtExplicitTessellationDefaults.export,
-            });
-            const { linearTolerance, angularTolerance } = requested;
-            const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
-              render(namedShapes, {
-                tessellation: { linearTolerance, angularTolerance },
-                collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
-                openCascade: context.openCascade,
-                tessellationInstancing: context.tessellationInstancing,
-                tracer: runtime.tracer,
-              }),
-            );
-            assertWithinExportBudget(requested, countMesh(renderedShapes).triangles);
-            const temporaryShapes = renderedShapes.filter(
-              (shape): shape is GeometryReplicad => shape.format === 'replicad',
-            );
-
-            if (temporaryShapes.length === 0) {
-              return emptyGltfExport(exportId);
-            }
-
-            let mechanismIssues: KernelIssue[] = [];
-            const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
-              convertReplicadGeometriesToGltf({
-                images: handle.images,
-                textures: handle.textures,
-                samplers: handle.samplers,
-                geometries:
-                  content?.includeEdges === true
-                    ? temporaryShapes
-                    : temporaryShapes.map((geometry) => ({
-                        ...geometry,
-                        edges: { ...geometry.edges, lines: new Float32Array(0) },
-                      })),
-                format: exportId,
-                includeTauTopology: content?.includeTopology === true,
-                logger: runtime.logger,
-                coordinateSystem,
-                unit,
-                mechanism,
-                onMechanismIssues(issues) {
-                  mechanismIssues = issues;
-                },
-              }),
-            );
-            return {
-              files: [
-                createExportFile(exportId, exportId === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
-              ] as const,
-              issues: mechanismIssues,
-            };
-          }
-
-          case 'step': {
-            const { options } = input;
-            if (entries.length === 0) {
-              return noGeometryExportError();
-            }
-
-            const { coordinateSystem } = options;
-
-            // A drawing-only model is offered STEP only when every drawing bounds closed profiles (`offersFor`);
-            // it writes those region faces, sketched on XY at Z = 0, in place of the drawings.
-            const drawingOnly = entries.every(({ shape }) => isDrawingShape(shape));
-            let faced: NativeHandleEntry[] | undefined;
-            let rotated: NativeHandleEntry[] | undefined;
-            let stepBlob: Blob;
-            try {
-              if (drawingOnly) {
-                // Built one entry at a time so `finally` deletes the faces made before a later drawing throws.
-                faced = [];
-                for (const entry of entries) {
-                  faced.push({ ...entry, shape: drawingFaces(entry.shape) });
-                }
-              }
-              const source = faced ?? entries;
-              // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
-              // model in the OCCT heap until a finalizer runs.
-              rotated = coordinateSystem === 'y-up' ? source.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
-              stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
-                exportSTEP(context.openCascade, rotated ?? source, {
-                  phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
-                }),
-              );
-            } catch (error) {
-              return stepExportError(error);
-            } finally {
-              deleteExportCopies(rotated);
-              deleteExportCopies(faced);
-            }
-            const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
-            return { files: [createExportFile('step', 'assembly', stepBytes)] as const };
-          }
-
-          case 'stl': {
-            const { options } = input;
-            if (entries.length === 0) {
-              return noGeometryExportError();
-            }
-
-            const requested = resolveReplicadTessellation(entries, {
-              tessellation: options.tessellation,
-              explicitDefaults: occtExplicitTessellationDefaults.export,
-            });
-            const { linearTolerance, angularTolerance } = requested;
-            const angularToleranceRad = angularTolerance * (Math.PI / 180);
-            const { coordinateSystem } = options;
-
-            const rotated =
-              coordinateSystem === 'y-up'
-                ? entries.map((s) => ({
-                    ...s,
-                    shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
-                  }))
-                : undefined;
-
-            const result = await Promise.all(
-              (rotated ?? entries).map(async ({ shape, name }, index) => {
-                const bytes = await buildExportBytes(shape, {
-                  tolerance: linearTolerance,
-                  angularTolerance: angularToleranceRad,
-                  binary: options.binary,
-                });
-                return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
-              }),
-            ).finally(() => {
-              deleteExportCopies(rotated);
-            });
-            assertWithinExportBudget(
-              requested,
-              result.reduce((total, file) => total + countStlTriangles(file.bytes, options.binary), 0),
-            );
-            return { files: nonemptyExportFiles(result) };
-          }
-
-          default: {
-            const _exhaustive: never = exportId;
+    try {
+      return await context.libraryTrace.runInScope({
+        scope: 'export',
+        operation: async () => {
+          const { exportId, handle } = input;
+          const { shapes: entries, mechanism } = handle;
+          const emptyGltfExport = (format: 'glb' | 'gltf') => ({
+            files: [
+              createExportFile(
+                format,
+                format === 'glb' ? 'model.glb' : 'model.gltf',
+                asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
+              ),
+            ] as const,
+          });
+          const noGeometryExportError = (): never => {
+            throw new ReplicadBuildError([
+              { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+            ]);
+          };
+          const stepExportError = (error: unknown): never => {
             throw new ReplicadBuildError([
               {
-                message: `Unsupported export format: ${String(_exhaustive)}`,
-                code: 'KERNEL_CAPABILITY_MISSING',
+                message: error instanceof Error ? error.message : String(error),
+                code: 'RUNTIME',
                 type: 'runtime',
                 severity: 'error',
               },
             ]);
+          };
+
+          switch (exportId) {
+            case 'glb':
+            case 'gltf': {
+              const { options, content } = input;
+              if (entries.length === 0) {
+                return emptyGltfExport(exportId);
+              }
+
+              const { coordinateSystem, unit } = options;
+              const namedShapes = entries.map((shapeConfig, index) => ({
+                ...shapeConfig,
+                name: resolveShapeName({
+                  index,
+                  name: shapeConfig.name,
+                  source: 'generated',
+                }),
+              }));
+              const requested = resolveReplicadTessellation(namedShapes, {
+                tessellation: options.tessellation,
+                explicitDefaults: occtExplicitTessellationDefaults.export,
+              });
+              const { linearTolerance, angularTolerance } = requested;
+              const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
+                render(namedShapes, {
+                  tessellation: { linearTolerance, angularTolerance },
+                  collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
+                  openCascade: context.openCascade,
+                  tessellationInstancing: context.tessellationInstancing,
+                  tracer: runtime.tracer,
+                }),
+              );
+              const temporaryShapes = renderedShapes.filter(
+                (shape): shape is GeometryReplicad => shape.format === 'replicad',
+              );
+
+              if (temporaryShapes.length === 0) {
+                return emptyGltfExport(exportId);
+              }
+
+              let mechanismIssues: KernelIssue[] = [];
+              const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
+                convertReplicadGeometriesToGltf({
+                  images: handle.images,
+                  textures: handle.textures,
+                  samplers: handle.samplers,
+                  geometries:
+                    content?.includeEdges === true
+                      ? temporaryShapes
+                      : temporaryShapes.map((geometry) => ({
+                          ...geometry,
+                          edges: { ...geometry.edges, lines: new Float32Array(0) },
+                        })),
+                  format: exportId,
+                  includeTauTopology: content?.includeTopology === true,
+                  logger: runtime.logger,
+                  coordinateSystem,
+                  unit,
+                  mechanism,
+                  onMechanismIssues(issues) {
+                    mechanismIssues = issues;
+                  },
+                }),
+              );
+              return {
+                files: [
+                  createExportFile(exportId, exportId === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
+                ] as const,
+                issues: mechanismIssues,
+              };
+            }
+
+            case 'step': {
+              const { options } = input;
+              if (entries.length === 0) {
+                return noGeometryExportError();
+              }
+
+              const { coordinateSystem } = options;
+
+              // A drawing-only model is offered STEP only when every drawing bounds closed profiles (`offersFor`);
+              // it writes those region faces, sketched on XY at Z = 0, in place of the drawings.
+              const drawingOnly = entries.every(({ shape }) => isDrawingShape(shape));
+              let faced: NativeHandleEntry[] | undefined;
+              let rotated: NativeHandleEntry[] | undefined;
+              let stepBlob: Blob;
+              try {
+                if (drawingOnly) {
+                  // Built one entry at a time so `finally` deletes the faces made before a later drawing throws.
+                  faced = [];
+                  for (const entry of entries) {
+                    faced.push({ ...entry, shape: drawingFaces(entry.shape) });
+                  }
+                }
+                const source = faced ?? entries;
+                // D-RT-20: the y-up copies are this export's own; delete them rather than leave a second B-rep of the
+                // model in the OCCT heap until a finalizer runs.
+                rotated =
+                  coordinateSystem === 'y-up' ? source.map((entry) => rotateNativeEntryToYup(entry)) : undefined;
+                stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
+                  exportSTEP(context.openCascade, rotated ?? source, {
+                    phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
+                  }),
+                );
+              } catch (error) {
+                return stepExportError(error);
+              } finally {
+                deleteExportCopies(rotated);
+                deleteExportCopies(faced);
+              }
+              const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
+              return { files: [createExportFile('step', 'assembly', stepBytes)] as const };
+            }
+
+            case 'stl': {
+              const { options } = input;
+              if (entries.length === 0) {
+                return noGeometryExportError();
+              }
+
+              const requested = resolveReplicadTessellation(entries, {
+                tessellation: options.tessellation,
+                explicitDefaults: occtExplicitTessellationDefaults.export,
+              });
+              const { linearTolerance, angularTolerance } = requested;
+              const angularToleranceRad = angularTolerance * (Math.PI / 180);
+              const { coordinateSystem } = options;
+
+              const rotated =
+                coordinateSystem === 'y-up'
+                  ? entries.map((s) => ({
+                      ...s,
+                      shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
+                    }))
+                  : undefined;
+
+              const result = await Promise.all(
+                (rotated ?? entries).map(async ({ shape, name }, index) => {
+                  const bytes = await buildExportBytes(shape, {
+                    tolerance: linearTolerance,
+                    angularTolerance: angularToleranceRad,
+                    binary: options.binary,
+                  });
+                  return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
+                }),
+              ).finally(() => {
+                deleteExportCopies(rotated);
+              });
+              return { files: nonemptyExportFiles(result) };
+            }
+
+            default: {
+              const _exhaustive: never = exportId;
+              throw new ReplicadBuildError([
+                {
+                  message: `Unsupported export format: ${String(_exhaustive)}`,
+                  code: 'KERNEL_CAPABILITY_MISSING',
+                  type: 'runtime',
+                  severity: 'error',
+                },
+              ]);
+            }
           }
-        }
-      },
-    });
+        },
+      });
+    } finally {
+      // Export's OC calls get their own `oc.summary`, not the next evaluation's.
+      context.tracingSummary?.flush();
+    }
   },
 
   serializeHandle({ handle }, runtime, context) {
@@ -1389,37 +1376,6 @@ async function buildExportBytes(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());
-}
-
-const binaryStlHeaderBytes = 80;
-
-/**
- * Triangles in an STL file: the binary header count, or the ASCII facet count.
- * @param bytes - STL file bytes.
- * @param binary - Whether the file is binary STL.
- * @returns The triangle count.
- */
-function countStlTriangles(bytes: Uint8Array<ArrayBuffer>, binary: boolean): number {
-  if (!binary) {
-    return new TextDecoder().decode(bytes).match(/^\s*facet\b/gm)?.length ?? 0;
-  }
-  return bytes.byteLength < binaryStlHeaderBytes + 4
-    ? 0
-    : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(binaryStlHeaderBytes, true);
-}
-
-/**
- * Exports refuse instead of coarsening: an over-budget mesh fails with a suggested tessellation.
- * @param requested - The resolved request the export meshed with.
- * @param triangles - Triangles the export produced.
- */
-function assertWithinExportBudget(requested: OcctResolvedTessellation, triangles: number): void {
-  const budget = occtTriangleBudgets.export;
-  if (triangles > budget) {
-    throw new ReplicadBuildError([
-      createTessellationBudgetExceededIssue({ producer: 'replicad', requested, triangles, budget }),
-    ]);
-  }
 }
 
 class ReplicadBuildError extends Error {

@@ -7,13 +7,21 @@ import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
-import { sandboxRuntimeJavaAgent, sandboxRuntimeSeccomp } from '#native-sandbox.js';
+import {
+  nativeSandboxBwrap,
+  nativeSandboxBwrapVariable,
+  sandboxRuntimeJavaAgent,
+  sandboxRuntimeSeccomp,
+} from '#native-sandbox.js';
 
 /** A fresh module registry per file keeps the launcher's one-time initialization observable. */
 const sandbox = vi.hoisted(() => ({
   supported: true,
   dependencyErrors: [] as string[],
+  /* Every dependency check reads `dependencyErrors` unless a test queues its own answer. */
+  dependencyCheck: vi.fn((): string[] => sandbox.dependencyErrors),
   initialize: vi.fn(async () => undefined),
+  reset: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
   /* What the double's wrapped command looks like; `undefined` is the runtime's own shape for this platform. */
@@ -26,8 +34,9 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
   SandboxManager: {
     isSupportedPlatform: () => sandbox.supported,
-    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyErrors, warnings: [] }),
+    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyCheck(), warnings: [] }),
     initialize: sandbox.initialize,
+    reset: sandbox.reset,
     wrapWithSandboxArgv: async (command: string, ...rest: unknown[]) => {
       sandbox.wrap(command, ...rest);
       if (sandbox.wrapFailure !== undefined) {
@@ -61,7 +70,11 @@ afterEach(() => {
   sandbox.wrapFailure = undefined;
   sandbox.wrapped = undefined;
   sandbox.wrap.mockClear();
+  sandbox.reset.mockClear();
+  sandbox.dependencyCheck.mockClear();
+  vi.useRealTimers();
   Object.defineProperty(process, 'platform', platformDescriptor);
+  vi.unstubAllEnvs();
 });
 
 describe('launchInNativeSandbox', () => {
@@ -147,6 +160,96 @@ describe('launchInNativeSandbox', () => {
   });
 });
 
+describe('a Linux network bridge that starts too slowly', () => {
+  const bridgeFailure = (): Error => new Error('Failed to create bridge sockets after 5 attempts');
+  /* A fresh module per case, so the launcher's process-wide initialization starts from nothing. */
+  const freshLauncher = async (): Promise<typeof launchInNativeSandbox> => {
+    vi.resetModules();
+    const fresh = await import('#native-sandbox.js');
+    return fresh.launchInNativeSandbox;
+  };
+
+  it('should reset the runtime and start it again, so the first launch still succeeds', async () => {
+    vi.useFakeTimers();
+    sandbox.initialize.mockClear();
+    sandbox.initialize.mockRejectedValueOnce(bridgeFailure()).mockRejectedValueOnce(bridgeFailure());
+    const launchFresh = await freshLauncher();
+
+    const launched = launchFresh(launch);
+    await vi.runAllTimersAsync();
+
+    await expect(launched).resolves.toBeDefined();
+    expect(sandbox.initialize).toHaveBeenCalledTimes(3);
+    expect(sandbox.reset).toHaveBeenCalledTimes(2);
+    // Each reset finished before the next start began.
+    for (const [index, order] of sandbox.reset.mock.invocationCallOrder.entries()) {
+      expect(order).toBeGreaterThan(sandbox.initialize.mock.invocationCallOrder[index]!);
+      expect(order).toBeLessThan(sandbox.initialize.mock.invocationCallOrder[index + 1]!);
+    }
+  });
+
+  it('should give up after a bounded number of starts, and let a later launch try again', async () => {
+    vi.useFakeTimers();
+    sandbox.initialize.mockClear();
+    sandbox.initialize
+      .mockRejectedValueOnce(bridgeFailure())
+      .mockRejectedValueOnce(bridgeFailure())
+      .mockRejectedValueOnce(bridgeFailure());
+    const launchFresh = await freshLauncher();
+
+    const failed = expect(launchFresh(launch)).rejects.toThrow(
+      /sandbox could not start: Failed to create bridge sockets after 5 attempts/,
+    );
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(sandbox.initialize).toHaveBeenCalledTimes(3);
+
+    await expect(launchFresh(launch)).resolves.toBeDefined();
+    expect(sandbox.initialize).toHaveBeenCalledTimes(4);
+  });
+
+  it('should not retry a failure that is not the bridge', async () => {
+    sandbox.initialize.mockClear();
+    sandbox.initialize.mockRejectedValueOnce(new Error('proxy bind failed'));
+    const launchFresh = await freshLauncher();
+
+    await expect(launchFresh(launch)).rejects.toThrow(/proxy bind failed/);
+    expect(sandbox.initialize).toHaveBeenCalledOnce();
+    expect(sandbox.reset).not.toHaveBeenCalled();
+  });
+});
+
+describe('a sandbox prerequisite that is slow to find', () => {
+  const freshLauncher = async (): Promise<typeof launchInNativeSandbox> => {
+    vi.resetModules();
+    const fresh = await import('#native-sandbox.js');
+    return fresh.launchInNativeSandbox;
+  };
+
+  it('should check again before reporting it missing, so a slow lookup does not fail the launch', async () => {
+    vi.useFakeTimers();
+    sandbox.dependencyCheck.mockReturnValueOnce(['ripgrep (rg) not found']);
+    const launchFresh = await freshLauncher();
+
+    const launched = launchFresh(launch);
+    await vi.runAllTimersAsync();
+
+    await expect(launched).resolves.toBeDefined();
+    expect(sandbox.dependencyCheck).toHaveBeenCalledTimes(2);
+  });
+
+  it('should report a prerequisite missing on every check, after a bounded number of checks', async () => {
+    vi.useFakeTimers();
+    sandbox.dependencyErrors = ['ripgrep (rg) not found'];
+    const launchFresh = await freshLauncher();
+
+    const failed = expect(launchFresh(launch)).rejects.toThrow(/sandbox could not start: ripgrep \(rg\) not found$/);
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(sandbox.dependencyCheck).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe('the link refusal every launch carries', () => {
   const asPlatform = (platform: NodeJS.Platform): void => {
     Object.defineProperty(process, 'platform', { ...platformDescriptor, value: platform });
@@ -160,6 +263,25 @@ describe('the link refusal every launch carries', () => {
     expect(wrapped).toMatch(/^bwrap --seccomp 3 --unshare-net -- \/bin\/sh -c '/u);
 
     sandbox.wrapped = (command) => `/usr/local/bin/bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    await expect(launchInNativeSandbox(launch)).rejects.toThrow(
+      /the sandbox runtime did not start bwrap, so links cannot be refused/u,
+    );
+  });
+
+  it('should start the bubblewrap the environment names on Linux, and refuse a vector that starts any other', async () => {
+    // Stock Ubuntu 26.04 strips the nested-userns capabilities `apply-seccomp` needs from `/usr/bin/bwrap`, so a
+    // packaged app runs every worker through its own AppArmor-profiled copy (qualification 41865985263 ubuntu2604-*).
+    asPlatform('linux');
+    const owned = '/opt/tau-staging/sandbox/bwrap';
+    vi.stubEnv(nativeSandboxBwrapVariable, owned);
+    sandbox.wrapped = (command) => `${owned} --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    const vector = await launchInNativeSandbox(launch);
+    const wrapped = vector.at(2);
+    expect(wrapped).toMatch(/^\/opt\/tau-staging\/sandbox\/bwrap --seccomp 3 --unshare-net -- \/bin\/sh -c '/u);
+    const policy = sandbox.wrap.mock.calls.at(-1)![2] as { bwrapPath?: string };
+    expect(policy.bwrapPath).toBe(owned);
+
+    sandbox.wrapped = (command) => `bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
     await expect(launchInNativeSandbox(launch)).rejects.toThrow(
       /the sandbox runtime did not start bwrap, so links cannot be refused/u,
     );
@@ -179,6 +301,29 @@ describe('the link refusal every launch carries', () => {
 
     sandbox.wrapped = (command) => `/bin/sh -c ${shellQuote(command)}`;
     await expect(launchInNativeSandbox(launch)).rejects.toThrow(/did not pass one Seatbelt profile/u);
+  });
+});
+
+describe('nativeSandboxBwrap', () => {
+  it('should name the configured bubblewrap on Linux only, and refuse a path it cannot splice unquoted', () => {
+    const owned = { [nativeSandboxBwrapVariable]: '/opt/tau-staging-appimage/sandbox/bwrap' };
+    expect(nativeSandboxBwrap(owned, 'linux')).toBe('/opt/tau-staging-appimage/sandbox/bwrap');
+    expect(nativeSandboxBwrap(owned, 'darwin')).toBeUndefined();
+    expect(nativeSandboxBwrap({}, 'linux')).toBeUndefined();
+    expect(nativeSandboxBwrap({ [nativeSandboxBwrapVariable]: '' }, 'linux')).toBeUndefined();
+    for (const path of ['bwrap', '/opt/x y/bwrap', '/opt/$(id)/bwrap', '/opt/../usr/bin/bwrap']) {
+      expect(() => nativeSandboxBwrap({ [nativeSandboxBwrapVariable]: path }, 'linux')).toThrow(
+        NativeRuntimeUnavailableError,
+      );
+    }
+  });
+
+  it('should carry the configured bubblewrap in the profile on Linux, and leave the runtime default otherwise', () => {
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'linux' });
+    expect(nativeSandboxPolicy(launch)).not.toHaveProperty('bwrapPath');
+    vi.stubEnv(nativeSandboxBwrapVariable, '/opt/tau/sandbox/bwrap');
+    expect(nativeSandboxPolicy(launch).bwrapPath).toBe('/opt/tau/sandbox/bwrap');
+    expect(nativeSandboxPolicy().bwrapPath).toBe('/opt/tau/sandbox/bwrap');
   });
 });
 

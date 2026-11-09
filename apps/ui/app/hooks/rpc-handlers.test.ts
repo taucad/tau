@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import type * as ChatRpc from '@taucad/chat/rpc';
 import type * as AwaitFreshRender from '#machines/await-fresh-render.js';
-import { rpcClientErrorCodeSchema } from '@taucad/chat';
+import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { Rendering } from '@taucad/runtime';
 import type { DirectoryStatRow } from '@taucad/filesystem';
@@ -16,6 +16,7 @@ import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.j
 import { omittedSectionCutsNotice } from '#services/headless-capture.js';
 import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 
 type RpcDependencies = ChatRpc.RpcDependencies;
 type RpcFileSystem = ChatRpc.RpcFileSystem;
@@ -198,15 +199,20 @@ function createMockTreeService(tree?: Map<string, FileEntry>) {
 type MockTreeService = ReturnType<typeof createMockTreeService>;
 
 function createMockFileManager() {
+  const readFile = vi
+    .fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>()
+    .mockRejectedValue(new FileNotFoundError('missing', { path: workbenchPaths.entries }));
   return {
     fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: '/projects/proj-test' } }) },
     workbenchFiles: {
       writeFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['writeFileChecked']>(),
       deleteFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['deleteFileChecked']>(),
     },
-    readFile: vi
-      .fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>()
-      .mockRejectedValue(new FileNotFoundError('missing', { path: workbenchPaths.entries })),
+    readFile,
+    /* The raw path (D17) answers an owned copy of what this fake's `readFile` is told to answer, binaries included. */
+    readRawBytes: vi.fn<(path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>>(
+      async (path) => new Uint8Array(await readFile(path)),
+    ),
     writeFile: vi
       .fn<(path: string, data: Uint8Array<ArrayBuffer>, options: { source: string }) => Promise<void>>()
       .mockResolvedValue(undefined),
@@ -386,6 +392,15 @@ describe('rpc-handlers', () => {
       expect(bytes[0]).toBe(0);
     });
 
+    it('reads a binary artifact intact through the raw path at the binary read limit (L3 D-3)', async () => {
+      const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 0, 0xff, 0x80]);
+      mockFm.readFile.mockResolvedValue(glb);
+      mockFm.stat.mockResolvedValue({ ...textFileStat(), size: glb.byteLength });
+
+      await expect(fileSystem.readBinaryFile('exports/part.glb')).resolves.toEqual(glb);
+      expect(mockFm.readRawBytes).toHaveBeenCalledWith('exports/part.glb', { sizeLimit: 256 * 1024 * 1024 });
+    });
+
     it('rejects foreign paths and oversized binary reads before reading content', async () => {
       await expect(fileSystem.readBinaryFile('../foreign.glb')).rejects.toThrow();
       expect(mockFm.stat).not.toHaveBeenCalled();
@@ -419,6 +434,34 @@ describe('rpc-handlers', () => {
         fileSystem.deleteFileChecked({ path: '../escape', preconditions: [{ path: '../escape', expected: null }] }),
       ).rejects.toThrow();
       expect(mockFm.workbenchFiles.deleteFileChecked).toHaveBeenCalledTimes(1);
+    });
+
+    /* W3 a4: this client has no ranged read, so a stat past the line-count cap reports the size alone. */
+    it('should stat a file past the line-count cap by its size alone, reading none of it', async () => {
+      mockFm.stat.mockResolvedValueOnce({ type: 'file', size: 5_000_000, mtimeMs: 100 });
+
+      const stat = await fileSystem.stat('assets/scan.bin');
+
+      expect(stat).toStrictEqual({
+        size: 5_000_000,
+        isDirectory: false,
+        createdAt: new Date(100).toISOString(),
+        modifiedAt: new Date(100).toISOString(),
+      });
+      expect(mockFm.readFile).not.toHaveBeenCalled();
+    });
+
+    /* Review L1: past the cap the stat carries no kind, so the text read itself refuses a binary by its head. */
+    it('should refuse a text read of a binary past the line-count cap by its 512 B head', async () => {
+      const bytes = new Uint8Array(5_000_000);
+      bytes.fill(0x41);
+      bytes[100] = 0;
+      mockFm.readFile.mockResolvedValueOnce(bytes);
+
+      await expect(fileSystem.readFile('assets/scan.bin')).rejects.toMatchObject({
+        code: rpcClientErrorCode.ioError,
+        message: 'File is binary (5000000 bytes) and cannot be read as text.',
+      });
     });
 
     it('rejects malformed UTF-8 record bytes with a typed error', async () => {
@@ -1339,7 +1382,7 @@ describe('rpc-handlers', () => {
             mode: 'single',
             width: 1600,
             height: 1600,
-            lineWidth: 3,
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
             background: '#242424',
             camera: {
               framing: 'bounds',
@@ -1478,7 +1521,7 @@ describe('rpc-handlers', () => {
             mode: 'batch',
             width: 1600,
             height: 1600,
-            lineWidth: 3,
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
             background: '#242424',
             axes: true,
             scaleBar: true,

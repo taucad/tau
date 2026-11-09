@@ -101,6 +101,23 @@ const authorization = (target: LangfuseTarget): string =>
   `Basic ${Buffer.from(`${target.publicKey}:${target.secretKey}`).toString('base64')}`;
 
 /**
+ * A read of the v2 observations list, the only Langfuse read Tau makes: every
+ * v3 read (trace detail, sessions, scores) answers 410 for new organisations
+ * and is sunset on 2026-11-16.
+ *
+ * @param target - The project.
+ * @param query - The filters and paging parameters.
+ * @returns The request URL.
+ */
+const observationsUrl = (target: LangfuseTarget, query: Readonly<Record<string, string>>): URL => {
+  const url = new URL('/api/public/v2/observations', target.baseUrl);
+  for (const [name, value] of Object.entries(query)) {
+    url.searchParams.set(name, value);
+  }
+  return url;
+};
+
+/**
  * Langfuse v4 ingestion and read-back for agent evidence. It never logs or
  * returns request or response bodies: the span carries customer content.
  */
@@ -165,11 +182,12 @@ export class LangfuseClient {
    * @returns Present, absent or unavailable.
    */
   public async lookup(identity: ObservationIdentity, from: Date, signal?: AbortSignal): Promise<FindOutcome> {
-    const url = new URL('/api/public/v2/observations', this.target.baseUrl);
-    url.searchParams.set('traceId', identity.traceId);
-    url.searchParams.set('fromStartTime', from.toISOString());
-    url.searchParams.set('fields', 'core');
-    url.searchParams.set('limit', '100');
+    const url = observationsUrl(this.target, {
+      traceId: identity.traceId,
+      fromStartTime: from.toISOString(),
+      fields: 'core',
+      limit: '100',
+    });
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
     try {
       for (let page = 0; page < 20; page++) {
@@ -221,12 +239,13 @@ export class LangfuseClient {
     pages: number,
     signal?: AbortSignal,
   ): Promise<ObservationsRead> {
-    const url = new URL('/api/public/v2/observations', this.target.baseUrl);
-    url.searchParams.set('environment', window.environment);
-    url.searchParams.set('fromStartTime', window.from.toISOString());
-    url.searchParams.set('toStartTime', window.to.toISOString());
-    url.searchParams.set('fields', 'core,basic,metadata');
-    url.searchParams.set('limit', '100');
+    const url = observationsUrl(this.target, {
+      environment: window.environment,
+      fromStartTime: window.from.toISOString(),
+      toStartTime: window.to.toISOString(),
+      fields: 'core,basic,metadata',
+      limit: '100',
+    });
     const rows: LangfuseObservationRow[] = [];
     try {
       for (let page = 0; page < pages; page++) {
@@ -286,28 +305,34 @@ export class LangfuseClient {
   }
 
   /**
-   * Whether a trace is still readable, to confirm a requested deletion.
+   * Whether a trace still has any observation, to confirm a requested deletion.
+   * It reads one row of the v2 observations list filtered by the trace (there is
+   * no v2 detail route), and only the `core` fields, so nothing is read back but
+   * ids. Only an ok answer whose `data` is an empty array is absence; a 410
+   * (`LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`), any other non-ok answer, an
+   * unreadable body and a transport failure are `unavailable`, never absence.
    *
    * @param traceId - The trace.
    * @param signal - Aborts the read.
-   * @returns Present, absent (404) or unavailable.
+   * @returns Present, absent (an empty page) or unavailable.
    */
   public async traceExists(traceId: string, signal?: AbortSignal): Promise<FindOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
     try {
-      const response = await this.fetcher(
-        new URL(`/api/public/traces/${encodeURIComponent(traceId)}`, this.target.baseUrl),
-        {
-          headers: { authorization: authorization(this.target) },
-          signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
-          redirect: 'error',
-        },
-      );
-      await response.body?.cancel();
-      if (response.status === 404) {
-        return 'absent';
+      const response = await this.fetcher(observationsUrl(this.target, { traceId, fields: 'core', limit: '1' }), {
+        headers: { authorization: authorization(this.target) },
+        signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
+        redirect: 'error',
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        return 'unavailable';
       }
-      return response.ok ? 'present' : 'unavailable';
+      const data = field(await readJson(response), 'data');
+      if (!Array.isArray(data)) {
+        return 'unavailable';
+      }
+      return data.length === 0 ? 'absent' : 'present';
     } catch {
       return 'unavailable';
     }

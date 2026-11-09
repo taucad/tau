@@ -80,13 +80,28 @@ export const lfsObjectLocations = (
  */
 export const resolveLfsObjectLocation = async (
   storage: ObjectStorageService,
-  args: { readonly ownerId: string; readonly projectId: string; readonly oid: string; readonly signal?: AbortSignal },
-): Promise<{ location: LfsObjectLocation; size: number; etag: string } | undefined> => {
+  args: {
+    readonly ownerId: string;
+    readonly projectId: string;
+    readonly oid: string;
+    readonly signal?: AbortSignal;
+    readonly checksum?: boolean;
+  },
+): Promise<{ location: LfsObjectLocation; size: number; etag: string; checksumSha256?: string } | undefined> => {
   for (const location of lfsObjectLocations(args.ownerId, args.projectId, args.oid)) {
     // oxlint-disable-next-line no-await-in-loop -- the legacy key is only read when the tenant key misses
-    const stored = await storage.headBlob(args.signal === undefined ? location : { ...location, signal: args.signal });
+    const stored = await storage.headBlob({
+      ...location,
+      ...(args.signal === undefined ? {} : { signal: args.signal }),
+      ...(args.checksum === true ? { checksum: true } : {}),
+    });
     if (stored !== undefined) {
-      return { location, size: stored.size, etag: stored.etag };
+      return {
+        location,
+        size: stored.size,
+        etag: stored.etag,
+        ...(stored.checksumSha256 === undefined ? {} : { checksumSha256: stored.checksumSha256 }),
+      };
     }
   }
   return undefined;

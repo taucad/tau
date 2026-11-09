@@ -47,6 +47,8 @@ const envelopeSchema = z.object({
   kind: z.enum(['ready', 'response', 'failed']),
   frame: z.unknown().optional(),
   message: z.string().optional(),
+  /** The worker's `HEAPU8.byteLength` when it replied; observation only. */
+  heapBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 type Pending = {
@@ -64,6 +66,7 @@ export class PicogkBrowserSession {
   private pending: Pending | undefined;
   private tail: Promise<void> = Promise.resolve();
   private disposed = false;
+  private heapBytes: number | undefined;
 
   // oxlint-disable-next-line typescript/parameter-properties -- The browser build requires erasable TypeScript syntax.
   private readonly options: PicogkBrowserSessionOptions;
@@ -212,6 +215,16 @@ export class PicogkBrowserSession {
     return bytes;
   }
 
+  /**
+   * Bytes of the live worker's WebAssembly memory, for observation only: the `HEAPU8.byteLength` the worker read as it
+   * sent its latest reply. Requests are serialized and linear memory never shrinks while the worker lives, so after a
+   * reply this is the heap the kernel holds. It never feeds recycling, which reads each build's own metric.
+   * @returns The byte count; `undefined` before the worker's first reply, or once it is stopped or replaced.
+   */
+  public observedHeapBytes(): number | undefined {
+    return this.worker === undefined ? undefined : this.heapBytes;
+  }
+
   /** Terminate active work and release worker callbacks; queued requests remain rejected. */
   public cleanup(): void {
     this.disposed = true;
@@ -250,6 +263,7 @@ export class PicogkBrowserSession {
           if (requestId !== this.pending?.requestId) {
             return;
           }
+          this.heapBytes = envelope.heapBytes ?? this.heapBytes;
           this.pending?.resolve(frame);
         } catch (error) {
           this.stop(new Error('Invalid PicoGK browser worker message.', { cause: error }));
@@ -337,6 +351,7 @@ export class PicogkBrowserSession {
   private stop(error: Error): void {
     const { worker } = this;
     this.worker = undefined;
+    this.heapBytes = undefined;
     if (worker) {
       this.listenerController?.abort();
       this.listenerController = undefined;

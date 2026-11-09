@@ -50,16 +50,12 @@ const validationLine = ({ units, triangles, watertight, solids }: ExportValidati
 /* A job on a simulator reads as one in Copy and export, as the job card says it. */
 const simulatedMark = (simulated: boolean | undefined): string => (simulated === true ? ' (simulated)' : '');
 
-type SerializableFileMetadata =
-  | {
-      readonly size: number;
-      readonly contentKind: 'text';
-      readonly lineCount: number;
-    }
-  | {
-      readonly size: number;
-      readonly contentKind: 'binary';
-    };
+/* A listing reports a file by size alone where its kind or line count was not measured. */
+type SerializableFileMetadata = {
+  readonly size: number;
+  readonly contentKind?: 'text' | 'binary';
+  readonly lineCount?: number;
+};
 
 const formatSerializedFileSize = (bytes: number): string => {
   if (bytes < 1024) {
@@ -74,6 +70,9 @@ const formatSerializedFileSize = (bytes: number): string => {
 const formatSerializedFileMetadata = (metadata: SerializableFileMetadata): string => {
   if (metadata.contentKind === 'binary') {
     return `binary, ${formatSerializedFileSize(metadata.size)}`;
+  }
+  if (metadata.contentKind === undefined || metadata.lineCount === undefined) {
+    return formatSerializedFileSize(metadata.size);
   }
   const lineLabel = metadata.lineCount === 1 ? '1 line' : `${metadata.lineCount} lines`;
   return `${lineLabel}, ${formatSerializedFileSize(metadata.size)}`;
@@ -244,6 +243,9 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       joinLines(
         `Total: ${output.totalMatches}`,
+        output.pendingFiles?.length
+          ? `Not searched (large object not on this device yet): ${output.pendingFiles.join(', ')}`
+          : undefined,
         output.matches
           .flatMap((match) => {
             const firstLine = match.line - (match.before?.length ?? 0);
@@ -285,7 +287,6 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           requested,
           linearTolerance,
           angularTolerance,
-          downgraded,
         } = output.tessellation;
         const grid = [
           voxelSize === undefined ? undefined : `voxelSize ${voxelSize} mm`,
@@ -299,7 +300,6 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           requested === undefined ? undefined : `requested ${requested}`,
           linearTolerance === undefined ? undefined : `linearTolerance ${linearTolerance} mm`,
           angularTolerance === undefined ? undefined : `angularTolerance ${angularTolerance}°`,
-          downgraded === undefined ? undefined : `downgraded ${downgraded}`,
         ].filter(Boolean);
         if (resolution.length > 0) {
           lines.push(`Resolution: ${resolution.join(', ')}`);
@@ -579,11 +579,18 @@ function aggregateUsage(usageParts: UsageData[]): string {
     return '';
   }
 
+  /* `inputTokens` is the uncached input only: cache reads and writes are separate
+   * provider counts, so a turn served mostly from cache must not read as a dozen
+   * tokens of input. Each count is summed and rendered on its own. */
   let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let outputTokens = 0;
   const operationIds = new Set<string>();
   for (const d of usageParts) {
     inputTokens += d.inputTokens;
+    cacheReadTokens += d.cacheReadTokens;
+    cacheWriteTokens += d.cacheWriteTokens;
     outputTokens += d.outputTokens;
     if (d.operationId !== undefined) {
       operationIds.add(d.operationId);
@@ -600,7 +607,7 @@ function aggregateUsage(usageParts: UsageData[]): string {
   const operations = operationIds.size === 0 ? '' : ` | Tau operations: ${[...operationIds].sort().join(', ')}`;
   const agent = last?.agent === undefined ? '' : `Agent: ${last.agent} | `;
 
-  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${operations}`;
+  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${cacheReadTokens} cache read / ${cacheWriteTokens} cache write / ${outputTokens} out${operations}`;
 }
 
 /**

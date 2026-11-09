@@ -8,10 +8,10 @@
  *   WebGPU routes through the in-shader `sRGBTransferOETF`/`sRGBTransferEOTF` wrap
  *   (graphics-backend-policy `CB-4`) so saturated axis tints reach perceptual parity with
  *   WebGL's sRGB-encoded framebuffer blend.
- * - **Grid** (`infinite-grid-material.node.ts`) still blends in **linear space** on WebGPU
- *   and **gamma space** on WebGL — the residual ~10-15 sRGB/channel divergence captured
- *   by `CB-3` applies to grid lines specifically. Eliminating it requires routing the
- *   overlay scene through a shared post-processing render target (deferred).
+ * - **Grid** (`infinite-grid-material.node.ts`) blends into the transparent linear frame;
+ *   the frame output encodes straight colour and premultiplies after, so the page composite
+ *   is gamma space on every backend. Encoding the premultiplied value instead made the
+ *   light-theme grid nearly invisible and over-brightened the dark one.
  *
  * **Tuning rules** (do not break without policy review):
  * 1. Tune visually against `/e2e/graphics-backend` with both backends side-by-side.
@@ -23,27 +23,27 @@
  *    WebGPU's linear blend.
  */
 
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
+
 /**
  * Infinite grid line tint, **light theme**. sRGB hex.
  *
- * Light mode background is sRGB white (`#FFFFFF`). At alpha 0.3 over white:
- * - WebGL gamma blend → ~`#D5D5D5` perceptual.
- * - WebGPU linear blend → ~`#E2E2E2` perceptual.
- *
- * Both clearly visible; neither washes out.
+ * The viewport canvas is transparent over the page background. The frame output encodes
+ * straight colour and premultiplies after (`encodeFrameOutput` in `post-processing-webgpu.tsx`),
+ * so the browser composites the grid in gamma space on every backend. Over white (`#FFFFFF`)
+ * at alpha 0.3 this reads ~`#EAEAEA`, a step of about 21 from white (operator review
+ * 2026-11-05: half the step of the earlier `#737373` tint, which read too strong).
  */
-export const infiniteGridColorLightMode = 0x73_73_73;
+export const infiniteGridColorLightMode = 0xb9_b9_b9;
 
 /**
  * Infinite grid line tint, **dark theme**. sRGB hex.
  *
- * Dark mode background is sRGB `#171717`. At alpha 0.3 over the background:
- * - WebGL gamma blend → ~`#2A2A2A` perceptual.
- * - WebGPU linear blend → ~`#353535` perceptual.
- *
- * Both clearly visible against the dark surface without overwhelming geometry.
+ * Over the dark background (`#171717`) at alpha 0.3 this reads ~`#2A2A2A`, a step of about
+ * 20 from the background (operator review 2026-11-05: half the step of the earlier `#999999`
+ * tint). Its step from the background matches the light grid's step from white.
  */
-export const infiniteGridColorDarkMode = 0x55_55_55;
+export const infiniteGridColorDarkMode = 0x58_58_58;
 
 /** High-contrast grid tints and opacity. The stronger alpha keeps both WebGL's gamma blend and WebGPU's linear blend above 3:1. */
 export const infiniteGridColorHighContrastLightMode = 0x00_00_00;
@@ -55,18 +55,19 @@ export const infiniteGridOpacityHighContrast = 0.7;
  * GLTF characteristic-edge tint, **light theme**. sRGB hex.
  *
  * Black matches the runtime edge middleware default and reads clearly over
- * matcap-lit surfaces on light viewport backgrounds.
+ * matcap-lit surfaces on light viewport backgrounds. Defined by the viewer render profile, which captures also read.
  */
-export const gltfEdgeColorLightMode = 0x00_00_00;
+export const gltfEdgeColorLightMode = viewerRenderProfile.colorSchemes.light.edgeColor;
 
 /**
  * GLTF characteristic-edge tint, **dark theme**. sRGB hex.
  *
- * Neutral gray only (no brand chroma): `oklch(0.62 0 0deg)` → `#868686`. Sits above
- * {@link infiniteGridColorDarkMode} (`#555555`) for readability on dimmed matcap faces,
- * but well below near-white so characteristic edges do not glare against `#171717`.
+ * Neutral gray only (no brand chroma): `oklch(0.62 0 0deg)` → `#868686`. Opaque, so it reads
+ * well above the 30%-alpha grid ({@link infiniteGridColorDarkMode}) on dimmed matcap faces,
+ * but well below near-white so characteristic edges do not glare against `#171717`. Defined by the viewer render
+ * profile, which captures also read.
  */
-export const gltfEdgeColorDarkMode = 0x86_86_86;
+export const gltfEdgeColorDarkMode = viewerRenderProfile.colorSchemes.dark.edgeColor;
 
 /**
  * Edge tint of a **hovered** model component, drawn through occluding surfaces. Light yellow;

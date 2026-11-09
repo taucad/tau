@@ -9,6 +9,8 @@ const baseConfig: UserConfig = {
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
+  // Ships the KiCad pack's footprints and GLBs beside `kicad-pack.js`, which loads them by URL.
+  copy: ({ outDir }) => [{ from: 'src/assets', to: outDir }],
   deps: { neverBundle: [/^#engine\//u] },
 };
 

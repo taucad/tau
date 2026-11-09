@@ -19,22 +19,17 @@ import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
 import { startStorageHop } from '#testing/storage-hop.js';
 import type { StorageHop } from '#testing/storage-hop.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
-import {
-  hashHostGitCredential,
-  mintHostGitCredential,
-  resolveHostGitCredential,
-} from '#api/hosts/host-git-credential.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { staticAuthConfig } from '#config/auth.js';
-import type { Environment } from '#config/environment.config.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { corsBaseConfiguration } from '#constants/cors.constant.js';
-import { DatabaseService } from '#database/database.service.js';
-import type { Database } from '#database/owner-lock.js';
-import { readProjectDeletion } from '#database/project-lifecycle.js';
-import * as schema from '#database/schema.js';
+import { hashHostGitCredential, mintHostGitCredential, resolveHostGitCredential } from '@taucad/api-hosts';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { staticAuthConfig } from '@taucad/api-auth/config/auth-static';
+import type { Environment } from '@taucad/api-core';
+import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
+import { DatabaseService } from '@taucad/api-database';
+import type { Database } from '@taucad/api-database/owner-lock';
+import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
+import * as schema from '@taucad/api-database/schema';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
+import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
 import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
 
 /** Real HTTP controller, session lookup, SQL transactions, S3 adapter and MinIO CAS. */

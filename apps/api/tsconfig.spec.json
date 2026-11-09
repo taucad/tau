@@ -20,7 +20,6 @@
     "vitest.setup.ts",
     "vitest.integration.config.ts",
     "vitest.live.config.ts",
-    "drizzle.config.ts",
     "scripts/**/*.mts",
     "app/**/*.test.ts",
     "app/**/*.spec.ts",
@@ -29,6 +28,19 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "app/**/*.js",
-    "app/**/*.jsx"
-  ]
+    "app/**/*.jsx",
+    // The API server libraries are source-consumed. Child processes the suites spawn through tsx read
+    // this config, and tsx applies its decorator settings only to the files it includes.
+    "../libs/api-core/src/**/*.ts",
+    "../libs/api-observability/src/**/*.ts",
+    "../libs/api-lifecycle/src/**/*.ts",
+    "../libs/api-database/src/**/*.ts",
+    "../libs/api-redis/src/**/*.ts",
+    "../libs/api-email/src/**/*.ts",
+    "../libs/api-auth/src/**/*.ts",
+    "../libs/api-hosts/src/**/*.ts",
+    "../libs/api-llm-gateway/src/**/*.ts",
+    "../libs/api-billing/src/**/*.ts"
+  ],
+  "exclude": ["../libs/*/src/**/*.test.ts", "../libs/*/src/**/*.spec.ts", "../libs/*/src/**/*.test-d.ts"]
 }

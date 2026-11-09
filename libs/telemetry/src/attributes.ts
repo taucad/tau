@@ -38,11 +38,6 @@ export const AttributeKey = {
   REDIS_ROLE: 'redis.role',
   HEALTH_INDICATOR: 'health.indicator',
   ERROR_TYPE: 'error.type',
-  WS_RECONNECTION_ATTEMPT: 'ws.reconnection.attempt',
-  EDITOR_KERNEL: 'editor.kernel',
-  WASM_MODULE: 'wasm.module',
-  INDEXEDDB_OPERATION: 'indexeddb.operation',
-  INDEXEDDB_STORE: 'indexeddb.store',
   GEN_AI_PROVIDER_NAME: 'gen_ai.provider.name',
   GEN_AI_OPERATION_NAME: 'gen_ai.operation.name',
   GEN_AI_RESPONSE_MODEL: 'gen_ai.response.model',
@@ -90,7 +85,7 @@ export const GenAiToolStatus = {
  * `cache_read / (input + cache_read)`. Without splitting cache reads out of
  * `input` the ratio is skewed for providers that report cache reads inside the
  * raw `input_tokens` count (Anthropic, Vertex AI Gemini); see
- * `apps/api/app/api/providers/provider.service.ts` (`Provider.inputTokensIncludesCacheReadTokens`).
+ * `apps/libs/api-llm-gateway/src/providers/provider.service.ts` (`Provider.inputTokensIncludesCacheReadTokens`).
  *
  * @public
  */
@@ -98,6 +93,9 @@ export const GenAiTokenType = {
   INPUT: 'input',
   OUTPUT: 'output',
   CACHE_READ: 'cache_read',
+  CACHE_WRITE: 'cache_write',
+  /** The 1-hour cache write tier, kept apart because it is priced at twice the input rate. */
+  CACHE_WRITE_1H: 'cache_write_1h',
 } as const;
 
 /**

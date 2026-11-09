@@ -1,5 +1,5 @@
 import { expectTypeOf, it, describe } from 'vitest';
-import type { ExportFile, FileStat, FileStatEntry, FileTreeContentMetadata, FileTreeEntry } from '#types/file.types.js';
+import type { ExportFile, FileStat, FileStatEntry, FileTreeEntry, StatContentMetadata } from '#types/file.types.js';
 import type { MediaType, MimeType } from '#types/mime-types.types.js';
 
 describe('open export media types', () => {
@@ -23,12 +23,9 @@ describe('FileStat', () => {
     expectTypeOf<FileStat['mtimeMs']>().toEqualTypeOf<number>();
   });
 
-  it('requires line counts for text file stats', () => {
-    expectTypeOf<Extract<FileStat, { type: 'file'; contentKind: 'text' }>>().toExtend<{
-      type: 'file';
-      contentKind: 'text';
-      lineCount: number;
-    }>();
+  it('carries content facts only when known (I3)', () => {
+    expectTypeOf<{ type: 'file'; size: 1; mtimeMs: 0 }>().toExtend<FileStat>();
+    expectTypeOf<Extract<FileStat, { type: 'file' }>['lineCount']>().toEqualTypeOf<number | undefined>();
   });
 
   it('forbids line counts for binary file stats', () => {
@@ -43,7 +40,8 @@ describe('FileStatEntry', () => {
 });
 
 describe('FileTreeEntry', () => {
-  it('keeps classification while allowing unknown text line counts in file entries', () => {
-    expectTypeOf<Extract<FileTreeEntry, { type: 'file' }>>().toExtend<FileTreeContentMetadata>();
+  it('carries a classification and line count only when known (I3)', () => {
+    expectTypeOf<Extract<FileTreeEntry, { type: 'file' }>>().toExtend<StatContentMetadata>();
+    expectTypeOf<{ path: string; name: string; type: 'file'; size: number }>().toExtend<FileTreeEntry>();
   });
 });

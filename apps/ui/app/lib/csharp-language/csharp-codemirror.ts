@@ -2,14 +2,14 @@ import { completionTypeFromLsp } from '#components/code/editor-completion-icon.j
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
-import { languageFeatures } from '#components/code/editor-language-features.js';
+import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
 import type { EditorSignature } from '#components/code/editor-language-features.js';
 import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, Range } from '@codemirror/state';
 import { foldService, indentUnit } from '@codemirror/language';
-import { setDiagnostics } from '@codemirror/lint';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, HoverTooltipSource, ViewUpdate } from '@codemirror/view';
 import type * as LSP from 'vscode-languageserver-protocol';
@@ -199,7 +199,6 @@ export class CsharpBackend {
         fileManager: environment.fileManager,
         treeService: environment.treeService,
         paths: new WorkspacePathResolver(snapshot.context.rootDirectory),
-        filePoolBuffer: snapshot.context.filePoolBuffer,
         rootDirectory: snapshot.context.rootDirectory,
       },
       onFatal: (error) => {
@@ -522,7 +521,10 @@ export function csharpCompletion(item: LSP.CompletionItem, version: number, opti
       const { documentation, definitionTargets } = await resolve();
       const markdown = typeof documentation === 'string' ? documentation : documentation?.value;
       return markdown && !isDisposed()
-        ? renderEditorDocumentation(markdown, undefined, definitionLinkOpener(definitionTargets, options))
+        ? renderEditorDocumentation(markdown, undefined, {
+            onDefinitionLink: definitionLinkOpener(definitionTargets, options),
+            languageId: 'csharp',
+          })
         : null;
     },
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
@@ -573,11 +575,10 @@ export function csharpHover(options: ExtensionOptions): HoverTooltipSource {
       pos: hover.range ? offsetAt(document.text, hover.range.start) : pos,
       end: hover.range ? offsetAt(document.text, hover.range.end) : undefined,
       create: () => ({
-        dom: renderEditorDocumentation(
-          markdown,
-          view.dom.ownerDocument,
-          definitionLinkOpener(definitionTargets, options),
-        ),
+        dom: renderEditorDocumentation(markdown, view.dom.ownerDocument, {
+          onDefinitionLink: definitionLinkOpener(definitionTargets, options),
+          languageId: 'csharp',
+        }),
       }),
     };
   };
@@ -633,14 +634,8 @@ async function renameSymbol(view: EditorView, options: ExtensionOptions): Promis
   if (!prepared || !('placeholder' in prepared) || isDisposed() || document.version !== version) {
     return;
   }
-  const dialog = showDialog(view, {
-    label: 'Rename symbol',
-    input: { value: prepared.placeholder },
-    submitLabel: 'Rename',
-  });
-  const submitted = await dialog.result;
-  const name = submitted?.querySelector('input')?.value.trim();
-  if (!name || name === prepared.placeholder || isDisposed() || document.version !== version) {
+  const name = await promptRename(view, { value: prepared.placeholder });
+  if (!name || isDisposed() || document.version !== version) {
     return;
   }
   const edit = await client.request<LSP.WorkspaceEdit>('textDocument/rename', {
@@ -890,28 +885,6 @@ export function csharpExtensions(options: ExtensionOptions): Extension[] {
         reportFailure(error, options, version);
       }
     }),
-    ViewPlugin.define((view: EditorView) => {
-      const show = (): void => {
-        const diagnostics = environment.diagnostics.get(document.uri).get(diagnosticsOwner) ?? [];
-        view.dispatch(setDiagnostics(view.state, [...diagnostics]));
-      };
-      const unsubscribe = environment.diagnostics.subscribe((event) => {
-        if (event.uri === document.uri && event.owner === diagnosticsOwner) {
-          show();
-        }
-      });
-      let destroyed = false;
-      queueMicrotask(() => {
-        if (!destroyed && !isDisposed()) {
-          show();
-        }
-      });
-      return {
-        destroy() {
-          destroyed = true;
-          unsubscribe();
-        },
-      };
-    }),
+    storeDiagnostics(environment.diagnostics, document, diagnosticsOwner),
   ];
 }

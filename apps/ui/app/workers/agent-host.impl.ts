@@ -6,7 +6,7 @@ import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
  */
 
 import { ResourceQueue } from '@taucad/filesystem';
-import type { FileSystemProvider } from '@taucad/filesystem';
+import type { FileSystemProvider, IndexAdmits } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
 import { geoSpecDefaultRunBudget } from '@taucad/chat/constants';
@@ -38,7 +38,7 @@ import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
 import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
-import { createBrowserChatStore } from '@taucad/agent-host/browser';
+import { createBrowserChatStore, createRootedLogObserver } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
@@ -52,12 +52,12 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
-import { readBuildRelease } from '#lib/build-identity.js';
+import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
@@ -71,6 +71,7 @@ type ProjectFileSystemBridge = Pick<
   | 'writeFileChecked'
   | 'deleteFileChecked'
   | 'appendFile'
+  | 'appendFileFenced'
   | 'readdir'
   | 'stat'
   | 'lstat'
@@ -80,8 +81,12 @@ type ProjectFileSystemBridge = Pick<
   | 'rename'
   | 'exists'
   | 'watchReady'
+  | 'watchChangeSets'
   | 'hello'
   | 'dispose'
+  | 'pendingPaths'
+  | 'statTree'
+  | 'facts'
 >;
 
 /** What the worker as a whole gives each project host. */
@@ -279,6 +284,46 @@ const swappable = <Target extends object>(
 };
 
 /**
+ * Whether a mask admits one row of a subtree listing: the file itself and every
+ * directory above it, as an index walk asks before each descent.
+ *
+ * @param path - The row's path, relative to the listed directory.
+ * @param admits - The view's mask.
+ * @returns True when nothing on the path is hidden.
+ */
+const admittedRow = (path: string, admits: IndexAdmits): boolean => {
+  const segments = path.split('/');
+  for (let depth = 1; depth < segments.length; depth += 1) {
+    if (!admits(segments.slice(0, depth).join('/'), 'dir')) {
+      return false;
+    }
+  }
+  return admits(path, 'file');
+};
+
+/**
+ * Run one index query, refusing it with `ENOTSUP` where the bridge's far end
+ * serves no index (a bare provider's connection answers `Unknown method`):
+ * the agent's search then walks the tree, as it does on any host without one.
+ *
+ * @param method - The bridge call.
+ * @param call - The call itself.
+ * @returns Its answer.
+ */
+const withoutIndexAs = async <Result>(method: string, call: () => Promise<Result>): Promise<Result> => {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof Error && error.message === `Unknown method: ${method}`) {
+      throw Object.assign(new Error('This workspace bridge serves no index queries.', { cause: error }), {
+        code: 'ENOTSUP',
+      });
+    }
+    throw error;
+  }
+};
+
+/**
  * The workspace bridge as a `FileSystemProvider`: the one rooted provider this
  * worker hands to the GeoSpec bridge port and to the shared tool filesystem.
  *
@@ -286,7 +331,9 @@ const swappable = <Target extends object>(
  * @returns The provider every tool call and the GeoSpec bridge read through.
  * @internal
  */
-export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (
+  proxy: ProjectFileSystemBridge,
+): FileSystemProvider & Required<Pick<ComposedView, 'pendingPaths' | 'statTree' | 'facts'>> => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -335,6 +382,46 @@ export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge):
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
+    /*
+     * The root's Project Index in one call (charter D13), so the agent's grep
+     * and glob never walk the bridge one directory at a time. The view above
+     * passes its mask as `admits`, a predicate that cannot cross the wire, so
+     * it is applied to the rows here: a hidden directory's files are dropped
+     * by the same answer that would have stopped a descent.
+     */
+    statTree: async (path, options) => {
+      const rows = await withoutIndexAs('statTree', async () =>
+        proxy.statTree(path, options?.signal === undefined ? undefined : { signal: options.signal }),
+      );
+      const { admits } = options ?? {};
+      return admits === undefined ? rows : rows.filter((row) => admittedRow(row.path, admits));
+    },
+    /* The caller's listed head metadata stays here: the authority's index holds its own. */
+    facts: async (paths, options) =>
+      withoutIndexAs('facts', async () =>
+        proxy.facts(paths, {
+          ...(options?.lineCount === undefined ? {} : { lineCount: options.lineCount }),
+          ...(options?.byteCap === undefined ? {} : { byteCap: options.byteCap }),
+          ...(options?.digests === undefined ? {} : { digests: options.digests }),
+          ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        }),
+      ),
+    /* A host that predates the call cannot say, which is not "none": its callers check another way (reads refuse with PENDING). */
+    pendingPaths: async (paths) => {
+      try {
+        return await proxy.pendingPaths(paths);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: pendingPaths') {
+          throw Object.assign(
+            new Error('This workspace bridge cannot say which files are pending.', { cause: error }),
+            {
+              code: pendingPathsUnsupportedCode,
+            },
+          );
+        }
+        throw error;
+      }
+    },
     dispose: () => undefined,
   };
 };
@@ -499,6 +586,19 @@ export const openBrowserProjectHost = async (
   }
 };
 
+/**
+ * The build the host's evidence reports: the page's release label from the provide message, since a worker reads
+ * neither the define nor `window.ENV` and its own read is always the unknown label. The unknown label is no build, so
+ * it is reported as none and the observation shows `unknown` (I7), never `0000000`.
+ *
+ * @param release - The page's label, absent from an older page.
+ * @returns The build label, or `undefined`.
+ */
+export const hostBuildOf = (release: string | undefined): string | undefined => {
+  const label = release ?? readBuildRelease();
+  return label === unknownBuildRelease ? undefined : label;
+};
+
 const composeProjectHost = async (
   provide: AgentHostProjectProvide,
   worker: ResidentWorkerContext,
@@ -551,19 +651,20 @@ const composeProjectHost = async (
   });
   /* One function composes every view on every host (charter D1): the bundles,
    * the registry mask and provenance are all inside it, so this worker only
-   * adapts the RPC shape over it. The agent view is what the *executors* of
-   * project code read too — the kernel runtime below and the GeoSpec runner's
-   * port — because the code they run is code the agent wrote (CI1, W14). */
+   * adapts the RPC shape over it. The *executors* of project code — the kernel
+   * runtime below and the GeoSpec runner's port — read the `'agent'` consumer
+   * too, because the code they run is code the agent wrote (CI1, W14), but
+   * without the system skills overlay: a kernel never resolves `.agents/skills`,
+   * and only the agent's tools serve the bundles (I1). This is the executor view
+   * every host composes (`executorViewFor` in packages/host/src/host-daemon.ts and
+   * apps/desktop/src/tau/services-host.impl.ts). */
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
   const workbenchRootProvider = createRelayedFileSystemProvider(projectRoot);
   const workbenchRootView = composeView(
     { filesystem: workbenchRootProvider },
     { consumer: 'user', policy: tauPathPolicy },
   );
-  const agentView = composeView(
-    { filesystem: workspaceProvider },
-    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
-  );
+  const executorView = composeView({ filesystem: workspaceProvider }, { consumer: 'agent', policy: tauPathPolicy });
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
   // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
   /* Runtime telemetry (FR-14): only when the page handed a context, i.e. only where the page would record. */
@@ -574,7 +675,7 @@ const composeProjectHost = async (
   const createAgentRuntime = (): AppRuntimeClient => {
     const created = createRuntimeClient<AnyRuntimeDefinition>(
       createDefaultKernelOptions({
-        fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
+        fileSystem: fromFsLike(createRuntimeFsLike(executorView)),
         runtimeConfig,
         compute,
       }),
@@ -606,7 +707,7 @@ const composeProjectHost = async (
   const revisions = revisionsSlot?.view;
   opened(() => revisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
-    openFileSystemBridge: () => createFileSystemBridgePort(agentView),
+    openFileSystemBridge: () => createFileSystemBridgePort(executorView),
     runtimeConfig,
     // No outer RPC budget bounds a browser-placed test_model call; this host budget is the bound.
     runnerTimeout: geoSpecDefaultRunBudget,
@@ -660,7 +761,7 @@ const composeProjectHost = async (
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
-    provider: FileSystemProvider,
+    provider: FileSystemProvider & Pick<ComposedView, 'pendingPaths'>,
     preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
   ): ToolRegistry => {
     const view = composeView(
@@ -800,51 +901,20 @@ const composeProjectHost = async (
                 readFile: async (path) => projectRoot.readFile(path),
                 writeFile: async (path, bytes) => projectRoot.writeFile(path, bytes),
                 appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
+                // The authority fences each append by the length the log last read (D23), so a writer this
+                // tab's Web Lock cannot see is refused instead of interleaved.
+                appendFileFenced: async (path, bytes, fence) => projectRoot.appendFileFenced(path, bytes, fence),
                 unlink: async (path) => projectRoot.unlink(path),
                 // The durable rooted bridge owns canonical metadata; log allocation only needs size.
-                stat: async (path, options) => projectRoot.stat(path, options),
+                stat: async (path) => projectRoot.stat(path),
                 // The chat's `events/` directory: the other devices' segments the model's history merges in (XD1).
                 readdir: async (path) => projectRoot.readdir(path),
               },
               durability,
             }
           : { kind: 'opfs', directory: opfs },
-      observeLog: async ({ path, signal, onChange, onError }) => {
-        let released = false;
-        const subscription = projectRoot.watchReady({ paths: [path] }, onChange);
-        const release = (): void => {
-          if (!released) {
-            released = true;
-            signal.removeEventListener('abort', release);
-            subscription.unsubscribe();
-          }
-        };
-        signal.addEventListener('abort', release, { once: true });
-        // async-iife: bootstrap
-        // The observation owns its closure monitor until release; stale callbacks are fenced.
-        void (async () => {
-          try {
-            await subscription.closed;
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(new Error(`Chat log observation closed for ${path}.`));
-            }
-          } catch (error) {
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(error);
-            }
-          }
-        })();
-        try {
-          await subscription.ready;
-          signal.throwIfAborted();
-          return release;
-        } catch (error) {
-          release();
-          throw error;
-        }
-      },
+      /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
+      observeLog: createRootedLogObserver(projectRoot),
       visibility: worker.visibility,
     }),
     modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
@@ -880,7 +950,7 @@ const composeProjectHost = async (
       apiBaseUrl: provide.gatewayBaseUrl.replace(/\/+$/u, ''),
       principal: provide.principal,
       projectId: provide.authority.projectId,
-      hostBuild: readBuildRelease(),
+      hostBuild: hostBuildOf(provide.release),
       readEvents: async (input) => launcher.host.readEvents(input),
     });
     opened(() => evidence?.close());

@@ -3,6 +3,8 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+import { changeEventEntries, maximumChangesetEntries } from '#changeset.js';
+import type { ResourceQueueClaim } from '#resource-queue.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import {
   createIdbWorkspaceFileService,
@@ -79,7 +81,7 @@ describe('WorkspaceFileService', () => {
 
     it('broadly invalidates local and peer projections after a partial recursive mkdir failure', async () => {
       const coordinator = new CrossTabCoordinator();
-      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const events: ChangeEvent[] = [];
       context.eventBus.subscribe((event) => events.push(event));
@@ -95,9 +97,10 @@ describe('WorkspaceFileService', () => {
         );
         await expect(context.provider.exists('partial')).resolves.toBe(true);
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
-        expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
-          storageRootKey: 'memory:0',
-          providerBasePath: '',
+        expect(notifyChanges.mock.calls.flatMap(([changes]) => changes)).toContainEqual({
+          type: 'directory-change',
+          path: '/',
+          authority: { storageRootKey: 'memory:0', providerBasePath: '' },
         });
       } finally {
         context.service.dispose();
@@ -502,7 +505,7 @@ describe('WorkspaceFileService', () => {
 
     it('broadly invalidates local and peer projections after a partial recursive removal failure', async () => {
       const coordinator = new CrossTabCoordinator();
-      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       await context.service.writeFile('/partial/a.txt', 'a');
       await context.service.writeFile('/partial/b.txt', 'b');
@@ -524,9 +527,10 @@ describe('WorkspaceFileService', () => {
         );
         expect(await context.provider.exists('partial/a.txt')).not.toBe(await context.provider.exists('partial/b.txt'));
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
-        expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
-          storageRootKey: 'memory:0',
-          providerBasePath: '',
+        expect(notifyChanges.mock.calls.flatMap(([changes]) => changes)).toContainEqual({
+          type: 'directory-change',
+          path: '/',
+          authority: { storageRootKey: 'memory:0', providerBasePath: '' },
         });
       } finally {
         context.service.dispose();
@@ -581,24 +585,24 @@ describe('WorkspaceFileService', () => {
       }
     });
 
-    /** The lock set a single-file write of `path` claims, on its own service. */
-    const locksForOneWrite = async (path: string): Promise<readonly string[]> => {
+    /** The lock claims a single-file write of `path` holds, on its own service. */
+    const locksForOneWrite = async (path: string): Promise<readonly ResourceQueueClaim[]> => {
       const probe = await createWorkspaceFileService();
-      const queueForMany = vi.spyOn(probe.resourceQueue, 'queueForMany');
+      const queueForClaims = vi.spyOn(probe.resourceQueue, 'queueForClaims');
       try {
         await probe.service.writeFile(path, 'probe');
-        return queueForMany.mock.calls.at(-1)?.[0] ?? [];
+        return queueForClaims.mock.calls.at(-1)?.[0] ?? [];
       } finally {
         probe.service.dispose();
       }
     };
 
     /* One lock set for the batch, not one per file — but it must still exclude
-     * every peer writer a per-file set excluded, and still publish each path's
-     * own mutation notification. */
+     * every peer writer a per-file set excluded, and publish every path's
+     * mutation in one notice (I4). */
     it('should hold one cross-tab lock set that conflicts with every batch path', async () => {
       const coordinator = new CrossTabCoordinator();
-      const notifyMutation = vi.spyOn(coordinator, 'notifyMutation');
+      const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
       const { service: svc, resourceQueue } = await createWorkspaceFileService({
         crossTabCoordinator: coordinator,
       });
@@ -606,22 +610,27 @@ describe('WorkspaceFileService', () => {
       const pathB = '/batch/b.txt';
 
       try {
-        const queueForMany = vi.spyOn(resourceQueue, 'queueForMany');
+        const queueForClaims = vi.spyOn(resourceQueue, 'queueForClaims');
         await svc.writeFiles({
           [pathA]: { content: 'a' },
           [pathB]: { content: 'b' },
         });
 
-        expect(queueForMany).toHaveBeenCalledTimes(1);
-        const held = new Set(queueForMany.mock.calls[0]![0]);
+        expect(queueForClaims).toHaveBeenCalledTimes(1);
+        const held = queueForClaims.mock.calls[0]![0];
         const ownLockSets = await Promise.all([pathA, pathB].map(async (path) => locksForOneWrite(path)));
         for (const ownLocks of ownLockSets) {
-          expect(ownLocks.filter((lock) => held.has(lock))).not.toEqual([]);
+          const conflicting = ownLocks.filter((own) =>
+            held.some((claim) => claim.key === own.key && (claim.shared !== true || own.shared !== true)),
+          );
+          expect(conflicting).not.toEqual([]);
         }
         const authority = { storageRootKey: 'memory:0', providerBasePath: '' };
-        expect(notifyMutation.mock.calls.map(([notification]) => notification)).toEqual([
-          { type: 'write', path: pathA, authority },
-          { type: 'write', path: pathB, authority },
+        expect(notifyChanges.mock.calls.map(([changes]) => changes)).toEqual([
+          [
+            { type: 'write', path: pathA, authority },
+            { type: 'write', path: pathB, authority },
+          ],
         ]);
       } finally {
         svc.dispose();
@@ -631,7 +640,7 @@ describe('WorkspaceFileService', () => {
 
     it('waits for every admitted write and invalidates local and peer projections after a partial failure', async () => {
       const coordinator = new CrossTabCoordinator();
-      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const originalWriteFile = context.provider.writeFile.bind(context.provider);
       const failedPath = '/batch/failed.txt';
@@ -683,9 +692,10 @@ describe('WorkspaceFileService', () => {
 
         expect(await context.provider.readFile(delayedProviderPath)).toEqual(encoder.encode('completed'));
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
-        expect(notifyDirectoryChange).toHaveBeenCalledWith('/batch', {
-          storageRootKey: 'memory:0',
-          providerBasePath: '',
+        expect(notifyChanges.mock.calls.flatMap(([changes]) => changes)).toContainEqual({
+          type: 'directory-change',
+          path: '/batch',
+          authority: { storageRootKey: 'memory:0', providerBasePath: '' },
         });
       } finally {
         unsubscribe();
@@ -694,10 +704,10 @@ describe('WorkspaceFileService', () => {
       }
     });
 
-    /* Rule 34: the canonical batch lets the IndexedDB provider drain every
-     * admitted write in as few native transactions as possible. Per-file locks
-     * serialised the batch, so each file used to cost its own transaction. */
-    it('should commit a thousand-file batch in one IndexedDB transaction', async () => {
+    /* Rule 34 and D2: each bounded changeset of the batch drains into one
+     * IndexedDB transaction. Per-file locks serialised the batch, so each file
+     * used to cost its own transaction. */
+    it('should commit a thousand-file batch in one IndexedDB transaction per bounded changeset', async () => {
       const { service: idbService } = await createIdbWorkspaceFileService();
       const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction');
 
@@ -712,7 +722,7 @@ describe('WorkspaceFileService', () => {
         );
 
         const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
-        expect(writes).toHaveLength(1);
+        expect(writes).toHaveLength(Math.ceil(1000 / maximumChangesetEntries));
       } finally {
         transaction.mockRestore();
         idbService.dispose();
@@ -824,7 +834,10 @@ describe('WorkspaceFileService', () => {
           { originClientId: 'batch_author' },
         );
 
+        expect(events).toHaveLength(1);
+        expect(getEventOrigin(events[0]!)).toBe('batch_author');
         const writtenEvents = events
+          .flatMap((event) => changeEventEntries(event))
           .filter((event) => event.type === 'fileWritten')
           .map((event) => ({ event, origin: getEventOrigin(event) }))
           .sort((a, b) => a.event.path.localeCompare(b.event.path));
@@ -1019,12 +1032,12 @@ describe('flat workspace layout locks', () => {
   it('locks the owning project for a root-mount write into its physical directory', async () => {
     const context = await createWorkspaceFileService();
     await configureFlatProject(context);
-    const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+    const queueForClaims = vi.spyOn(context.resourceQueue, 'queueForClaims');
 
     try {
       await context.service.writeFile('/cube-design/main.ts', 'physical route');
 
-      expect(queueForMany.mock.calls.at(-1)?.[0]).toContain(`project:${projectId}`);
+      expect(queueForClaims.mock.calls.at(-1)?.[0]).toContainEqual({ key: `project:${projectId}`, shared: true });
     } finally {
       context.service.dispose();
     }
@@ -1033,12 +1046,12 @@ describe('flat workspace layout locks', () => {
   it('leaves an unmounted root child free of project locks', async () => {
     const context = await createWorkspaceFileService();
     await configureFlatProject(context);
-    const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+    const queueForClaims = vi.spyOn(context.resourceQueue, 'queueForClaims');
 
     try {
       await context.service.writeFile('/loose-directory/main.ts', 'no project');
 
-      expect(queueForMany.mock.calls.at(-1)?.[0].filter((lock) => lock.startsWith('project:'))).toEqual([]);
+      expect(queueForClaims.mock.calls.at(-1)?.[0].filter(({ key }) => key.startsWith('project:'))).toEqual([]);
     } finally {
       context.service.dispose();
     }
@@ -1046,25 +1059,26 @@ describe('flat workspace layout locks', () => {
 });
 
 /*
- * `MutationPipeline.mutationLockPaths` is the one place a lock set is decided,
- * and until now it was only ever observed sideways — through a `writeFiles`
- * expectation or the flat-layout rows above. These are its direct pins (W5,
- * T5 seed). The seam is the `ResourceQueue.queueForMany` spy the flat-layout
- * rows already use: the array it receives IS the array `mutationLockPaths`
- * returned, so no production visibility had to widen.
+ * `MutationPipeline.lockClaims` is the one place a lock set is decided (D3).
+ * The seam is the `ResourceQueue.queueForClaims` spy: the claims it receives
+ * are the claims the pipeline also requests as Web Locks, so no production
+ * visibility had to widen.
  */
-describe('mutationLockPaths', () => {
+describe('lockClaims', () => {
   const alpha = 'proj_aaaaaaaaaaaaaaaaaaaaa';
   const beta = 'proj_bbbbbbbbbbbbbbbbbbbbb';
 
-  /** The lock set the pipeline claimed for one write. */
-  const locksForWrite = async (path: string, projects: ProjectRootConfig[] = []): Promise<readonly string[]> => {
+  /** The lock claims the pipeline held for one write. */
+  const locksForWrite = async (
+    path: string,
+    projects: ProjectRootConfig[] = [],
+  ): Promise<readonly ResourceQueueClaim[]> => {
     const context = await createWorkspaceFileService();
     try {
       await context.service.configureProjectRoots({ projects, roots: [] });
-      const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+      const queueForClaims = vi.spyOn(context.resourceQueue, 'queueForClaims');
       await context.service.writeFile(path, 'lock probe');
-      return queueForMany.mock.calls.at(-1)?.[0] ?? [];
+      return queueForClaims.mock.calls.at(-1)?.[0] ?? [];
     } finally {
       context.service.dispose();
     }
@@ -1077,27 +1091,38 @@ describe('mutationLockPaths', () => {
     providerBasePath,
   });
 
-  it('should claim every virtual ancestor of a nested path, exclusive of the root', async () => {
+  it('should hold no logical token for a mount with physical identity, whose physical tokens exclude every alias', async () => {
     const locks = await locksForWrite('/a/b/c.txt');
 
-    expect(locks.filter((lock) => lock.startsWith('/'))).toEqual(['/a/b/c.txt', '/a/b', '/a']);
+    expect(locks.filter(({ key }) => key.startsWith('/'))).toEqual([]);
   });
 
-  it('should claim the storage-root-keyed physical hierarchy down to the authority root', async () => {
-    const locks = await locksForWrite('/a/b/c.txt');
+  it('should hold one lock set of four tokens for a nested write in a project (S19)', async () => {
+    const locks = await locksForWrite(`/projects/${alpha}/src/main.ts`, [flatProject(alpha, 'cube-design')]);
 
-    expect(locks.filter((lock) => lock.startsWith('memory:0:'))).toEqual([
-      'memory:0:a/b/c.txt',
-      'memory:0:a/b',
-      'memory:0:a',
-      'memory:0:',
+    expect(locks).toEqual([
+      { key: 'memory:0:cube-design', shared: true },
+      { key: 'memory:0:cube-design/src', shared: true },
+      { key: 'memory:0:cube-design/src/main.ts' },
+      { key: `project:${alpha}`, shared: true },
     ]);
   });
 
-  it('should claim the owning project lock for a write on its route', async () => {
+  it('should hold the written physical path exclusive and its hierarchy shared down to the authority root', async () => {
+    const locks = await locksForWrite('/a/b/c.txt');
+
+    expect(locks.filter(({ key }) => key.startsWith('memory:0:'))).toEqual([
+      { key: 'memory:0:', shared: true },
+      { key: 'memory:0:a', shared: true },
+      { key: 'memory:0:a/b', shared: true },
+      { key: 'memory:0:a/b/c.txt' },
+    ]);
+  });
+
+  it('should hold the owning project lock shared for a write on its route', async () => {
     const locks = await locksForWrite(`/projects/${alpha}/main.ts`, [flatProject(alpha, 'cube-design')]);
 
-    expect(locks.filter((lock) => lock.startsWith('project:'))).toEqual([`project:${alpha}`]);
+    expect(locks.filter(({ key }) => key.startsWith('project:'))).toEqual([{ key: `project:${alpha}`, shared: true }]);
   });
 
   it('should share no lock between paths in different projects', async () => {
@@ -1106,7 +1131,70 @@ describe('mutationLockPaths', () => {
     const alphaLocks = await locksForWrite(`/projects/${alpha}/main.ts`, projects);
     const betaLocks = await locksForWrite(`/projects/${beta}/main.ts`, projects);
 
-    expect(alphaLocks.filter((lock) => betaLocks.includes(lock))).toEqual([]);
+    expect(alphaLocks.filter((lock) => betaLocks.some(({ key }) => key === lock.key))).toEqual([]);
     expect(alphaLocks).not.toEqual([]);
+  });
+
+  it('should let two writes to different paths of one project run without conflicting', async () => {
+    const projects = [flatProject(alpha, 'cube-design')];
+
+    const first = await locksForWrite(`/projects/${alpha}/src/a.ts`, projects);
+    const second = await locksForWrite(`/projects/${alpha}/src/b.ts`, projects);
+
+    expect(
+      first.filter((lock) =>
+        second.some(({ key, shared }) => key === lock.key && (shared !== true || lock.shared !== true)),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('recovered removals', () => {
+  /** What a root reports through its registry when it undid a crashed realm's creates as it opened. */
+  const recover = (registry: unknown, storageRootKey: string, providerPaths: readonly string[]): void => {
+    (registry as { _recovered: (key: string, paths: readonly string[]) => void })._recovered(
+      storageRootKey,
+      providerPaths,
+    );
+  };
+
+  it('should publish a removal a mount routes as a fileDeleted event and one delete notice', async () => {
+    const coordinator = new CrossTabCoordinator();
+    const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
+    const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+    const events: ChangeEvent[] = [];
+    context.eventBus.subscribe((event) => events.push(event));
+
+    try {
+      recover(context.providerRegistry, 'memory:0', ['src/torn.ts']);
+
+      expect(events).toMatchObject([{ type: 'fileDeleted', path: '/src/torn.ts', backend: 'memory' }]);
+      expect(notifyChanges).toHaveBeenCalledWith([
+        { type: 'delete', path: '/src/torn.ts', authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
+      ]);
+    } finally {
+      context.service.dispose();
+      coordinator.dispose();
+    }
+  });
+
+  it('should reset a root no mount routes yet, once, with a root-wide notice', async () => {
+    const coordinator = new CrossTabCoordinator();
+    const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
+    const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+    const events: ChangeEvent[] = [];
+    context.eventBus.subscribe((event) => events.push(event));
+
+    try {
+      recover(context.providerRegistry, 'opfs:origin', ['a.ts', 'b.ts']);
+
+      expect(events).toMatchObject([{ type: 'backendChanged', backend: 'opfs' }]);
+      expect(notifyChanges).toHaveBeenCalledWith([
+        { type: 'directory-change', path: '/', authority: { storageRootKey: 'opfs:origin', providerBasePath: '' } },
+      ]);
+    } finally {
+      context.service.dispose();
+      coordinator.dispose();
+    }
   });
 });

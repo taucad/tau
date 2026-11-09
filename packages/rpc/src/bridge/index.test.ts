@@ -322,6 +322,32 @@ describe('@taucad/rpc/bridge', () => {
     }
   });
 
+  it('should release every watch the server holds when createBridgePort is disposed, without waiting for a close event', async () => {
+    /* A browser fires no `close` event on a port its own realm closed, so the
+     * release must come from the dispose itself: within microtasks, before any
+     * event the runtime might deliver. */
+    const unsubscribe = vi.fn();
+    const bridge = createBridgePort({
+      watch: (): (() => void) => unsubscribe,
+    });
+    const client = createBridgeCall(wrapBridgePort(bridge.port));
+    try {
+      const handle = client.watchReady({}, () => undefined);
+      await handle.ready;
+      expect(unsubscribe).not.toHaveBeenCalled();
+
+      bridge.dispose();
+      for (let turn = 0; turn < 20; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- draining microtasks one turn at a time.
+        await Promise.resolve();
+      }
+
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    } finally {
+      client.dispose();
+    }
+  });
+
   it('should publish an optional hello payload from createBridgePort', async () => {
     const bridge = createBridgePort({}, { hello: { capability: 'rooted' } });
     const client = createBridgeCall(wrapBridgePort(bridge.port));

@@ -31,7 +31,8 @@ describe('createCliRuntime types', () => {
 
   it('passes the real CLI dynamic runtime client to the host without widening finite clients', () => {
     expectTypeOf<Awaited<ReturnType<typeof createCliHostClient>>>().toExtend<HostRuntimeClient>();
-    expectTypeOf<RuntimeClient<TscircuitRuntime>>().not.toExtend<HostRuntimeClient>();
+    // Every tscircuit view now takes the host's request shape: the board view declares `includeEdges` content.
+    expectTypeOf<RuntimeClient<TscircuitRuntime>>().toExtend<HostRuntimeClient>();
     expectTypeOf<RuntimeClient<OpenrscadRuntime>>().toExtend<HostRuntimeClient>();
   });
 

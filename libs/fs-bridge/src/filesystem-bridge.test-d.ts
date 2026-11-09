@@ -155,6 +155,7 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     }>();
     expectTypeOf<Parameters<FileSystemBridgeWorkspaceProxy['getScopedZippedDirectory']>[1]>().toEqualTypeOf<{
       readonly scope: WorkspaceScope;
+      readonly maxBytes?: number;
     }>();
   });
 

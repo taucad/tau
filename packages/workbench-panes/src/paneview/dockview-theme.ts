@@ -41,6 +41,9 @@ export const dockviewStyleOverrides = cn(
   // Two 2px horizontal margins combine into the same 4px gap as the vertical inset.
   '[--dv-tab-margin:0.25rem_0.125rem]',
   '[--dv-overlay-z-index:999]',
+  // Contain Dockview's own stacking (sashes 99, drop targets and overlays up to 9999) so it orders only Dockview's
+  // parts: app menus, popovers and tooltips portal to the body at z-50 and must draw above every pane.
+  'isolate',
   // ── Drag & drop ──
   '[--dv-drag-over-background-color:color-mix(in_oklch,var(--primary),transparent_80%)]',
   '[--dv-drag-over-border-color:var(--primary)]',
@@ -167,6 +170,13 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+  // A coarse pointer shows every tab's close action (`pointer-coarse:opacity-100`), not only the active or hovered
+  // one. An inactive tab is transparent over the group, so its scrim dissolves into the group's background rather
+  // than the active fill (`--accent`, the token default), which drew a grey block beside each glyph; its title makes
+  // the same room the active tab's does. Fine pointers keep the hover-only reveal unchanged.
+  'pointer-coarse:[&_.dv-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+  'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)]:[--fade-scrim-into:var(--dv-group-view-background-color)]',
+  'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-(--fade-scrim-into)',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
 

@@ -10,7 +10,7 @@
  * resource outright here — compute admission and the agent-host attachment —
  * and the other two are reported by the subtree that holds the file-manager,
  * project and editor actors, because those are built from React-context
- * handles (the shared worker, the file pool, the query client, the project
+ * handles (the shared worker, the query client, the project
  * manager's closures). The session still decides when they exist: the project
  * route renders a project's resources iff the registry says it is live, and
  * `closing` completes — flush, lease release — before the registry drops it.

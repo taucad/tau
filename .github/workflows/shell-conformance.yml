@@ -4,83 +4,34 @@
 # row, positive controls before negatives, network negatives judged by canaries outside the sandbox, and one
 # JSON receipt per row binding source, host, runtime, Bash and node-pty identities (I12).
 #
-# - LNX-U and LNX-D: a disposable stock Ubuntu 24.04 or Debian 13 cloud guest under KVM. The guest keeps its
+# - LNX-U, LNX-U26 and LNX-D: a disposable stock Ubuntu 24.04, Ubuntu 26.04 or Debian 13 cloud guest under KVM. The guest keeps its
 #   shipped AppArmor policy and `kernel.apparmor_restrict_unprivileged_userns`; the sandbox reaches user
 #   namespaces only through the Tau-scoped profile the real APT selector installs with its bwrap copy. This
 #   row never uses `setup-linux-sandbox`, which relaxes that sysctl for the CAD workers.
 # - MAC-A and MAC-X: hosted `macos-26` (arm64) and `macos-26-intel` (x64), Seatbelt through the same
 #   provider. The macOS Terminal rows are recorded `operator-validation-pending`, never run here.
 # - WIN-ARM is not a row yet: the Windows provider is paused.
-# - LNX-P: the private, unactivated Linux projection transport on a stock hosted Ubuntu 24.04 runner. It builds
-#   libfuse 3.17.2 from the SHA-256-pinned upstream release, installs only its setuid `fusermount3`, builds the
-#   bridge through `native-process-core:test:shell-projection-conformance` and mounts as the unprivileged runner
-#   user. It proves the FUSE transport only; authority composition and every D8 activation gate stay open.
 #
 # Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
 name: Shell conformance
 
+# Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
+# head, on demand, and on a pull request only while it carries the `shell-conformance` label. They no
+# longer run on every `main` push or on every pull request that touches a shell path. The nightly watchdog
+# alerts the operator when a nightly is red or missing. `release-desktop-staging.yml` calls the rows on
+# the commit it is about to tag, so no desktop candidate exists without five green rows on its own commit.
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit the rows check out (a desktop candidate's commit)
+        type: string
+        required: true
+  schedule:
+    - cron: '17 2 * * *'
   pull_request:
-    paths:
-      - 'packages/core/native-process/**'
-      - 'packages/host/src/shell/**'
-      - 'packages/host/src/agent-tools.ts'
-      - 'packages/agent-host/**'
-      - 'libs/agent-tools/src/registry/shell-tool.ts'
-      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
-      - 'packages/host/project.json'
-      - 'apps/desktop-e2e/**'
-      - 'apps/desktop/electron.vite.config.ts'
-      - 'apps/desktop/src/main/**'
-      - 'apps/desktop/package.json'
-      - 'apps/desktop/project.json'
-      - 'apps/ui/desktop/**'
-      - 'apps/desktop/src/tau/services-host-shell*.ts'
-      - 'apps/desktop/src/tau/services-host.ts'
-      - 'apps/ui/app/components/terminal/**'
-      - 'apps/ui/app/components/panes/**'
-      - 'apps/ui/app/workbench-records/**'
-      - 'packages/runtime/**'
-      - 'packages/plugins/openrscad/**'
-      - 'packages/geospec/**'
-      - 'apps/desktop/src/tau/services-host.terminal*.ts'
-      - 'apps/desktop/src/tau/services-host.impl.ts'
-      - 'libs/types/src/desktop-terminal.ts'
-      - 'apps/desktop/scripts/linux-apt-package.mts'
-      - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
-      - 'apps/desktop/src/shared/linux-installation.ts'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/shell-conformance.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'packages/core/native-process/**'
-      - 'packages/host/src/shell/**'
-      - 'packages/host/src/agent-tools.ts'
-      - 'packages/agent-host/**'
-      - 'libs/agent-tools/src/registry/shell-tool.ts'
-      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
-      - 'packages/host/project.json'
-      - 'apps/desktop-e2e/**'
-      - 'apps/desktop/electron.vite.config.ts'
-      - 'apps/desktop/src/main/**'
-      - 'apps/desktop/package.json'
-      - 'apps/desktop/project.json'
-      - 'apps/ui/desktop/**'
-      - 'apps/desktop/src/tau/services-host-shell*.ts'
-      - 'apps/desktop/src/tau/services-host.ts'
-      - 'apps/ui/app/components/terminal/**'
-      - 'apps/ui/app/components/panes/**'
-      - 'apps/ui/app/workbench-records/**'
-      - 'packages/runtime/**'
-      - 'packages/plugins/openrscad/**'
-      - 'packages/geospec/**'
-      - 'apps/desktop/src/tau/services-host.terminal*.ts'
-      - 'libs/types/src/desktop-terminal.ts'
-      - 'apps/desktop/scripts/linux-apt-package.mts'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/shell-conformance.yml'
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -91,13 +42,19 @@ env:
   pnpm_config_verify_deps_before_run: warn
 
 concurrency:
-  group: shell-conformance-${{ github.event.pull_request.number || github.ref }}
+  # Another label added to a pull request starts a run whose rows skip; its own group keeps it from
+  # cancelling the rows already running for the `shell-conformance` label.
+  group: shell-conformance-${{ inputs.ref && format('candidate-{0}', inputs.ref) || github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'shell-conformance' && '-other-label' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
     name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -108,10 +65,13 @@ jobs:
             row: LNX-U
           - distro: debian
             row: LNX-D
+          - distro: ubuntu2604
+            row: LNX-U26
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -128,7 +88,8 @@ jobs:
         timeout-minutes: 85
         env:
           TAU_VM_DISTRO: ${{ matrix.distro }}
-        run: timeout --signal=TERM --kill-after=120s 80m bash packages/core/native-process/scripts/shell-conformance-vm.sh
+        # The receipts bind `GITHUB_SHA`; a caller's `ref` checks out another commit, so pass the one the rows test.
+        run: GITHUB_SHA="$(git rev-parse HEAD)" timeout --signal=TERM --kill-after=120s 80m bash packages/core/native-process/scripts/shell-conformance-vm.sh
 
       - name: Upload the receipt
         if: always()
@@ -139,82 +100,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  linux-projection:
-    name: Shell projection transport on LNX-P (stock ubuntu-24.04 runner, pinned libfuse 3.17.2)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      LIBFUSE_VERSION: '3.17.2'
-      # SHA-256 of https://github.com/libfuse/libfuse/releases/download/fuse-3.17.2/fuse-3.17.2.tar.gz
-      LIBFUSE_SHA256: 3d932431ad94e86179e5265cddde1d67aa3bb2fb09a5bd35c641f86f2b5ed06f
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      - name: Build pinned libfuse
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y meson ninja-build
-          work="$RUNNER_TEMP/libfuse"
-          mkdir -p "$work/headers"
-          curl -fsSL --retry 3 -o "$work/fuse.tar.gz" \
-            "https://github.com/libfuse/libfuse/releases/download/fuse-${LIBFUSE_VERSION}/fuse-${LIBFUSE_VERSION}.tar.gz"
-          echo "${LIBFUSE_SHA256}  $work/fuse.tar.gz" | sha256sum --check --strict
-          tar -xzf "$work/fuse.tar.gz" -C "$work"
-          meson setup "$work/build" "$work/fuse-${LIBFUSE_VERSION}" --prefix=/usr/local --buildtype=release \
-            -Dexamples=false -Dtests=false -Dutils=true
-          ninja -C "$work/build"
-          # Only the mount helper is installed; the bridge loads its own adjacent copy of the library.
-          sudo install -o root -g root -m 4755 "$work/build/util/fusermount3" /usr/local/bin/fusermount3
-          cp "$work/fuse-${LIBFUSE_VERSION}/include/"{fuse_lowlevel.h,fuse_common.h,fuse_opt.h,fuse_log.h} "$work/headers/"
-          cp "$work/build/libfuse_config.h" "$work/headers/"
-          library="$(readlink -f "$work/build/lib/libfuse3.so.4")"
-          {
-            echo "TAU_PROJECTION_NODE_HEADERS=$(dirname "$(dirname "$(command -v node)")")/include/node"
-            echo "TAU_PROJECTION_FUSE_HEADERS=$work/headers"
-            echo "TAU_PROJECTION_FUSE_LIBRARY=$library"
-            echo "TAU_PROJECTION_FUSE_SHA256=$(sha256sum "$library" | cut -d' ' -f1)"
-          } >> "$GITHUB_ENV"
-          ls -l /dev/fuse /usr/local/bin/fusermount3
-          id
-
-      - name: Run the projection transport conformance target
-        run: pnpm nx run native-process-core:test:shell-projection-conformance --skip-nx-cache
-
-      - name: Record the bridge provenance
-        if: always()
-        run: |
-          mkdir -p out/test-results/shell-conformance/LNX-P
-          cp packages/core/native-process/dist/native/linux-x64/provenance.json \
-            out/test-results/shell-conformance/LNX-P/provenance.json || true
-          { uname -a; cat /etc/os-release; node --version; } > out/test-results/shell-conformance/LNX-P/host.txt
-          # No mount may outlive the run.
-          if grep tau-shell-projection /proc/self/mounts; then
-            echo '::error::A projection mount outlived the conformance run.'
-            exit 1
-          fi
-
-      - name: Upload the receipt
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: shell-conformance-LNX-P
-          path: out/test-results/shell-conformance/LNX-P/
-          retention-days: 14
-          if-no-files-found: error
-
   macos:
     name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -229,6 +121,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -244,14 +137,14 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
-        run: pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
 
       - name: Run the shell service conformance target
         if: success() || failure()
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
-        run: pnpm nx run host:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance --skip-nx-cache
 
       # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
       - name: Run the shell qualification target
@@ -259,7 +152,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
-        run: pnpm nx run host:test:shell-qualification --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification --skip-nx-cache
 
       # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
       # until the operator's own-pty run, which this workflow never performs.
@@ -268,7 +161,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
-        run: pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
 
       - name: Upload the receipt
         if: always()

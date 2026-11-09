@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { OPFSProvider } from '#backend/opfs-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
+import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
 
 describe('FileSystemAccessProvider', () => {
   let provider: FileSystemAccessProvider;
@@ -26,6 +28,9 @@ describe('FileSystemAccessProvider', () => {
         writable: true,
         quotaBased: false,
         durability: 'stream-append',
+        trustworthyMtime: true,
+        externallyEdited: true,
+        streamsWrites: true,
       });
     });
   });
@@ -192,6 +197,230 @@ describe('FileSystemAccessProvider', () => {
     });
   });
 
+  describe('stat file handle reuse', () => {
+    it('answers a stat after a listing from the listed handle, with current metadata', async () => {
+      await provider.writeFile('dir/a.txt', 'alpha');
+      await provider.refresh();
+      await provider.readdirWithStats('');
+      await provider.readdirWithStats('dir');
+      const directory = await rootHandle.getDirectoryHandle('dir');
+      const lookups = vi.spyOn(directory, 'getFileHandle');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+      try {
+        await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 5 });
+        expect(lookups).not.toHaveBeenCalled();
+        expect(reads).not.toHaveBeenCalled();
+      } finally {
+        reads.mockRestore();
+      }
+
+      /* A rewrite keeps the file: the kept handle answers its new metadata. */
+      await provider.writeFile('dir/a.txt', 'alphabet');
+      lookups.mockClear();
+      await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 8 });
+      expect(lookups).not.toHaveBeenCalled();
+    });
+
+    it('looks the path up again when the kept handle no longer resolves', async () => {
+      await provider.writeFile('gone.txt', 'one');
+      await provider.writeFile('replaced.txt', 'one');
+      await provider.writeFile('now-dir', 'one');
+      await provider.readdirWithStats('');
+
+      /* Changes no authority announced: straight to the handles. */
+      await rootHandle.removeEntry('gone.txt');
+      await rootHandle.removeEntry('replaced.txt');
+      const replacement = await rootHandle.getFileHandle('replaced.txt', { create: true });
+      const writable = await replacement.createWritable();
+      await writable.write(new TextEncoder().encode('replacement'));
+      await writable.close();
+      await rootHandle.removeEntry('now-dir');
+      await rootHandle.getDirectoryHandle('now-dir', { create: true });
+
+      await expect(provider.stat('gone.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.stat('replaced.txt')).resolves.toMatchObject({ type: 'file', size: 11 });
+      await expect(provider.stat('now-dir')).resolves.toMatchObject({ type: 'dir' });
+    });
+
+    /* A mock file handle's getFile fails once its entry is replaced, so a stale
+     * kept handle and a forgotten one both end in a lookup. What tells them
+     * apart is the read: a forgotten handle is never asked. */
+    type MetadataReader = { getFile(): Promise<File> };
+    type LookupParent = { getFileHandle(name: string, options?: { create?: boolean }): Promise<unknown> };
+
+    /** The prototype every mock file handle shares. */
+    const fileHandlePrototype = async (): Promise<MetadataReader> =>
+      Object.getPrototypeOf(await createMockRootHandle().getFileHandle('probe', { create: true })) as MetadataReader;
+
+    /** One stat, with the parent's handle lookups and every file handle's metadata reads during it. */
+    const statCounting = async (
+      subject: FileSystemAccessProvider,
+      parent: LookupParent,
+      path: string,
+    ): Promise<{ outcome: unknown; lookups: number; reads: number }> => {
+      const lookups = vi.spyOn(parent, 'getFileHandle');
+      const reads = vi.spyOn(await fileHandlePrototype(), 'getFile');
+      try {
+        const outcome = await subject.stat(path).then(
+          (stat) => stat,
+          (error: unknown) => error,
+        );
+        return { outcome, lookups: lookups.mock.calls.length, reads: reads.mock.calls.length };
+      } finally {
+        lookups.mockRestore();
+        reads.mockRestore();
+      }
+    };
+
+    /** Write `content` at `name` under `directory` without the provider. */
+    const writeBehind = async (directory: LookupParent, name: string, content: string): Promise<void> => {
+      const handle = (await directory.getFileHandle(name, { create: true })) as FileSystemFileHandle;
+      const writable = await handle.createWritable();
+      await writable.write(new TextEncoder().encode(content));
+      await writable.close();
+    };
+
+    it('looks the path up again when the kept handle refuses for any reason', async () => {
+      await provider.writeFile('flaky.txt', 'flaky');
+      await provider.stat('flaky.txt');
+      const refused = vi
+        .spyOn(await fileHandlePrototype(), 'getFile')
+        .mockRejectedValueOnce(new DOMException('Busy', 'NoModificationAllowedError'));
+      try {
+        await expect(provider.stat('flaky.txt')).resolves.toMatchObject({ type: 'file', size: 5 });
+        expect(refused).toHaveBeenCalledTimes(2);
+      } finally {
+        refused.mockRestore();
+      }
+      /* The refusing handle was forgotten; the lookup's handle is the one kept now. */
+      await expect(statCounting(provider, rootHandle, 'flaky.txt')).resolves.toMatchObject({ lookups: 0, reads: 1 });
+    });
+
+    it('forgets the kept handle of a file it unlinks', async () => {
+      await provider.writeFile('target.txt', 'old');
+      await provider.stat('target.txt');
+
+      await provider.unlink('target.txt');
+      await writeBehind(rootHandle, 'target.txt', 'newer');
+
+      await expect(statCounting(provider, rootHandle, 'target.txt')).resolves.toMatchObject({
+        outcome: { type: 'file', size: 5 },
+        lookups: 1,
+        reads: 1,
+      });
+    });
+
+    it('forgets the kept handles of both paths a native move names', async () => {
+      const root = createMockRootHandle({ nativeMove: true });
+      vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+      try {
+        const opfs = new OPFSProvider();
+        await opfs.initialize();
+        await opfs.writeFile('from.txt', 'source');
+        await opfs.writeFile('to.txt', 'stale');
+        await opfs.stat('from.txt');
+        await opfs.stat('to.txt');
+        /* The destination goes behind the provider's back, so its handle stays kept. */
+        await root.removeEntry('to.txt');
+
+        await opfs.rename('from.txt', 'to.txt');
+
+        await expect(statCounting(opfs, root, 'from.txt')).resolves.toMatchObject({
+          outcome: { code: 'ENOENT' },
+          lookups: 1,
+          reads: 0,
+        });
+        await expect(statCounting(opfs, root, 'to.txt')).resolves.toMatchObject({
+          outcome: { type: 'file', size: 6 },
+          lookups: 1,
+          reads: 1,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('forgets the kept handle a batch move takes away, through the move itself', async () => {
+      const root = createMockRootHandle({ nativeMove: true });
+      vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+      try {
+        const opfs = new OPFSProvider();
+        await opfs.initialize();
+        await opfs.writeFile('batch/c.txt', 'c');
+        await opfs.stat('batch/c.txt');
+
+        await expect(opfs.applyBatch([{ op: 'move', from: 'batch/c.txt', to: 'batch/d.txt' }])).resolves.toEqual([
+          { outcome: 'applied', kind: 'file' },
+        ]);
+
+        const directory = await root.getDirectoryHandle('batch');
+        await expect(statCounting(opfs, directory, 'batch/c.txt')).resolves.toMatchObject({
+          outcome: { code: 'ENOENT' },
+          lookups: 1,
+          reads: 0,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('forgets every kept handle under a directory it removes', async () => {
+      await provider.writeFile('tree/leaf.txt', 'leaf');
+      await provider.stat('tree/leaf.txt');
+      /* The file goes behind the provider's back, so the directory is empty and its handle stays kept. */
+      const tree = await rootHandle.getDirectoryHandle('tree');
+      await tree.removeEntry('leaf.txt');
+
+      await provider.rmdir('tree');
+      const recreated = await rootHandle.getDirectoryHandle('tree', { create: true });
+      await writeBehind(recreated, 'leaf.txt', 'regrown');
+
+      await expect(statCounting(provider, recreated, 'tree/leaf.txt')).resolves.toMatchObject({
+        outcome: { type: 'file', size: 7 },
+        lookups: 1,
+        reads: 1,
+      });
+    });
+
+    it('drops kept handles on refresh', async () => {
+      await provider.writeFile('kept.txt', 'kept');
+      await provider.stat('kept.txt');
+      await provider.refresh(['kept.txt']);
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
+
+      await provider.refresh();
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
+    });
+
+    it('keeps no handle from a stat a refresh overtook', async () => {
+      await provider.writeFile('kept.txt', 'kept');
+      await provider.refresh();
+      const prototype = await fileHandlePrototype();
+      const { getFile } = prototype;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held = vi.spyOn(prototype, 'getFile').mockImplementationOnce(async function (this: MetadataReader) {
+        await gate;
+        return getFile.call(this);
+      });
+      try {
+        const pending = provider.stat('kept.txt');
+        await vi.waitFor(() => {
+          expect(held).toHaveBeenCalled();
+        });
+        await provider.refresh();
+        release();
+        await expect(pending).resolves.toMatchObject({ type: 'file', size: 4 });
+      } finally {
+        held.mockRestore();
+      }
+
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // mkdir
   // ---------------------------------------------------------------------------
@@ -346,6 +575,36 @@ describe('FileSystemAccessProvider', () => {
         new DOMException('Permission denied', 'NotAllowedError'),
       );
       await expect(provider.exists('denied')).rejects.toMatchObject({ name: 'NotAllowedError' });
+    });
+
+    it('should return false beneath a file instead of reporting ENOTDIR', async () => {
+      await provider.writeFile('plain.txt', 'file');
+      expect(await provider.exists('plain.txt/child')).toBe(false);
+    });
+  });
+
+  describe('metadata-only preflights', () => {
+    it('should answer exists, unlink and rmdir checks without reading file bytes', async () => {
+      await provider.writeFile('a.txt', 'alpha');
+      await provider.mkdir('dir');
+      const slices = vi.spyOn(File.prototype, 'slice');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+
+      expect(await provider.exists('a.txt')).toBe(true);
+      expect(await provider.exists('dir')).toBe(true);
+      expect(await provider.exists('missing.txt')).toBe(false);
+      await expect(provider.unlink('dir')).rejects.toMatchObject({ code: 'EISDIR' });
+      await expect(provider.unlink('missing.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rmdir('a.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(provider.rmdir('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('missing.txt', 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('a.txt', 'dir')).rejects.toMatchObject({ code: 'EEXIST' });
+      await provider.unlink('a.txt');
+
+      expect(slices).not.toHaveBeenCalled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(await provider.exists('a.txt')).toBe(false);
+      expect(await provider.exists('dir')).toBe(true);
     });
   });
 
@@ -679,10 +938,9 @@ describe('FileSystemAccessProvider', () => {
         type: 'file',
         size: 50_000_000,
         mtimeMs: 4242,
-        contentKind: 'binary',
       });
       expect(counters.fullReads).toBe(0);
-      expect(counters.sliceBytes).toBeLessThanOrEqual(512);
+      expect(counters.sliceBytes).toBe(0);
     });
 
     it('should list stats without reading contents and with bounded concurrency', async () => {
@@ -699,9 +957,9 @@ describe('FileSystemAccessProvider', () => {
         type: 'file',
         size: 50_000_000,
         mtimeMs: 4242,
-        contentKind: 'binary',
       });
       expect(counters.fullReads).toBe(0);
+      expect(counters.sliceBytes).toBe(0);
       expect(counters.maxInFlight).toBeGreaterThan(1);
       expect(counters.maxInFlight).toBeLessThanOrEqual(16);
     });
@@ -731,15 +989,20 @@ describe('FileSystemAccessProvider', () => {
   });
 
   describe('readdirWithStats', () => {
-    it('returns head-only text metadata after one bounded slice while exact stat still counts lines', async () => {
+    it('lists and stats head metadata without reading a byte of content (I3)', async () => {
       await provider.writeFile('large.txt', `${'a'.repeat(1024)}\nend`);
+      vi.restoreAllMocks();
       const slice = vi.spyOn(File.prototype, 'slice');
+      const arrayBuffer = vi.spyOn(File.prototype, 'arrayBuffer');
 
-      const rows = await provider.readdirWithStats('', { content: 'head' });
-      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
-      expect(rows[0]).not.toHaveProperty('lineCount');
-      expect(slice.mock.calls).toEqual([[0, 512]]);
-      expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 2 });
+      const rows = await provider.readdirWithStats('');
+      const stat = await provider.stat('large.txt');
+
+      /* Exactly kind, size and time: no content fact rides along. */
+      expect(rows[0]).toStrictEqual({ name: 'large.txt', type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
+      expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: rows[0]!.mtimeMs });
+      expect(slice).not.toHaveBeenCalled();
+      expect(arrayBuffer).not.toHaveBeenCalled();
     });
 
     it('should return entries with type and size in single pass', async () => {
@@ -757,6 +1020,259 @@ describe('FileSystemAccessProvider', () => {
       expect(file!.size).toBeGreaterThan(0);
 
       expect(directory!.type).toBe('dir');
+    });
+
+    describe('when an entry disappears during the listing', () => {
+      type ListedHandle = Awaited<ReturnType<typeof rootHandle.getFileHandle>>;
+
+      /**
+       * Enumerate the root as usual, running `beforeStat` once enumeration has
+       * finished and before any child is stat'ed, and letting `prepare` adjust
+       * each file handle on the way out.
+       */
+      const interceptListing = ({
+        beforeStat,
+        prepare,
+      }: {
+        beforeStat?: () => Promise<void>;
+        prepare?: (name: string, handle: ListedHandle) => void;
+      }): void => {
+        const enumerate = rootHandle.entries.bind(rootHandle);
+        vi.spyOn(rootHandle, 'entries').mockImplementation(async function* () {
+          const listed: Array<[string, ListedHandle | Awaited<ReturnType<typeof rootHandle.getDirectoryHandle>>]> = [];
+          for await (const [name, handle] of enumerate()) {
+            if (handle.kind === 'file') {
+              prepare?.(name, handle);
+            }
+            listed.push([name, handle]);
+          }
+          await beforeStat?.();
+          yield* listed;
+        });
+      };
+
+      const unreadable = (): DOMException =>
+        new DOMException('The requested file could not be read.', 'NotReadableError');
+
+      it('should skip the vanished entry and list the rest', async () => {
+        const staged = '.kept.ts.tau-staged.00000000-0000-4000-8000-000000000000.tmp';
+        await provider.writeFile('kept.ts', 'export {}');
+        await provider.writeFile(staged, 'staged');
+        interceptListing({ beforeStat: async () => rootHandle.removeEntry(staged) });
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
+        expect(rows[0]).toMatchObject({ type: 'file', size: 9 });
+      });
+
+      it('should skip an entry whose File became unreadable because it was removed', async () => {
+        await provider.writeFile('kept.ts', 'kept');
+        await provider.writeFile('gone.ts', 'gone');
+        interceptListing({
+          prepare: (name, handle) => {
+            if (name === 'gone.ts') {
+              vi.spyOn(handle, 'getFile').mockImplementation(async () => {
+                await rootHandle.removeEntry('gone.ts');
+                throw unreadable();
+              });
+            }
+          },
+        });
+        const lookups = vi.spyOn(rootHandle, 'getFileHandle');
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
+        expect(lookups).toHaveBeenCalledWith('gone.ts');
+      });
+
+      it('should stat a file swapped in under the same name once more on a fresh handle', async () => {
+        await provider.writeFile('kept.ts', 'kept');
+        await provider.writeFile('swapped.ts', 'old');
+        interceptListing({
+          prepare: (name, handle) => {
+            if (name === 'swapped.ts') {
+              vi.spyOn(handle, 'getFile').mockImplementation(async () => {
+                await provider.writeFile('swapped.ts', 'the replacement');
+                throw unreadable();
+              });
+            }
+          },
+        });
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts', 'swapped.ts']);
+        expect(rows[1]).toMatchObject({ type: 'file', size: 15 });
+      });
+
+      it('should still reject an entry that stays unreadable on a fresh handle', async () => {
+        await provider.writeFile('locked.ts', 'locked');
+        const lookUp = rootHandle.getFileHandle.bind(rootHandle);
+        const lockedHandle = async (name: string, options?: { create?: boolean }) => {
+          const handle = await lookUp(name, options);
+          vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
+          return handle;
+        };
+        interceptListing({
+          prepare: (_name, handle) => {
+            vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
+          },
+        });
+        const lookups = vi.spyOn(rootHandle, 'getFileHandle').mockImplementation(lockedHandle);
+
+        await expect(provider.readdirWithStats('')).rejects.toMatchObject({ name: 'NotReadableError' });
+        expect(lookups).toHaveBeenCalledWith('locked.ts');
+        lookups.mockRestore();
+        await expect(provider.readFile('locked.ts', 'utf8')).resolves.toBe('locked');
+      });
+    });
+  });
+
+  describe('applyBatch', () => {
+    it('should leave no file a failed write created, and keep what landed', async () => {
+      await provider.writeFile('existing.txt', 'old');
+      const writeError = new Error('the writable did not commit');
+      const target = provider as unknown as { _writeBatchData: (handle: { name: string }) => Promise<void> };
+      const original = target._writeBatchData.bind(provider);
+      vi.spyOn(target, '_writeBatchData').mockImplementation(async (...args) => {
+        if (args[0].name === 'new.txt' || args[0].name === 'existing.txt') {
+          throw writeError;
+        }
+        return original(...args);
+      });
+      const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+      const receipts = await provider.applyBatch([
+        { op: 'write', path: 'fresh/deep/new.txt', data: bytes('new') },
+        { op: 'write', path: 'fresh/ok.txt', data: bytes('ok') },
+        { op: 'write', path: 'existing.txt', data: bytes('new') },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['failed', 'applied', 'uncertain']);
+      // Its parent stays: another changeset may hold that directory shared.
+      await expect(provider.exists('fresh/deep/new.txt')).resolves.toBe(false);
+      await expect(provider.readFile('fresh/ok.txt', 'utf8')).resolves.toBe('ok');
+      await expect(provider.readFile('existing.txt', 'utf8')).resolves.toBe('old');
+    });
+  });
+
+  describe('uncommitted creates of a user-picked root', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+    const memoryStore = (seed: readonly UncommittedRecord[] = []) => {
+      const records = new Map(seed.map((record) => [record.changesetId, record]));
+      const store: UncommittedChangesetStore = {
+        put: async (record) => {
+          records.set(record.changesetId, record);
+        },
+        delete: async ({ changesetId }) => {
+          records.delete(changesetId);
+        },
+        list: async (root) => [...records.values()].filter((record) => record.root === root),
+      };
+      return { store, records };
+    };
+
+    const stubLocks = (): void => {
+      vi.stubGlobal('navigator', {
+        locks: {
+          request: async <T>(_name: string, _options: unknown, callback: () => Promise<T>): Promise<T> => callback(),
+          query: async () => ({ held: [], pending: [] }),
+        },
+      });
+    };
+
+    it('should record its creates under the workspace key and undo a dead realm’s empty one as it opens', async () => {
+      stubLocks();
+      const root = createMockRootHandle();
+      await root.getFileHandle('torn.ts', { create: true });
+      const { store, records } = memoryStore([
+        {
+          root: 'webaccess:workspace-1',
+          owner: 'dead-owner',
+          changesetId: 'changeset-1',
+          recordedAt: Date.now(),
+          entries: [{ path: 'torn.ts', size: 4 }],
+        },
+      ]);
+      const onRecovered = vi.fn();
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: { root: 'webaccess:workspace-1', store },
+        onRecovered,
+      });
+
+      await expect(picked.recoverUncommitted()).resolves.toEqual(['torn.ts']);
+
+      expect(onRecovered).toHaveBeenCalledWith(['torn.ts']);
+      expect(records.size).toBe(0);
+      const puts: UncommittedRecord[] = [];
+      const watched: UncommittedChangesetStore = {
+        ...store,
+        put: async (record) => {
+          puts.push(record);
+          await store.put(record);
+        },
+      };
+      const writer = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: { root: 'webaccess:workspace-1', store: watched },
+      });
+      await writer.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+      expect(puts.map(({ root: key, entries }) => [key, entries])).toEqual([
+        ['webaccess:workspace-1', [{ path: 'new.ts', size: 3 }]],
+      ]);
+      expect(records.size).toBe(0);
+    });
+
+    it('should stage a create through a temporary sibling on a root that keeps no record', async () => {
+      const root = createMockRootHandle();
+      await root.getFileHandle('taken.ts', { create: true });
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, { stageCreates: true });
+      const writes = vi.spyOn(
+        picked as unknown as { _writeBatchData: (handle: { name: string }) => Promise<void> },
+        '_writeBatchData',
+      );
+
+      const receipts = await picked.applyBatch([
+        { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
+        { op: 'write', path: 'taken.ts', data: bytes('mine'), create: true },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'failed']);
+      // The bytes went to a sibling the revisions sweep recognises, never to the path itself.
+      const written = writes.mock.calls.map(([handle]) => handle.name);
+      expect(written).toHaveLength(1);
+      expect(written[0]).toMatch(/^\.new\.ts\.tau-staged\.[\da-f-]{36}\.tmp$/u);
+      await expect(picked.readFile('dir/new.ts', 'utf8')).resolves.toBe('new');
+      await expect(picked.readdir('dir')).resolves.toEqual(['new.ts']);
+      await expect(picked.readFile('taken.ts', 'utf8')).resolves.toBe('');
+    });
+
+    it('should refuse a create it cannot stage when the record cannot be kept, leaving no file', async () => {
+      stubLocks();
+      const root = createMockRootHandle();
+      const { store: inner } = memoryStore();
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: {
+          root: 'webaccess:workspace-1',
+          store: {
+            ...inner,
+            put: async () => {
+              throw new Error('quota');
+            },
+          },
+        },
+      });
+
+      const [receipt] = await picked.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+
+      expect(receipt?.outcome).toBe('failed');
+      await expect(picked.exists('new.ts')).resolves.toBe(false);
     });
   });
 });

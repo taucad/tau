@@ -34,6 +34,7 @@ import type {
   ExportFile,
   FileContentMetadata,
   FileProvenance,
+  StatContentMetadata,
 } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import type { WorkbenchView } from '@taucad/workbench';
@@ -53,7 +54,9 @@ export type RpcInvocationContext = Readonly<{
 export type RpcProgressReport = Readonly<{ progress: number; total?: number; message?: string }>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
- * `name` is a basename, never a path.
+ * `name` is a basename, never a path. A file carries its kind, and a text
+ * file its exact line count, where a listing could measure them within its
+ * byte cap (charter D4, EQ15); otherwise its size alone.
  *
  * @public
  */
@@ -75,7 +78,36 @@ export type RpcDirectoryEntry =
       modifiedAt?: string;
       /** What the composed view says about this entry. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
+
+/**
+ * Options for {@link RpcFileSystem.readdir}.
+ *
+ * @public
+ */
+export type RpcReaddirOptions = Readonly<{
+  /**
+   * False when the caller needs names, types and sizes only — a walk that
+   * reads every file anyway (`grep`) — so the listing measures no content
+   * facts. Defaults to true.
+   */
+  contentFacts?: boolean;
+}>;
+
+/**
+ * One file of an index-backed listing ({@link RpcFileSystem.indexedFiles}):
+ * its project-relative path and head metadata, with content facts only where
+ * the index already knows them (charter D4, I3).
+ *
+ * @public
+ */
+export type RpcIndexedFile = Readonly<
+  {
+    path: string;
+    size: number;
+    modifiedAt?: string;
+  } & StatContentMetadata
+>;
 
 /**
  * Abstract filesystem for RPC handlers.
@@ -103,6 +135,30 @@ export type RpcFileSystem = {
   readFile(path: string): Promise<string>;
   /** Exact owned bytes from a canonical rooted path; refuses files above 256 MiB. */
   readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * Which of these files are pending entries: their large object is not on
+   * the device yet (D9). Answered from the index without reading, so a
+   * consumer that only searches never starts a download. Optional: a host
+   * without an index offers none, and its reads refuse with `PENDING`.
+   */
+  pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
+  /**
+   * Every file below a directory, from the authority's Project Index in one
+   * call (charter D13): what `grep` and `glob_search` search instead of
+   * walking the tree. The index applies the project's ignore rules (a
+   * `node_modules` or cache directory is never indexed) and the view's mask.
+   * Resolves `undefined` when the index cannot answer for that directory — no
+   * index, or a directory it does not hold, such as an ignored one named
+   * explicitly — and the caller walks it instead. Optional: a host without an
+   * index offers none.
+   */
+  indexedFiles?(path: string): Promise<readonly RpcIndexedFile[] | undefined>;
+  /**
+   * The content kind of each file, from the index where it is known and
+   * otherwise from the file's head alone (charter D4): what lets a search skip
+   * a binary without reading it. A path the host cannot classify is left out.
+   */
+  contentKinds?(paths: readonly string[]): Promise<ReadonlyMap<string, 'text' | 'binary'>>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {
@@ -111,7 +167,7 @@ export type RpcFileSystem = {
   }): Promise<CheckedFileWriteResult>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;
   deleteFile(path: string): Promise<void>;
-  readdir(path: string): Promise<RpcDirectoryEntry[]>;
+  readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
   editFile(input: DeterministicEditFileInput): Promise<{
@@ -153,7 +209,7 @@ export type RpcFileStat =
       modifiedAt: string;
       /** What the composed view says about this path. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Abstract runtime client for getting compilation results.

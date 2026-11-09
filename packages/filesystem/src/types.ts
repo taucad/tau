@@ -9,17 +9,18 @@
  * - FileTreeNode: tree representation for /files route
  */
 
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
-  FileContentMetadata,
   FileProvenance,
   FileStat,
+  StatContentMetadata,
 } from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
-export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
+export type { ChangeEvent, ChangeSetEvent, PathChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
 
 /** Rule 16's four storage classes. @public */
 export type PathClass = 'authored' | 'records' | 'cache' | 'control-plane';
@@ -64,23 +65,48 @@ export type PathPolicy = {
  */
 export type FileMode = '100644' | '100755';
 
-/** Options for authoritative metadata without exact text line counting. @public */
-export type FileStatOptions = Readonly<{ content: 'head' }>;
+/** One directory row with head metadata (I3: content facts only when known). @public */
+export type DirectoryStatRow = { readonly name: string } & FileStat;
 
-/** Metadata from a head-only stat or listing. Text line counts are unknown. @public */
-export type HeadFileStat =
-  | Extract<FileStat, { type: 'dir' }>
-  | {
-      readonly type: 'file';
-      readonly size: number;
-      readonly mtimeMs: number;
-      readonly contentKind: 'text' | 'binary';
-      readonly lineCount?: never;
-      readonly provenance?: FileProvenance;
-    };
+/**
+ * What a file's bytes are, measured once from the bytes themselves (charter D4).
+ *
+ * Recorded on the write path, where the bytes are in hand, or by an explicit
+ * lazy `facts` request; never by a metadata call. `blobOid` and `sha256` are
+ * present only when something hashed exactly these bytes.
+ *
+ * @public
+ */
+export type ContentFacts = Readonly<{
+  contentKind: 'text' | 'binary';
+  /** Exact `split('\n')` line count; text only. */
+  lineCount?: number;
+  /** Lowercase hexadecimal SHA-256 of the bytes. */
+  sha256?: string;
+  /** Git blob object id (SHA-1) of the bytes. */
+  blobOid?: string;
+}>;
 
-/** One directory row with exact or head-only metadata. @public */
-export type DirectoryStatRow<Stat extends FileStat | HeadFileStat = FileStat> = { readonly name: string } & Stat;
+/** Options for a lazy {@link ContentFacts} request. @public */
+export type ContentFactsOptions = Readonly<{
+  /**
+   * Count the lines of text files. Without it a request learns the kind only,
+   * from each file's first 512 bytes.
+   */
+  lineCount?: boolean;
+  /**
+   * Largest file read in full, to count lines or digest it; omitted means no
+   * cap. A larger file answers its kind and nothing else (D4).
+   */
+  byteCap?: number;
+  /**
+   * The head metadata the caller already listed, one per requested path in
+   * request order (`undefined` where it has none): what lets facts measured
+   * from an earlier read be checked as current without another stat.
+   */
+  listed?: ReadonlyArray<Readonly<{ size: number; mtimeMs: number }> | undefined>;
+  signal?: AbortSignal;
+}>;
 
 /**
  * Capability flags describing what a storage provider supports.
@@ -102,6 +128,38 @@ export type ProviderCapabilities = {
    * does not receives them one at a time.
    */
   readonly coalescesWrites?: boolean;
+  /**
+   * Whether `mtimeMs` changes whenever a file's bytes do, so a Project Index
+   * may key content facts on `(size, mtimeMs)` (D5). A provider without it
+   * opts out: no snapshot is kept and every fact is re-read (closeout EQ7).
+   */
+  readonly trustworthyMtime?: boolean;
+  /**
+   * Whether programs other than Tau's authorities write this root (a folder
+   * the user picked, a checkout on disk), so an indexed digest must be
+   * compared against the provider before a cut trusts it (D5).
+   */
+  readonly externallyEdited?: boolean;
+  /**
+   * Whether `writeFileStream` holds one chunk at a time rather than gathering
+   * the whole file first (File System Access, OPFS, Node). A consumer that
+   * streams to save memory streams only where this is set (W6.4).
+   */
+  readonly streamsWrites?: boolean;
+  /**
+   * Whether `rename` of a file is a metadata operation that never reads or
+   * writes its bytes (OPFS's native `move()`, Node's `rename`). A consumer
+   * that would move many files into place asks first, and writes them where
+   * they belong instead on a provider whose rename copies (W7).
+   */
+  readonly movesInPlace?: boolean;
+  /**
+   * Whether a write may name a large object by its id (`LargeObjectWriteSource`)
+   * for the provider to clone or copy from the repository store its authority
+   * was given for this root (EQ13). Absent, such a write is refused before any
+   * I/O, and the caller writes the bytes.
+   */
+  readonly largeObjectSources?: boolean;
 };
 
 /**
@@ -149,13 +207,8 @@ export type ExternalChangeFact =
 export type FileSystemProvider = {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;
-  /** Explicit opt-in to head-only listing; absent on exact-only legacy providers. */
-  readonly supportsHeadListing?: true;
-  /** Optional batched listing. Omission returns exact metadata; `head` omits unknown line counts. */
-  readdirWithStats?: {
-    (path: string): Promise<DirectoryStatRow[]>;
-    (path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<FileStat | HeadFileStat>>>;
-  };
+  /** Optional batched listing: one level with head metadata, reading no file content (I3). */
+  readdirWithStats?(path: string): Promise<DirectoryStatRow[]>;
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   /** Persist a file, creating any missing parent directories. */
@@ -169,9 +222,28 @@ export type FileSystemProvider = {
   }): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  /**
+   * Write one file from a stream of its bytes, creating missing parents (W6.3).
+   *
+   * An existing file keeps its old bytes until the stream ends, and then holds
+   * all the new ones: chunks land in a staged file that is moved or closed over
+   * the path only once the stream is done (I1). A new file never holds part of
+   * the stream at its path. Where the provider cannot stage it elsewhere (a
+   * picked folder, or OPFS without sync handles and a native move) it is
+   * recorded as an uncommitted create and reads as empty until the stream
+   * ends; a crash leaves that empty file for the root's recovery to remove, or,
+   * on a root that keeps no record, a temporary sibling for the sweep. A stream
+   * that errors, or a write that fails, leaves the path as it was and nothing
+   * staged behind, and the source is cancelled whenever the write stops before
+   * reading it to the end. File System Access, OPFS and Node providers hold
+   * one chunk at a time (a picked folder without a native move copies a staged
+   * sibling into place); a provider whose storage keeps a file whole (memory,
+   * IndexedDB) gathers it first.
+   */
+  writeFileStream?(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void>;
   readdir(path: string): Promise<string[]>;
+  /** Head metadata of one path: kind, size and time, reading no file content (I3). */
   stat(path: string): Promise<FileStat>;
-  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   unlink(path: string): Promise<void>;
   rmdir(path: string): Promise<void>;
@@ -193,6 +265,14 @@ export type FileSystemProvider = {
    * bodies; without it, callers read and digest the bodies themselves.
    */
   hashFiles?(paths: readonly string[]): Promise<Record<string, string>>;
+  /**
+   * Apply one changeset phase's entries for this provider, reporting each
+   * entry's outcome truthfully (charter D2). Entries name no path twice except
+   * appends, which run in entry order, and none lies inside another's subtree.
+   * Never rejects for an entry's own failure. A provider without it is driven
+   * through its primitives.
+   */
+  applyBatch?(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]>;
   /** Optional readdir carrying entry kinds. When present, tree walks skip the stat-per-child. */
   readdirEntries?(path: string): Promise<DirectoryEntry[]>;
   /**
@@ -273,7 +353,7 @@ export type FileTreeNode =
       children?: never;
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
-    } & ({ contentKind: 'text'; lineCount?: number } | { contentKind: 'binary'; lineCount?: never }));
+    } & StatContentMetadata);
 
 /**
  * Directory listing row with stat metadata (worker readDirectory aggregation).
@@ -291,7 +371,7 @@ export type TreeEntry =
       type: 'file';
       size: number;
       mtimeMs: number;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 // =============================================================================
 // Watch API types

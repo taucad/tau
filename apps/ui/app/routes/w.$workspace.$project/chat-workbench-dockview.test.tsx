@@ -53,11 +53,17 @@ vi.mock('#components/code/code-editor-view.client.js', () => {
 });
 vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
-const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>() }));
+const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
   useModelAvailability: () => 'ready',
   useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
+  useOpenedLargeObjectPending(path: string | undefined) {
+    if (path !== undefined) {
+      largeObjectState.opened.push(path);
+    }
+    return path !== undefined && largeObjectState.pending.has(path);
+  },
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
@@ -160,7 +166,14 @@ const mockSessionApply = vi.fn((path: string, transaction: DocumentTransaction):
 );
 const mockSessionSave = vi.fn(async (_path: string): Promise<void> => undefined);
 const mockSessionGet = vi.fn((path: string): EditorDocument | undefined => mockDocuments.get(path));
-const mockSession = { apply: mockSessionApply, save: mockSessionSave, get: mockSessionGet };
+const mockSessionFlush = vi.fn((_path?: string): void => undefined);
+/* Typing schedules a debounced save (D17); `mockSessionSave` stands for that schedule. */
+const mockSession = {
+  apply: mockSessionApply,
+  scheduleSave: mockSessionSave,
+  flushSaves: mockSessionFlush,
+  get: mockSessionGet,
+};
 
 vi.mock('#hooks/use-editor-document-session.js', () => ({
   useEditorDocumentSession: () => mockSession,
@@ -810,6 +823,8 @@ describe('FileEditor routing', () => {
       expect(placeholder).toHaveTextContent('Downloading part.step');
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
       expect(screen.queryByText(/git-lfs/u)).not.toBeInTheDocument();
+      /* Open, so its object jumps the fill queue (D10). */
+      expect(largeObjectState.opened).toContain('models/part.step');
 
       largeObjectState.pending.delete('models/part.step');
       mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('solid part') });
@@ -819,6 +834,7 @@ describe('FileEditor routing', () => {
       expect(screen.getByTestId('viewer-content').textContent).toBe('solid part');
     } finally {
       largeObjectState.pending.clear();
+      largeObjectState.opened.length = 0;
     }
   });
 
@@ -1208,6 +1224,39 @@ describe('FileEditor routing', () => {
       await userEvent.click(screen.getByTestId('trigger-undo'));
       expect(document.text).toBe('hello');
       expect(mockSessionSave).toHaveBeenCalledWith(document.path);
+    });
+  });
+
+  describe('save flush points (D17)', () => {
+    const textPane = (path: string): void => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path }];
+      mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
+      mockResolveViewer.mockReturnValue(() => <input data-testid='pane-input' />);
+    };
+
+    it('flushes the live path when focus leaves the pane', async () => {
+      textPane('src/renamed.ts');
+      render(<FileEditor paneId='pane-1' filePath='src/original.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('pane-input'));
+      mockSessionFlush.mockClear();
+      await userEvent.tab();
+      await userEvent.click(document.body);
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/renamed.ts');
+    });
+
+    it('flushes when the pane is hidden by a tab switch', () => {
+      textPane('src/main.ts');
+      const hidden = { ...mockPanelApi, isVisible: false } as unknown as IDockviewPanelProps['api'];
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={hidden} />);
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/main.ts');
+    });
+
+    it('flushes when the pane closes', () => {
+      textPane('src/main.ts');
+      const { unmount } = render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      expect(mockSessionFlush).not.toHaveBeenCalled();
+      unmount();
+      expect(mockSessionFlush).toHaveBeenCalledWith('src/main.ts');
     });
   });
 });

@@ -16,7 +16,8 @@ import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.j
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
-import { AccountClosureSettings } from '#components/billing/account-closure-settings.js';
+import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
+import { useBillingBinding } from '#components/billing/use-billing-binding.js';
 
 const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
 const proMonthlyPriceLabel = `${proPlan?.priceLabel ?? ''} per month USD`;
@@ -36,15 +37,7 @@ export function BillingSettings(): React.JSX.Element {
   const queryClient = useQueryClient();
   const isBalanceLoading = useIsFetching({ queryKey: ['billing', 'credits'] }) > 0;
   const { apiBaseUrl, environment, userId } = useBillingSession();
-  const binding =
-    apiBaseUrl && environment && userId
-      ? {
-          apiBaseUrl,
-          environment,
-          ownerId: userId,
-          ...(credits?.subjectId ? { subjectId: credits.subjectId } : {}),
-        }
-      : undefined;
+  const binding = useBillingBinding();
   const generation = `${apiBaseUrl ?? ''}|${environment ?? ''}|${userId ?? ''}`;
   /* oxlint-disable react/refs -- monotonic generation refs synchronously fence stale owner and API responses */
   const scopeRef = useRef({ key: generation, value: 0 });
@@ -105,12 +98,12 @@ export function BillingSettings(): React.JSX.Element {
     <div className='flex flex-col gap-8 pb-4'>
       {entitlements.status === 'past_due' ? (
         <div className='rounded-md border border-warning/20 bg-card px-3 py-2 text-sm'>
-          Payment failed — update your card to restore Pro. Your credits are safe.
+          Payment failed — update your card within 7 days to keep Pro. Your credits are safe.
         </div>
       ) : undefined}
       {entitlements.cancelAtPeriodEnd && entitlements.paidThrough ? (
         <div className='rounded-md border border-border bg-card px-3 py-2 text-sm'>
-          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage Subscription.
+          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage subscription.
         </div>
       ) : undefined}
 
@@ -292,14 +285,9 @@ export function BillingSettings(): React.JSX.Element {
       <SettingsItem settingId='automatic-reload'>
         <AutoReloadSettings binding={binding} />
       </SettingsItem>
-      <SettingsItem settingId='close-account'>
-        <AccountClosureSettings
-          binding={binding}
-          onReviewPayment={() => {
-            setIsTopupOpen(true);
-          }}
-        />
-      </SettingsItem>
+      {entitlements.tier === 'pro' && !entitlements.cancelAtPeriodEnd ? (
+        <CancelPlanSettings binding={binding} />
+      ) : undefined}
 
       <TopupModal isOpen={isTopupOpen} onOpenChange={setIsTopupOpen} />
     </div>

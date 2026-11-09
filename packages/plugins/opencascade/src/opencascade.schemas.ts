@@ -14,7 +14,6 @@ import {
   occtQualityGltfExportSchema,
   occtQualityRenderOptionSchema,
   occtQualityStlExportSchema,
-  occtTriangleBudgets,
 } from '@taucad/occt-core';
 
 /**
@@ -40,15 +39,6 @@ export const opencascadeOptionsSchema = z.object({
     .default('off')
     .describe(
       'OC API call tracing mode. "off" (default) avoids proxy overhead, "summary" emits aggregated stats, and "per-call" emits individual spans.',
-    ),
-  previewTriangleBudget: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .default(occtTriangleBudgets.preview)
-    .describe(
-      'Triangles a preview may carry before it is coarsened and a TESSELLATION_DOWNGRADED warning is reported. Defaults to the policy preview budget; a host on a memory-constrained device passes a smaller one.',
     ),
 });
 

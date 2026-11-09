@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
 const connectionTimeoutMilliseconds = 30_000;
 const serviceUnavailableCloseCode = 1013;

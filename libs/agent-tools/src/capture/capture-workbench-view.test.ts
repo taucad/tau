@@ -3,6 +3,7 @@ import type { CaptureWorkbenchView } from '@taucad/chat/rpc';
 
 import { buildCaptureExportOptions } from '#capture/capture-views.js';
 import { workbenchViewCamera, workbenchViewSections } from '#capture/capture-workbench-view.js';
+import { buildViewerCaptureImageOptions } from '#capture/viewer-capture-options.js';
 
 const display = {
   surfaces: true,
@@ -150,7 +151,7 @@ describe('buildCaptureExportOptions with a workbench view', () => {
     expect(buildCaptureExportOptions({ mode: 'single', size: 1600, workbench })).toStrictEqual({
       width: 1600,
       height: 1600,
-      lineWidth: 3,
+      ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
       background: '#242424',
       lines: false,
       world: { up: '+z', forward: '-y', unit: 'meter' },

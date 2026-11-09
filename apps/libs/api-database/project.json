@@ -1,0 +1,30 @@
+{
+  "name": "api-database",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-database",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:data-access", "api:database"],
+  "targets": {
+    "db-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit generate",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "db-push": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit push",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "db-studio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit studio",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

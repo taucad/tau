@@ -12,22 +12,18 @@ import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import {
   compactTriangleIndices,
   formatPrimitiveSelector,
+  markClosedMeshesSingleSided,
   normalizeGltfGeometryNames,
   srgbHexToLinearTuple,
   transformVertexArray,
 } from '@taucad/geometry-core';
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/runtime/types';
-import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/types';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import type { ShapeEntry } from '#opencascade.types.js';
 import { extractShapeEdges } from '#opencascade-edges.js';
 import type { ShapeEdges } from '#opencascade-edges.js';
-import {
-  createOcScope,
-  createTessellationDowngradedIssue,
-  resolveOcctTessellation,
-  tessellateWithinOcctBudget,
-} from '@taucad/occt-core';
+import { createOcScope, resolveOcctTessellation } from '@taucad/occt-core';
 import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 
 type MeshOptions = {
@@ -182,6 +178,7 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
       node.setName(meshName);
     }
   }
+  markClosedMeshesSingleSided(document);
   appendEdgeLines(document, entries, options);
   return io.writeBinary(document);
 };
@@ -415,29 +412,6 @@ export function countGlbMesh(glb: Uint8Array<ArrayBuffer>): MeshCount {
   return { triangles, vertices };
 }
 
-const binaryStlHeaderBytes = 80;
-const binaryStlTriangleBytes = 50;
-
-/**
- * Triangles in an STL file. A file whose length matches its binary header count is binary;
- * any other file is ASCII and its facets are counted.
- *
- * @param bytes - STL file bytes.
- * @returns The triangle count.
- */
-export function countStlTriangles(bytes: Uint8Array<ArrayBuffer>): number {
-  if (bytes.byteLength >= binaryStlHeaderBytes + 4) {
-    const declared = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
-      binaryStlHeaderBytes,
-      true,
-    );
-    if (bytes.byteLength === binaryStlHeaderBytes + 4 + declared * binaryStlTriangleBytes) {
-      return declared;
-    }
-  }
-  return new TextDecoder().decode(bytes).match(/^\s*facet\b/gm)?.length ?? 0;
-}
-
 /**
  * Bounding-box diagonal of every shape entry together, in model millimetres. Reads the B-rep
  * geometry rather than any triangulation, so the result does not depend on earlier meshing.
@@ -505,68 +479,43 @@ export function toMeshTolerances(
   };
 }
 
-/** A rendering within a triangle budget, with its cost report and any downgrade warning. */
-export type BudgetedGlb = {
+/** A rendering at the requested tessellation, with its cost report. */
+export type TessellatedGlb = {
   content: Uint8Array<ArrayBuffer>;
   tessellation: TessellationReport;
-  issues: KernelIssue[];
 };
 
 /**
- * Render a preview GLB within a triangle budget. The request resolves to absolute tolerances;
- * while the mesh exceeds the budget it is re-meshed one step coarser, at most three times, and
- * a `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances. With
- * `includeEdges`, the B-rep edges of the admitted mesh are appended as lines, outside the budget.
+ * Render a preview GLB at the requested tessellation, once. The request resolves to absolute
+ * tolerances and the mesh is never coarsened. With `includeEdges`, the B-rep edges are appended
+ * as lines at the same tolerances.
  *
  * @param oc - OpenCASCADE WASM instance
  * @param shapes - The shape entries to render.
- * @param options - Request, triangle budget, parallel meshing and whether to draw B-rep edges.
- * @returns The delivered GLB, its tessellation report and the downgrade warning when one was taken.
+ * @param options - Request, parallel meshing and whether to draw B-rep edges.
+ * @returns The delivered GLB and its tessellation report.
  */
-export async function renderShapesWithinBudget(
+export async function renderShapesTessellated(
   oc: OpenCascadeInstance,
   shapes: ShapeEntry[],
-  options: { request: OpencascadeTessellationRequest; budget: number; inParallel?: boolean; includeEdges?: boolean },
-): Promise<BudgetedGlb> {
-  const { request, budget, inParallel, includeEdges } = options;
+  options: { request: OpencascadeTessellationRequest; inParallel?: boolean; includeEdges?: boolean },
+): Promise<TessellatedGlb> {
+  const { request, inParallel, includeEdges } = options;
   const started = performance.now();
   const requested = resolveOpencascadeTessellation(oc, shapes, request);
-  const { result, effective, downgraded } = tessellateWithinOcctBudget({
-    tolerances: requested,
-    budget,
-    tessellate(tolerances) {
-      const glb = writeShapesGlb(oc, shapes, { ...toMeshTolerances(tolerances), inParallel });
-      return { glb, ...countGlbMesh(glb) };
-    },
-  });
-  // The shapes still hold the admitted mesh, so edges sample the effective tolerances; lines are not triangles.
-  const edges = includeEdges
-    ? shapes.map((entry) => extractShapeEdges(oc, entry.shape, toMeshTolerances(effective)))
-    : undefined;
-  const content = await finishShapesGlb(result.glb, shapes, { edges });
-  const delivered = countGlbMesh(content);
+  const tolerances = toMeshTolerances(requested);
+  const glb = writeShapesGlb(oc, shapes, { ...tolerances, inParallel });
+  // The shapes hold the mesh just written, so edges sample the same tolerances; lines are not triangles.
+  const edges = includeEdges ? shapes.map((entry) => extractShapeEdges(oc, entry.shape, tolerances)) : undefined;
+  const content = await finishShapesGlb(glb, shapes, { edges });
   return {
     content,
     tessellation: {
-      ...delivered,
+      ...countGlbMesh(content),
       elapsed: performance.now() - started,
       requested: requested.requested,
-      linearTolerance: effective.linearTolerance,
-      angularTolerance: effective.angularTolerance,
-      downgraded,
+      linearTolerance: requested.linearTolerance,
+      angularTolerance: requested.angularTolerance,
     },
-    issues:
-      downgraded === 0
-        ? []
-        : [
-            createTessellationDowngradedIssue({
-              producer: 'opencascade',
-              requested,
-              effective,
-              downgraded,
-              triangles: delivered.triangles,
-              budget,
-            }),
-          ],
   };
 }

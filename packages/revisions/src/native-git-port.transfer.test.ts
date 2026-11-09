@@ -4,16 +4,24 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { runGitCommand } from '#git-command.js';
-import { largeObjectThresholdBytes } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  largeObjectThresholdBytes,
+} from '#workspace-config.js';
+
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
+/* Tau's block, so a cut adds a line for each file over the threshold (D16). */
+const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
+
 const author = { name: 'Transfer test', email: 'transfer@example.com' };
 
-// A real Git/LFS transfer whose start is delayed past the local plumbing budget.
+// A real Git/LFS transfer whose start is delayed past the local plumbing budget. A large-object fetch
+// covers both of its transfers, the commit's `lfs fetch` and an object's own `lfs smudge`.
 // The executable shim does not implement the protocol or the result being asserted.
-const transferFixture = async (operation: 'fetch' | 'push' | 'discovery') => {
+const transferFixture = async (operation: 'fetch' | 'push' | 'discovery' | 'git-fetch') => {
   const root = await mkdtemp(join(tmpdir(), 'tau-lfs-budget-'));
   const server = await startGitHttpBackend({ root });
   const marker = join(root, 'transfer-started');
@@ -26,7 +34,8 @@ const transferFixture = async (operation: 'fetch' | 'push' | 'discovery') => {
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-const delayed = ${JSON.stringify(operation)} === 'discovery' ? args.includes('ls-remote') : args.some((arg, i) => arg === 'lfs' && args[i + 1] === ${JSON.stringify(operation)});
+const operation = ${JSON.stringify(operation)};
+const delayed = operation === 'discovery' ? args.includes('ls-remote') : operation === 'git-fetch' ? args.includes('fetch') && !args.includes('lfs') : args.some((arg, i) => arg === 'lfs' && (args[i + 1] === operation || (operation === 'fetch' && args[i + 1] === 'smudge')));
 const start = () => {
   if (delayed && fs.existsSync(${JSON.stringify(fail)})) process.exit(1);
   const child = spawn('git', args, { stdio: 'inherit' });
@@ -51,7 +60,7 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
   const bytes = new Uint8Array(largeObjectThresholdBytes + 1024).fill(73);
   const receipt = await source.writeRevision({
     parents: [],
-    tree: new ImmutableRevisionTree([['large.bin', bytes]]),
+    tree: new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes]]),
     provenance: { source: 'user', actorId: 'test', createdAt: 1 },
     summary: { generated: 'Large file' },
   });
@@ -88,6 +97,8 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
             ...(operation === 'discovery' ? {} : { refs: ['refs/heads/main', 'refs/tags/ready'] }),
             ...(signal ? { signal } : {}),
           }),
+    /* Large objects fill lazily (D16): the read of the fetched tip is what transfers them. */
+    read: async (signal?: AbortSignal) => clone.readTree(head, signal ? { signal } : undefined),
     close: async () => {
       await server.close();
       await rm(root, { recursive: true, force: true });
@@ -103,7 +114,7 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
       try {
         await fixture.transfer();
         if (operation === 'fetch') {
-          const tree = await fixture.clone.readTree(fixture.head);
+          const tree = await fixture.read();
           expect(tree?.get('large.bin')).toEqual(fixture.bytes);
         } else {
           expect(await fixture.server.git(['rev-parse', 'refs/heads/main'])).toBe(fixture.head);
@@ -123,24 +134,22 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
       const controller = new AbortController();
       try {
         if (operation === 'fetch') {
-          await runGitCommand({
-            gitExecutable: 'git',
-            args: ['config', 'remote.tau.fetch', '+refs/heads/*:refs/remotes/tau/*'],
-            cwd: fixture.clonePath,
-          });
+          /* The fetch itself moves refs only, so it publishes them without waiting on large objects. */
+          await fixture.transfer();
+          expect(await fixture.clone.readRef('refs/remotes/tau/main')).toBe(fixture.head);
         }
-        const pending = fixture.transfer(controller.signal);
+        const pending = operation === 'fetch' ? fixture.read(controller.signal) : fixture.transfer(controller.signal);
         const rejection = expect(pending).rejects.toMatchObject({ code: 'ENGINE_FAILED', cause: { reason: 'signal' } });
         await expect.poll(async () => readFile(fixture.marker, 'utf8'), { timeout: 10_000 }).toBe('started');
         controller.abort();
         await rejection;
         if (operation === 'fetch') {
-          expect(await fixture.clone.listRefs('refs/remotes/tau')).toEqual([]);
-          expect(await fixture.clone.listRefs('refs/tags')).toEqual([]);
           expect(await fixture.clone.listRefs('refs/tau/transactions')).toEqual([]);
+          /* What the cancelled read could not fetch stays a pointer to a `local` read. */
+          const local = await fixture.clone.readTree(fixture.head, { largeObjects: 'local' });
+          expect(local?.get('large.bin')?.byteLength).toBeLessThan(200);
           await writeFile(fixture.release, 'resume');
-          await fixture.transfer();
-          const recovered = await fixture.clone.readTree(fixture.head);
+          const recovered = await fixture.read();
           expect(recovered?.get('large.bin')).toEqual(fixture.bytes);
         } else {
           expect(await fixture.server.git(['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe('');
@@ -153,27 +162,26 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
     },
     30_000,
   );
-  it('should leave tracking refs and tags untouched after an LFS failure and retry the same tip', async () => {
+  it('should publish fetched refs before large objects and retry a failed fill on the next read', async () => {
     const fixture = await transferFixture('fetch');
     try {
       await writeFile(fixture.release, 'start immediately');
       await writeFile(fixture.fail, 'fail LFS');
-      await expect(fixture.transfer()).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
-      expect(await fixture.clone.listRefs('refs/remotes/tau')).toEqual([]);
-      expect(await fixture.clone.listRefs('refs/tags')).toEqual([]);
-      expect(await fixture.clone.listRefs('refs/tau/transactions')).toEqual([]);
-      await rm(fixture.fail);
       await fixture.transfer();
-      const recovered = await fixture.clone.readTree(fixture.head);
-      expect(recovered?.get('large.bin')).toEqual(fixture.bytes);
+      expect(await fixture.clone.readRef('refs/remotes/tau/main')).toBe(fixture.head);
       expect(await fixture.clone.readRef('refs/tags/ready')).toBe(fixture.head);
+      expect(await fixture.clone.listRefs('refs/tau/transactions')).toEqual([]);
+      await expect(fixture.read()).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+      await rm(fixture.fail);
+      const recovered = await fixture.read();
+      expect(recovered?.get('large.bin')).toEqual(fixture.bytes);
     } finally {
       await fixture.close();
     }
   }, 30_000);
 
   it('should preserve a concurrent tracking winner and publish none of the fetched refs', async () => {
-    const fixture = await transferFixture('fetch');
+    const fixture = await transferFixture('git-fetch');
     try {
       const competing = await fixture.clone.writeRevision({
         parents: [],

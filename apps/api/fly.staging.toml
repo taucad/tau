@@ -7,7 +7,7 @@ app = 'tau-api-staging'
 primary_region = 'syd'
 kill_signal = 'SIGTERM'
 # 120 s, not Fly's 5 s default nor the 30 s it was: the API drains in-flight model
-# steps before it stops (`app/lifecycle/graceful-shutdown.ts`, `shutdownPhases`), and a
+# steps before it stops (`@taucad/api-lifecycle` `graceful-shutdown.ts`, `shutdownPhases`), and a
 # step cut by a deploy costs the person the step. A longer window slows a rolling
 # deploy only while a step is still streaming. Change both together.
 kill_timeout = '120s'
@@ -75,6 +75,11 @@ DATABASE_STATEMENT_TIMEOUT_MS = '15000'
 DATABASE_LOCK_TIMEOUT_MS = '5000'
 DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
 DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
+# Deploy-cut charter D15: a funded model step may run up to 600 s on staging so
+# high-effort reasoning is measured, not cut. Production keeps the schema default
+# (300 s). kill_timeout stays 120 s and shutdownPhases and recoveryGraceMinutes are
+# unchanged: a step cut by a deploy still settles at zero with service_restart.
+BILLING_INVOCATION_DEADLINE = '600000'
 # Additional CORS origins for the Netlify-hosted UI:
 #   - https://deploy-preview-*--taucad.netlify.app : per-PR Netlify deploy previews
 #   - https://taucad.netlify.app                   : Netlify default domain for the `taucad` site

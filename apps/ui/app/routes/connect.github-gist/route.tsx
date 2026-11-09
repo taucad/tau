@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { Loader } from '@taucad/ui/components/loader';
 import { useAuthenticate } from '@better-auth-ui/react';
-import { CircleAlert, CircleCheck, Loader2 } from 'lucide-react';
+import { CircleAlert, CircleCheck } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
@@ -157,7 +158,7 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
                 }}
               >
                 {starting ? (
-                  <Loader2 className='size-4 spin-glyph' aria-hidden='true' />
+                  <Loader className='size-4' />
                 ) : (
                   <SvgIcon id='github' className='size-4' aria-hidden='true' />
                 )}

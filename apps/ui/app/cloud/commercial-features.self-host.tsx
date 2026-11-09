@@ -9,7 +9,6 @@ export const useCommercialFeatures = (): {
   readonly canSyncFiles: boolean;
   readonly storageLimitBytes: number | undefined;
   readonly canUpgradePlan: boolean;
-  readonly hasNoTrainGuarantee: boolean;
   readonly isResolved: boolean;
   readonly requestUpgrade: () => void;
 } => ({
@@ -19,7 +18,6 @@ export const useCommercialFeatures = (): {
   /* The server's own allowance, which this build has no plan table for. */
   storageLimitBytes: undefined,
   canUpgradePlan: false,
-  hasNoTrainGuarantee: false,
   isResolved: true,
   requestUpgrade: useCallback(() => undefined, []),
 });

@@ -318,7 +318,7 @@ export const listViewerSelectableFiles = (
 
 /** Browse and search the project's authority, including directories the visible tree has never expanded. */
 export function createViewerFileDataSource(
-  tree: Pick<FileTreeService, 'listDirectory' | 'searchFiles' | 'getTreeSnapshot'> | undefined,
+  tree: Pick<FileTreeService, 'listDirectory' | 'searchFilesDebounced' | 'getTreeSnapshot'> | undefined,
   capabilities: Pick<CapabilitiesManifest, 'registrations'> | undefined,
   revision = 0,
 ): FileSelectorDataSource & { readonly revision: number } {
@@ -340,7 +340,11 @@ export function createViewerFileDataSource(
       if (!tree || !capabilities) {
         return [];
       }
-      const entries = await tree.searchFiles(query, { maxResults: 100, includeDirectories: false });
+      const entries = await tree.searchFilesDebounced(query, {
+        maxResults: 100,
+        includeDirectories: false,
+        caller: 'quick-open',
+      });
       if (entries.length === 100) {
         throw new Error('Refine your search or browse folders to see supported files.');
       }

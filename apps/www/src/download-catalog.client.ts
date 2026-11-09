@@ -27,10 +27,6 @@ export const initializeHostDownload = (hostname: string): void => {
       link.innerHTML = desktopDownloadLabel(hostPlatform);
     }
   }
-  const intelDownload = document.querySelector('[data-mac-intel]');
-  if (intelDownload instanceof HTMLElement) {
-    intelDownload.hidden = hostPlatform !== 'mac';
-  }
   const detail = document.querySelector('[data-download-detail]');
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');
@@ -226,6 +222,12 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
       }
       body.append(alternatives);
       fragment.append(section);
+    }
+    // Intel Macs stay unlisted unless the catalog qualifies an Intel disk image; the hero offers it only to a Mac.
+    if (catalog.some((choice) => choice.platform === 'macIntel' && macDiskImage(choice))) {
+      for (const entry of document.querySelectorAll<HTMLElement>('[data-mac-intel]')) {
+        entry.hidden = entry.dataset['macIntel'] === 'hero' && host !== 'mac';
+      }
     }
     if (choices instanceof HTMLElement) {
       choices.replaceChildren(fragment);

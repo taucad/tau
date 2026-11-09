@@ -7,6 +7,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
+import { repositoryPrefix } from '#api/git/store/repository-key.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -32,9 +33,6 @@ import type {
 
 /** The single mutable key of a repository (D5). */
 const manifestKeyName = 'manifest.json';
-
-/** Everything for one repository lives under this prefix (D24). */
-const repositoryPrefix = (locator: RepositoryLocator): string => `${locator.ownerId}/repos/${locator.projectId}/`;
 
 const manifestKey = (locator: RepositoryLocator): string => `${repositoryPrefix(locator)}${manifestKeyName}`;
 
@@ -257,6 +255,8 @@ export class S3RepositoryStore implements RepositoryStore {
       contentType: objectContentType,
       tier: 'private',
       checksumSha256: options.sha256,
+      /* A create-only put that loses to an object already there has nothing left to do. */
+      ...(options.createOnly === true ? { ifNoneMatch: '*' } : {}),
       ...(signal === undefined ? {} : { signal }),
     });
   }

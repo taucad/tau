@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { toast } from '#components/ui/sonner.js';
@@ -158,7 +159,7 @@ export function PublicationAccessPanel({
               void handleAdd();
             }}
           >
-            {mutating ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : null}
+            {mutating ? <Loader className='size-4' /> : null}
             <span>Add access</span>
           </Button>
         </div>
@@ -167,7 +168,7 @@ export function PublicationAccessPanel({
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between'>
           <h3 className='text-sm font-medium'>People with access</h3>
-          {loading ? <Loader2 className='size-4 spin-glyph text-muted-foreground' aria-hidden /> : null}
+          {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
         </div>
         {grants.length === 0 && !loading ? (
           <p className='rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground'>

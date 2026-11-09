@@ -58,6 +58,21 @@ export const expectTerminalRunning = async (page: Page): Promise<void> => {
 };
 
 /**
+ * Wait until the Terminal's screen mirror shows `text`. The output of a command reaches the mirror only after the
+ * shell writes it, the PTY bridge forwards it, AurigaX renders a frame and the mirror's own debounce fires, so it can
+ * trail a file the same command wrote by more than vitest's one-second default poll. Every mirror check goes through
+ * here, with the same window as the Terminal's other qualification waits.
+ *
+ * @param page - The desktop page showing the Terminal pane.
+ * @param text - The text the visible screen must contain.
+ */
+export const expectTerminalScreen = async (page: Page, text: string): Promise<void> => {
+  await expect
+    .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
+    .toContain(text);
+};
+
+/**
  * Choose one of the pane's own actions the way a person does, from the Terminal actions menu the pane advertises as
  * Shift+F10 and opens on a real right-click. They are deliberately not buttons in an inner header.
  *
@@ -77,37 +92,28 @@ export type NativeQuestion = Readonly<{ message: string; buttons: readonly strin
 const unloadAnswers = '__TAU_E2E_UNLOAD_QUESTIONS__';
 
 /**
- * Answer the window's running-Terminal question the way a person would, and record it.
+ * Record every native question the window's main process puts, so a test can prove none was asked.
  *
- * A running session holds the page's unload (T15), so reloading the window or closing it asks first through
- * `dialog.showMessageBoxSync` — a native modal no browser automation can reach, which is why the answer is installed
- * before the navigation rather than clicked afterwards. Only the operating system's message box stands in; the hold
- * itself, the main process's handler and the session's end are the production ones, and
- * {@link nativeQuestionsAsked} proves the question was really put.
+ * Closing or reloading a window never asks about a running Terminal (T15). A question through
+ * `dialog.showMessageBoxSync` would be a native modal no browser automation can reach, so the recorder is installed
+ * before the navigation; it answers with the first button, and {@link nativeQuestionsAsked} reports what was put.
  *
  * @param session - The running desktop session.
- * @param choice - The button a person would press.
  */
-export const answerUnloadQuestion = async (
-  session: DesktopSession,
-  choice: 'Keep open' | 'Close and stop',
-): Promise<void> => {
-  await session.application.evaluate(
-    ({ dialog }, [key, answer]) => {
-      const asked: NativeQuestion[] = (Reflect.get(globalThis, key!) as NativeQuestion[] | undefined) ?? [];
-      Reflect.set(globalThis, key!, asked);
-      dialog.showMessageBoxSync = (...args: readonly unknown[]): number => {
-        const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons: string[] };
-        asked.push({ message: options.message, buttons: [...options.buttons] });
-        return options.buttons.indexOf(answer!);
-      };
-    },
-    [unloadAnswers, choice],
-  );
+export const recordNativeQuestions = async (session: DesktopSession): Promise<void> => {
+  await session.application.evaluate(({ dialog }, key) => {
+    const asked: NativeQuestion[] = (Reflect.get(globalThis, key) as NativeQuestion[] | undefined) ?? [];
+    Reflect.set(globalThis, key, asked);
+    dialog.showMessageBoxSync = (...args: readonly unknown[]): number => {
+      const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons: string[] };
+      asked.push({ message: options.message, buttons: [...options.buttons] });
+      return 0;
+    };
+  }, unloadAnswers);
 };
 
 /**
- * The native questions this session has asked since {@link answerUnloadQuestion} was installed.
+ * The native questions this session has asked since {@link recordNativeQuestions} was installed.
  *
  * @param session - The desktop session.
  * @returns Each question's message and buttons, oldest first.
@@ -166,11 +172,36 @@ export const copyTerminalSelection = async (session: DesktopSession): Promise<vo
  * @param page - The desktop page.
  */
 export const openTerminalPane = async (page: Page): Promise<void> => {
-  if ((await terminalRegion(page).count()) > 0) {
-    return;
-  }
-  await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
-  await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+  /*
+   * Just after a project opens, the workbench restores its layout and replaces the group headers, which closes a menu
+   * opened from the replaced header (shell conformance run 41186360781: the menu opened 0.5 s after navigation and
+   * never showed its items). A person whose menu vanished opens it again; so does this, within the same minute.
+   */
+  const item = page.getByRole('menuitem', { name: 'Terminal', exact: true });
+  const deadline = Date.now() + 60_000;
+  const choose = async (): Promise<void> => {
+    if ((await terminalRegion(page).count()) > 0) {
+      return;
+    }
+    /* Each attempt is bounded by what is left of the minute, so a retry never outlives it. */
+    const attempt = (): number => Math.max(1, Math.min(5000, deadline - Date.now()));
+    try {
+      if (!(await item.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Open workbench tab', exact: true })
+          .first()
+          .click({ timeout: attempt() });
+      }
+      await item.click({ timeout: attempt() });
+    } catch (error) {
+      if (Date.now() >= deadline) {
+        throw error;
+      }
+      await page.keyboard.press('Escape');
+      await choose();
+    }
+  };
+  await choose();
   await terminalRegion(page).waitFor();
 };
 

@@ -147,6 +147,7 @@ const buildComposer = (overrides: {
         id: modelId,
         provider: { id: providerKind, name: providerKind },
         isResolved: true,
+        isNamePending: false,
         model: { provider: { id: providerKind, name: providerKind } },
       },
       setActiveModel: noop,

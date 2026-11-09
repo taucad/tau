@@ -9,25 +9,37 @@
  * apply's own temporary siblings left behind.
  *
  * The counting surface is the checkout the actors write through: a real
- * `NodeFsProvider` plus the two rooted reads a browser or daemon checkout offers
- * and a bare provider does not — `statTree`, whose timestamps these tests own,
- * and `writeFiles`.
+ * `NodeFsProvider` plus the rooted read a browser or daemon checkout offers and
+ * a bare provider does not — `statTree`, whose timestamps these tests own. It
+ * has no authority above it, so each changeset the apply sends lands as provider
+ * batches built from the primitives counted here.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
+import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
-import type { FileMode, FileStatEntry } from '@taucad/filesystem';
+import type {
+  BatchEntry,
+  BatchOptions,
+  BatchReceipt,
+  ExpectedEntry,
+  FileMode,
+  FileStatEntry,
+} from '@taucad/filesystem';
+import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { revisionTreeId } from '#git-tree-id.js';
+import { UnstoredLargeObjectsError } from '#large-object-fill.js';
+import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -84,8 +96,8 @@ type Counts = {
   rootListings: number;
   /** Single-file writes, which staging as a batch does not make. */
   writeFile: number;
-  /** Batched writes. */
-  writeFiles: number;
+  /** Provider batches: one per phase of each changeset the apply sends. */
+  batches: number;
   /** Every call that changes the tree, in order, so one of them can be stopped. */
   mutations: number;
   /** What those calls were, which is what names the step a stopped apply stopped at. */
@@ -95,14 +107,14 @@ type Counts = {
 type CountingOptions = Readonly<{
   /** How much older than the clock the surface reports every timestamp; no `statTree` at all when absent. */
   statAge?: number;
-  /** Whether the surface offers a batch write. */
-  batch?: boolean;
   /** Which mutation, in call order, fails instead of running. */
   failMutation?: (sequence: number) => boolean;
   /** Fold provider paths the way a case-insensitive filesystem does. */
   caseInsensitive?: boolean;
   /** Expose linked checkouts through the in-memory port. */
   linkedCheckouts?: boolean;
+  /** Runs before each provider batch, with its entries: a concurrent writer's slot. */
+  beforeBatch?: (entries: readonly BatchEntry[]) => Promise<void>;
 }>;
 
 /**
@@ -117,7 +129,7 @@ const countingCheckout = (
   real: NodeFsProvider,
   options: CountingOptions,
 ): Readonly<{ checkout: RevisionFileSystem; counts: Counts; reset: () => void }> => {
-  const counts: Counts = { reads: 0, rootListings: 0, writeFile: 0, writeFiles: 0, mutations: 0, calls: [] };
+  const counts: Counts = { reads: 0, rootListings: 0, writeFile: 0, batches: 0, mutations: 0, calls: [] };
   const mutate = async <Result>(call: string, operation: () => Promise<Result>): Promise<Result> => {
     counts.mutations += 1;
     counts.calls.push(call);
@@ -176,35 +188,32 @@ const countingCheckout = (
     setFileMode: async (path: string, mode: FileMode): Promise<void> =>
       mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
     ...(options.statAge === undefined ? {} : { statTree }),
-    ...(options.batch === true
-      ? {
-          writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void> => {
-            counts.writeFiles += 1;
-            await mutate('writeFiles', async () =>
-              Promise.all(
-                Object.entries(files).map(async ([path, { content }]) => real.writeFile(pathOf(path), content)),
-              ),
-            );
-          },
-        }
-      : {}),
   };
+  const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
+    /* The primitives' batch, run over this surface so every primitive it takes is counted. Node's own batch
+     * (D16) stages and syncs below the primitives, so it would count nothing here. */
+    applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+      counts.batches += 1;
+      await options.beforeBatch?.(entries);
+      return AbstractFileSystemProvider.prototype.applyBatch.call(checkout, entries, batchOptions);
+    },
+  });
   return {
-    checkout: Object.assign(Object.create(real) as RevisionFileSystem, counted),
+    checkout,
     counts,
     reset: () => {
       counts.reads = 0;
       counts.rootListings = 0;
       counts.writeFile = 0;
-      counts.writeFiles = 0;
+      counts.batches = 0;
       counts.mutations = 0;
       counts.calls = [];
     },
   };
 };
 
-/** Timestamps a minute old, which is outside the memo's racy window, and a batch write. */
-const trustedStats: CountingOptions = { statAge: 60_000, batch: true };
+/** Timestamps a minute old, which is outside the memo's racy window. */
+const trustedStats: CountingOptions = { statAge: 60_000 };
 
 /**
  * One project directory, its port, and actor sets opened over it on demand.
@@ -268,13 +277,14 @@ const liveCheckout: Checkout = {
 const materializer = (
   checkout: RevisionFileSystem,
   prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
+  onApplyingTree?: Parameters<typeof createApplyTreeEffects>[0]['onApplyingTree'],
 ) => {
   let temporary = 0;
   return createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
     capture: async () =>
       captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
-    onApplyingTree: undefined,
+    onApplyingTree,
     ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
@@ -376,7 +386,7 @@ describe('what a cut reads', () => {
   }, 30_000);
 
   it('should read every file when the checkout keeps no timestamps to trust', async () => {
-    const { counts, reset, open } = await project({ 'main.ts': 'export const size = 1;\n' }, { batch: true });
+    const { counts, reset, open } = await project({ 'main.ts': 'export const size = 1;\n' }, {});
     const actors = open();
     await cut(actors);
 
@@ -416,16 +426,20 @@ const baseFiles = { 'main.ts': 'export const size = 1;\n', 'drop.ts': 'export co
 const agentWrites = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', 'export const size = 22_222_222;\n');
   await tree.writeFile('added.ts', 'export const added = true;\n');
+  /* A second new file, so a stop can land between two moves of one batch. */
+  await tree.writeFile('lib/also-added.ts', 'export const alsoAdded = true;\n');
   await tree.unlink('drop.ts');
 };
 const putBack = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', baseFiles['main.ts']);
   await tree.unlink('added.ts');
+  await tree.unlink('lib/also-added.ts');
+  await tree.rmdir('lib');
   await tree.writeFile('drop.ts', baseFiles['drop.ts']);
 };
 
 describe('what a settlement walks', () => {
-  it('should walk the tree twice to settle a turn, and stage its writes as one batch', async () => {
+  it('should walk the tree twice to settle a turn, and write each new file once at its final path', async () => {
     const { tree, counts, reset, open } = await project(baseFiles);
     const actors = open();
     const base = await save(actors);
@@ -445,13 +459,16 @@ describe('what a settlement walks', () => {
     /* The live tree the merge takes its third side from, and the re-read that
      * verifies what the apply wrote — and nothing else (CI4). */
     expect(counts.rootListings).toBe(2);
-    expect(counts.writeFiles).toBe(1);
-    expect(counts.writeFile).toBe(0);
+    /* Two new files written in place, and one replacement staged beside main.ts. */
+    expect(counts.writeFile).toBe(3);
+    /* The removed drop.ts and the replaced main.ts aside, and the staged main.ts published. */
+    expect(counts.calls.filter((call) => call === 'rename')).toHaveLength(3);
+    expect(litterIn(await filesOf(tree))).toEqual([]);
   }, 30_000);
 });
 
 describe('a large apply', () => {
-  it('should apply 2,000 changed files in one staged batch and leave no temporary sibling', async () => {
+  it('should write 2,000 new files at their final paths in bounded changesets, with no rename and no temporary sibling', async () => {
     const context = await project({});
     const target = new ImmutableRevisionTree(
       Array.from({ length: 2000 }, (_, index) => [
@@ -460,21 +477,605 @@ describe('a large apply', () => {
       ]),
     );
     context.reset();
+    const exists = vi.spyOn(context.checkout, 'exists');
 
     const result = await materializer(context.checkout)(liveCheckout, target, {
       before: new ImmutableRevisionTree([]),
     });
 
     expect(result.paths).toHaveLength(2000);
-    expect(context.counts.writeFiles).toBe(1);
-    expect(context.counts.writeFile).toBe(0);
+    /* One provider batch per changeset of at most 256 entries. */
+    expect(context.counts.batches).toBe(Math.ceil(2000 / 256));
+    expect(context.counts.writeFile).toBe(2000);
     expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(2000);
-    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(2000);
-    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
+    /* Nothing staged, so nothing to sweep. */
+    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(0);
+    expect(exists).not.toHaveBeenCalled();
     expect(context.counts.reads).toBe(2000);
     expect(context.counts.rootListings).toBe(1);
     expect(litterIn(await filesOf(context.tree))).toEqual([]);
+    await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
   }, 120_000);
+
+  it('should replace 2,000 changed files through a staged sibling and a native move each, and leave no temporary sibling', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 2000 }, (_, index) => [`src/file-${String(index).padStart(4, '0')}.ts`, 'old\n']),
+    );
+    const context = await project(files);
+    const before = new ImmutableRevisionTree(Object.entries(files));
+    const target = new ImmutableRevisionTree(
+      Object.keys(files).map((path, index) => [path, `export const value = ${String(index)};\n`]),
+    );
+    context.reset();
+
+    const result = await materializer(context.checkout)(liveCheckout, target, { before });
+
+    expect(result.paths).toHaveLength(2000);
+    expect(context.counts.writeFile).toBe(2000);
+    /* Each file aside to its backup, then its staged sibling onto it. */
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(4000);
+    /* Each backup removed once its replacement published. */
+    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
+    expect(litterIn(await filesOf(context.tree))).toEqual([]);
+    await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
+  }, 120_000);
+
+  it('should swap a replaced file through its staged sibling and write the new ones in place', async () => {
+    const context = await project({ 'main.ts': 'old\n' });
+    const before = new ImmutableRevisionTree([['main.ts', 'old\n']]);
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ['added/a.ts', 'a\n'],
+      ['added/b.ts', 'b\n'],
+    ]);
+    context.reset();
+
+    const result = await materializer(context.checkout)(liveCheckout, target, { before });
+
+    expect(result.paths).toEqual(['added/a.ts', 'added/b.ts', 'main.ts']);
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(2);
+    await expect(context.tree.readFile('main.ts', 'utf8')).resolves.toBe('new\n');
+    await expect(context.tree.readFile('added/b.ts', 'utf8')).resolves.toBe('b\n');
+    expect(litterIn(await filesOf(context.tree))).toEqual([]);
+  });
+
+  it('should refuse a new file created during the apply and keep the concurrent file', async () => {
+    const concurrent: { tree?: NodeFsProvider } = {};
+    const context = await project(
+      {},
+      {
+        ...trustedStats,
+        beforeBatch: async () => {
+          await concurrent.tree?.writeFile('src/b.ts', 'a person’s own b\n');
+        },
+      },
+    );
+    concurrent.tree = context.tree;
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+      message: 'src/b.ts was created while these files were being updated.',
+    });
+    await expect(context.tree.readFile('src/b.ts', 'utf8')).resolves.toBe('a person’s own b\n');
+  });
+
+  it('should name every other new file the apply found taken alongside the conflict it raises', async () => {
+    const concurrent: { tree?: NodeFsProvider } = {};
+    const context = await project(
+      {},
+      {
+        ...trustedStats,
+        beforeBatch: async () => {
+          await concurrent.tree?.writeFile('src/a.ts', 'mine a\n');
+          await concurrent.tree?.writeFile('src/c.ts', 'mine c\n');
+        },
+      },
+    );
+    concurrent.tree = context.tree;
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+      message: 'src/a.ts was created while these files were being updated. 1 more file was refused: src/c.ts.',
+    });
+    await expect(context.tree.readFile('src/a.ts', 'utf8')).resolves.toBe('mine a\n');
+    await expect(context.tree.readFile('src/c.ts', 'utf8')).resolves.toBe('mine c\n');
+  });
+
+  it('should raise the provider’s own error unchanged and name the other refusals', async () => {
+    const context = await project({});
+    const missing = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    /* The batch refuses every entry before any byte moved. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[]): Promise<BatchReceipt[]> =>
+        entries.map(() => ({ outcome: 'failed', error: missing })),
+    });
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const applying = materializer(checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+      await expect(applying).rejects.toBe(missing);
+      expect(missing.message).toBe('EACCES: permission denied');
+      expect(warn).toHaveBeenCalledWith(
+        '[revisions] src/a.ts could not be published. 2 more files were refused: src/b.ts, src/c.ts.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(await filesOf(context.tree)).toEqual([]);
+  });
+
+  it('should put a replaced file back when its publish is refused, and sweep the staged sibling', async () => {
+    const context = await project({ 'main.ts': 'old\n' });
+    const refusal = Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+    /* Every move onto main.ts is refused before anything moved; every other entry runs. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await Promise.all(
+          entries.map(
+            async (entry): Promise<BatchReceipt | undefined> =>
+              entry.op === 'move' && entry.to === 'main.ts' && entry.from.includes('.tau-staged.')
+                ? { outcome: 'failed', error: refusal }
+                : undefined,
+          ),
+        );
+        const rest = entries.filter((_, index) => receipts[index] === undefined);
+        const applied = await context.checkout.applyBatch!(rest, batchOptions);
+        return receipts.map((receipt) => receipt ?? applied.shift()!);
+      },
+    });
+    const before = new ImmutableRevisionTree([['main.ts', 'old\n']]);
+    const target = new ImmutableRevisionTree([['main.ts', 'new\n']]);
+
+    await expect(materializer(checkout)(liveCheckout, target, { before })).rejects.toBe(refusal);
+
+    await expect(context.tree.readFile('main.ts', 'utf8')).resolves.toBe('old\n');
+    expect(await filesOf(context.tree)).toEqual(['main.ts']);
+  });
+
+  it('should put back the files an aborted removal already moved aside, and skip the rest', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 300 }, (_, index) => [`gone/file-${String(index).padStart(3, '0')}.ts`, 'old\n']),
+    );
+    const context = await project({ ...files, 'kept.ts': 'kept\n' });
+    const controller = new AbortController();
+    const reason = new Error('the apply was cancelled');
+    /* The first changeset of moves aside lands whole; the abort arrives before the second. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await context.checkout.applyBatch!(entries, batchOptions);
+        if (entries.some((entry) => entry.op === 'move' && entry.to.includes('.tau-backup.'))) {
+          controller.abort(reason);
+        }
+        return receipts;
+      },
+    });
+    const before = new ImmutableRevisionTree([...Object.entries(files), ['kept.ts', 'kept\n']]);
+    const target = new ImmutableRevisionTree([['kept.ts', 'kept\n']]);
+
+    await expect(
+      materializer(checkout)(liveCheckout, target, { before, signal: controller.signal }),
+    ).rejects.toBeDefined();
+
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    expect(found).toHaveLength(301);
+    await expect(context.tree.readFile('gone/file-000.ts', 'utf8')).resolves.toBe('old\n');
+  });
+
+  it('should keep an executable mode on a new file it writes in place', async () => {
+    const context = await project({});
+    const target = new ImmutableRevisionTree([
+      ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
+      ['bin/readme.txt', 'plain\n'],
+    ]);
+    context.reset();
+
+    await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
+    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+  });
+});
+
+describe('an apply through the Node provider’s own batch (D16)', () => {
+  /** The real provider as the checkout, its batch observed but never replaced. */
+  const nativeProject = async (files: Readonly<Record<string, string>>) => {
+    const context = await project(files);
+    const receipts: BatchReceipt[] = [];
+    const batch = vi.spyOn(context.tree, 'applyBatch');
+    const real = NodeFsProvider.prototype.applyBatch;
+    batch.mockImplementation(async (entries, batchOptions) => {
+      const answered = await real.call(context.tree, entries, batchOptions);
+      receipts.push(...answered);
+      return answered;
+    });
+    return { ...context, batch, receipts };
+  };
+
+  it('should land and read back every file of a tree, replaced or new', async () => {
+    const context = await nativeProject({ 'main.ts': 'old\n' });
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ...Array.from({ length: 40 }, (_, index): [string, string] => [
+        `src/${String(index % 4)}/m${String(index)}.ts`,
+        `export const v = ${String(index)};\n`,
+      ]),
+    ]);
+    const before = new ImmutableRevisionTree([['main.ts', 'old\n']]);
+
+    await materializer(context.tree)(liveCheckout, target, { before });
+
+    expect(context.batch).toHaveBeenCalled();
+    expect(context.receipts.every(({ outcome }) => outcome === 'applied')).toBe(true);
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    expect(found).toHaveLength(41);
+    expect(revisionTreeId(await captureRevisionTree(context.tree), 'sha1')).toBe(revisionTreeId(target, 'sha1'));
+  });
+
+  it('should leave the files as they were or as wanted when a native write lands and then throws', async () => {
+    const context = await nativeProject({ 'main.ts': 'old\n', 'kept.ts': 'kept\n' });
+    const failure = Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+    const rename = fs.rename.bind(fs);
+    /* A native write's rename lands and then throws, so its receipt is uncertain, never failed. */
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to);
+      if (String(to).endsWith('fresh.ts')) {
+        throw failure;
+      }
+    });
+    const before = new ImmutableRevisionTree([
+      ['main.ts', 'old\n'],
+      ['kept.ts', 'kept\n'],
+    ]);
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ['kept.ts', 'kept\n'],
+      ['fresh.ts', 'fresh\n'],
+    ]);
+
+    await expect(materializer(context.tree)(liveCheckout, target, { before })).rejects.toBeDefined();
+
+    expect(context.receipts.some(({ outcome }) => outcome === 'uncertain')).toBe(true);
+    expect(context.receipts.some(({ outcome }) => outcome === 'failed')).toBe(false);
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    /* As it was, or as the revision wanted it: never a mix with a staged sibling behind. */
+    expect([revisionTreeId(before, 'sha1'), revisionTreeId(target, 'sha1')]).toContain(
+      revisionTreeId(await captureRevisionTree(context.tree), 'sha1'),
+    );
+  });
+});
+
+describe('landing large objects from the store (W11.3)', () => {
+  const part = new TextEncoder().encode('solid part\n'.repeat(512));
+  const { pointer, bytes: pointerBytes } = lfsPointerFor(part);
+
+  /* A checkout over a store that holds the part, as the native port lays it out. */
+  const storeProject = async (withStore: boolean) => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-apply-store-'));
+    roots.push(root);
+    const store = join(root, 'store');
+    const objectDirectory = join(store, pointer.oid.slice(0, 2), pointer.oid.slice(2, 4));
+    await fs.mkdir(objectDirectory, { recursive: true });
+    await fs.writeFile(join(objectDirectory, pointer.oid), part);
+    await fs.mkdir(join(root, 'project', 'models'), { recursive: true });
+    await fs.writeFile(join(root, 'project', 'models', 'b.step'), 'old bytes\n');
+    const tree = new NodeFsProvider(join(root, 'project'), withStore ? { largeObjectStore: store } : {});
+    const batch = vi.spyOn(tree, 'applyBatch');
+    return { tree, batch, store };
+  };
+  const before = new ImmutableRevisionTree([['models/b.step', 'old bytes\n']]);
+  const target = new ImmutableRevisionTree([
+    ['models/a.step', pointerBytes],
+    ['models/b.step', pointerBytes],
+  ]);
+  const sourced = new Map([
+    ['models/a.step', pointer],
+    ['models/b.step', pointer],
+  ]);
+
+  it('should clone each object, created or replaced, and verify it by its receipt', async () => {
+    const { tree, batch } = await storeProject(true);
+
+    await materializer(tree)(liveCheckout, target, { before, purpose: 'fill', largeObjects: sourced });
+
+    expect(await tree.readFile('models/a.step')).toStrictEqual(part);
+    expect(await tree.readFile('models/b.step')).toStrictEqual(part);
+    const writes = batch.mock.calls.flatMap(([entries]) => entries).filter((entry) => entry.op === 'write');
+    expect(writes.every((entry) => 'largeObject' in entry.data)).toBe(true);
+    expect(litterIn(await filesOf(tree))).toEqual([]);
+  });
+
+  it('should refuse a side map on a checkout that cannot land from a store', async () => {
+    const { tree } = await storeProject(false);
+
+    await expect(
+      materializer(tree)(liveCheckout, target, { before, purpose: 'fill', largeObjects: sourced }),
+    ).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+  });
+
+  it('should name the objects a store lost, before moving any file aside, so the fill brings their bytes', async () => {
+    const { tree, store } = await storeProject(true);
+    await fs.rm(join(store, pointer.oid.slice(0, 2), pointer.oid.slice(2, 4), pointer.oid));
+    const replacedOnly = new ImmutableRevisionTree([['models/b.step', pointerBytes]]);
+
+    const failure = await materializer(tree)(liveCheckout, replacedOnly, {
+      before,
+      purpose: 'fill',
+      largeObjects: sourced,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(UnstoredLargeObjectsError);
+    expect((failure as UnstoredLargeObjectsError).oids).toStrictEqual([pointer.oid]);
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('old bytes\n');
+    expect(litterIn(await filesOf(tree))).toEqual([]);
+  });
+
+  it('should write the bytes of a path whose target is not the mapped pointer', async () => {
+    const { tree } = await storeProject(true);
+    const plain = new ImmutableRevisionTree([['models/b.step', 'new bytes\n']]);
+
+    await materializer(tree)(liveCheckout, plain, { before, purpose: 'fill', largeObjects: sourced });
+
+    expect(await tree.readFile('models/b.step', 'utf8')).toBe('new bytes\n');
+  });
+});
+
+describe('the entry closure of a tree write (D10)', () => {
+  it('should tell the index every entry before any lands, and land the entry closure first', async () => {
+    const context = await project({ 'old.scad': 'old\n' });
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Bracket',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'zz/main.scad' } },
+    });
+    const target = new ImmutableRevisionTree([
+      ...Array.from({ length: 600 }, (_, index): [string, string] => [
+        `src/file-${String(index).padStart(4, '0')}.scad`,
+        'cube(1);\n',
+      ]),
+      ['old.scad', 'old\n'],
+      ['models/part.step', pointerBytes],
+      ['tau.json', manifest],
+      ['zz/main.scad', 'cube(2);\n'],
+    ]);
+    const events: string[] = [];
+    let expected: readonly ExpectedEntry[] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      expectEntries: (entries: readonly ExpectedEntry[]) => {
+        expected = entries;
+        events.push('expect');
+      },
+      endExpectation: () => {
+        events.push('end');
+      },
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+    const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
+
+    const outcomes: unknown[] = [];
+    await materializer(watched, undefined, (_place, _paths, bracket) => {
+      brackets.push(bracket);
+      events.push('bracket');
+      return (outcome) => {
+        outcomes.push(outcome);
+        events.push('release');
+      };
+    })(liveCheckout, target, { before: new ImmutableRevisionTree([['old.scad', 'old\n']]), purpose: 'tree' });
+
+    /* The index learns the whole tree as the bracket opens, before any byte lands. */
+    expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
+    expect(outcomes).toEqual([{ failed: false }]);
+    expect(expected).toHaveLength(604);
+    expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
+      path: 'models/part.step',
+      size: pointerBytes.byteLength,
+      pending: { oid: pointer.oid, size: pointer.size },
+      arriving: true,
+    });
+    expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
+    expect(brackets).toEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'] }]);
+    /* The closure lands in the first changeset, before the tree's other files. */
+    expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
+    expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should land the closure first across created and replaced files', async () => {
+    const context = await project({ 'tau.json': '{}\n', 'zz/main.scad': 'cube(0);\n' });
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Bracket',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'zz/main.scad' } },
+    });
+    const target = new ImmutableRevisionTree([
+      ['a/new.scad', 'cube(1);\n'],
+      ['tau.json', manifest],
+      ['zz/main.scad', 'cube(2);\n'],
+    ]);
+    const published: string[] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        published.push(
+          ...entries.flatMap((entry) =>
+            entry.op === 'write' && entry.create === true && !entry.path.includes('tau-staged')
+              ? [entry.path]
+              : entry.op === 'move' && !entry.to.includes('tau-backup')
+                ? [entry.to]
+                : [],
+          ),
+        );
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+
+    await materializer(watched)(liveCheckout, target, {
+      before: new ImmutableRevisionTree([
+        ['tau.json', '{}\n'],
+        ['zz/main.scad', 'cube(0);\n'],
+      ]),
+      purpose: 'tree',
+    });
+
+    /* Both closure files are replacements, yet they land before the created file. */
+    expect(published.indexOf('a/new.scad')).toBeGreaterThan(published.indexOf('tau.json'));
+    expect(published.indexOf('a/new.scad')).toBeGreaterThan(published.indexOf('zz/main.scad'));
+  });
+
+  /* I8: closure-first costs a cold open no changeset: every file is created, and the closure is first in the one changeset. */
+  it('should land a cold open with its closure in one changeset, closure first', async () => {
+    const context = await project({});
+    const writes: string[][] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        writes.push(entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+    await materializer(watched)(
+      liveCheckout,
+      new ImmutableRevisionTree([
+        ['a.scad', 'a\n'],
+        ['tau.json', '{}\n'],
+        ['b.scad', 'b\n'],
+      ]),
+      { before: new ImmutableRevisionTree([]), purpose: 'tree' },
+    );
+    expect(writes.filter((paths) => paths.length > 0)).toEqual([['tau.json', 'a.scad', 'b.scad']]);
+  });
+
+  it('should write the tree when the index cannot learn it, leaving its reading late', async () => {
+    const context = await project({});
+    const endExpectation = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries: async () => {
+        throw new Error('the index could not open');
+      },
+      endExpectation,
+    });
+    try {
+      await materializer(watched)(liveCheckout, new ImmutableRevisionTree([['tau.json', '{}\n']]), {
+        before: new ImmutableRevisionTree([]),
+        purpose: 'tree',
+      });
+      await expect(context.tree.readFile('tau.json', 'utf8')).resolves.toBe('{}\n');
+      expect(warn).toHaveBeenCalled();
+      expect(endExpectation).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('should end the expectation even when the bracket throws, and tell a failed write as failed', async () => {
+    const context = await project({});
+    const target = new ImmutableRevisionTree([
+      ['tau.json', '{}\n'],
+      ['a.scad', 'a\n'],
+    ]);
+    const endExpectation = vi.fn();
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries: vi.fn(),
+      endExpectation,
+    });
+    await expect(
+      materializer(watched, undefined, () => {
+        throw new Error('host bracket failed');
+      })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
+    ).rejects.toThrow('host bracket failed');
+    expect(endExpectation).toHaveBeenCalledTimes(1);
+
+    /* An aborted write releases its bracket as failed, so its tree is never read as written. */
+    const outcomes: unknown[] = [];
+    const controller = new AbortController();
+    const aborting: RevisionFileSystem = Object.assign(Object.create(watched) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await context.checkout.applyBatch!(entries, batchOptions);
+        controller.abort(new Error('closed'));
+        return receipts;
+      },
+    });
+    await expect(
+      materializer(aborting, undefined, () => (outcome) => {
+        outcomes.push(outcome);
+      })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree', signal: controller.signal }),
+    ).rejects.toThrow();
+    /* It tore the checkout, so it is told failed, and the recovery that puts the prior files back lands. */
+    expect(outcomes).toEqual([{ failed: true }, { failed: false }]);
+    expect(endExpectation).toHaveBeenCalledTimes(3);
+
+    /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */
+    outcomes.length = 0;
+    const refusing: RevisionFileSystem = Object.assign(Object.create(watched) as RevisionFileSystem, {
+      applyBatch: async (): Promise<BatchReceipt[]> => {
+        throw new Error('The disk went away.');
+      },
+      apply: async () => {
+        throw new Error('The disk went away.');
+      },
+    });
+    await expect(
+      materializer(refusing, undefined, () => (outcome) => {
+        outcomes.push(outcome);
+      })(liveCheckout, new ImmutableRevisionTree([['b.scad', 'b\n']]), {
+        before: await captureRevisionTree(context.checkout, {
+          exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned,
+        }),
+        purpose: 'tree',
+      }),
+    ).rejects.toThrow('The disk went away.');
+    expect(outcomes).toEqual([{ failed: false }]);
+  });
+
+  it('should tell nothing for a fill flush', async () => {
+    const context = await project({});
+    const expectEntries = vi.fn();
+    const brackets: unknown[] = [];
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries,
+    });
+    await materializer(watched, undefined, (_place, _paths, bracket) => {
+      brackets.push(bracket);
+    })(liveCheckout, new ImmutableRevisionTree([['a.scad', 'a\n']]), {
+      before: new ImmutableRevisionTree([]),
+      purpose: 'fill',
+    });
+    expect(expectEntries).not.toHaveBeenCalled();
+    expect(brackets).toEqual([{ purpose: 'fill' }]);
+  });
 });
 
 describe('a case-insensitive checkout', () => {
@@ -571,7 +1172,6 @@ describe('a checkout stopped inside an apply', () => {
      * failure starts cannot run either — the one path no suite reached. */
     const stopped = await project(baseFiles, {
       statAge: 60_000,
-      batch: true,
       failMutation: (sequence) => sequence >= 8,
     });
     const base = await save(stopped.open());
@@ -598,9 +1198,10 @@ describe('a checkout stopped inside an apply', () => {
   }, 30_000);
 
   it('should leave the files as they were or as the revision wanted them, with no temporary sibling behind', async () => {
+    const options = trustedStats;
     /* The clean run says how many steps there are to stop at, and what the two
      * admissible outcomes hash to. */
-    const clean = await project(baseFiles);
+    const clean = await project(baseFiles, options);
     const cleanActors = clean.open();
     const base = await save(cleanActors);
     await agentWrites(clean.tree);
@@ -622,7 +1223,7 @@ describe('a checkout stopped inside an apply', () => {
 
     for (const step of Array.from({ length: steps }, (_, index) => index + 1)) {
       // oxlint-disable-next-line no-await-in-loop -- one whole project per step, in order.
-      const stopped = await project(baseFiles, { ...trustedStats, failMutation: (sequence) => sequence === step });
+      const stopped = await project(baseFiles, { ...options, failMutation: (sequence) => sequence === step });
       // oxlint-disable-next-line no-await-in-loop -- the base revision of this step's project.
       const stoppedBase = await save(stopped.open());
       // oxlint-disable-next-line no-await-in-loop -- this step's turn.

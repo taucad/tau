@@ -26,6 +26,25 @@ git checkout --detach "$source_sha"
 # Use the repository's integrity-pinned pnpm and frozen dependencies. No token is exported during install.
 corepack enable
 pnpm install --frozen-lockfile
+# The guest gets the same guard as setup-nx's "Rerun Nx once after a segfault" step: Nx 22.7.1 is sometimes
+# killed by SIGSEGV about two seconds into a command, before it runs anything, and the guest's own install has no
+# such guard (guest (ubuntu) on #1378: `nx run desktop:test-qualification-electron-writer` killed 2 s after start).
+# Only Nx's own exit 139 reruns it, once; a failed task exits otherwise and passes through unchanged.
+nx_bin=node_modules/.bin
+mv "$nx_bin/nx" "$nx_bin/nx-segv-guarded"
+cat > "$nx_bin/nx" <<'SH'
+#!/bin/sh
+real="$(dirname "$0")/nx-segv-guarded"
+"$real" "$@"
+status=$?
+if [ "$status" -eq 139 ]; then
+  echo "Nx was killed by SIGSEGV; rerunning once: nx $*" >&2
+  "$real" "$@"
+  status=$?
+fi
+exit "$status"
+SH
+chmod +x "$nx_bin/nx"
 python3 - <<'PYRUN'
 import json, os, pathlib, select, subprocess, sys, tempfile, time, zipfile
 root = pathlib.Path.home() / 'tau'
@@ -120,6 +139,21 @@ status = 1
 try:
     status = subprocess.run(['pnpm', 'nx', 'run', 'desktop:qualify-installed-route'], cwd=root, env=env).returncode
 finally:
+    # Whether the X server stayed up for the whole run: its unit's start/stop lines only, and why any restart happened.
+    subprocess.run(['sudo', 'journalctl', '--no-pager', '-o', 'short-iso', '-u', 'tau-proof-xorg.service',
+                    '-g', 'Started|Stopping|Stopped|Deactivated|Failed|code=exited'], check=False)
+    subprocess.run(['sudo', 'sh', '-c', 'grep -h -A3 "Restarting services" /var/log/unattended-upgrades/*.log 2>/dev/null || true'],
+                   check=False)
+    # Whether the scheduler could still run when an upgrade wait expired (run 41827213025 Debian rows saw no mirror
+    # request for 15 minutes after reconnect): each APT unit's state, its start and finish lines, and any APT process
+    # still running.
+    subprocess.run(['systemctl', 'show',
+                    '--property=Id,ActiveState,SubState,ExecMainStartTimestamp,LastTriggerUSec,NextElapseUSecRealtime',
+                    'apt-daily.service', 'apt-daily-upgrade.service', 'apt-daily.timer', 'apt-daily-upgrade.timer'],
+                   check=False)
+    subprocess.run(['sudo', 'sh', '-c', 'journalctl --no-pager -o short-iso -u apt-daily.service -u apt-daily-upgrade.service '
+                    '-g "Start|Finish|Fail|Deactivat|skipped|condition|code=|timed out" | tail -n 40'], check=False)
+    subprocess.run(['sh', '-c', 'ps -eo pid,etimes,args | grep -E "[a]pt|[d]pkg|[u]nattended" || true'], check=False)
     cleanup = subprocess.run(['pnpm', 'nx', 'run', 'desktop:cleanup-qualification-trust'], cwd=root, env=env).returncode
     config.unlink(missing_ok=True)
     if cleanup:

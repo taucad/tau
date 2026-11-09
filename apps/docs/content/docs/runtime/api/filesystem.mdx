@@ -17,7 +17,7 @@ Runtime supports Node.js, browser, memory, confined fs-compatible, and cross-wor
 
 <auto-type-table path='./props/filesystem.ts' name='FsLike' />
 
-Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`, `FileStatEntry`, `FileTreeEntry`, and `FileStatus` describe listings and stats; watch callbacks receive `ChangeEvent` values carrying a `ChangeEventStat`. `isRuntimeFileSystem` guards an opaque handle; `isNotFoundError` classifies read failures; `runtimeFileSystemSchema` is the Zod validator for the kernel-facing method surface.
+Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`, `FileStatEntry`, `FileTreeEntry`, and `FileStatus` describe listings and stats; watch callbacks receive `ChangeEvent` values (a `PathChangeEvent` or per-changeset `ChangeSetEvent`) carrying a `ChangeEventStat`. `isRuntimeFileSystem` guards an opaque handle; `isNotFoundError` classifies read failures; `runtimeFileSystemSchema` is the Zod validator for the kernel-facing method surface.
 
 ## Constructors
 
@@ -30,6 +30,8 @@ Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`
 | `fromFileSystemBridge(open)` | `@taucad/runtime/filesystem`         | A fresh rooted bridge connection for each runtime binding |
 
 Every constructor establishes the root of the [runtime-path namespace](../concepts/path-namespaces). Filesystem method arguments are root-relative, so `main.ts` refers to a file beneath the supplied root and `''` refers to the root itself.
+
+A Node.js host passes `nodeGrepMatcherWorker`, also from `@taucad/runtime/filesystem/node`, as `grepMatcherWorker` to the filesystem bridge so a regex `grep` runs on a terminable `worker_threads` thread.
 
 ## Bridge Types
 

@@ -26,10 +26,9 @@ import {
   sandboxRuntimeJavaAgent,
   sandboxRuntimeSeccomp,
 } from '#native-sandbox.js';
-import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import { terminateOwnedProcesses, terminationDeadline, trackDescendants } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
-import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
-import { shellBaselineDenied } from '#shell/shell-baseline.js';
+import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
@@ -44,11 +43,13 @@ import type {
 } from '#shell/shell-provider.js';
 import {
   abandonStartBarrier,
+  createLaunchAnnouncement,
   createTerminalStartGate,
   openStartBarrier,
   stagedStartArguments,
   stagedTerminalStartArguments,
 } from '#shell/shell-start-barrier.js';
+import type { LaunchAnnouncement } from '#shell/shell-start-barrier.js';
 import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
@@ -142,8 +143,8 @@ export type SandboxShellProviderOptions = Readonly<{
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
-/** How long termination may take before survivors are reported. */
-const terminationMilliseconds = 5000;
+/** How long termination may take before survivors are reported (see {@link terminationDeadline}). */
+const terminationMilliseconds = terminationDeadline;
 
 /** The util-linux `setsid`, which makes the session's own PTY the controlling terminal that `bwrap --new-session` dropped. */
 const linuxSetsid = '/usr/bin/setsid';
@@ -251,33 +252,28 @@ const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly s
 };
 
 export const shellSandboxProfile = (
-  launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
+  launch: Pick<ShellLaunch, 'filesystem' | 'network' | 'startupFiles'>,
   options: SandboxShellProviderOptions = {},
   runtimeDirectory?: string,
 ): Record<string, unknown> => {
+  const home = options.home ?? homedir();
+  /* The human Terminal's Zsh reopens exactly its startup files, read-only; every other baseline entry stays denied. */
+  const startupFiles = launch.startupFiles === 'zsh' ? zshStartupFiles(home) : [];
   const denied = deniedVariants([
     ...launch.filesystem.denied,
-    ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
+    ...shellBaselineDenied({ platform: process.platform, home, environment: process.env }).filter(
+      (path) => !startupFiles.includes(path),
+    ),
   ]);
-  const readOnly = launch.filesystem.readOnly ?? [];
-  const masked = process.platform === 'linux' ? deniedVariants(launch.filesystem.masked ?? []) : [];
-  // A strict child makes SRT mount an empty directory at the absent container. A direct
-  // deny would mount /dev/null there and conflict with the directory stubs for protected children.
-  const absentMasked = masked.filter((path) => !existsSync(path)).map((path) => join(path, '.tau-mask-boundary'));
-  // A mask already pins its container. Rebinding that host directory would expose everything
-  // the tmpfs hid. Only ancestors within explicitly writable children may be restored.
-  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]).filter(
-    (path) =>
-      !masked.some((root) => inside(path, root)) ||
-      launch.filesystem.writable.some((root) => masked.some((mask) => inside(root, mask)) && inside(path, root)),
-  );
+  const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
+  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]);
   const { domains } = launch.network;
   return {
     seccomp: sandboxRuntimeSeccomp(),
     javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...masked])],
+      denyRead: [...new Set([...deniedReadRoots(), ...denied])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
@@ -286,7 +282,7 @@ export const shellSandboxProfile = (
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
       allowWrite: physicalVariants([...launch.filesystem.writable, ...pinned]),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly), ...absentMasked])],
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },
@@ -298,19 +294,24 @@ export const shellSandboxProfile = (
 
 /**
  * The command the runtime runs under `/bin/sh -c` inside the sandbox: the launch environment as assignments (so they
- * win over the runtime's own `TMPDIR`), then `exec` of the quoted vector. Nothing from the vector is interpreted.
+ * win over the runtime's own `TMPDIR`), then `exec` of the quoted vector. Nothing from the vector is interpreted. On
+ * Linux the launch's announcement ({@link createLaunchAnnouncement}) runs first, and the vector runs only if it
+ * succeeded.
  *
  * @public
  * @param launch - The launch.
+ * @param announcement - Shell text that announces the workload is about to run, from {@link LaunchAnnouncement}.
  * @returns The command text.
  */
 export const shellSandboxCommand = (
   launch: Pick<ShellLaunch, 'executablePath' | 'arguments' | 'environment' | 'stdio'>,
+  announcement?: string,
 ): string => {
   const assignments = Object.entries(launch.environment).map(([name, value]) => `${name}=${quote(value)}`);
   const vector = [launch.executablePath, ...launch.arguments];
   const terminal = launch.stdio.kind === 'terminal' && process.platform === 'linux';
   return [
+    ...(announcement === undefined ? [] : [announcement, '&&']),
     ...assignments,
     'exec',
     ...(terminal ? [linuxSetsid, '--ctty', '--wait'] : []),
@@ -608,20 +609,40 @@ const byteQueue = (pause: () => void, resume: () => void, identity: QueueIdentit
   };
 };
 
-/** Queue a readable child stream. */
-const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }, identity: QueueIdentity): ByteQueue => {
+/*
+ * Queue a readable child stream. A stream that carries the launch's announcement passes only what followed it, and
+ * tells it how the stream ended.
+ */
+const queueStream = (
+  stream: NodeJS.ReadableStream & { destroy: () => void },
+  identity: QueueIdentity,
+  announcement?: LaunchAnnouncement,
+): ByteQueue => {
   const queue = byteQueue(
     () => stream.pause(),
     () => stream.resume(),
     identity,
   );
   stream.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-    queue.push(chunk);
+    const passed = announcement === undefined ? chunk : announcement.pass(chunk);
+    if (passed !== undefined) {
+      queue.push(passed);
+    }
   });
-  stream.on('end', queue.end);
-  stream.on('close', queue.end);
+  stream.on('end', () => {
+    announcement?.end(true);
+    queue.end();
+  });
+  /* Without an `end` first, the host destroyed the stream: that proves nothing about what the launch wrote. */
+  stream.on('close', () => {
+    announcement?.end(false);
+    queue.end();
+  });
   /* EIO is how a PTY master reports that every slave descriptor has closed. */
-  stream.on('error', queue.end);
+  stream.on('error', (error: NodeJS.ErrnoException) => {
+    announcement?.end(error.code === 'EIO');
+    queue.end();
+  });
   return queue;
 };
 
@@ -760,7 +781,10 @@ type Staged = Readonly<{
   abandon: () => void;
 }>;
 
-const startPipes = (argv: readonly string[], launch: ShellLaunch, owner: LaunchOwner): Staged => {
+const startPipes = (
+  { argv, launch, owner }: Readonly<{ argv: readonly string[]; launch: ShellLaunch; owner: LaunchOwner }>,
+  announcement: LaunchAnnouncement | undefined,
+): Staged => {
   const [executable, ...rest] = stagedStartArguments(argv);
   const child = spawn(executable!, rest, {
     cwd: launch.workingDirectory,
@@ -772,7 +796,7 @@ const startPipes = (argv: readonly string[], launch: ShellLaunch, owner: LaunchO
   });
   const pipes = outputsOf(child);
   const stdout = queueStream(pipes.stdout, { commandId: launch.commandId, stream: 'stdout' });
-  const stderr = queueStream(pipes.stderr, { commandId: launch.commandId, stream: 'stderr' });
+  const stderr = queueStream(pipes.stderr, { commandId: launch.commandId, stream: 'stderr' }, announcement);
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -810,6 +834,7 @@ type TerminalStart = Readonly<{
 const startLinuxTerminal = (
   { argv, launch, size, owner }: TerminalStart,
   native: NonNullable<PtyBinding['native']>,
+  announcement: LaunchAnnouncement | undefined,
 ): Staged => {
   /* Opened here, so no process outside the sandbox takes it as its controlling terminal; `setsid --ctty` inside does. */
   const pty = native.open(size.columns, size.rows);
@@ -823,7 +848,7 @@ const startLinuxTerminal = (
   });
   closeSync(pty.slave);
   const master = new ReadStream(pty.master);
-  const queue = queueStream(master, { commandId: launch.commandId, stream: 'pty' });
+  const queue = queueStream(master, { commandId: launch.commandId, stream: 'pty' }, announcement);
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -941,10 +966,6 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
-  const maskRefusal = maskProblem(launch.filesystem);
-  if (maskRefusal !== undefined) {
-    return unsupported('filesystem-mask', maskRefusal);
-  }
   const { readable, writable, denied, readOnly = [] } = launch.filesystem;
   const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
@@ -959,6 +980,12 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (launch.network.domains.some((domain) => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(domain))) {
     return unsupported('network-isolation', 'network grants name exact lowercase host names only.');
   }
+  if (
+    launch.startupFiles !== undefined &&
+    (process.platform !== 'darwin' || launch.stdio.kind !== 'terminal' || launch.executablePath !== '/bin/zsh')
+  ) {
+    return unsupported('filesystem-mask', 'only the macOS Terminal running /bin/zsh may read Zsh startup files.');
+  }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
       return unsupported('terminal', 'the macOS Terminal waits for the own-pty validation run.');
@@ -970,7 +997,7 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   return undefined;
 };
 
-/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows and masks. */
+/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows. */
 const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): StandInProfile => {
   const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
     denyWrite: readonly string[];
@@ -980,8 +1007,65 @@ const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): 
     denyWrite,
     allowWrite,
     directories: launch.filesystem.directories,
-    masked: deniedVariants(launch.filesystem.masked ?? []),
-    writable: physicalVariants(launch.filesystem.writable),
+  };
+};
+
+/** How much of the sandbox's own setup diagnostics a refused launch reports, in characters. */
+const setupDiagnosticCharacters = 512;
+
+/**
+ * The announcement one launch carries. On Linux bubblewrap builds the sandbox only after the barrier opens, so its
+ * setup can still fail then, and the announcement tells that apart from the workload's own exit (see
+ * {@link createLaunchAnnouncement}). Pipes carry it on standard error, where bubblewrap reports; a terminal on its PTY.
+ * macOS refuses a profile before the barrier opens, so it carries none.
+ *
+ * @param launch - The launch, whose stdio picks the carrying stream.
+ * @returns Its announcement, on Linux only.
+ */
+const announcementFor = (launch: ShellLaunch): LaunchAnnouncement | undefined =>
+  process.platform === 'linux' ? createLaunchAnnouncement(launch.stdio.kind === 'pipes' ? 2 : 1) : undefined;
+
+/**
+ * Wait for an opened launch's announcement, at most as long as a supervisor may take to answer, and refuse the launch
+ * only when the sandbox proved it never started the workload (I7).
+ *
+ * A launch that neither announced nor ended by then is handed over as started, exactly as before the announcement
+ * existed: only proof that nothing ran may turn a launch into a refusal. A refused launch is settled first, so its tree
+ * is confirmed stopped and its supervisor and stand-ins released; an unconfirmed stop rejects instead, and the caller
+ * keeps its roots. Only then may the caller prepare a fresh launch, whose fresh profile stands in for a protected path
+ * that disappeared.
+ *
+ * @param staged - The opened launch.
+ * @param announcement - Its announcement; without one (macOS) the launch is handed over at once.
+ * @param wait - The launch's abort signal, and how long to wait (the supervisor startup bound by default).
+ * @returns The refusal, or `undefined` when the launch is to be handed over as started.
+ */
+const refusedSetup = async (
+  staged: Staged,
+  announcement: LaunchAnnouncement | undefined,
+  wait: Readonly<{ signal: AbortSignal; milliseconds: number | undefined }>,
+): Promise<ShellLaunchOutcome | undefined> => {
+  if (announcement === undefined) {
+    return undefined;
+  }
+  const timer = setTimeout(announcement.abandon, wait.milliseconds ?? 30_000);
+  let answer: Awaited<LaunchAnnouncement['answer']>;
+  try {
+    answer = await announcement.answer;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (answer !== 'not-started') {
+    return undefined;
+  }
+  await staged.process.exited;
+  wait.signal.throwIfAborted();
+  const diagnostic = announcement.preamble().slice(-setupDiagnosticCharacters);
+  return {
+    status: 'sandbox-unavailable',
+    message: 'the sandbox could not be set up, so nothing ran.',
+    ...(diagnostic === '' ? {} : { diagnostic }),
+    retryable: true,
   };
 };
 
@@ -997,7 +1081,9 @@ const defaultCustody = (): Readonly<{ directory: string; sessionDirectory: strin
  * Every launch is prepared first (I7): its durable receipt and exclusive lock exist before any process. The launch's
  * supervisor inherits the lock, the shell starts behind a start barrier, and the barrier opens only after the
  * supervisor and the staged root are durably registered and this process has handed its copy of the lock away. Once
- * `exited` settles the supervisor has exited, so {@link ShellProvider.recover} can claim the stopped receipt.
+ * `exited` settles the supervisor has exited, so {@link ShellProvider.recover} can claim the stopped receipt. On Linux a
+ * launch is handed over once its sandbox announced the workload; one whose sandbox exited before that ran nothing and
+ * answers a `retryable` `sandbox-unavailable` (see {@link createLaunchAnnouncement}).
  *
  * @public
  * @param options - Supervisor, prerequisite paths, custody namespace and the macOS Terminal flag.
@@ -1028,26 +1114,12 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     }
     const runtimeDirectory = createRuntimeDirectory();
     // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
-    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns). A
-    // masked container's stand-in changes the profile (it is no longer absent), so the profile handed to the runtime is
-    // computed again once the stand-ins exist and held from its own lists.
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
     let releaseStandIns: () => void;
     let profile: Record<string, unknown>;
     try {
-      const releaseFirst = holdProtectedStandIns(
-        standInProfile(shellSandboxProfile(launch, options, runtimeDirectory), launch),
-      );
-      try {
-        profile = shellSandboxProfile(launch, options, runtimeDirectory);
-        const releaseSecond = holdProtectedStandIns(standInProfile(profile, launch));
-        releaseStandIns = () => {
-          releaseSecond();
-          releaseFirst();
-        };
-      } catch (error) {
-        releaseFirst();
-        throw error;
-      }
+      profile = shellSandboxProfile(launch, options, runtimeDirectory);
+      releaseStandIns = holdProtectedStandIns(standInProfile(profile, launch));
     } catch (error) {
       if (runtimeDirectory !== undefined) {
         rmSync(runtimeDirectory, { recursive: true, force: true });
@@ -1057,12 +1129,20 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    const announcement = announcementFor(launch);
     let started: Supervisor;
     try {
       started = await startSupervisor(
         {
           profile,
-          command: shellSandboxCommand(launch),
+          /* Only the provider sets ZDOTDIR, and only for the Terminal Zsh it admitted: a host value stays refused. */
+          command: shellSandboxCommand(
+            launch.startupFiles === 'zsh'
+              ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+                { ...launch, environment: { ...launch.environment, ZDOTDIR: options.home ?? homedir() } }
+              : launch,
+            announcement?.command,
+          ),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,
           guard: launch.network.domains.length > 0,
@@ -1092,24 +1172,13 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const maskedArgv =
-      process.platform === 'darwin'
-        ? bindMaskedDirectories(supervisor.reply.argv, launch.filesystem)
-        : supervisor.reply.argv;
-    if (maskedArgv === undefined) {
-      await supervisor.close();
-      return {
-        status: 'sandbox-unavailable',
-        message: 'the sandbox profile could not enforce masked directory creation.',
-      };
-    }
-    const argv = hostBound(maskedArgv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
     const owner: LaunchOwner = { supervisor, table: options.processTable };
     let staged: Staged;
     if (launch.stdio.kind === 'pipes') {
-      staged = startPipes(argv, launch, owner);
+      staged = startPipes({ argv, launch, owner }, announcement);
     } else if (process.platform === 'linux') {
-      staged = startLinuxTerminal({ argv, launch, size: launch.stdio.size, owner }, binding!.native!);
+      staged = startLinuxTerminal({ argv, launch, size: launch.stdio.size, owner }, binding!.native!, announcement);
     } else {
       const bound = bindOwnPty(argv);
       if (bound === undefined) {
@@ -1138,7 +1207,12 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         message: `Tau could not take custody of this launch, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    return { status: 'started', process: staged.process };
+    /* A sandbox that exits before its announcement failed to set up: never the workload's exit (I7). */
+    const refused = await refusedSetup(staged, announcement, {
+      signal: launch.signal,
+      milliseconds: options.startupMilliseconds,
+    });
+    return refused ?? { status: 'started', process: staged.process };
   };
   return {
     name: 'srt-0.0.75',

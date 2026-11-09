@@ -16,7 +16,7 @@ describe('project creation workbench files', () => {
     if (layout.status !== 'current') {
       return;
     }
-    expect(layout.record.workbench).toEqual({ kind: 'group', tabs: [] });
+    expect(layout.record.workbench).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }], active: 0 });
     expect(layout.record.viewer).toMatchObject({ kind: 'group', tabs: [{ kind: 'view' }] });
     if (layout.record.viewer.kind !== 'group') {
       return;

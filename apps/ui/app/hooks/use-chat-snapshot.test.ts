@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
-import type { GeometryComponentManifest } from '@taucad/types';
-import { projectViewerSelection, projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
+import { maxSnapshotFileTreeEntries, snapshotSchema } from '@taucad/chat';
+import type { FileEntry, FileProvenance, GeometryComponentManifest } from '@taucad/types';
+import {
+  boundedProjectFileTree,
+  projectFileTree,
+  projectViewerSelection,
+  projectWorkbenchSnapshot,
+} from '#hooks/use-chat-snapshot.js';
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 describe('projectWorkbenchSnapshot', () => {
@@ -178,5 +184,80 @@ describe('projectViewerSelection', () => {
         'a.ts',
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('projectFileTree', () => {
+  type FileRow = Extract<FileEntry, { type: 'file' }>;
+  const text = (path: string, lineCount?: number, provenance?: FileProvenance): FileRow => ({
+    path,
+    name: path.split('/').pop()!,
+    type: 'file',
+    size: 12,
+    mtimeMs: 1,
+    isLoaded: false,
+    contentKind: 'text',
+    ...(lineCount === undefined ? {} : { lineCount }),
+    ...(provenance === undefined ? {} : { provenance }),
+  });
+  const binary: FileRow = {
+    path: 'models/a.step',
+    name: 'a.step',
+    type: 'file',
+    size: 12,
+    mtimeMs: 1,
+    isLoaded: false,
+    contentKind: 'binary',
+  };
+  const folder: FileEntry = { path: 'models', name: 'models', type: 'dir', size: 0, mtimeMs: 1, isLoaded: true };
+  const skill: FileProvenance = { source: 'system-skills', versioned: false, agentAccess: 'read-only' };
+
+  /* A head listing leaves a text row uncounted; the wire takes a text kind only with its count. */
+  it('keeps each file’s kind where the wire can carry it, and only the project’s rows', () => {
+    const rows = projectFileTree([
+      text('main.scad', 3),
+      text('notes.md'),
+      binary,
+      text('.agents/skills/x/SKILL.md', 2, skill),
+      folder,
+    ]);
+
+    expect(rows).toStrictEqual([
+      { path: 'main.scad', name: 'main.scad', type: 'file', size: 12, contentKind: 'text', lineCount: 3 },
+      { path: 'notes.md', name: 'notes.md', type: 'file', size: 12 },
+      { path: 'models/a.step', name: 'a.step', type: 'file', size: 12, contentKind: 'binary' },
+    ]);
+    expect(snapshotSchema.safeParse({ fileTree: rows }).success).toBe(true);
+  });
+});
+
+describe('boundedProjectFileTree', () => {
+  const file = (path: string): FileEntry => ({
+    path,
+    name: path.split('/').pop()!,
+    type: 'file',
+    size: 1,
+    contentKind: 'binary',
+    mtimeMs: 1,
+    isLoaded: false,
+  });
+
+  it('lists every file of a small project, shallowest first, with no omission count', () => {
+    const bounded = boundedProjectFileTree([file('b/z.ts'), file('main.ts'), file('a/y.ts')]);
+
+    expect(bounded.fileTree.map(({ path }) => path)).toEqual(['main.ts', 'a/y.ts', 'b/z.ts']);
+    expect(bounded.fileTreeOmitted).toBeUndefined();
+  });
+
+  it('cuts a large project at the bound, the same way whatever order the tree yields (D18)', () => {
+    const paths = Array.from({ length: maxSnapshotFileTreeEntries + 120 }, (_, index) => `src/f-${String(index)}.ts`);
+    const forward = boundedProjectFileTree([...paths.map((path) => file(path)), file('tau.json')]);
+    const backward = boundedProjectFileTree([file('tau.json'), ...paths.toReversed().map((path) => file(path))]);
+
+    expect(forward.fileTree).toHaveLength(maxSnapshotFileTreeEntries);
+    expect(forward.fileTreeOmitted).toBe(121);
+    expect(forward.fileTree[0]!.path).toBe('tau.json');
+    expect(backward).toStrictEqual(forward);
+    expect(snapshotSchema.safeParse(forward).success).toBe(true);
   });
 });

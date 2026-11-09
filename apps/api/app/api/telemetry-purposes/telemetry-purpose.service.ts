@@ -2,10 +2,10 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { FeedbackGrant, FeedbackGrants } from '@taucad/agent-observability/scorecard';
-import { DatabaseService } from '#database/database.service.js';
-import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
-import type { Environment } from '#config/environment.config.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { DatabaseService } from '@taucad/api-database';
+import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '@taucad/api-database/schema';
+import type { Environment } from '@taucad/api-core';
+import { Span } from '@taucad/api-observability';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import type { ProjectAuthority, RecordedPurposeDecision } from '#api/telemetry-purposes/purpose-authority.js';
@@ -91,6 +91,7 @@ export class TelemetryPurposeService {
           tierAssured: assurance.assured,
           project: projectAuthority,
         }),
+        answeredAt: Date.now(),
       },
       protection: assurance.assured ? (assurance.tier === 'free' ? 'free' : 'pro') : 'unknown',
     };
@@ -214,7 +215,7 @@ export class TelemetryPurposeService {
   private async decisionsFor(userId: string): Promise<RecordedPurposeDecision[]> {
     const rows = await this.databaseService.database.query.telemetryPurposeDecision.findMany({
       where: eq(telemetryPurposeDecision.userId, userId),
-      columns: { id: true, purpose: true, granted: true, noticeVersion: true },
+      columns: { id: true, purpose: true, granted: true, noticeVersion: true, decidedAt: true },
     });
 
     return rows.map((row) => ({
@@ -222,6 +223,7 @@ export class TelemetryPurposeService {
       granted: row.granted,
       noticeVersion: row.noticeVersion,
       sequence: row.id,
+      decidedAt: row.decidedAt.getTime(),
     }));
   }
 

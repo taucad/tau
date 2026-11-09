@@ -1,5 +1,5 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package entry point */
-export type { InstrumentType, MetricDefinition, MetricDeprecation } from '#define-metric.js';
+export type { InstrumentType, MetricDefinition } from '#define-metric.js';
 export { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
 export { TauMetrics } from '#registry.js';
 export {
@@ -32,8 +32,19 @@ export {
   evaluationClasses,
   geospecRunStatuses,
   lfsTransports,
+  workerTimingSpanNames,
 } from '#ingest.js';
 export type { AgentTurnContext, ClientMetricEntry, IngestPayload } from '#ingest.js';
+export {
+  llmGatewayProviders,
+  llmGatewayWires,
+  llmRequestEncodings,
+  llmAdmissionOutcomes,
+  turnSteps,
+  turnGaps,
+  promptCacheOutcomes,
+  turnStepTokenTypes,
+} from '#llm-gateway-vocabulary.js';
 export { toPrometheusName, PrometheusNames, prometheusNameOf } from '#prometheus.js';
 export type { TelemetryBackend } from '#reporter.js';
 export { createReporter } from '#reporter.js';

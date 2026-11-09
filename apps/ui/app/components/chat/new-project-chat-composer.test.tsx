@@ -39,7 +39,7 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   },
 }));
 vi.mock('#components/chat/kernel-selector.js', () => ({
-  KernelSelector: () => <div>Kernel selector</div>,
+  NewProjectKernelChips: () => <div>Kernel selector</div>,
 }));
 vi.mock('#components/filesystem/workspace-selector.js', () => ({
   WorkspaceSelector: ({
@@ -55,6 +55,9 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
   ),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({ useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }) }));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({ withCatalogDefaultModel: async (execution: unknown) => execution }),
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: mockCreateProject }),
 }));
@@ -170,6 +173,18 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft).toHaveBeenCalledOnce();
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
+  });
+
+  it('leaves the kernel chips to a host that already serves them, and still creates with the chosen kernel', async () => {
+    const { rerender } = render(<NewProjectChatComposer />);
+    expect(screen.getByText('Kernel selector')).toBeInTheDocument();
+
+    rerender(<NewProjectChatComposer enableKernelChips={false} />);
+    expect(screen.queryByText('Kernel selector')).not.toBeInTheDocument();
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
+    });
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ kernel: 'openscad' }));
   });
 
   // New (W6, P39): a surface with its own directory names it, so resume copies from there.

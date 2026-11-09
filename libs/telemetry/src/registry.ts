@@ -9,10 +9,21 @@ import {
   geospecRunStatuses,
   kernelIds,
   lfsTransports,
+  workerTimingSpanNames,
   lookupOutcomes,
   tauToolNames,
 } from '#ingest.js';
 import { runtimeMetrics } from '#runtime-metrics.js';
+import {
+  llmAdmissionOutcomes,
+  llmGatewayProviders,
+  llmGatewayWires,
+  llmRequestEncodings,
+  promptCacheOutcomes,
+  turnGaps,
+  turnStepTokenTypes,
+  turnSteps,
+} from '#llm-gateway-vocabulary.js';
 
 /**
  * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
@@ -318,7 +329,8 @@ export const TauMetrics = {
     name: 'gen_ai.client.time_to_first_token',
     unit: 's',
     description: 'Streaming responsiveness (time to first SSE chunk)',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    /* 20–60 s: a cold re-prefill of a long chat can pass 10 s, and a capped histogram hides it. */
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
     attributes: z.object({
       'gen_ai.operation.name': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
@@ -548,6 +560,102 @@ export const TauMetrics = {
     }),
   }),
 
+  // --- Funded LLM gateway latency and prompt cache (chat latency and prompt cache program, W3.1) ---
+  // Upload, parse and admission split the time before the supplier request; the turn-step series
+  // label each settled step by the agent host's turn boundary and pause. Durations, sizes and
+  // enumerated labels only (I4): never a chat, project, user or attempt id.
+
+  llmGatewayAdmissionDuration: defineHistogram({
+    name: 'tau.llm.gateway.admission.duration',
+    unit: 's',
+    description: 'Funded LLM call admission, from invocation entry to the supplier request or the exit taken instead',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.surface': z.enum(['gateway', 'project_name', 'commit_name', 'other']),
+      outcome: z.enum(llmAdmissionOutcomes),
+    }),
+  }),
+
+  llmGatewayRequestReceiveDuration: defineHistogram({
+    name: 'tau.llm.gateway.request_body.receive.duration',
+    unit: 's',
+    description: 'Gateway request upload: request headers received to the last body byte',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+      'http.request.encoding': z.enum(llmRequestEncodings),
+    }),
+  }),
+
+  llmGatewayRequestParseDuration: defineHistogram({
+    name: 'tau.llm.gateway.request_body.parse.duration',
+    unit: 's',
+    description: 'Gateway request body parse: the last body byte to validation',
+    buckets: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+    }),
+  }),
+
+  llmGatewayRequestSize: defineHistogram({
+    name: 'tau.llm.gateway.request_body.size',
+    unit: 'By',
+    description: 'Gateway request body bytes as received on the wire',
+    buckets: Array.from({ length: 13 }, (_, step) => 16_384 * 2 ** step),
+    attributes: z.object({
+      'tau.llm.wire': z.enum(llmGatewayWires),
+      'http.request.encoding': z.enum(llmRequestEncodings),
+    }),
+  }),
+
+  llmGatewayInlineImageBytes: defineHistogram({
+    name: 'tau.llm.gateway.request_body.inline_image_bytes',
+    unit: 'By',
+    description: 'Base64 image bytes carried inline in one funded request (images re-sent with history count again)',
+    buckets: [0, ...Array.from({ length: 13 }, (_, step) => 16_384 * 2 ** step)],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+    }),
+  }),
+
+  llmTurnStepCacheTokens: defineCounter({
+    name: 'tau.llm.turn_step.cache_tokens',
+    unit: '{token}',
+    description: 'Settled tokens of funded steps by turn step, pause bucket and token type',
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'gen_ai.token.type': z.enum(turnStepTokenTypes),
+    }),
+  }),
+
+  llmTurnStepCacheOutcomes: defineCounter({
+    name: 'tau.llm.turn_step.cache_outcomes',
+    unit: '{step}',
+    description: 'Settled funded steps by prompt-cache outcome, turn step and pause bucket',
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
+    }),
+  }),
+
+  llmTurnStepTimeToFirstToken: defineHistogram({
+    name: 'tau.llm.turn_step.time_to_first_token',
+    unit: 's',
+    description: 'Supplier time to first token of settled streaming steps by prompt-cache outcome, turn step and pause',
+    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
+    attributes: z.object({
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.turn.step': z.enum(turnSteps),
+      'tau.turn.gap': z.enum(turnGaps),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
+    }),
+  }),
+
   // --- Infrastructure ---
 
   redisConnectionState: defineGauge({
@@ -557,6 +665,18 @@ export const TauMetrics = {
     attributes: z.object({
       'redis.role': z.string().optional(),
     }),
+  }),
+
+  /**
+   * Share of the Redis memory limit in use (`used_memory / maxmemory` from `INFO memory`). The
+   * production instance runs without eviction, so at 1 Redis refuses writes; unrecorded when the
+   * server reports no limit.
+   */
+  redisMemoryUtilization: defineGauge({
+    name: 'redis.memory.utilization',
+    unit: '1',
+    description: 'Fraction of the Redis memory limit in use (used_memory / maxmemory)',
+    attributes: z.object({}),
   }),
 
   /**
@@ -677,65 +797,6 @@ export const TauMetrics = {
     attributes: z.object({
       'kernel.status': z.string().optional(),
       'export.format': z.string().optional(),
-    }),
-  }),
-
-  // --- Client-reported: extended telemetry ---
-
-  wsReconnectionDuration: defineHistogram({
-    name: 'ws.reconnection.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'WebSocket reconnection latency (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'ws.reconnection.attempt': z.number().optional(),
-    }),
-  }),
-
-  editorLoadDuration: defineHistogram({
-    name: 'editor.load.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'Editor initialization time (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'editor.kernel': z.string().optional(),
-    }),
-  }),
-
-  wasmModuleLoadDuration: defineHistogram({
-    name: 'wasm.module.load.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'WASM module download + instantiation time (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
-    attributes: z.object({
-      'wasm.module': z.string().optional(),
-    }),
-  }),
-
-  indexeddbOperationDuration: defineHistogram({
-    name: 'indexeddb.operation.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'IndexedDB operation latency (reported by client)',
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5],
-    attributes: z.object({
-      'indexeddb.operation': z.string().optional(),
-      'indexeddb.store': z.string().optional(),
     }),
   }),
 
@@ -1572,6 +1633,18 @@ export const TauMetrics = {
       phase: z.enum(['first_view', 'fully_fetched']),
       cache: z.enum(['cold', 'warm']),
       'tau.lfs.transport': z.enum(lfsTransports).optional(),
+    }),
+  }),
+
+  projectOpenSpanDuration: defineHistogram({
+    name: 'tau.project.open.span.duration',
+    unit: 's',
+    description:
+      'Client-reported total time one file-manager worker span (an LFS store, a fence or queue wait, a fill flush, a capture, an apply, the record projection) took over a hosted open phase or large-object fetch. A total sums every run of the span in that window, so concurrent runs (24 LFS stores at once) can add up to more than the window itself; the recorder is per worker, so it covers the reporting tab’s file-manager worker only',
+    buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      stage: z.enum(['first_view', 'fully_fetched', 'lfs_fetch']),
+      span: z.enum(workerTimingSpanNames),
     }),
   }),
 

@@ -157,6 +157,70 @@ describe('wrapOcForExceptions', () => {
     expect(shape.area()).toBe(7);
   });
 
+  /* eslint-disable @typescript-eslint/naming-convention -- embind classes carry OCCT's names (`gp_Pnt`, `gp_Pnt_3` overloads). */
+  it('should return gp value types unproxied, including from an overloaded constructor', () => {
+    class gp_Pnt {
+      public x(): number {
+        return 1;
+      }
+
+      public delete(): void {
+        // Emscripten records carry delete(); nothing to release here.
+      }
+    }
+    class gp_Pnt_3 extends gp_Pnt {}
+    class BRepAdaptor_Curve {
+      public value(): gp_Pnt {
+        return point;
+      }
+
+      public delete(): void {
+        // Emscripten records carry delete(); nothing to release here.
+      }
+    }
+    // `new-cap` wants a capitalised constructor; embind names classes after OCCT.
+    const Point = gp_Pnt;
+    const point = new Point();
+    const oc = createMockOc({ getExceptionMessage: vi.fn(), gp_Pnt_3, BRepAdaptor_Curve });
+    const traced = wrapOcForExceptions(oc) as unknown as {
+      gp_Pnt_3: new () => gp_Pnt;
+      BRepAdaptor_Curve: new () => BRepAdaptor_Curve;
+    };
+
+    const curve = new traced.BRepAdaptor_Curve();
+    // A proxied object answers with a wrapper, never its own method.
+    expect(curve.value).not.toBe(BRepAdaptor_Curve.prototype.value);
+    expect(curve.value()).toBe(point);
+    expect(curve.value().x).toBe(gp_Pnt.prototype.x);
+    const { gp_Pnt_3: OverloadedPoint } = traced;
+    expect(new OverloadedPoint().x).toBe(gp_Pnt.prototype.x);
+  });
+
+  it('should still name the OCCT exception a method of a non-value type throws', () => {
+    const tag = new WebAssembly.Tag({ parameters: ['i32'] });
+    class BRepBuilderAPI_MakeEdge {
+      public edge(): never {
+        // oxlint-disable-next-line typescript/only-throw-error -- OCCT throws a WebAssembly.Exception, not an Error.
+        throw new WebAssembly.Exception(tag, [0]);
+      }
+
+      public delete(): void {
+        // Emscripten records carry delete(); nothing to release here.
+      }
+    }
+    const oc = createMockOc({
+      getExceptionMessage: vi.fn().mockReturnValue(['StdFail_NotDone', 'BRep_API: command not done']),
+      BRepBuilderAPI_MakeEdge,
+    });
+    const traced = wrapOcForExceptions(oc) as unknown as { BRepBuilderAPI_MakeEdge: new () => BRepBuilderAPI_MakeEdge };
+
+    const builder = new traced.BRepBuilderAPI_MakeEdge();
+    expect(() => builder.edge()).toThrow(
+      expect.objectContaining({ name: 'OcKernelError', typeName: 'StdFail_NotDone' }) as Error,
+    );
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the OCCT-named classes. */
+
   it('should rethrow non-WASM errors from proxied calls', () => {
     const oc = createMockOc({
       getExceptionMessage: vi.fn(),
@@ -171,6 +235,45 @@ describe('wrapOcForExceptions', () => {
 });
 
 describe('wrapOcWithTracing', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- embind classes carry OCCT's names (`gp_Vec`). */
+  it.each(['summary', 'per-call'] as const)(
+    'should keep gp value types proxied in %s mode, so their methods stay abortable and name their exceptions',
+    (mode) => {
+      const tag = new WebAssembly.Tag({ parameters: ['i32'] });
+      class gp_Vec {
+        public normalized(): never {
+          // oxlint-disable-next-line typescript/only-throw-error -- OCCT throws a WebAssembly.Exception, not an Error.
+          throw new WebAssembly.Exception(tag, [0]);
+        }
+
+        public magnitude(): number {
+          return 0;
+        }
+
+        public delete(): void {
+          // Emscripten records carry delete(); nothing to release here.
+        }
+      }
+      const oc = createMockOc({
+        getExceptionMessage: vi.fn().mockReturnValue(['gp_VectorWithNullMagnitude', 'gp_Vec::Normalized()']),
+        gp_Vec,
+      });
+      const { tracedInstance } = wrapOcWithTracing(oc, createMockTracer(), { mode });
+      const traced = tracedInstance as unknown as { gp_Vec: new () => gp_Vec };
+
+      const { gp_Vec: Vector } = traced;
+      const vector = new Vector();
+      // Tracing is a diagnostic mode: value types keep the proxy the exception-only wrapper drops for speed.
+      expect(vector.magnitude).not.toBe(gp_Vec.prototype.magnitude);
+      abortNextCheck();
+      expect(() => vector.magnitude()).toThrow(RenderAbortedError);
+      expect(() => vector.normalized()).toThrow(
+        expect.objectContaining({ name: 'OcKernelError', typeName: 'gp_VectorWithNullMagnitude' }) as Error,
+      );
+    },
+  );
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the OCCT-named classes. */
+
   it('should proxy function calls and return results', () => {
     const oc = createMockOc();
     const tracer = createMockTracer();

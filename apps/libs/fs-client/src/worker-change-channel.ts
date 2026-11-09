@@ -1,7 +1,24 @@
 import { Topic } from '@taucad/events';
-import type { WatchRequest, WatchEvent } from '@taucad/filesystem';
+import { toChangeSet, watchByChangeSets, watchEventsOfChangeSetFor } from '@taucad/filesystem';
+import type {
+  BridgeWatchHandle,
+  ChangeSet,
+  ChangeSetChannelEvent,
+  ChangeSetWatchRequest,
+  WatchRequest,
+  WatchEvent,
+} from '@taucad/filesystem';
 import type { ObservationWatch } from '#observation-service.js';
-import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
+import type { ChangeEvent, FileSystemBackend, PathChangeEvent } from '@taucad/types';
+
+/**
+ * One frame of a connection's event channel, as this channel reads it: the
+ * filesystem package's structural form of a rooted proxy's
+ * `FileSystemBridgeEvent`, so this package does not depend on the bridge.
+ *
+ * @public
+ */
+export type WorkerChannelEvent = ChangeSetChannelEvent;
 
 /**
  * Transport surface required to wire worker push events (typically
@@ -10,11 +27,36 @@ import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
  * @public
  */
 export type WorkerChangeChannelTransport = {
+  /**
+   * The connection's one event channel (charter D14): every change set of the
+   * root as the connection's view sees it. When present, every watch this
+   * channel registers listens on it and reads its own events off each set, so
+   * the authority delivers a changeset to the connection once however many
+   * watches the tree and the open documents hold. `ready` rejecting with
+   * `ENOTSUP` falls back to `watchChangeSets`, then `watchReady`.
+   */
+  events?: (handler: (event: WorkerChannelEvent) => void) => BridgeWatchHandle;
+  /**
+   * Called with each watch this channel registers on `events`, answering the
+   * registration to use: an opt-in diagnostic's seam. A transport wraps its
+   * own `watchChangeSets` and `watchReady` registrations itself.
+   */
+  observeWatch?: (request: WatchRequest, watch: BridgeWatchHandle) => BridgeWatchHandle;
   listen: (event: string, handler: (data: unknown) => void) => () => void;
   /** Actual authority registration; omitted only by local synchronous sources. */
   watchReady?: (
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
+  ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
+  /**
+   * The authority's change-set form of a watch (charter D6): one frame per
+   * committed changeset. When present, every watch this channel registers uses
+   * it, so a fifty-file turn crosses the wire once per watch rather than once
+   * per path; `ready` rejecting with `ENOTSUP` falls back to `watchReady`.
+   */
+  watchChangeSets?: (
+    request: ChangeSetWatchRequest,
+    handler: (set: ChangeSet) => void,
   ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
   closed?: Promise<void>;
 };
@@ -117,6 +159,10 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
     return false;
   }
   const { type } = value as { type: unknown };
+  if (type === 'changeSet') {
+    const { entries } = value as { entries?: unknown };
+    return Array.isArray(entries) && entries.every((entry) => isChangeEvent(entry) && entry.type !== 'changeSet');
+  }
   return (
     type === 'fileWritten' ||
     type === 'fileDeleted' ||
@@ -130,6 +176,31 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
     type === 'backendChanged'
   );
 }
+
+const isUnsupported = (error: unknown): boolean =>
+  error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOTSUP';
+
+/** The authority's root spelling (`/`) is this namespace's `''`. */
+const relativeDirectory = (directory: string): string => (directory === '/' ? '' : directory);
+
+/**
+ * One delivery's facts as one change set in the workspace-relative namespace (charter D6).
+ *
+ * @param facts - Every fact of one delivery, in order.
+ * @param generation - This channel's delivery count.
+ * @returns The change set, or `undefined` for none.
+ */
+const relativeChangeSet = (facts: readonly PathChangeEvent[], generation: number): ChangeSet | undefined => {
+  const set = toChangeSet(facts, generation);
+  if (set === undefined) {
+    return undefined;
+  }
+  return {
+    ...set,
+    touchedDirectories: [...new Set(set.touchedDirectories.map(relativeDirectory))],
+    ...(set.reset === undefined ? {} : { reset: { ...set.reset, prefix: relativeDirectory(set.reset.prefix) } }),
+  };
+};
 
 /**
  * Owns a single `fileChanged` subscription and fans out typed, workspace-relative
@@ -188,10 +259,14 @@ export class WorkerChangeChannel {
   readonly #backendChanged = new Topic<Extract<ChangeEvent, { type: 'backendChanged' }>>({
     name: 'WorkerChangeChannel.backendChanged',
   });
+  readonly #changeSets = new Topic<ChangeSet>({ name: 'WorkerChangeChannel.changeSets' });
+  #deliveries = 0;
+  /** The connection answered `ENOTSUP` for its event channel: later watches skip it. */
+  #eventsUnsupported = false;
 
   /** Whether exact authority watches own observation invalidation. @returns True for a real watch transport. */
   public get hasAuthorityWatch(): boolean {
-    return this.transport.watchReady !== undefined;
+    return this.transport.watchReady !== undefined || this.transport.events !== undefined;
   }
 
   public constructor(deps: { transport: WorkerChangeChannelTransport }) {
@@ -372,6 +447,19 @@ export class WorkerChangeChannel {
   }
 
   /**
+   * Subscribe to one {@link ChangeSet} per delivery (charter D6): every fact
+   * one changeset (or one bridge coalescing window) carried, with the
+   * directories it touched, after the per-kind topics have heard each fact.
+   *
+   * @param handler - Receives each change set.
+   * @param options - Optional AbortSignal lifecycle binding.
+   * @returns Unsubscribe function removing `handler`.
+   */
+  public onChangeSet(handler: (set: ChangeSet) => void, options?: { signal?: AbortSignal }): () => void {
+    return this.#changeSets.subscribe(handler, options);
+  }
+
+  /**
    * Subscribe to backend swap events (IndexedDB ↔ OPFS, etc.).
    * @param handler - Invoked whenever the worker reports a backend transition.
    * @param options - Optional AbortSignal lifecycle binding.
@@ -405,6 +493,7 @@ export class WorkerChangeChannel {
     this.#directoryCopied.dispose();
     this.#directoryChanged.dispose();
     this.#backendChanged.dispose();
+    this.#changeSets.dispose();
   }
 
   /**
@@ -414,8 +503,13 @@ export class WorkerChangeChannel {
    * @returns Actual registration acknowledgement and closure.
    */
   public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
-    if (this.transport.watchReady) {
-      const watch = this.transport.watchReady(request, handler);
+    const { events } = this.transport;
+    if (events !== undefined && !this.#eventsUnsupported) {
+      const watch = this.#watchOnEvents(events, request, handler);
+      return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
+    }
+    const watch = this.#authorityWatch(request, handler);
+    if (watch !== undefined) {
       return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
     }
     /* Local Topic sources are registered synchronously; this fallback is not
@@ -516,10 +610,138 @@ export class WorkerChangeChannel {
     this.closedSignal.resolve();
   }
 
+  /**
+   * One watch on the connection's event channel: its events read off each
+   * change set of the root. A connection that answers `ENOTSUP` gets the
+   * registration of the older forms instead, and so do later watches.
+   *
+   * @param events - The connection's event channel.
+   * @param request - The watch's paths and scope.
+   * @param handler - Its events.
+   * @returns The registration.
+   */
+  #watchOnEvents(
+    events: NonNullable<WorkerChangeChannelTransport['events']>,
+    request: WatchRequest,
+    handler: (event: WatchEvent) => void,
+  ): BridgeWatchHandle {
+    /* Only the channel registration is handed to the diagnostic seam here: a
+     * fallback comes from the transport's own forms, which hand themselves. */
+    const initial = this.#observed(
+      request,
+      events((event) => {
+        /* A lost connection may have dropped frames: the watch re-reads (D6). */
+        if (event.kind === 'authority-lost') {
+          handler({ type: 'reset' });
+          return;
+        }
+        /* `compute-restarted` has no consumer here yet: a watch reads files,
+         * and a compute restart changes none. */
+        if (event.kind !== 'changeSet') {
+          return;
+        }
+        for (const watchEvent of watchEventsOfChangeSetFor(event.set, request)) {
+          handler(watchEvent);
+        }
+      }),
+    );
+    let current: BridgeWatchHandle = initial;
+    let unsubscribed = false;
+    const register = async (): Promise<void> => {
+      try {
+        await initial.ready;
+      } catch (error) {
+        const fallback = isUnsupported(error) && !unsubscribed ? this.#authorityWatch(request, handler) : undefined;
+        if (fallback === undefined) {
+          throw error;
+        }
+        /* The refused registration may still hold a subscriber on the channel. */
+        initial.unsubscribe();
+        this.#eventsUnsupported = true;
+        current = fallback;
+        await current.ready;
+      }
+    };
+    const ready = register();
+    const follow = async (): Promise<void> => {
+      await ready;
+      await current.closed;
+    };
+    const closed = follow();
+    const observeClosed = async (): Promise<void> => {
+      try {
+        await closed;
+      } catch {
+        /* A caller observes a failure through `ready`; `closed` must not also surface it unobserved. */
+      }
+    };
+    // async-iife: bootstrap
+    void observeClosed();
+    return {
+      ready,
+      closed,
+      unsubscribe: () => {
+        unsubscribed = true;
+        current.unsubscribe();
+      },
+    };
+  }
+
+  /**
+   * A registration on the authority in the older forms: change sets scoped by
+   * the authority when it offers them, per-path events otherwise.
+   *
+   * @param request - The watch's paths and scope.
+   * @param handler - Its events.
+   * @returns The registration, or `undefined` for a transport with neither.
+   */
+  #authorityWatch(request: WatchRequest, handler: (event: WatchEvent) => void): BridgeWatchHandle | undefined {
+    const { watchChangeSets, watchReady } = this.transport;
+    if (watchChangeSets) {
+      /* Only the older forms: this channel has already tried, or has no, event channel. */
+      return watchByChangeSets({ watchChangeSets, watchReady }, request, handler);
+    }
+    return this.transport.watchReady?.(request, handler);
+  }
+
+  /**
+   * Hand a registration to the transport's diagnostic seam, disposing it if the seam refuses it.
+   *
+   * @param request - The watch's paths and scope.
+   * @param watch - The registration.
+   * @returns The registration to use.
+   */
+  #observed(request: WatchRequest, watch: BridgeWatchHandle): BridgeWatchHandle {
+    const { observeWatch } = this.transport;
+    if (observeWatch === undefined) {
+      return watch;
+    }
+    try {
+      return observeWatch(request, watch);
+    } catch (error) {
+      watch.unsubscribe();
+      throw error;
+    }
+  }
+
   #dispatch(data: unknown): void {
     if (!isChangeEvent(data)) {
       return;
     }
+    const facts = data.type === 'changeSet' ? data.entries : [data];
+    for (const fact of facts) {
+      this.#dispatchFact(fact);
+    }
+    this.#deliveries += 1;
+    if (this.#changeSets.size > 0) {
+      const set = relativeChangeSet(facts, this.#deliveries);
+      if (set !== undefined) {
+        this.#changeSets.emit(set);
+      }
+    }
+  }
+
+  #dispatchFact(data: PathChangeEvent): void {
     switch (data.type) {
       case 'fileWritten': {
         this.#fileWritten.emit(data);

@@ -68,6 +68,7 @@ import {
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
+import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
@@ -134,11 +135,6 @@ export type ActiveChatExecution = {
    * composer names it; it stays this device's placement for the tab that can reach it.
    */
   heldPlacement?: TauAgentHostId | undefined;
-  /**
-   * The execution is not known yet: Home's record, which may hold one of its own, is still being read. The
-   * composer shows its agent control loading rather than a choice the record is about to replace.
-   */
-  isPending?: boolean;
 };
 
 export type ChatAgentActivity = 'ready' | 'working' | 'approval-required' | 'stopping';
@@ -648,14 +644,14 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
 /**
  * Home execution: the user's choice this mount, else the record's as read,
  * else the cookie model. A late read never replaces a choice already made.
+ * The record is this device's, so a loopback daemon another tab was handed
+ * is dropped and the new chat runs here.
  */
 function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
   const { defaultExecution, rememberExecution } = useModels();
   const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
-  const isLoading = useSelector(recordRef, (snapshot) => snapshot.matches({ lifecycle: 'loading' }));
   const [chosen, setChosen] = useState<CadAgentExecution>();
-  const execution = chosen ?? stored ?? defaultExecution;
-  const isPending = chosen === undefined && stored === undefined && isLoading;
+  const execution = usePlaceableExecution(chosen ?? stored ?? defaultExecution);
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
       setChosen(next);
@@ -664,7 +660,7 @@ function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
     },
     [recordRef, rememberExecution],
   );
-  return useMemo(() => ({ execution, setActiveExecution, isPending }), [execution, setActiveExecution, isPending]);
+  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }
 
 function useConsumeDraft(

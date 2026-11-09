@@ -1,9 +1,13 @@
+import type { WorkerTimings } from '#worker-timings.js';
+
 const resolved: Promise<void> = Promise.resolve();
 
 /** One exact resource, optionally covering every key below a caller-defined prefix. @public */
 export type ResourceQueueClaim = Readonly<{
   key: string;
   descendantPrefix?: string;
+  /** A shared claim conflicts only with exclusive claims, as a Web Lock's `shared` mode does (D3). */
+  shared?: boolean;
 }>;
 
 type QueuedClaims = Readonly<{
@@ -16,7 +20,11 @@ const covers = (claim: ResourceQueueClaim, key: string): boolean =>
 
 const conflicts = (left: readonly ResourceQueueClaim[], right: readonly ResourceQueueClaim[]): boolean =>
   left.some((leftClaim) =>
-    right.some((rightClaim) => covers(leftClaim, rightClaim.key) || covers(rightClaim, leftClaim.key)),
+    right.some(
+      (rightClaim) =>
+        (leftClaim.shared !== true || rightClaim.shared !== true) &&
+        (covers(leftClaim, rightClaim.key) || covers(rightClaim, leftClaim.key)),
+    ),
   );
 
 /**
@@ -31,8 +39,19 @@ const conflicts = (left: readonly ResourceQueueClaim[], right: readonly Resource
  */
 export class ResourceQueue {
   private readonly _operations = new Set<QueuedClaims>();
+  private readonly _timings: Pick<WorkerTimings, 'now' | 'record'> | undefined;
   private _totalDepth = 0;
   private _drainWaiter: PromiseWithResolvers<void> | undefined;
+
+  /**
+   * Create a queue.
+   *
+   * @param options - `timings` records each operation's wait for its claims
+   *   (`queue.wait`) and its run while holding them (`queue.held`).
+   */
+  public constructor(options: Readonly<{ timings?: Pick<WorkerTimings, 'now' | 'record'> }> = {}) {
+    this._timings = options.timings;
+  }
 
   /** Queue an operation serialized by one exact resource key. */
   public async queueFor<T>(path: string, operation: () => Promise<T>): Promise<T> {
@@ -59,9 +78,10 @@ export class ResourceQueue {
     operation: () => Promise<T>,
     options?: Readonly<{ signal?: AbortSignal }>,
   ): Promise<T> {
-    const ownedClaims = claims.map(({ key, descendantPrefix }) => ({
+    const ownedClaims = claims.map(({ key, descendantPrefix, shared }) => ({
       key,
       ...(descendantPrefix === undefined ? {} : { descendantPrefix }),
+      ...(shared === true ? { shared } : {}),
     }));
     this._totalDepth += 1;
     const settled = Promise.withResolvers<void>();
@@ -74,6 +94,8 @@ export class ResourceQueue {
       }
     }
     this._operations.add(queued);
+    const timings = this._timings;
+    const queuedAt = timings?.now();
 
     try {
       const signal = options?.signal;
@@ -93,7 +115,16 @@ export class ResourceQueue {
         }
         signal.throwIfAborted();
       }
-      return await operation();
+      if (timings === undefined || queuedAt === undefined) {
+        return await operation();
+      }
+      timings.record('queue.wait', queuedAt);
+      const startedAt = timings.now();
+      try {
+        return await operation();
+      } finally {
+        timings.record('queue.held', startedAt);
+      }
     } finally {
       this._operations.delete(queued);
       settled.resolve();

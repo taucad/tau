@@ -2,56 +2,13 @@ import type { Transferable } from 'node:worker_threads';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SharedPool } from '@taucad/memory';
-import { joinPath } from '@taucad/utils/path';
-
 import { slotIndex, syncState } from '#sync/sync-fs-protocol.js';
 import type { SyncFsProbe } from '#sync/sync-fs-client.js';
 import { createSyncFsClient } from '#sync/sync-fs-client.js';
 import { attachSyncFsServer } from '#sync/sync-fs-server.js';
+import type { SyncFsIndexSource } from '#sync/sync-fs-server.js';
 
 describe('createSyncFsClient', () => {
-  it('short-circuits readFileText when bytes are in the file pool (Tier 0)', () => {
-    const root = '/projects/p1';
-    const relativePath = 'lib/hidden.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 32 });
-    const bytes = new TextEncoder().encode('export const x = 1;\n');
-    expect(poolWriter.store(abs, bytes)).toBe(true);
-
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-    });
-
-    expect(client.readFileText(`file:///${relativePath}`)).toBe('export const x = 1;\n');
-  });
-
-  it('short-circuits fileExists for Tier 0 pool hits', () => {
-    const root = '/w';
-    const relativePath = 'a.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 8 });
-    expect(poolWriter.store(abs, new Uint8Array([32]))).toBe(true);
-
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-    });
-
-    expect(client.fileExists(`file:///${relativePath}`)).toBe(true);
-  });
-
   it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
     const root = '/root';
     const { port1, port2 } = new MessageChannel();
@@ -173,37 +130,6 @@ describe('createSyncFsClient', () => {
     expect(slotProbes.some((p) => p.op === 'listDirectories' && p.outcome === 'ok')).toBe(true);
   });
 
-  it('emits onProbe with raw -> relative -> absolute path translation for pool hits', () => {
-    const root = '/projects/p1';
-    const relativePath = 'lib/cube.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 8 });
-    expect(poolWriter.store(abs, new TextEncoder().encode('hi'))).toBe(true);
-
-    const probes: SyncFsProbe[] = [];
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-      onProbe: (probe) => probes.push(probe),
-    });
-
-    client.readFileText(`file:///${relativePath}`);
-    expect(probes).toHaveLength(1);
-    expect(probes[0]).toMatchObject({
-      op: 'readFile',
-      tier: 'pool',
-      outcome: 'ok',
-      fileName: 'file:///lib/cube.ts',
-      relativePath: 'lib/cube.ts',
-      absolutePath: abs,
-    });
-  });
-
   it('emits a translation-failure probe when the URI scheme is not file:', () => {
     const onProbe = vi.fn();
     const { port1 } = new MessageChannel();
@@ -225,5 +151,74 @@ describe('createSyncFsClient', () => {
       relativePath: undefined,
       absolutePath: undefined,
     });
+  });
+
+  /* S13 (charter D13): 3,000 module-resolution probes (each specifier tries three candidates; half resolve on the last) answered by the worker's index mirror, with no slot round trip and no byte read. */
+  it('answers presence and versions from the index mirror, and asks the slot for a path the index never holds or while the mirror is behind', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const slotSab = new SharedArrayBuffer(16);
+    const arenaSab = new SharedArrayBuffer(512);
+    const files = Array.from({ length: 500 }, (_, index) => `src/m${String(index)}/index.ts`);
+    const projectIndex: SyncFsIndexSource = {
+      changedSince: async () => ({
+        generation: 3,
+        epoch: 'e',
+        entries: [
+          { path: 'src', kind: 'dir', size: 0, mtimeMs: 1, generation: 1 },
+          ...files.map((path) => ({ path, kind: 'file', size: 10, mtimeMs: 2, generation: 3 }) as const),
+        ],
+        removed: [],
+      }),
+      statTree: async () => [],
+      watch: () => () => undefined,
+    };
+    const workspace = {
+      readFileBytes: vi.fn(async () => new Uint8Array()),
+      stat: vi.fn(async (path: string) => {
+        if (path === 'node_modules/dep/index.d.ts') {
+          return { mtimeMs: 1, isDirectory: false };
+        }
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }),
+      listDirectories: vi.fn(async () => []),
+      index: projectIndex,
+    };
+    const server = attachSyncFsServer({ port: port2, slotSab, arenaSab, workspace });
+    const specifiers = Array.from({ length: 1000 }, (_, index) =>
+      index % 2 === 0 ? `src/m${String(index % files.length)}` : `missing/m${String(index)}`,
+    );
+
+    const result = await new Promise<{
+      duration: number;
+      probes: number;
+      hits: number;
+      versions: string[];
+      directory: boolean;
+      mirrorTiers: Record<string, number>;
+      ignored: boolean;
+      behind: boolean;
+      tiers: Record<string, number>;
+    }>((resolve, reject) => {
+      const worker = new Worker(new URL('sync-fs-client.mirror.tier2.worker.ts', import.meta.url), {
+        execArgv: ['--import', '@oxc-node/core/register'],
+      });
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      worker.postMessage({ port: port1, slotSab, arenaSab, specifiers }, [port1 as unknown as Transferable]);
+    });
+    server.dispose();
+
+    expect(result.probes).toBe(3000);
+    expect(result.hits).toBe(500);
+    expect(result.versions.every((version) => version === '3:10:2')).toBe(true);
+    expect(result.directory).toBe(true);
+    expect(result.mirrorTiers).toEqual({ mirror: 3000 + 500 + 1, slot: 0, translation: 0 });
+    expect(result.duration).toBeLessThanOrEqual(300);
+    expect(result.ignored).toBe(true);
+    /* Behind a heard change set, the slot's answer (here: gone) wins over the mirror's stale entry. */
+    expect(result.behind).toBe(false);
+    expect(result.tiers['slot']).toBe(2);
+    expect(workspace.readFileBytes).not.toHaveBeenCalled();
+    expect(workspace.stat).toHaveBeenCalledTimes(2);
   });
 });

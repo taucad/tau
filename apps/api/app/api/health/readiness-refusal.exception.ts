@@ -1,6 +1,6 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 import type { HealthCheckResult } from '@nestjs/terminus';
-import type { ReadinessFailure } from '#telemetry/sentry.js';
+import type { ReadinessFailure } from '@taucad/api-observability/sentry';
 
 /**
  * A `/health/ready` 503 that the health controller has already logged, counted and reported per indicator.

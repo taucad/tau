@@ -1,9 +1,11 @@
 import { randomUuid } from '@taucad/utils/id';
+import { toast } from 'sonner';
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
 import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export type PaymentActionBinding = {
   readonly apiBaseUrl: string;
@@ -194,6 +196,8 @@ export const createPortalAction = async (
   input: {
     readonly requestId: string;
     readonly returnPath: string;
+    /** Opens the portal on its cancellation confirmation instead of its home page. */
+    readonly flow?: 'subscription_cancel';
   },
 ): Promise<WirePaymentAction> =>
   actionRequest('/payment-actions/portal', binding, {
@@ -227,9 +231,19 @@ export const getUnresolvedPaymentActions = async (
     .map((action) => assertBoundAction(action, binding));
 };
 
+/** Whether Stripe opens in the system browser rather than in place, as in the desktop app. */
+export const opensPaymentsInBrowser = (): boolean => isDesktopTarget();
+
 export const followPaymentRedirect = (action: WirePaymentAction): boolean => {
   if (action.state !== 'redirect_required' || action.redirectUrl === null) {
     return false;
+  }
+  if (opensPaymentsInBrowser()) {
+    // The desktop renderer never navigates to Stripe: the link opens in the browser, Stripe returns there to the web
+    // app, and billing here refreshes when the customer comes back to the window.
+    globalThis.open(action.redirectUrl, '_blank', 'noopener');
+    toast('Continue in your browser. Billing here updates when you come back.');
+    return true;
   }
   globalThis.location.assign(action.redirectUrl);
   return true;

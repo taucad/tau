@@ -1,0 +1,50 @@
+# Nightly watchdog (CI throughput review, operator decision 2026-11-08): once a day, read the newest
+# scheduled run on `main` of every workflow with a `schedule` trigger, and when one was red, cancelled
+# or did not run, send the operator one Grafana IRM alert (a normal phone push, not a page). No GitHub
+# issue is opened. New nightlies are watched without editing this file. The webhook lives on the
+# `main`-only `ci-alerts` environment (tau-cloud `stacks/repo/tau`, relayed from tau-observability);
+# without it the job reports and turns red instead. 18:30 UTC is after the last daily cron (15:41)
+# has had time to finish its macOS jobs, and is the operator's morning in New Zealand.
+name: Nightly watchdog
+
+on:
+  schedule:
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: Send one test alert to prove delivery
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Check scheduled workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ci-alerts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Check scheduled runs and alert
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_ALERT_WEBHOOK_URL: ${{ secrets.CI_ALERT_WEBHOOK_URL }}
+          TEST_ALERT: ${{ inputs.test_alert && '--test-alert' || '' }}
+        run: node scripts/src/nightly-watchdog.ts --summary "$GITHUB_STEP_SUMMARY" $TEST_ALERT

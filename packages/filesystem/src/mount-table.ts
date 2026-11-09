@@ -198,6 +198,13 @@ export type CommitPendingProjectDirectoryInput = {
     Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>
   >;
   readonly manifest: Uint8Array<ArrayBuffer>;
+  /**
+   * An import staged on the same storage root (charter D12): its staged files
+   * move into the project before `files` and the manifest are written, so the
+   * journal carries this locator instead of the bytes. `files` then holds only
+   * what the create adds beside the import.
+   */
+  readonly staging?: { readonly operationId: string };
 };
 
 /** Identity-safe outcome of committing one journal-backed project directory. @public */

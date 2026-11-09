@@ -1,15 +1,12 @@
 import { projectIdSchema } from '@taucad/types';
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
-  FileStatEntry,
   FileSystemBackend,
 } from '@taucad/types';
 import type {
-  FileStatOptions,
-  HeadFileStat,
   FileSystemProvider,
   FileTreeNode,
   FileReadStreamOptions,
@@ -27,21 +24,18 @@ import type { RootedFileSystem } from '#rooted-views.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
-import { TreeIndexes } from '#tree-index.js';
-import type { TreeIndex } from '#tree-index.js';
+import { ProjectIndexes } from '#project-index/project-indexes.js';
 import { WatchRegistry } from '#watch-registry.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 /* The scope discriminants are the backend layer's own vocabulary (D13); the
  * authority reads capabilities and admission answers, never a backend name. */
 import { isDurableScope, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
-import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 /* External change and cross-tab receive are their own modules (D13/W9); the
  * authority keeps the one public poll and owns nothing of either mechanism. */
 import { ExternalChangeIngest } from '#external-change-ingest.js';
 import type { StagedDiscoveryRoot } from '#external-change-ingest.js';
 import { RemoteChanges } from '#remote-changes.js';
-import type { SharedPool } from '@taucad/memory';
 import type {
   CheckoutRootConfig,
   MountTable,
@@ -60,16 +54,18 @@ import type {
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
+import type { ImportStagingPort } from '#importer/staging.js';
 import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
+import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
-const treeIndexBuildAttempts = 3;
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -138,7 +134,7 @@ function isStructurallyValidWorkspacePath(path: string): boolean {
  * Layer 3a UI-side workspace orchestrator.
  *
  * Composes routing and watch primitives with workspace-only concerns: in-memory file index for fast
- * search, cross-tab write coordination, shared-memory file pool, multi-backend
+ * search, cross-tab write coordination, multi-backend
  * provider creation via {@link ProviderRegistry}, and tree-shaped helpers
  * (zip, copy directory, recursive stat).
  *
@@ -150,15 +146,12 @@ export class WorkspaceFileService {
   private readonly _eventBus: ChangeEventBus;
   private readonly _watchRegistry: WatchRegistry;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
-  private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
   private readonly _policy: PathPolicy | undefined;
+  private _pendingSource: PendingObjectSource | undefined;
+  private readonly _pendingStallMilliseconds: number | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
-  private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.prefixes);
-  private readonly _pendingTreeScans = new Map<
-    string,
-    { generation: number; promise: Promise<TreeIndex | undefined> }
-  >();
+  private readonly _projectIndexes: ProjectIndexes;
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -179,8 +172,6 @@ export class WorkspaceFileService {
     resourceQueue: ResourceQueue;
     eventBus: ChangeEventBus;
     crossTabCoordinator?: CrossTabCoordinator;
-    /** Writer-side shared file pool for zero-IPC cached reads across threads. */
-    filePool?: SharedPool;
     /** Mount table for multi-backend path routing. */
     mountTable: MountTable;
     /**
@@ -189,8 +180,11 @@ export class WorkspaceFileService {
      * a workspace with no reserved layout means.
      */
     policy?: PathPolicy;
+    /** How long a read of a pending entry waits for its object; see {@link pendingStallMilliseconds}. */
+    pendingStallMilliseconds?: number;
   }) {
     this._registry = options.providerRegistry;
+    this._pendingStallMilliseconds = options.pendingStallMilliseconds;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     // Kernels deduplicate by content hash, so a lone edit is delivered at once and only the burst behind it waits.
@@ -199,31 +193,39 @@ export class WorkspaceFileService {
       leadingEdge: true,
     });
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
-    this._filePool = options.filePool;
     this._mountTable = options.mountTable;
     this._policy = options.policy;
+    const coordinator = this._crossTabCoordinator;
+    this._projectIndexes = new ProjectIndexes({
+      mountPrefixes: () => this._mountTable.prefixes,
+      resolve: (root) => this._indexRoot(root),
+      policy: options.policy,
+      tab: () => ({ tabId: coordinator.tabId, seq: coordinator.seq }),
+    });
     this._pipeline = new MutationPipeline({
       mountTable: this._mountTable,
       resourceQueue: this._resourceQueue,
       eventBus: this._eventBus,
       crossTabCoordinator: this._crossTabCoordinator,
-      treeIndexes: this._treeIndexes,
-      filePool: () => this._filePool,
+      projectIndexes: this._projectIndexes,
     });
     this._rootedViews = new RootedViews({
       mountTable: this._mountTable,
       pipeline: this._pipeline,
       watchRegistry: this._watchRegistry,
-      treeIndexFor: async (root) => this._treeIndexFor(root),
+      projectIndexes: this._projectIndexes,
+      pendingSource: () => this._pendingSource,
+      ...(options.pendingStallMilliseconds === undefined
+        ? {}
+        : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
     });
     this._projectDirectories = new ProjectDirectories({
       registry: this._registry,
       resourceQueue: this._resourceQueue,
       crossTabCoordinator: this._crossTabCoordinator,
       pipeline: this._pipeline,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
       discoveryRoots: () => this._discoveryRoots,
-      filePool: () => this._filePool,
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
       },
@@ -233,8 +235,8 @@ export class WorkspaceFileService {
       mountTable: this._mountTable,
       pipeline: this._pipeline,
       crossTabCoordinator: this._crossTabCoordinator,
-      treeIndexes: this._treeIndexes,
-      filePool: () => this._filePool,
+      projectIndexes: this._projectIndexes,
+      policy: options.policy,
       disposeStorageRoot: (storageRootKey) => {
         this.disposeStorageRoot(storageRootKey);
       },
@@ -243,9 +245,8 @@ export class WorkspaceFileService {
       registry: this._registry,
       mountTable: this._mountTable,
       pipeline: this._pipeline,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
       watchRegistry: this._watchRegistry,
-      filePool: () => this._filePool,
       discoveryRoots: () => this._discoveryRoots,
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
@@ -254,16 +255,12 @@ export class WorkspaceFileService {
     this._crossTabCoordinator.onRemoteChange((notification) => {
       this._remoteChanges.apply(notification);
     });
-  }
-
-  /**
-   * Set or replace the shared file pool for zero-IPC cached reads.
-   * Enables late binding when the SharedArrayBuffer arrives after construction.
-   *
-   * @param pool - Writer-side shared file pool.
-   */
-  public setFilePool(pool: SharedPool): void {
-    this._filePool = pool;
+    // A root that undid a crashed realm's creates as it opened publishes the
+    // removals like any other change (I1).
+    this._registry.setRecoveryListener((storageRootKey, providerPaths) => {
+      const backend: FileSystemBackend = storageRootKey.startsWith('webaccess:') ? 'webaccess' : 'opfs';
+      this._pipeline.publishRecoveredRemovals(storageRootKey, backend, providerPaths);
+    });
   }
 
   /**
@@ -272,10 +269,26 @@ export class WorkspaceFileService {
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
+   * @param options - `placeholders: 'raw'` for the revision layer alone, which reads large-object pointers as they are.
    * @returns A writable filesystem whose root is the captured mount.
    */
-  public createRootedFileSystem(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
-    return this._rootedViews.create(authorityRoot, mutationContext);
+  public createRootedFileSystem(
+    authorityRoot: string,
+    mutationContext?: WorkspaceMutationContext,
+    options?: Readonly<{ placeholders?: 'raw' }>,
+  ): RootedFileSystem {
+    return this._rootedViews.create(authorityRoot, mutationContext, options);
+  }
+
+  /**
+   * Say where a read of a pending entry gets its large object (D9): the
+   * revision layer's store, fetching by oid on demand. Without one, every
+   * such read refuses with `PENDING`.
+   *
+   * @param source - The host's source, or `undefined` to remove it.
+   */
+  public setPendingObjectSource(source: PendingObjectSource | undefined): void {
+    this._pendingSource = source;
   }
 
   // --- Read operations (direct to provider, no serialization) ---
@@ -304,10 +317,7 @@ export class WorkspaceFileService {
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
-    const data = await provider.readFile(resolvedPath);
-    if (optionsObject?.scope === undefined) {
-      this._filePool?.store(canonicalPath, data);
-    }
+    const data = await this._readThrough(canonicalPath, { provider, path: resolvedPath }, optionsObject);
     return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 
@@ -329,7 +339,19 @@ export class WorkspaceFileService {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    const { provider, path: resolvedPath } = this._resolveProvider(resolveAuthorityPath(filepath));
+    const canonicalPath = resolveAuthorityPath(filepath);
+    const { provider, path: resolvedPath } = this._resolveProvider(canonicalPath);
+
+    /* A file small enough to be a pointer is read whole, so a pending entry streams its object (D9). */
+    let size: number | undefined;
+    try {
+      ({ size } = await provider.stat(resolvedPath));
+    } catch {
+      size = undefined;
+    }
+    if (size !== undefined && size <= 1024) {
+      return bufferToStream(await this._readThrough(canonicalPath, { provider, path: resolvedPath }, options), options);
+    }
 
     if (provider.readFileStream) {
       return provider.readFileStream(resolvedPath, options);
@@ -366,11 +388,9 @@ export class WorkspaceFileService {
    * @param path - Absolute path.
    * @returns Stat information (type, size, mtime).
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return options ? provider.stat(resolvedPath, options) : provider.stat(resolvedPath);
+    return provider.stat(resolvedPath);
   }
 
   /**
@@ -420,7 +440,7 @@ export class WorkspaceFileService {
 
   /** Check current bytes and replace one file inside the canonical mutation fence. */
   public async writeFileChecked(
-    input: CheckedFileWrite,
+    input: AuthorityCheckedFileWrite,
     context?: WorkspaceMutationContext,
   ): Promise<CheckedFileWriteResult> {
     const path = resolveAuthorityPath(input.path);
@@ -844,13 +864,15 @@ export class WorkspaceFileService {
    * them.
    *
    * @param path    - Absolute directory path.
-   * @param options - The `{ scope }` discriminator; a routed path has a view to serve it instead.
+   * @param options - The `{ scope }` discriminator (a routed path has a view to
+   *   serve it instead), and the caller's byte ceiling, when it wants one.
    * @returns ZIP archive as a `Blob`.
    */
-  public async getZippedDirectory(path: string, options: { scope: WorkspaceScope }): Promise<Blob> {
+  public async getZippedDirectory(path: string, options: { scope: WorkspaceScope; maxBytes?: number }): Promise<Blob> {
     const { provider, path: resolvedPath } = await this._resolve(path, options);
     return archive(provider, resolvedPath, {
       admits: (relativePath) => this._policy?.classify(relativePath).agentAccess !== 'hidden',
+      ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
     });
   }
 
@@ -873,6 +895,7 @@ export class WorkspaceFileService {
     const entryMap = new Map<string, TreeEntry>();
 
     if (provider.readdirWithStats) {
+      /* A tree row needs a name, a size and a kind, never a line count (I3). */
       const statsEntries = await provider.readdirWithStats(resolvedPath);
       for (const entry of statsEntries) {
         if (entry.type === 'dir') {
@@ -938,7 +961,7 @@ export class WorkspaceFileService {
    * consumer reaches the same index through `statTree` and `search` on the
    * rooted surface, where the composed view applies its policy before the
    * descent. The index itself stays — {@link WorkspaceFileService.createRootedFileSystem}
-   * builds it through `_treeIndexFor` and every mutation still invalidates it.
+   * opens it through `ProjectIndexes.ready` and every mutation still feeds it.
    */
 
   /**
@@ -1025,14 +1048,21 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Safety-reconcile one routed project, or every configured webaccess root when omitted.
+   * Safety-reconcile one routed project, or every configured webaccess root when
+   * omitted, then run the head-metadata compare of the warm Project Indexes it
+   * covers whose roots other programs edit (D5): that project's, or every one.
    *
    * @param root - Optional routed project root.
    * @returns `true` when every root this call covered is under live `FileSystemObserver`
    *          delivery, which lets the caller poll on a slow safety-net cadence instead.
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
-    return this._externalChanges.poll(root);
+    const nativelyObserved = await this._externalChanges.poll(root);
+    /* The same moments — a poll, a tab regaining visibility — compare the warm
+     * Project Indexes of the roots other programs edit (D5); a root only Tau
+     * writes learns every change from its own hooks and is never compared here. */
+    await this._projectIndexes.compareExternallyEdited(root);
+    return nativelyObserved;
   }
 
   // --- Backend management ---
@@ -1113,6 +1143,17 @@ export class WorkspaceFileService {
     context?: WorkspaceMutationContext,
   ): Promise<CommitPendingProjectDirectoryResult> {
     return this._projectDirectories.commitPendingProjectDirectory(input, context);
+  }
+
+  /**
+   * Where an import stages on one durable storage root (in process only: the
+   * import runs in the authority, so no wire carries this).
+   *
+   * @param scope - A durable storage root.
+   * @returns The staging port.
+   */
+  public async importStaging(scope: StorageRootConfig): Promise<ImportStagingPort> {
+    return this._projectDirectories.importStaging(scope);
   }
 
   /**
@@ -1226,10 +1267,7 @@ export class WorkspaceFileService {
   public dispose(): void {
     this._projectDirectories.dispose();
     this._externalChanges.dispose();
-    this._filePool?.clear();
-    this._filePool = undefined;
-    this._treeIndexes.clear();
-    this._pendingTreeScans.clear();
+    this._projectIndexes.clear();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();
@@ -1238,6 +1276,42 @@ export class WorkspaceFileService {
     this._watchRegistry.dispose();
     this._registry.disposeAll();
     this._eventBus.dispose();
+  }
+
+  /**
+   * Read one file's bytes, through to its object when it is a pending entry (D9). The pointer is marked pending
+   * unless a write landed after the read began (I7).
+   *
+   * @param canonicalPath - Absolute authority path.
+   * @param resolved - The provider and path it resolves to.
+   * @param options - The caller's cancellation and the scope it read under.
+   * @returns The bytes the path stands for.
+   */
+  private async _readThrough(
+    canonicalPath: string,
+    resolved: Readonly<{ provider: FileSystemProvider; path: string }>,
+    options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    const generation = this._projectIndexes.generationAt(canonicalPath);
+    const read = await resolved.provider.readFile(resolved.path);
+    const object = pendingObjectOf(read);
+    if (object === undefined) {
+      return read;
+    }
+    this._projectIndexes.markPending(canonicalPath, object, { size: read.byteLength, generation });
+    /* The source answers by mount, as a rooted view's read asks it. */
+    const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
+    const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
+    const signal = options?.signal;
+    return readThroughPending(
+      this._pendingSource,
+      { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
+      {
+        pointer: read,
+        ...(signal === undefined ? {} : { signal }),
+        stallMilliseconds: this._pendingStallMilliseconds,
+      },
+    );
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {
@@ -1514,9 +1588,8 @@ export class WorkspaceFileService {
    * and the one that now covers it; every other root stays warm (W7c).
    */
   private _resetTopologyState(prefixes: readonly string[]): void {
-    this._filePool?.clear();
     for (const prefix of prefixes) {
-      this._treeIndexes.evict(prefix);
+      this._projectIndexes.evict(prefix);
     }
     this._watchRegistry.emitResetAll();
   }
@@ -1542,131 +1615,31 @@ export class WorkspaceFileService {
     }
   }
 
-  private async _collectDirectoryStatsFromProvider(
-    provider: {
-      readdir(path: string): Promise<string[]>;
-      stat(path: string): Promise<FileStat>;
-      readdirWithStats?(path: string): Promise<Array<{ name: string } & FileStat>>;
-    },
-    scan: { walkPath: string; basePath: string },
-    options?: { signal?: AbortSignal },
-  ): Promise<FileStatEntry[]> {
-    const { walkPath, basePath } = scan;
-    const assertLive = (): void => {
-      if (options?.signal?.aborted) {
-        throw new DOMException('The operation was aborted.', 'AbortError');
-      }
-    };
-
-    /** One directory's rows, batched when the provider offers the batch. */
-    const listEntries = async (directory: string): Promise<Array<{ name: string } & FileStat>> => {
-      assertLive();
-      if (provider.readdirWithStats) {
-        return provider.readdirWithStats(directory);
-      }
-      const names = await provider.readdir(directory);
-      return mapConcurrent(names, statConcurrency, async (name) => ({
-        name,
-        ...(await provider.stat(joinRelativePath(directory, name))),
-      }));
-    };
-
-    /* Listed one tree level at a time from a bounded pool. A bounded *recursion*
-     * would instead put `directoryConcurrency ** depth` listings in flight, which
-     * on a real tree is no bound at all. */
-    const listings = new Map<string, Array<{ name: string } & FileStat>>();
-    let level = [walkPath];
-    while (level.length > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- One level at a time is what bounds the pool.
-      const resolved = await mapConcurrent(
-        level,
-        directoryConcurrency,
-        async (directory) => [directory, await listEntries(directory)] as const,
-      );
-      const next: string[] = [];
-      for (const [directory, entries] of resolved) {
-        listings.set(directory, entries);
-        for (const entry of entries) {
-          if (entry.type !== 'file') {
-            next.push(joinRelativePath(directory, entry.name));
-          }
-        }
-      }
-      level = next;
-    }
-
-    /* Emitted depth-first, in the order the sequential walk produced: the index
-     * keeps children in first-mention order, and `search` caps its results. */
-    const fileStats: FileStatEntry[] = [];
-    const emit = (directory: string): void => {
-      for (const entry of listings.get(directory) ?? []) {
-        const fullPath = joinRelativePath(directory, entry.name);
-        if (entry.type !== 'file') {
-          emit(fullPath);
-          continue;
-        }
-        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
-        fileStats.push({
-          path: relativePath,
-          name: relativePath.split('/').at(-1) ?? relativePath,
-          type: 'file',
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-          ...fileMetadataFields(entry),
-        });
-      }
-    };
-    emit(walkPath);
-    return fileStats;
-  }
-
   /**
-   * One root's index, scanned from its provider only when cold (D3).
+   * How the Project Indexes reach one root: its provider and provider path,
+   * and — for a durable mount of exactly this root on a provider whose mtime
+   * can key facts — where its snapshot lives and the lock it is written under.
    *
-   * @param root - Absolute authority root the index is keyed by.
-   * @returns The warm index for that root.
+   * @param root - Absolute index root.
+   * @returns The resolution.
    */
-  private async _treeIndexFor(root: string): Promise<TreeIndex> {
-    for (let attempt = 0; attempt < treeIndexBuildAttempts; attempt++) {
-      const warm = this._treeIndexes.get(root);
-      if (warm !== undefined) {
-        return warm;
-      }
-      const generation = this._treeIndexes.generation(root);
-      // oxlint-disable-next-line no-await-in-loop -- An invalidated cold scan must retry from current storage.
-      const published = await this._scanTreeIndex(root, generation);
-      if (published !== undefined) {
-        return published;
-      }
-    }
-    const { provider, path } = this._resolveProvider(root);
-    const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-    return this._treeIndexes.buildDetached(stats);
-  }
-
-  private async _scanTreeIndex(root: string, generation: number): Promise<TreeIndex | undefined> {
-    const existing = this._pendingTreeScans.get(root);
-    if (existing?.generation === generation) {
-      return existing.promise;
-    }
-
-    const { provider, path } = this._resolveProvider(root);
-    const pending = {
-      generation,
-      promise: (async () => {
-        const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-        return this._treeIndexes.build(root, stats, generation);
-      })(),
+  private _indexRoot(root: string): {
+    provider: FileSystemProvider;
+    path: string;
+    persist?: { lockName: string };
+  } {
+    const { provider, path, entry } = this._resolveProvider(root);
+    const persists =
+      entry !== undefined &&
+      entry.prefix === root &&
+      entry.storageRootKey !== undefined &&
+      provider.capabilities.persistent &&
+      provider.capabilities.trustworthyMtime === true;
+    return {
+      provider,
+      path,
+      ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };
-    this._pendingTreeScans.set(root, pending);
-    try {
-      return await pending.promise;
-    } finally {
-      // An obsolete generation may finish after a newer scan has taken ownership.
-      if (this._pendingTreeScans.get(root) === pending) {
-        this._pendingTreeScans.delete(root);
-      }
-    }
   }
 
   private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {

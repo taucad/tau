@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
+import type { ProjectListShape } from '#lib/project-list-shape.lib.js';
 
 const mockUseProjects = vi.fn();
 const mockCloudIntent = vi.fn();
@@ -26,6 +27,8 @@ let search = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => mockUseProjects() as ReturnType<typeof useProjects> }));
+let rememberedShape: ProjectListShape | undefined;
+vi.mock('#hooks/use-project-list-shape.js', () => ({ useProjectListShape: () => rememberedShape }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createChat: mockCreateChat }) }));
 vi.mock('#hooks/use-app-ui-preferences.js', () => ({
   useAppUiPreferences: () => ({
@@ -232,6 +235,7 @@ describe('ProjectNavigation', () => {
     pathname = '/';
     search = '';
     pendingLocation = undefined;
+    rememberedShape = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockCloudIntent.mockReturnValue(undefined);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
@@ -500,6 +504,41 @@ describe('ProjectNavigation', () => {
     expect(skeletons[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
   });
 
+  /* R5: the listing fills the rows the last listing had, so nothing below them moves. */
+  it('reserves the remembered rows, with their names, and the Show more row past a page', () => {
+    rememberedShape = {
+      count: 7,
+      projects: Array.from({ length: 7 }, (_, index) => ({ id: `p${index}`, name: `Remembered ${index}` })),
+    };
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+    render(<ProjectNavigation />);
+
+    const placeholders = screen.getAllByTestId('project-navigation-skeleton');
+    expect(placeholders).toHaveLength(6);
+    expect(placeholders[0]).toHaveTextContent('Remembered 0');
+    expect(placeholders[5]).toHaveTextContent('Show more projects');
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+  });
+
+  it('reserves bars when the server knows only the count', () => {
+    rememberedShape = { count: 2, projects: [] };
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+    render(<ProjectNavigation />);
+
+    const placeholders = screen.getAllByTestId('project-navigation-skeleton');
+    expect(placeholders).toHaveLength(2);
+    expect(placeholders[1]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
+  });
+
+  it('says there are no projects before the listing when the last listing had none', () => {
+    rememberedShape = { count: 0, projects: [] };
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+    render(<ProjectNavigation />);
+
+    expect(screen.queryByTestId('project-navigation-skeleton')).not.toBeInTheDocument();
+    expect(screen.getByText('No projects yet')).toBeInTheDocument();
+  });
+
   /* D3, D11, D16: a collapsed project carries its chats' rollup on the
    * disclosure control; expanded, only its session's own facts. */
   it('puts the rollup on the disclosure control only while collapsed', () => {
@@ -539,10 +578,14 @@ describe('ProjectNavigation', () => {
     const more = screen.getByRole('button', { name: 'More actions for Two' });
     const newChat = screen.getByRole('button', { name: 'New chat in Two' });
     expect(more.compareDocumentPosition(newChat)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    /* R13: the actions rest hidden on fine pointers and show on hover, focus and coarse pointers. */
+    const actions = more.closest('[data-slot=project-row-actions]');
+    expect(actions).toHaveClass('hidden', 'group-hover/row:flex', 'group-focus-within/row:flex', 'pointer-coarse:flex');
+    expect(actions).toContainElement(newChat);
     expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
   });
 
-  /* A phone opens the sidebar as a sheet (z-100) a dropdown would sit behind; both menus open in drawers there. */
+  /* On a phone both menus open in drawers. */
   it('should open the Projects header and project row menus in drawers on a phone', () => {
     liveProjectIds = ['proj_one', 'proj_two'];
     mockLiveNow.mockReturnValue({ projects: 2, idleProjectIds: ['proj_two'] });

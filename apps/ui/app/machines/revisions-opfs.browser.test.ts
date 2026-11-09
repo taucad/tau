@@ -6,7 +6,7 @@
  */
 
 import { afterEach, expect, it } from 'vitest';
-import type { OpfsRequest } from '#machines/revisions-opfs.fixture.worker.js';
+import type { OpfsRequest, PointerTreeApplied, PointerTreeSurface } from '#machines/revisions-opfs.fixture.worker.js';
 
 type OpfsWorker = Readonly<{ ask: (request: OpfsRequest) => Promise<unknown>; terminate: () => void }>;
 
@@ -84,3 +84,40 @@ it('should let exactly one of two workers publish over the same expected head', 
   await expect(first.ask({ op: 'readRef', directory })).resolves.toBe(winner);
   await expect(second.ask({ op: 'readRef', directory })).resolves.toBe(winner);
 });
+
+/*
+ * A cold open of a hosted project of about 450 files, most of them large-object
+ * pointers, spent minutes applying its tree on OPFS. The apply itself — one
+ * staged write batch, the publishing moves, and the verifying re-read — runs
+ * three ways: over the bare provider (one native move per file, no locks),
+ * through the worker's rooted view with one locked move per file, and through
+ * the rooted view as the worker hands it, which publishes every new file in one
+ * batch move under one lock set. On a CI-sized container they take about 7–8 s,
+ * 14–20 s and 11–14 s; the rooted view's own checks and stats around each move
+ * are what both rooted rows pay over the bare provider. Each bound guards the order of magnitude, not
+ * a benchmark, and each row annotates its own time.
+ */
+const coldApplyRows: ReadonlyArray<Readonly<{ surface: PointerTreeSurface; bound: number }>> = [
+  { surface: 'provider', bound: 20_000 },
+  { surface: 'rooted-per-file', bound: 40_000 },
+  { surface: 'rooted-bulk', bound: 20_000 },
+];
+
+for (const { surface, bound } of coldApplyRows) {
+  it(`should apply 439 pointer-sized files to an empty OPFS checkout in seconds, not minutes, through ${surface}`, async ({
+    annotate,
+  }) => {
+    const [worker] = twoWorkers();
+
+    const applied = (await worker.ask({
+      op: 'applyPointerTree',
+      directory,
+      files: 439,
+      surface,
+    })) as PointerTreeApplied;
+
+    await annotate(`${surface}: ${String(Math.round(applied.milliseconds))} ms`);
+    expect(applied).toMatchObject({ files: 439, matching: 439, litter: [] });
+    expect(applied.milliseconds).toBeLessThan(bound);
+  }, 120_000);
+}

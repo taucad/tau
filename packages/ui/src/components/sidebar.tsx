@@ -237,7 +237,7 @@ function Sidebar({
           data-mobile='true'
           // The sidebar's own shortcuts (toggle, search) still work inside it; other app shortcuts stay off (keyboard.tsx).
           data-shortcut-scope='sidebar'
-          className='z-100 w-(--sidebar-width) bg-sidebar text-sidebar-foreground outline-none [&>button]:hidden'
+          className='w-(--sidebar-width) bg-sidebar text-sidebar-foreground outline-none [&>button]:hidden'
           style={{ '--sidebar-width': sidebarWidthMobile } as CssVariableProperties}
           side={side}
           onOpenAutoFocus={(event) => {

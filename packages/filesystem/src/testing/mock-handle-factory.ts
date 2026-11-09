@@ -35,7 +35,17 @@ export type MockRootHandleOptions = {
   exclusiveWritable?: boolean;
   /** Called on every write-API acquisition *attempt*, including ones that throw. */
   onAcquireWriteApi?: (api: 'sync' | 'writable') => void;
+  /**
+   * Expose OPFS's native `FileSystemFileHandle.move(directory, name)`. Default
+   * `false`, the File System Access shape for user-picked roots.
+   */
+  nativeMove?: boolean;
+  /** Called on every native `move()` call, before it resolves or throws. */
+  onMove?: (from: string, to: string) => void;
 };
+
+/** Each directory's child table, so a file handle can move itself between directories. */
+const childrenOf = new WeakMap<MockDirectoryHandle, Map<string, Entry>>();
 
 class MockWritableStream {
   private _content: Uint8Array<ArrayBuffer>;
@@ -170,13 +180,42 @@ class MockFileHandle {
    * so absence has to be real absence, not a stubbed method.
    */
   public createSyncAccessHandle?: () => Promise<MockSyncAccessHandle>;
+  /** Own property, present only when {@link MockRootHandleOptions.nativeMove} is set. */
+  public move?: (destination: MockDirectoryHandle, name: string) => Promise<void>;
   private readonly _entry: FileEntry;
   private readonly _options: MockRootHandleOptions;
+  private readonly _parent: Map<string, Entry>;
 
-  public constructor(name: string, entry: FileEntry, options: MockRootHandleOptions) {
+  public constructor(
+    name: string,
+    entry: FileEntry,
+    { options, parent }: { options: MockRootHandleOptions; parent: Map<string, Entry> },
+  ) {
     this.name = name;
     this._entry = entry;
     this._options = options;
+    this._parent = parent;
+    if (options.nativeMove === true) {
+      this.move = async (destination, newName): Promise<void> => {
+        options.onMove?.(name, newName);
+        const target = childrenOf.get(destination);
+        if (target === undefined) {
+          throw new TypeError('move() requires a directory handle');
+        }
+        if (parent.get(name) !== entry) {
+          throw new DOMException(`File not found: ${name}`, 'NotFoundError');
+        }
+        if (entry.syncHandleOpen === true || entry.exclusiveWritableOpen === true) {
+          throw new DOMException(`File is locked: ${name}`, 'NoModificationAllowedError');
+        }
+        if (target.get(newName)?.kind === 'directory') {
+          throw new DOMException(`Is a directory: ${newName}`, 'InvalidModificationError');
+        }
+        // Chromium's OPFS move replaces an existing file at the destination.
+        parent.delete(name);
+        target.set(newName, entry);
+      };
+    }
     if (options.syncAccess !== false) {
       this.createSyncAccessHandle = async (): Promise<MockSyncAccessHandle> => {
         options.onAcquireWriteApi?.('sync');
@@ -189,6 +228,9 @@ class MockFileHandle {
   }
 
   public async getFile(): Promise<File> {
+    if (this._parent.get(this.name) !== this._entry) {
+      throw new DOMException(`File not found: ${this.name}`, 'NotFoundError');
+    }
     return new File([this._entry.content], this.name, {
       lastModified: this._entry.lastModified,
     });
@@ -245,12 +287,13 @@ class MockDirectoryHandle {
     this._options = options;
     this._identity = shared.identity ?? {};
     this._children = shared.children ?? new Map<string, Entry>();
+    childrenOf.set(this, this._children);
   }
 
   public async getFileHandle(name: string, options?: { create?: boolean }): Promise<MockFileHandle> {
     const existing = this._children.get(name);
     if (existing?.kind === 'file') {
-      return new MockFileHandle(name, existing, this._options);
+      return new MockFileHandle(name, existing, { options: this._options, parent: this._children });
     }
     if (existing) {
       throw new DOMException('Is a directory', 'TypeMismatchError');
@@ -258,7 +301,7 @@ class MockDirectoryHandle {
     if (options?.create) {
       const entry: FileEntry = { kind: 'file', content: new Uint8Array(0), lastModified: Date.now() };
       this._children.set(name, entry);
-      return new MockFileHandle(name, entry, this._options);
+      return new MockFileHandle(name, entry, { options: this._options, parent: this._children });
     }
     throw new DOMException(`File not found: ${name}`, 'NotFoundError');
   }
@@ -292,7 +335,15 @@ class MockDirectoryHandle {
 
   public async *entries(): AsyncGenerator<[string, MockFileHandle | MockDirectoryHandle]> {
     for (const [name, entry] of this._children) {
-      yield entry.kind === 'file' ? [name, new MockFileHandle(name, entry, this._options)] : [name, entry.handle];
+      yield entry.kind === 'file'
+        ? [name, new MockFileHandle(name, entry, { options: this._options, parent: this._children })]
+        : [name, entry.handle];
+    }
+  }
+
+  public async *keys(): AsyncGenerator<string> {
+    for (const name of this._children.keys()) {
+      yield name;
     }
   }
 

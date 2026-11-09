@@ -1457,7 +1457,7 @@ main > .band:not(.band ~ .band)::before {
 .vision-steps .kicker {
   margin-bottom: 1rem;
 }
-.contact-grid .button,
+.contact-grid [data-slot='button'],
 .contact-grid .text-link,
 .download-grid .text-link {
   margin-top: 1rem;
@@ -1486,7 +1486,7 @@ main > .band:not(.band ~ .band)::before {
   font-size: 1.375rem;
   margin: 2.5rem 0 0.75rem;
 }
-.prose .button {
+.prose [data-slot='button'] {
   margin-top: 1rem;
 }
 .prose p a {

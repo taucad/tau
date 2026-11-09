@@ -11,6 +11,8 @@ export type CreateTypeScriptServiceOptions = Readonly<{
   /** Package names from the selected kernel; imports load additional mounted types on demand. */
   staticPackageNames?: readonly string[];
   readProjectFile?: (path: string) => Promise<string | undefined>;
+  /** Packages a document compiles against without importing them; see `TypeAcquisitionController`. */
+  implicitPackages?: (uri: string) => readonly string[];
   dynamicTypes?: boolean;
   onError?: (error: Error) => void;
   onWorkerFailure?: (error: Error) => void;
@@ -250,6 +252,7 @@ export async function createTypeScriptService(options: CreateTypeScriptServiceOp
       dependencyReader: options.dependencyReader,
       dynamicTypes: options.dynamicTypes !== false,
       readProjectFile: options.readProjectFile,
+      implicitPackages: options.implicitPackages,
       onError: options.onError,
     });
     await acquisition.initialize();

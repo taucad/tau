@@ -30,6 +30,7 @@ const foregroundKill: DetectedMemoryKill = {
 afterEach(() => {
   resetCrashFeedback();
   vi.mocked(submitCrashFeedback).mockClear();
+  Reflect.deleteProperty(HTMLElement.prototype, 'showPopover');
 });
 
 describe('CrashReportPrompt (SB12, D9)', () => {
@@ -44,7 +45,7 @@ describe('CrashReportPrompt (SB12, D9)', () => {
     offerCrashFeedback(foregroundKill, 'event-1');
     render(<CrashReportPrompt />);
 
-    expect(screen.getByRole('heading')).toHaveTextContent('ran out of memory');
+    expect(screen.getByRole('heading')).toHaveTextContent('Tau reloaded after the page stopped unexpectedly');
     /* Nothing is pre-filled, and nothing can be sent until they write something. */
     expect(screen.getByRole('textbox', { name: /what were you doing/iu })).toHaveValue('');
     expect(screen.getByLabelText(/email/iu)).toHaveValue('');
@@ -66,5 +67,22 @@ describe('CrashReportPrompt (SB12, D9)', () => {
 
     expect(submitCrashFeedback).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  });
+
+  it('opens in the top layer so no page chrome can cover it', () => {
+    /* Jsdom has no popover API; stand in for the browser's. */
+    const shown: HTMLElement[] = [];
+    Object.defineProperty(HTMLElement.prototype, 'showPopover', {
+      configurable: true,
+      value(this: HTMLElement) {
+        shown.push(this);
+      },
+    });
+    offerCrashFeedback(foregroundKill, 'event-1');
+    render(<CrashReportPrompt />);
+
+    const prompt = screen.getByRole('region', { name: /stopped unexpectedly/iu });
+    expect(prompt).toHaveAttribute('popover', 'manual');
+    expect(shown).toEqual([prompt]);
   });
 });

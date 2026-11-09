@@ -45,10 +45,33 @@ runs:
       run: git lfs version
       shell: bash
 
+    # The first `pnpm` call of the job makes corepack download the pinned pnpm
+    # from the npm registry, and that is the flakiest network call here: in run
+    # 41670839293 it reset mid-stream (`TypeError: terminated` / `read
+    # ECONNRESET`) and took the job with it. Do the download in a step of its
+    # own, with retries, so a reset costs seconds instead of a CI round.
+    - name: Download pnpm through corepack
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          if pnpm --version; then exit 0; fi
+          echo "::warning title=corepack download failed::pnpm download attempt $attempt failed; retrying" >&2
+          sleep $((attempt * 5))
+        done
+        pnpm --version
+
     - name: Get pnpm store directory
       shell: bash
       run: |
-        echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        # An empty store path fails the cache step after this one as "Input
+        # required and not supplied: path", which names neither pnpm nor the
+        # download that actually broke. Fail here instead, by name.
+        store="$(pnpm store path --silent)"
+        if [ -z "$store" ]; then
+          echo "::error title=No pnpm store path::pnpm store path printed nothing" >&2
+          exit 1
+        fi
+        echo "STORE_PATH=$store" >> "$GITHUB_ENV"
 
     - name: Setup pnpm cache
       if: inputs.save-pnpm-store == 'true'

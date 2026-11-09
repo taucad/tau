@@ -34,6 +34,15 @@ let lastBackend: ResolvedGraphicsBackend | undefined;
 let contextLostPending = false;
 
 /**
+ * Long frames are summed over this window and leave as one event. The platform delivers a batch whenever frames
+ * block, which on software rendering is nearly every frame, so one event per batch was one event per frame.
+ * Milliseconds.
+ */
+export const longFrameWindow = 30_000;
+let pendingLongFrames: { backend: ResolvedGraphicsBackend; duration: number } | undefined;
+let longFrameTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
  * Subscribe to viewer events.
  *
  * @param handler - Called once per event.
@@ -92,13 +101,37 @@ export const viewerFirstFrame = (
 };
 
 /**
- * One batch of long animation frames, as the platform delivered it: one event per burst, never per frame. Dropped
- * until a renderer exists, since the event is about the viewer's backend.
+ * Send the long frames summed so far as one event, if there are any.
+ */
+export const flushViewerLongFrames = (): void => {
+  if (longFrameTimer !== undefined) {
+    clearTimeout(longFrameTimer);
+    longFrameTimer = undefined;
+  }
+  const pending = pendingLongFrames;
+  pendingLongFrames = undefined;
+  if (pending !== undefined) {
+    emit(() => ({ event: 'long-frame-burst', ...pending }));
+  }
+};
+
+/**
+ * One batch of long animation frames, as the platform delivered it. Batches are summed and leave as at most one
+ * event per backend per `longFrameWindow`, never one per batch or per frame. Dropped until a renderer exists,
+ * since the event is about the viewer's backend, and when no host listens.
  *
- * @param duration - The burst's total frame milliseconds.
+ * @param duration - The batch's total frame milliseconds.
  */
 export const viewerLongFrameBurst = (duration: number): void => {
-  emit(() => (lastBackend === undefined ? undefined : { event: 'long-frame-burst', backend: lastBackend, duration }));
+  const backend = lastBackend;
+  if (backend === undefined || topic.size === 0) {
+    return;
+  }
+  if (pendingLongFrames !== undefined && pendingLongFrames.backend !== backend) {
+    flushViewerLongFrames();
+  }
+  pendingLongFrames = { backend, duration: (pendingLongFrames?.duration ?? 0) + duration };
+  longFrameTimer ??= setTimeout(flushViewerLongFrames, longFrameWindow);
 };
 
 /**
@@ -110,8 +143,13 @@ export const viewerGeometryDownloaded = (format: string): void => {
   emit(() => (lastBackend === undefined ? undefined : { event: 'download', backend: lastBackend, format }));
 };
 
-/** Test seam: forget the remembered backend and any pending context loss. */
+/** Test seam: forget the remembered backend, any pending context loss and any unsent long frames. */
 export const resetViewerEvents = (): void => {
+  if (longFrameTimer !== undefined) {
+    clearTimeout(longFrameTimer);
+    longFrameTimer = undefined;
+  }
+  pendingLongFrames = undefined;
   lastBackend = undefined;
   contextLostPending = false;
 };

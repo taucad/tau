@@ -43,6 +43,8 @@ export type GitHttpBackendFixture = Readonly<{
   authorizations: () => readonly string[];
   /** Object ids a client verified, which is what the server counts against a plan (W11a §9.6). */
   verified: () => readonly string[];
+  /** The object ids each batch call listed, in order, which is what "new oids only" is read from (D11, S9). */
+  batches: () => ReadonlyArray<Readonly<{ operation: 'upload' | 'download'; oids: readonly string[] }>>;
   close: () => Promise<void>;
 }>;
 
@@ -65,6 +67,14 @@ export type GitHttpBackendOptions = Readonly<{
   refusedRef?: string;
   /** What the hook prints when it refuses {@link GitHttpBackendOptions.refusedRef}, one line per entry. */
   refusedSaying?: readonly string[];
+  /**
+   * Shell lines a `pre-receive` hook runs before receive-pack updates any ref,
+   * with the bare repository as its working directory: how a test moves or
+   * locks a ref between the advertisement a push planned from and the
+   * server's compare-and-set. The hook runs inside git's object quarantine,
+   * so a line that updates a ref clears `GIT_QUARANTINE_PATH` itself.
+   */
+  preReceive?: readonly string[];
   /**
    * Set, the LFS batch endpoint answers `413` instead of issuing transfers.
    *
@@ -90,9 +100,31 @@ export type GitHttpBackendOptions = Readonly<{
   requireAuthorization?: string;
 }>;
 
+/*
+ * Every git this fixture runs, the CGI included, reads no global or system
+ * config and no ref-format default from the environment: a developer's
+ * `core.hooksPath` would skip the fixture's hooks, and a `reftable` default
+ * would change what receive-pack says about a locked or moved ref. Nor does it
+ * inherit a repository: run from a hook or another git, `GIT_DIR` and its
+ * siblings would point every command at the caller's repository instead.
+ */
+const {
+  GIT_DEFAULT_REF_FORMAT: _refFormat,
+  GIT_DIR: _gitDirectory,
+  GIT_WORK_TREE: _workTree,
+  GIT_INDEX_FILE: _indexFile,
+  GIT_OBJECT_DIRECTORY: _objectDirectory,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: _alternates,
+  GIT_COMMON_DIR: _commonDirectory,
+  GIT_PREFIX: _prefix,
+  GIT_QUARANTINE_PATH: _quarantine,
+  ...inherited
+} = process.env;
+const gitEnvironment: NodeJS.ProcessEnv = { ...inherited, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
 const run = async (args: readonly string[], cwd: string): Promise<string> =>
   new Promise((resolve, reject) => {
-    const child = spawn('git', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', [...args], { cwd, env: gitEnvironment, stdio: ['ignore', 'pipe', 'pipe'] });
     const out: Array<Uint8Array<ArrayBuffer>> = [];
     const error: Array<Uint8Array<ArrayBuffer>> = [];
     child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
@@ -168,8 +200,18 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
   const name = options.name ?? 'project';
   const repositoryPath = join(options.root, `${name}.git`);
   await mkdir(options.root, { recursive: true });
-  await run(['init', '--bare', '--initial-branch=main', repositoryPath], options.root);
+  /* The files ref backend, by name where git knows the setting (2.45+); older git has no other. */
+  await run(
+    ['-c', 'init.defaultRefFormat=files', 'init', '--bare', '--initial-branch=main', repositoryPath],
+    options.root,
+  );
   await run(['config', 'http.receivepack', 'true'], repositoryPath);
+  /* Hooks from this repository's own directory, whatever else is configured. */
+  await mkdir(join(repositoryPath, 'hooks'), { recursive: true });
+  await run(['config', 'core.hooksPath', join(repositoryPath, 'hooks')], repositoryPath);
+  /* A commit a test makes on the server has an author without the developer's config. */
+  await run(['config', 'user.name', 'Fixture'], repositoryPath);
+  await run(['config', 'user.email', 'fixture@example.test'], repositoryPath);
   /* A bare repository refuses a push to the branch its own HEAD names unless
    * told otherwise; this one has no work tree to protect. */
   await run(['config', 'receive.denyCurrentBranch', 'ignore'], repositoryPath);
@@ -190,10 +232,17 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     await chmod(hook, 0o755);
   }
 
+  if (options.preReceive !== undefined) {
+    const hook = join(repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(hook, ['#!/bin/sh', 'cat > /dev/null', ...options.preReceive, 'exit 0', ''].join('\n'));
+    await chmod(hook, 0o755);
+  }
+
   const objects = new Map<string, Uint8Array<ArrayBuffer>>();
   const trail: string[] = [];
   const authorizations: string[] = [];
   const verifiedOids: string[] = [];
+  const batchCalls: Array<Readonly<{ operation: 'upload' | 'download'; oids: readonly string[] }>> = [];
   /* Per-fixture nonces: a client that echoes what the batch issued gets them
    * right, and a client that invents its own headers cannot. */
   const transferToken = `transfer-${String(Date.now())}`;
@@ -208,6 +257,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
         operation: 'upload' | 'download';
         objects: ReadonlyArray<Readonly<{ oid: string; size: number }>>;
       }>;
+      batchCalls.push({ operation: body.operation, oids: body.objects.map((object) => object.oid) });
       if (options.quotaRefusal !== undefined && body.operation === 'upload') {
         response.writeHead(413, { 'Content-Type': 'application/vnd.git-lfs+json' });
         response.end(
@@ -230,6 +280,11 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
              * bytes — and how Tau proves "one upload per object". */
             if (body.operation === 'upload' && held) {
               return { oid: object.oid, size: object.size };
+            }
+            /* An object it does not hold is refused in the batch, per object, as the LFS batch API spells it:
+             * a download action for it would only send the client into its transfer retries. */
+            if (body.operation === 'download' && !held) {
+              return { oid: object.oid, size: object.size, error: { code: 404, message: 'Object does not exist' } };
             }
             return {
               oid: object.oid,
@@ -320,7 +375,10 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     if (authorization !== undefined) {
       authorizations.push(authorization);
     }
-    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization) {
+    /* A presigned transfer is authorized by the header its batch issued, not by the session, as storage URLs are. */
+    const presigned =
+      /^\/lfs\/[\da-f]{64}$/u.test(requested.pathname) && request.headers['x-tau-transfer'] === transferToken;
+    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization && !presigned) {
       response.writeHead(401, { 'Content-Type': 'text/plain' });
       response.end('unauthorized');
       return;
@@ -341,7 +399,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     const child = spawn('git', ['http-backend'], {
       cwd: options.root,
       env: {
-        ...process.env,
+        ...gitEnvironment,
         GIT_PROJECT_ROOT: options.root,
         GIT_HTTP_EXPORT_ALL: '1',
         PATH_INFO: requested.pathname,
@@ -371,6 +429,12 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
       response.writeHead(500);
       response.end();
     });
+    /*
+     * `git http-backend` may exit before it reads the whole request body (a refused push stops
+     * reading early). Writing the rest then fails with EPIPE on stdin; the reply is still sent
+     * from `close`, so swallow it here rather than let it escape as an uncaught exception.
+     */
+    child.stdin.on('error', () => undefined);
     request.pipe(child.stdin);
   };
 
@@ -399,6 +463,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     trail: () => [...trail],
     authorizations: () => [...authorizations],
     verified: () => [...verifiedOids],
+    batches: () => [...batchCalls],
     close: async () =>
       new Promise<void>((resolve) => {
         server.close(() => {

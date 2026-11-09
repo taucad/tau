@@ -3,7 +3,7 @@
  * `WorkspaceFileService`, the composition root.
  *
  * W5 moved those rows beside the module that owns each behaviour
- * (`project-directories`, `mutation-pipeline`, `rooted-views`, `tree-index`);
+ * (`project-directories`, `mutation-pipeline`, `rooted-views`, `project-index`);
  * the harness they shared while they lived in one file is extracted here once
  * so the move does not duplicate it. Test-only: reachable through the
  * package's internal `#*` imports and deliberately absent from `exports`.

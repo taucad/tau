@@ -1,56 +1,20 @@
 import type { GlobSearchRpcInput, GlobSearchRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import type { FileContentMetadata } from '@taucad/types';
+import { assertRootedPath } from '@taucad/utils/path';
+import { listedFileMetadataFields } from '#rpc/listed-file-metadata.js';
+import { indexedFilesUnder, isExplicitSkillsScope, walkFiles } from '#rpc/search-files.js';
 
 type GlobSearchEntry = Extract<GlobSearchRpcResult, { success: true }>['entries'][number];
 
-type CollectedEntry = {
-  path: string;
-  isDirectory: false;
-  size: number;
-  modifiedAt?: string;
-} & FileContentMetadata;
-
-async function collectFileEntries(
-  fileSystem: RpcFileSystem,
-  basePath: string,
-  includeExplicitOnly: boolean,
-): Promise<CollectedEntry[]> {
-  const result: CollectedEntry[] = [];
-  const entries = await fileSystem.readdir(basePath);
-
-  for (const entry of entries) {
-    const fullPath = joinRelativePath(basePath, entry.name);
-    if (entry.type === 'file') {
-      if (entry.contentKind === 'text') {
-        result.push({
-          path: fullPath,
-          isDirectory: false,
-          size: entry.size,
-          contentKind: 'text',
-          lineCount: entry.lineCount,
-          ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-        });
-      } else {
-        result.push({
-          path: fullPath,
-          isDirectory: false,
-          size: entry.size,
-          contentKind: 'binary',
-          ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-        });
-      }
-    } else if (includeExplicitOnly || entry.traverseOnImplicitSearch !== false) {
-      // oxlint-disable-next-line no-await-in-loop -- recursive traversal
-      const subEntries = await collectFileEntries(fileSystem, fullPath, includeExplicitOnly);
-      result.push(...subEntries);
-    }
-  }
-
-  return result;
-}
+/**
+ * The files a glob matches against. The index answers the subtree in one call
+ * with head metadata, content facts only where already known (I3); a host
+ * without one walks the directory, its listings measuring facts as they did.
+ */
+const filesUnder = async (fileSystem: RpcFileSystem, basePath: string) =>
+  (await indexedFilesUnder(fileSystem, basePath)) ??
+  walkFiles(fileSystem, basePath, { contentFacts: true, includeExplicitOnly: isExplicitSkillsScope(basePath) });
 
 /** @public */
 export async function handleGlobSearch(
@@ -59,31 +23,19 @@ export async function handleGlobSearch(
 ): Promise<GlobSearchRpcResult> {
   try {
     const basePath = assertRootedPath(input.path ?? '');
-    const explicitlyScopedToSkills = basePath === '.agents/skills' || basePath.startsWith('.agents/skills/');
-    const allEntries = await collectFileEntries(fileSystem, basePath, explicitlyScopedToSkills);
+    const allEntries = await filesUnder(fileSystem, basePath);
 
     const { minimatch } = await import('minimatch');
     const matched = allEntries.filter((entry) => minimatch(entry.path, input.pattern, { matchBase: true, dot: true }));
 
     const files = matched.map((entry) => entry.path);
-    const entries: GlobSearchEntry[] = matched.map((entry) =>
-      entry.contentKind === 'text'
-        ? {
-            path: entry.path,
-            isDirectory: entry.isDirectory,
-            size: entry.size,
-            contentKind: 'text',
-            lineCount: entry.lineCount,
-            ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-          }
-        : {
-            path: entry.path,
-            isDirectory: entry.isDirectory,
-            size: entry.size,
-            contentKind: 'binary',
-            ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-          },
-    );
+    const entries: GlobSearchEntry[] = matched.map((entry) => ({
+      path: entry.path,
+      isDirectory: false,
+      size: entry.size,
+      ...listedFileMetadataFields(entry),
+      ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
+    }));
 
     return { success: true, files, entries, totalFiles: files.length };
   } catch (error) {

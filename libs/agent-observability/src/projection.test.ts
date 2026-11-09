@@ -203,6 +203,29 @@ describe('projectRun', () => {
     expect(compareEvidence(presentation!, rating!)).not.toBe('conflict');
   });
 
+  it('cites each committed row with one digest, whichever fact cites it, so admission keeps every fact', async () => {
+    const tool = run().tools[0]!;
+    const shown = run({
+      presentedAt: at + 2500,
+      rating: { value: 'positive', at: at + 7000 },
+      tools: [{ ...tool, check: { result: 'passed', revision: [`ENTRY=sha256:${'a'.repeat(64)}`], requirements: [] } }],
+    });
+    const summary = await projectRun(shown, context());
+    const feedback = await projectRun(shown, context({ plane: 'feedback' }));
+    const cited = [...summary.evidence, ...feedback.evidence].flatMap((evidence) => evidence.lineage);
+    const digests = new Map<string, Set<string>>();
+    for (const item of cited) {
+      digests.set(item.source, (digests.get(item.source) ?? new Set()).add(item.digest));
+    }
+
+    /* The tool and its check share rows 3 and 4; the outcome, presentation and rating share the ending row 6. */
+    expect(cited).toHaveLength(7);
+    expect(digests.size).toBe(3);
+    expect([...digests.values()].map((held) => held.size)).toEqual([1, 1, 1]);
+    /* The fact's own source digest still differs per fact. */
+    expect(new Set(summary.evidence.map((evidence) => evidence.source.digest)).size).toBe(summary.evidence.length);
+  });
+
   it('holds a presentation back until the run ends, and never sends one shown before the grant', async () => {
     const open = await projectRun(run({ presentedAt: at + 2500, ending: undefined, tools: [] }), context());
     const early = await projectRun(run({ presentedAt: at - 1 }), context());
@@ -236,6 +259,19 @@ describe('projectRun', () => {
     const late = await projectRun(run(), context({ grantedAt: at + 5000 }));
     expect(late).toMatchObject({ beforeGrant: 1 });
     expect(late.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
+    /* An outcome after the grant carries no phase time from before it. */
+    expect(late.evidence[0]?.clocks.intervals).toEqual([]);
+  });
+
+  it('clips an outcome’s phases at the grant, so a run that began before it reports only the time since', async () => {
+    const projection = await projectRun(
+      run({ intervals: [{ phase: 'approval', start: at, end: at + 2000 }] }),
+      context({ grantedAt: at + 500 }),
+    );
+
+    expect(projection.evidence.at(-1)?.clocks.intervals).toEqual([
+      { phase: 'approval', domain: 'host-recorded', start: at + 500, end: at + 2000 },
+    ]);
   });
 
   it('reports each foreign epoch it read, by its contract id, and flags an unended run whose tail is elsewhere', async () => {
@@ -260,5 +296,42 @@ describe('projectRun', () => {
       pending: 1,
       foreignTails: [{ epoch: epochB, facts: 0, through: 2, open: true }],
     });
+  });
+
+  it('names a failed run’s ending code, the wrapped one first, with its owner and retry class (W5)', async () => {
+    const outcomeOf = async (failure: NonNullable<ProjectedRun['ending']>['failure']) => {
+      const projection = await projectRun(
+        run({ termination: 'failed', ending: { source: row(6), at: at + 6000, failure } }),
+        context(),
+      );
+      const evidence = projection.evidence.find((item) => item.semantic.kind === 'outcome')!;
+      expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+      expect(evidence.versions.mapper).toBe('host-turn-v4');
+      return evidence.payload.plane === 'summary' ? evidence.payload.fact : undefined;
+    };
+
+    expect(await outcomeOf({ code: 'RUN_ABANDONED', wrapped: 'MODEL_ATTEMPT_PENDING' })).toEqual({
+      kind: 'outcome',
+      termination: 'failed',
+      success: 'unknown',
+      assessment: null,
+      failureClass: { owner: 'host', retry: 'wait' },
+      code: 'MODEL_ATTEMPT_PENDING',
+    });
+    expect(await outcomeOf({ code: 'INSUFFICIENT_CREDIT', wrapped: undefined })).toMatchObject({
+      failureClass: { owner: 'gateway', retry: 'resume' },
+      code: 'INSUFFICIENT_CREDIT',
+    });
+    /* A code this build does not know reads as the registry's unknown entry; one that is not a code is not sent. */
+    expect(await outcomeOf({ code: 'A_NEWER_CODE', wrapped: undefined })).toMatchObject({
+      failureClass: { owner: 'unknown', retry: 'never' },
+      code: 'A_NEWER_CODE',
+    });
+    const malformed = await outcomeOf({ code: 'not a code: user text', wrapped: undefined });
+    expect(malformed).toMatchObject({ failureClass: { owner: 'unknown', retry: 'never' } });
+    expect(malformed).not.toHaveProperty('code');
+    const uncoded = await outcomeOf(undefined);
+    expect(uncoded).not.toHaveProperty('failureClass');
+    expect(uncoded).not.toHaveProperty('code');
   });
 });

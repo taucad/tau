@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { toPrometheusName } from '#prometheus.js';
 import { TauMetrics } from '#registry.js';
@@ -131,8 +133,37 @@ describe('runtime.operation (T10)', () => {
     ['a machine from a browser route', { operation: 'machine', machineKind: 'start' }],
     ['an unknown route', { route: 'satellite' }],
     ['an invalid release', { release: 'main; drop table' }],
+    ['a prerelease with an uppercase identifier', { release: '0.1.0-BETA.9' }],
+    ['a prerelease with five identifiers', { release: '0.1.0-a.b.c.d.e' }],
+    ['build metadata', { release: '0.1.0+sha.1' }],
   ])('should reject %s', (_label, detail) => {
     expect(parseRuntimeEntry(operation(detail))).toBeUndefined();
+  });
+
+  it.each(['1.7.83', '0.1.0-beta.9', '2.0.0-rc.1', '0123abc'])(
+    'D-T12-2: should admit the client release %s',
+    (value) => {
+      expect(parseRuntimeEntry(operation({ release: value }))).toBeDefined();
+    },
+  );
+
+  it('D-T12-2: should admit the release the CLI and its MCP route actually send', () => {
+    const { version } = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../packages/cli/package.json', import.meta.url)), 'utf8'),
+    ) as { version: string };
+
+    expect(
+      parseRuntimeEntry(
+        operation({
+          route: 'cli',
+          caller: 'host',
+          transport: 'in-process',
+          platform: 'node',
+          os: 'linux',
+          release: version,
+        }),
+      ),
+    ).toBeDefined();
   });
 
   it('should honour count only on merged outcomes and clamp it to 500', () => {
@@ -140,6 +171,15 @@ describe('runtime.operation (T10)', () => {
       count: 500,
     });
   });
+
+  it.each(['desktop', 'cli', 'mcp', 'daemon', 'cloud'])(
+    'D-T12-3: should admit a machine entry from the %s Node host route',
+    (route) => {
+      expect(
+        parseRuntimeEntry(operation({ operation: 'machine', route, machineKind: 'stop', caller: 'agent' }))?.detail,
+      ).toMatchObject({ operation: 'machine', route });
+    },
+  );
 
   it('should admit machine entries from a Node machine host', () => {
     expect(
@@ -332,18 +372,6 @@ describe('runtime metrics (T13 registry part)', () => {
     for (const metric of product) {
       expect(Object.keys(metric.attributes.shape), metric.name).toContain('tau.runtime.population');
     }
-  });
-
-  it('should mark the four producer-less instruments deprecated (D-T18)', () => {
-    const deprecated = Object.values(TauMetrics)
-      .filter((metric) => 'deprecated' in metric && metric.deprecated !== undefined)
-      .map((metric) => metric.name);
-    expect(deprecated).toEqual([
-      'ws.reconnection.duration',
-      'editor.load.duration',
-      'wasm.module.load.duration',
-      'indexeddb.operation.duration',
-    ]);
   });
 });
 

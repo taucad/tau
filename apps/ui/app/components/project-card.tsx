@@ -61,7 +61,7 @@ export function ProjectCard({
     : undefined;
   return (
     <Card
-      className={cn('isolate relative h-full overflow-hidden pt-0 hover:border-foreground/30', className)}
+      className={cn('group/card isolate relative h-full overflow-hidden pt-0 hover:border-foreground/30', className)}
       {...properties}
     >
       {to === undefined ? (
@@ -147,7 +147,10 @@ export function ProjectCardMedia({
             size='icon'
             aria-label='Preview model'
             aria-pressed={isPreviewVisible}
-            className='absolute top-2 right-2 z-30 aria-pressed:bg-accent aria-pressed:text-foreground'
+            /* R13: a deliberate action (it starts a CAD worker), shown when the card is reached:
+               hover or focus on fine pointers, always on coarse ones, and while it is on. It stays
+               in the tab order and under the pointer, so revealing it never moves anything. */
+            className='absolute top-2 right-2 z-30 opacity-0 group-focus-within/card:opacity-100 group-hover/card:opacity-100 aria-pressed:bg-accent aria-pressed:text-foreground aria-pressed:opacity-100 pointer-coarse:opacity-100'
             onClick={() => {
               onPreviewVisibilityChange(!isPreviewVisible);
             }}

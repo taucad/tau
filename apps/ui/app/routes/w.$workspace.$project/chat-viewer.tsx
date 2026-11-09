@@ -21,7 +21,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
-import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
+import { settleLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
@@ -566,6 +566,13 @@ const ViewerContent = memo(function ({
   const liveOptions = useLiveViewOptions(viewId);
   const viewOptions =
     liveOptions && liveOptions.viewId === offeredViewId ? liveOptions.options : selectedState?.options;
+  // The draft yields once the record the file watcher delivers holds the same options, so the pane never steps back.
+  const savedOptions = selectedState?.options;
+  useEffect(() => {
+    if (liveOptions !== undefined && offeredViewId !== undefined) {
+      settleLiveViewOptions(viewId, liveOptions, { viewId: offeredViewId, options: savedOptions ?? {} });
+    }
+  }, [viewId, offeredViewId, savedOptions, liveOptions]);
   const localInstance = useLocalInstanceChoice(viewId);
   const localForView = localInstance?.viewId === offeredViewId ? localInstance : undefined;
   const localExpired =

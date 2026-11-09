@@ -1,125 +1,27 @@
-import { languageFromExtension } from '@taucad/types/constants';
+import { resolveHighlightLanguageId } from '@taucad/grammars';
+import type { HighlightLanguage } from '@taucad/grammars';
 
 export const plaintextHighlightLanguage = 'plaintext';
 
-export const supportedHighlightLanguages = [
-  'bash',
-  'javascript',
-  'jsx',
-  'json',
-  'jsonc',
-  'jsonl',
-  'kcl',
-  'markdown',
-  'openscad',
-  'python',
-  'csharp',
-  'stepfile',
-  'stl',
-  'sysml',
-  'tsx',
-  'typescript',
-  'usd',
-  'yaml',
-] as const;
-
-export type HighlightLanguage = (typeof supportedHighlightLanguages)[number];
-export type ShikiLanguage = HighlightLanguage | typeof plaintextHighlightLanguage;
+export type CodeLanguage = HighlightLanguage | typeof plaintextHighlightLanguage;
 export type HighlightLanguageInput = string | undefined;
 
 export type ResolvedHighlightLanguage = {
   readonly input: string | undefined;
   readonly displayLanguage: string;
-  readonly shikiLanguage: ShikiLanguage;
+  readonly language: CodeLanguage;
   readonly isSupported: boolean;
 };
 
-export const builtinHighlightLanguages = [
-  'bash',
-  'javascript',
-  'jsx',
-  'json',
-  'jsonc',
-  'jsonl',
-  'markdown',
-  'python',
-  'csharp',
-  'tsx',
-  'typescript',
-  'yaml',
-] as const satisfies readonly HighlightLanguage[];
-
-export const customHighlightLanguages = [
-  'kcl',
-  'openscad',
-  'stepfile',
-  'stl',
-  'sysml',
-  'usd',
-] as const satisfies readonly HighlightLanguage[];
-
-const supportedHighlightLanguageSet = new Set<string>(supportedHighlightLanguages);
-
-const extensionAliases = Object.fromEntries(
-  Object.entries(languageFromExtension).map(([extension, language]) => [extension, language]),
-) as Record<string, HighlightLanguage>;
-
-const highlightLanguageAliasEntries = {
-  ...extensionAliases,
-  cjs: 'javascript',
-  mjs: 'javascript',
-  mts: 'typescript',
-  cts: 'typescript',
-  sh: 'bash',
-  shell: 'bash',
-  shellscript: 'bash',
-  zsh: 'bash',
-  md: 'markdown',
-  markdown: 'markdown',
-  jsonlines: 'jsonl',
-  'json-lines': 'jsonl',
-  ndjson: 'jsonl',
-} as const satisfies Record<string, HighlightLanguage>;
-
-export const highlightLanguageAliases: Readonly<Record<string, HighlightLanguage>> = highlightLanguageAliasEntries;
-
-function normalizeLanguageInput(input: HighlightLanguageInput): string | undefined {
-  const trimmed = input?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  return trimmed.toLowerCase().replace(/^\./, '');
-}
-
 export function resolveHighlightLanguage(input: HighlightLanguageInput): ResolvedHighlightLanguage {
-  const normalizedInput = normalizeLanguageInput(input);
-  if (!normalizedInput) {
-    return {
-      input: undefined,
-      displayLanguage: plaintextHighlightLanguage,
-      shikiLanguage: plaintextHighlightLanguage,
-      isSupported: false,
-    };
-  }
-
-  const aliasedLanguage = highlightLanguageAliases[normalizedInput];
-  const shikiLanguage =
-    aliasedLanguage ?? (supportedHighlightLanguageSet.has(normalizedInput) ? normalizedInput : undefined);
-
-  if (shikiLanguage) {
-    return {
-      input: normalizedInput,
-      displayLanguage: normalizedInput,
-      shikiLanguage: shikiLanguage as HighlightLanguage,
-      isSupported: true,
-    };
-  }
-
+  const trimmed = input?.trim().toLowerCase().replace(/^\./u, '');
+  const normalizedInput = trimmed === '' ? undefined : trimmed;
+  const language = resolveHighlightLanguageId(normalizedInput);
   return {
     input: normalizedInput,
-    displayLanguage: normalizedInput,
-    shikiLanguage: plaintextHighlightLanguage,
-    isSupported: false,
+    displayLanguage: normalizedInput ?? plaintextHighlightLanguage,
+    language: language ?? plaintextHighlightLanguage,
+    isSupported: language !== undefined,
   };
 }
 

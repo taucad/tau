@@ -170,6 +170,7 @@
         "{projectRoot}/src/extract-tscircuit-types.ts",
         "{projectRoot}/src/languages/typescript/extract.ts",
         "{projectRoot}/src/languages/typescript/tscircuit.ts",
+        "{projectRoot}/src/languages/typescript/tscircuit-declarations.ts",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],

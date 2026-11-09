@@ -5,6 +5,8 @@ import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
+import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
@@ -41,6 +43,7 @@ export const ChatTextarea = memo(function ({
   onSubmit,
   enableAutoFocus = true,
   enableEarlyInput = false,
+  adoptedEarlyInput,
   onEscapePressed,
   onBlur,
   className,
@@ -337,11 +340,11 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  const content = (
+  const content = (earlyInput?: EarlyChatInput): React.ReactNode => (
     <>
       {composerNotices}
       <ChatTextareaDesktop
-        enableEarlyInput={enableEarlyInput}
+        earlyInput={earlyInput}
         className={className}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
@@ -395,7 +398,16 @@ export const ChatTextarea = memo(function ({
       />
     </>
   );
-  /* With an early input the composer itself is served: its editor area holds a native input until the
-   * rich editor exists, and nothing else in it waits for the client. */
-  return enableEarlyInput ? content : <ClientOnly fallback={skeleton}>{content}</ClientOnly>;
+  /* Three arrangements, and the host picks one. `adoptedEarlyInput` means a host above this
+   * component owns the native input and has already handed its edit over, which is how a route can
+   * accept text without this module in its bundle; `enableEarlyInput` means this component owns it,
+   * which needs the module first; neither means there is no early input to carry. */
+  if (adoptedEarlyInput) {
+    return <>{content(adoptedEarlyInput)}</>;
+  }
+  return enableEarlyInput ? (
+    <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
+  ) : (
+    <ClientOnly fallback={skeleton}>{content()}</ClientOnly>
+  );
 });

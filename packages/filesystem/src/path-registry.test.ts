@@ -352,7 +352,20 @@ describe('path registry', () => {
       '.tau/binding.json',
       '.jj',
       '.git',
+      '.tau-staging',
     ]);
+  });
+
+  /* D5: an agent that lists or greps the project never walks into the Project
+   * Index's snapshot, and no watcher echoes the index's own write. */
+  it('hides the project-root Project Index snapshot from agents and watchers, and only at the root', () => {
+    expect(classify('.tau/index/snapshot.json')).toStrictEqual({
+      class: 'cache',
+      versioned: false,
+      agentAccess: 'hidden',
+      watch: 'none',
+    });
+    expect(classify('src/.tau/index/snapshot.json')).toStrictEqual(unlistedPathClassification);
   });
 
   it('matches a nested node_modules but only a project-root exports', () => {
@@ -364,8 +377,8 @@ describe('path registry', () => {
 
   it('does not let a path that merely starts like a reserved one inherit it', () => {
     /* Inside `.tau` the near miss lands on the reserved default, never on the
-     * row it resembles: the chats row is agent-readable, the default is not. */
-    expect(classify('.tau/chats-notes.md').agentAccess).toBe('hidden');
+     * row it resembles: the chats row is read-only, the default is the agent's. */
+    expect(classify('.tau/chats-notes.md')).toStrictEqual(reservedTauPathClassification);
     expect(classify('.gitignore-old')).toStrictEqual(unlistedPathClassification);
     expect(classify('thumbnail.webp.bak')).toStrictEqual(unlistedPathClassification);
   });

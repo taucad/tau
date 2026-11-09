@@ -8,10 +8,6 @@ import { z } from 'zod';
 export const IngestEntryName = {
   KERNEL_CREATE_GEOMETRY: 'observability.createGeometry',
   KERNEL_EXPORT_GEOMETRY: 'observability.exportGeometry',
-  WEBSOCKET_RECONNECTION: 'observability.websocketReconnection',
-  EDITOR_LOAD: 'observability.editorLoad',
-  WASM_MODULE_LOAD: 'observability.wasmModuleLoad',
-  INDEXEDDB_OPERATION: 'observability.indexeddbOperation',
   AGENT_SESSION: 'agent.session',
   AGENT_TURN: 'agent.turn',
   SYNC_ATTEMPT: 'observability.syncAttempt',
@@ -38,51 +34,6 @@ const kernelExportGeometryEntrySchema = z.object({
     .strictObject({
       status: z.string().optional(),
       exportFormat: z.string().optional(),
-    })
-    .optional(),
-});
-
-const websocketReconnectionEntrySchema = z.object({
-  name: z.literal(IngestEntryName.WEBSOCKET_RECONNECTION),
-  duration: z.number().nonnegative(),
-  detail: z
-    .object({
-      attempt: z.number().int().nonnegative().optional(),
-      reason: z.string().optional(),
-    })
-    .optional(),
-});
-
-const editorLoadEntrySchema = z.object({
-  name: z.literal(IngestEntryName.EDITOR_LOAD),
-  duration: z.number().nonnegative(),
-  detail: z
-    .object({
-      kernel: z.string().optional(),
-      fileCount: z.number().int().nonnegative().optional(),
-    })
-    .optional(),
-});
-
-const wasmModuleLoadEntrySchema = z.object({
-  name: z.literal(IngestEntryName.WASM_MODULE_LOAD),
-  duration: z.number().nonnegative(),
-  detail: z
-    .object({
-      module: z.string().optional(),
-      sizeBytes: z.number().nonnegative().optional(),
-    })
-    .optional(),
-});
-
-const indexeddbOperationEntrySchema = z.object({
-  name: z.literal(IngestEntryName.INDEXEDDB_OPERATION),
-  duration: z.number().nonnegative(),
-  detail: z
-    .object({
-      operation: z.string().optional(),
-      store: z.string().optional(),
-      error: z.string().optional(),
     })
     .optional(),
 });
@@ -347,6 +298,36 @@ const syncAttemptEntrySchema = z.object({
  */
 export const lfsTransports = ['files', 'r2_presigned', 'relay', 'other'] as const;
 
+/**
+ * The file-manager worker's timed spans (`@taucad/filesystem`'s `workerTimingSpans`, pinned to this copy by the UI
+ * worker's tests): where a hosted open's time went inside the worker, which page resource timing cannot see.
+ * @public
+ */
+export const workerTimingSpanNames = [
+  'lfs.store',
+  'fence.wait',
+  'fence.held',
+  'queue.wait',
+  'queue.held',
+  'fill.flush',
+  'capture.tree',
+  'apply.hold',
+  'records.project',
+] as const;
+
+/** Total milliseconds per worker span over the entry's window; a span that never ran is absent. */
+const workerSpanTotalsSchema = z.strictObject({
+  'lfs.store': z.number().nonnegative().optional(),
+  'fence.wait': z.number().nonnegative().optional(),
+  'fence.held': z.number().nonnegative().optional(),
+  'queue.wait': z.number().nonnegative().optional(),
+  'queue.held': z.number().nonnegative().optional(),
+  'fill.flush': z.number().nonnegative().optional(),
+  'capture.tree': z.number().nonnegative().optional(),
+  'apply.hold': z.number().nonnegative().optional(),
+  'records.project': z.number().nonnegative().optional(),
+});
+
 /** One client tree read that fetched large objects from the remote; `duration` is its large-object phase. */
 const lfsFetchEntrySchema = z.object({
   name: z.literal(IngestEntryName.LFS_FETCH),
@@ -359,6 +340,8 @@ const lfsFetchEntrySchema = z.object({
     localBytes: z.number().int().nonnegative(),
     /** The transport that served most of the fetched objects; absent from clients older than the files service. */
     transport: z.enum(lfsTransports).optional(),
+    /** Worker span totals over the phase; absent from older clients. */
+    spans: workerSpanTotalsSchema.optional(),
   }),
 });
 
@@ -374,6 +357,8 @@ const projectOpenEntrySchema = z.object({
     cache: z.enum(['cold', 'warm']),
     /** On a cold open, the transport of its latest network fetch; absent on a warm open and from older clients. */
     transport: z.enum(lfsTransports).optional(),
+    /** Worker span totals from the root opening to this phase; absent from older clients. */
+    spans: workerSpanTotalsSchema.optional(),
   }),
 });
 
@@ -385,10 +370,6 @@ const projectOpenEntrySchema = z.object({
 export const clientMetricEntrySchema = z.discriminatedUnion('name', [
   kernelCreateGeometryEntrySchema,
   kernelExportGeometryEntrySchema,
-  websocketReconnectionEntrySchema,
-  editorLoadEntrySchema,
-  wasmModuleLoadEntrySchema,
-  indexeddbOperationEntrySchema,
   agentSessionEntrySchema,
   agentTurnEntrySchema,
   syncAttemptEntrySchema,

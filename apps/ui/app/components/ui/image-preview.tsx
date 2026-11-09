@@ -1,7 +1,7 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import { cn } from '@taucad/ui/utils/cn';
 import { Dialog, DialogContent } from '@taucad/ui/components/dialog';
+import { ViewerLayer } from '#components/ui/viewer-layer.js';
 
 type ImagePreviewContextValue = {
   src: string;
@@ -61,22 +61,18 @@ function ImagePreview({ src, alt, label, onError, children, dialogProps }: Image
       <Dialog open={open} modal={false} onOpenChange={setOpen}>
         {children}
         {open ? (
-          <>
-            {/* Backdrop via portal to ensure it's above all other content */}
-            {createPortal(
-              <div
-                aria-hidden='true'
-                className='fixed inset-0 z-100 animate-in bg-black/60 fade-in-0'
-                {...dialogProps}
-                onClick={() => {
-                  setOpen(false);
-                }}
-              />,
-              document.body,
-            )}
+          <ViewerLayer {...dialogProps}>
+            <div
+              aria-hidden='true'
+              className='absolute inset-0 z-0 animate-in bg-black/60 fade-in-0'
+              {...dialogProps}
+              onClick={() => {
+                setOpen(false);
+              }}
+            />
             <DialogContent
               {...dialogProps}
-              className='z-101! flex h-[80vh]! max-h-none! w-auto! max-w-none! items-center justify-center overflow-visible rounded-lg border bg-background p-2 shadow-lg *:data-[slot=dialog-close]:bg-background'
+              className='z-1 flex h-[80vh]! max-h-none! w-auto! max-w-none! items-center justify-center overflow-visible rounded-lg border bg-background p-2 shadow-lg *:data-[slot=dialog-close]:bg-background'
             >
               <div className='relative h-full'>
                 <img
@@ -94,7 +90,7 @@ function ImagePreview({ src, alt, label, onError, children, dialogProps }: Image
                 ) : undefined}
               </div>
             </DialogContent>
-          </>
+          </ViewerLayer>
         ) : undefined}
       </Dialog>
     </ImagePreviewContext.Provider>

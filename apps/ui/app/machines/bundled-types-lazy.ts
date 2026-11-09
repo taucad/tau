@@ -10,6 +10,7 @@ const readMethods = new Set([
   'getFileMode',
   'search',
   'statTree',
+  'pendingPaths',
   'provenance',
   'archive',
   'contents',

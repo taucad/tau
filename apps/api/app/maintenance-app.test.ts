@@ -10,7 +10,7 @@ import { apiRoot, importChain, moduleGraph } from '#testing/module-graph.js';
  * service. These tests tie the deployable pieces to one another and to that
  * rule: the Dockerfile's `maintenance` target runs the maintenance command,
  * the command's module graph opens no listener, and both Fly configs deploy one
- * Machine in `syd` with no service, no metrics endpoint and no volume.
+ * Machine (staging `syd`, production `sjc`) with no service, no metrics endpoint and no volume.
  */
 
 const read = (file: string): string => readFileSync(path.join(apiRoot, file), 'utf8');
@@ -92,7 +92,7 @@ const listeningPackages = [
   '@opentelemetry/exporter-prometheus',
   '@opentelemetry/sdk-node',
 ];
-const listeningModules = ['app/main.ts', 'app/app.module.ts', 'app/telemetry/otel.ts'];
+const listeningModules = ['app/main.ts', 'app/app.module.ts', '../libs/api-observability/src/otel.ts'];
 
 describe('tau-maintenance image (DC4)', () => {
   it('should build a maintenance target that runs the maintenance command and exposes nothing', () => {
@@ -120,6 +120,15 @@ describe('tau-maintenance image (DC4)', () => {
     expect(listeningPackages.filter((name) => graph.packages.has(name))).toEqual([]);
   });
 
+  it('should reach no billing module', () => {
+    // The maintenance entry names billing only in type imports, which are erased before run time.
+    const graph = moduleGraph(maintenanceImageEntry());
+    const billing = [...graph.modules].filter((module) => module.startsWith('../libs/api-billing/'));
+
+    expect(graph.modules.size).toBeGreaterThan(0);
+    expect(billing.map((module) => importChain(graph, module))).toEqual([]);
+  });
+
   describe('when the command module loads', () => {
     const { argv } = process;
 
@@ -143,16 +152,16 @@ describe('tau-maintenance image (DC4)', () => {
 });
 
 describe.each([
-  ['staging', 'tau-maintenance-staging'],
-  ['prod', 'tau-maintenance'],
-])('apps/maintenance/fly.%s.toml (DC4)', (environment, app) => {
+  ['staging', 'tau-maintenance-staging', 'syd'],
+  ['prod', 'tau-maintenance', 'sjc'],
+])('apps/maintenance/fly.%s.toml (DC4)', (environment, app, region) => {
   const config = (): string => readFileSync(path.join(maintenanceProject, `fly.${environment}.toml`), 'utf8');
   /** Section headers, comments excluded. */
   const sections = (): string[] => config().match(/^\[\[?[^\]]+\]\]?$/gmu) ?? [];
 
-  it('should name the app and deploy it in syd', () => {
+  it('should name the app and deploy it in its region (staging syd, production sjc)', () => {
     expect(config()).toMatch(new RegExp(`^app = '${app}'$`, 'mu'));
-    expect(config()).toMatch(/^primary_region = 'syd'$/mu);
+    expect(config()).toMatch(new RegExp(`^primary_region = '${region}'$`, 'mu'));
   });
 
   it('should declare no service, metrics endpoint, volume or release command', () => {

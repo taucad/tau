@@ -18,7 +18,7 @@ import { qualificationArtifactObjects, qualificationFeed } from './qualification
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
 import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
-import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
+import { createLinuxAptQualificationDriver, isAptLockRefusal } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { LinuxAptQualificationDriver } from './qualification-linux.mjs';
@@ -57,6 +57,95 @@ const alive = (pid: number): boolean => {
     return true;
   } catch {
     return false;
+  }
+};
+/**
+ * What a process that ignored an ordinary quit was doing, for the job log of a disposable Linux guest: the app's own
+ * quit, shutdown and updater events since `logOffset` (event name and its first fields only, never the whole log), the kernel's
+ * process state, and every window it still maps with its title. Each part reports its own failure instead of hiding it.
+ */
+const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: number): Promise<string> => {
+  const parts: string[] = [];
+  try {
+    // The offset is a byte count. When the log has rotated past it (diagnostics.ts renames it to desktop.1.log over
+    // 5 MiB), the offset belongs to the rotated file and the whole current file is newer.
+    const current = await readFile(logPath);
+    const sources =
+      current.length >= logOffset
+        ? [current.subarray(logOffset)]
+        : [
+            await readFile(join(dirname(logPath), 'desktop.1.log')).then(
+              (rotated) => rotated.subarray(logOffset),
+              () => Buffer.alloc(0),
+            ),
+            current,
+          ];
+    const events = sources
+      .map((bytes) => bytes.toString('utf8'))
+      .join('\n')
+      .split('\n')
+      .filter((line) =>
+        /^\S+ \S+ (?:main\.(?:\S*quiesce|\S*quit|shutdown\S*|window\S*)|services\.quiesced|updater\.\S+|window-state\.\S+)\b/u.test(
+          line,
+        ),
+      )
+      .map((line) => line.slice(0, 240));
+    parts.push(`shutdown events: ${events.length === 0 ? 'none' : events.join(' | ')}`);
+  } catch (error) {
+    parts.push(`shutdown events unreadable: ${String(error)}`);
+  }
+  try {
+    const status = await readFile(`/proc/${pid}/status`, 'utf8');
+    const state = status.split('\n').find((line) => line.startsWith('State:')) ?? 'State: unknown';
+    const wchan = await readFile(`/proc/${pid}/wchan`, 'utf8').catch(() => 'unknown');
+    parts.push(`${state.replaceAll(/\s+/gu, ' ')}, wchan ${wchan}`);
+  } catch (error) {
+    parts.push(`process state unreadable: ${String(error)}`);
+  }
+  try {
+    const { stdout } = await execFileAsync('xdotool', ['search', '--pid', String(pid)], { timeout: 15_000 });
+    const windows = stdout.trim().split(/\s+/u).filter(Boolean);
+    const named = await Promise.all(
+      windows.map(async (id) => {
+        const name = await execFileAsync('xdotool', ['getwindowname', id], { timeout: 15_000 }).then(
+          ({ stdout: title }) => JSON.stringify(title.trim()),
+          () => 'unnamed',
+        );
+        return `${id} ${name}`;
+      }),
+    );
+    parts.push(`windows: ${named.length === 0 ? 'none' : named.join(', ')}`);
+  } catch (error) {
+    // `xdotool search` exits 1 when nothing matches; any other failure is reported, not read as "no windows".
+    const { code } = error as { code?: unknown };
+    parts.push(code === 1 ? 'windows: none' : `windows unreadable: ${String(error)}`);
+  }
+  return parts.join('; ');
+};
+/**
+ * `apt-get update` on a host whose own apt-daily and unattended-upgrades may hold a lock ({@link isAptLockRefusal}): a
+ * lock refusal is retried until the deadline and every other outcome is returned, so an update that failed for its own
+ * reason (the offline mirror) stays a failure the caller can require.
+ */
+const aptUpdate = async (deadlineMs = 600_000): Promise<{ ok: true } | { ok: false; error: unknown }> => {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    try {
+      await execFileAsync(
+        'sudo',
+        ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', '-o', 'DPkg::Lock::Timeout=120', 'update'],
+        {
+          timeout: 180_000,
+        },
+      );
+      return { ok: true };
+    } catch (error) {
+      const { stderr } = error as { stderr?: string };
+      if (!isAptLockRefusal(stderr ?? '') || Date.now() >= deadline) {
+        return { ok: false, error };
+      }
+    }
+    await wait(5000);
   }
 };
 const readySchema = z.object({
@@ -428,7 +517,18 @@ const main = async (): Promise<void> => {
           maxBuffer: 8 * 1024 * 1024,
           timeout: 1_200_000,
         },
-      );
+      ).catch(async (error: unknown) => {
+        /* A renderer that never answers leaves no evidence of its own; the app's log since this step began says
+         * whether the main process was busy, still starting or already gone. Bounded, and only on failure. */
+        const log = await readFile(join(profile, 'logs/desktop.log')).then(
+          (bytes) => bytes.subarray(offset).subarray(-16_384).toString(),
+          () => '(no desktop log)',
+        );
+        throw new Error(
+          `Renderer step ${stage}/${action ?? 'render'} failed; desktop log since the step began:\n${log}`,
+          { cause: error },
+        );
+      });
       return action && action !== 'reinstall-ui' && action !== 'active'
         ? undefined
         : rendererSchema.parse(await json(output));
@@ -471,15 +571,9 @@ const main = async (): Promise<void> => {
       }, 'Initial observe command did not release updater initialization');
       const beforeReconnect = await driver.observe(candidate(0));
       if (apt) {
-        let failed = false;
-        try {
-          await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
-            timeout: 180_000,
-          });
-        } catch {
-          failed = true;
-        }
-        if (!failed) {
+        // The offline update must fail on the unavailable mirror, not on another apt process holding a lock.
+        const offline = await aptUpdate();
+        if (offline.ok) {
           throw new Error('Offline APT transport unexpectedly succeeded');
         }
       } else {
@@ -488,9 +582,10 @@ const main = async (): Promise<void> => {
       const reconnectStart = Date.now();
       await transport.setAvailable(true);
       if (apt) {
-        await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
-          timeout: 180_000,
-        });
+        const reconnected = await aptUpdate();
+        if (!reconnected.ok) {
+          throw reconnected.error;
+        }
       } else {
         await render('a', offlineReady.pid, 'check');
       }
@@ -519,11 +614,20 @@ const main = async (): Promise<void> => {
         { flag: 'wx' },
       );
       await render('a', offlineReady.pid, apt ? 'quit' : 'quit-ready');
-      await waitFor(
-        async () => (alive(offlineReady.pid) ? undefined : true),
-        'Baseline ordinary quit did not exit',
-        60_000,
-      );
+      try {
+        await waitFor(
+          async () => (alive(offlineReady.pid) ? undefined : true),
+          'Baseline ordinary quit did not exit',
+          60_000,
+        );
+      } catch (error) {
+        // The ubuntu-apt-x11 row has stayed alive here in four runs (41783968750 the latest) while debian-apt-x11 exits.
+        if (process.platform !== 'linux' || !alive(offlineReady.pid)) {
+          throw error;
+        }
+        const diagnostics = await linuxQuitDiagnostics(offlineReady.pid, join(profile, 'logs/desktop.log'), offset);
+        throw new Error(`Baseline ordinary quit did not exit; ${diagnostics}`, { cause: error });
+      }
       if (route !== 'linux-apt') {
         ordinaryQuit = {
           probe: observed,
@@ -551,8 +655,8 @@ const main = async (): Promise<void> => {
       }
       projectUrl = rendered.url;
       const installed = await driver.observe(candidate(index));
-      const processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
-      const security = await driver.measureSecurity(processes);
+      let processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
+      let security = await driver.measureSecurity(processes);
       const command = async (action: 'observe' | 'install') => {
         await atomicJson(join(profile, 'route-qualification.command.json'), {
           schemaVersion: 1,
@@ -588,7 +692,10 @@ const main = async (): Promise<void> => {
         if (!active || !alive(ready.pid) || active.project.sha256 !== rendered.project.sha256) {
           throw new Error('Old APT session cannot export its retained saved project after selector upgrade');
         }
-        discoverQualificationProcesses(ready.pid, ready.rendererPid);
+        /* The selector upgrade and the active export can restart the native workers, so the stage evidence takes its
+         * process tree and security from this moment, beside the probe's own observation that follows. */
+        processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
+        security = await driver.measureSecurity(processes);
         scheduler.push({
           ...scheduled,
           activeSession: {

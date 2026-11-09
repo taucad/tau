@@ -8,10 +8,12 @@
  */
 
 import type { FileContentMetadata } from '@taucad/types';
-import type { DirectoryEntry, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
-import { getFileContentMetadata, headFileStatFromStat } from '#content-metadata.js';
+import { getFileContentMetadata } from '#content-metadata.js';
 
 const storeName = 'files';
 const metadataStoreName = 'file-metadata';
@@ -37,10 +39,6 @@ function parentDirectory(path: string): string {
  * @public
  */
 export class DirectIdbProvider extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   /* eslint-disable @typescript-eslint/member-ordering -- `_renameDirectory` and the IDB flush helpers are intentionally co-located with the public methods that call them so the IDB-transaction lifecycle stays readable; relocating them would split a tightly-coupled triple. */
   /**
    * Backend identifier; always `'indexeddb'`.
@@ -112,13 +110,66 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
   }
 
-  /** Refresh the provider's metadata indexes from the backing database. */
-  public async refresh(): Promise<void> {
+  /**
+   * Refresh the provider's metadata indexes from the backing database.
+   *
+   * With `prefixes`, only the keys at, above and below those paths are read
+   * again (a few key-range reads in one transaction) and only their
+   * projections replaced, so a peer's committed write still admits or refuses
+   * ours without re-reading the whole key index.
+   *
+   * @param prefixes - Provider paths whose subtrees may have changed. Omit to re-read everything.
+   */
+  public async refresh(prefixes?: readonly string[]): Promise<void> {
     this._ensureOpen();
-    const snapshot = await this._readPathIndexSnapshot();
-    this._paths = snapshot.paths;
-    this._dirs = snapshot.directories;
-    this._fileMeta = new Map();
+    if (prefixes === undefined || prefixes.includes('')) {
+      const snapshot = await this._readPathIndexSnapshot();
+      this._paths = snapshot.paths;
+      this._dirs = snapshot.directories;
+      this._fileMeta = new Map();
+      return;
+    }
+    for (const prefix of prefixes) {
+      this._assertRootedPath(prefix);
+    }
+    const scopes = new Set(prefixes);
+    const found = await this._readScopedKeys(scopes);
+    /* A peer may have turned an ancestor into a file; its subtree is then gone too. */
+    for (const ancestor of found.fileAncestors) {
+      scopes.add(ancestor);
+    }
+    const inScope = (path: string): boolean => {
+      for (let current = path; ; current = parentDirectory(current)) {
+        if (scopes.has(current)) {
+          return true;
+        }
+        if (current === '') {
+          return false;
+        }
+      }
+    };
+    /* Purging deletes from the set being walked, so walk a copy. */
+    const paths = [...this._paths];
+    for (const path of paths) {
+      if (inScope(path)) {
+        this._purgeFileProjection(path);
+      }
+    }
+    const directories = [...this._dirs];
+    for (const directory of directories) {
+      if (directory !== '' && inScope(directory)) {
+        this._dirs.delete(directory);
+      }
+    }
+    for (const directory of found.directories) {
+      this._dirs.add(directory);
+      this._addParentDirs(directory);
+    }
+    for (const path of found.files) {
+      this._dirs.delete(path);
+      this._paths.add(path);
+      this._addParentDirs(path);
+    }
   }
 
   /**
@@ -150,6 +201,22 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       } else {
         this._pendingWritePaths.set(path, remaining);
       }
+    });
+  }
+
+  /**
+   * Apply one batch with every entry in flight at once, so its writes share
+   * the transaction {@link writeFile} coalesces one turn's writes into
+   * (charter D2, Rule 34).
+   *
+   * @param entries - One phase's entries for this provider, in provider paths.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    return runBatch(entries, async (entry) => applyEntryWithPrimitives(this, entry), {
+      ...options,
+      limit: Math.max(1, entries.length),
     });
   }
 
@@ -187,21 +254,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   /**
    * Batched readdir + stat — eliminates the N+1 stat round-trips per directory listing.
-   * Head mode drops line counts from warm metadata. A cold legacy IDB value is
-   * still cloned whole because this store persists a raw Uint8Array.
+   * This store persists a raw Uint8Array with no separate metadata row, so a
+   * cold value is cloned whole to learn its size; the facts those bytes give
+   * are then known and carried (I3: known, not sniffed for the listing).
    *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertRootedPath(path);
     const names = await this.readdir(path);
     const prefix = path === '' ? '' : `${path}/`;
@@ -226,16 +286,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         const cached = this._fileMeta.get(fullPath);
         fileMetadataPaths.push({ index: result.length, fullPath, cached });
         result.push(
-          cached
-            ? { name, type: 'file', mtimeMs: 0, ...cached }
-            : {
-                name,
-                type: 'file',
-                size: 0,
-                mtimeMs: 0,
-                contentKind: 'text',
-                lineCount: 1,
-              },
+          cached ? { name, type: 'file', mtimeMs: 0, ...cached } : { name, type: 'file', size: 0, mtimeMs: 0 },
         );
       }
     }
@@ -285,13 +336,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     }
 
-    const present = result.filter((_, index) => !missingIndexes.has(index));
-    return options?.content === 'head'
-      ? present.map(({ name, ...stat }) => ({
-          name,
-          ...headFileStatFromStat(stat),
-        }))
-      : present;
+    return result.filter((_, index) => !missingIndexes.has(index));
   }
 
   /**
@@ -300,9 +345,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     this._ensureOpen();
     this._assertRootedPath(path);
     if (path === '' || (this._dirs.has(path) && (await this._idbHasStorageKey(directoryStorageKey(path))))) {
@@ -322,8 +365,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._paths.add(path);
     this._ensureParentDirs(path);
     this._fileMeta.set(path, metadata);
-    const result: FileStat = { type: 'file', mtimeMs: 0, ...metadata };
-    return options?.content === 'head' ? headFileStatFromStat(result) : result;
+    return { type: 'file', mtimeMs: 0, ...metadata };
   }
 
   /**
@@ -689,6 +731,74 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    *
    * @returns Complete file and directory path indexes.
    */
+  /**
+   * Read the durable keys at, below and above each scoped path in one
+   * transaction.
+   *
+   * @param scopes - Provider paths.
+   * @returns Files and directories at or below a scope, and the scopes' ancestors that are files.
+   */
+  private async _readScopedKeys(scopes: ReadonlySet<string>): Promise<{
+    files: string[];
+    directories: string[];
+    fileAncestors: string[];
+  }> {
+    const files: string[] = [];
+    const directories: string[] = [];
+    const fileAncestors: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const tx = this._db!.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+      const collect = (request: IDBRequest<IDBValidKey[]> | IDBRequest<IDBValidKey | undefined>, into: string[]) => {
+        request.addEventListener('success', () => {
+          const { result } = request;
+          for (const key of Array.isArray(result) ? result : result === undefined ? [] : [result]) {
+            const storagePath = typeof key === 'string' ? key : JSON.stringify(key);
+            const directoryPath = directoryPathFromKey(storagePath);
+            if (directoryPath === undefined) {
+              into.push(fromStoragePath(storagePath));
+            } else {
+              directories.push(directoryPath);
+            }
+          }
+        });
+      };
+      const ancestors = new Set<string>();
+      for (const scope of scopes) {
+        const file = toStoragePath(scope);
+        const directory = directoryStorageKey(scope);
+        collect(store.getKey(file), files);
+        collect(store.getAllKeys(IDBKeyRange.bound(`${file}/`, `${file}/\uFFFF`)), files);
+        collect(store.getKey(directory), files);
+        collect(store.getAllKeys(IDBKeyRange.bound(`${directory}/`, `${directory}/\uFFFF`)), files);
+        for (let parent = parentDirectory(scope); parent !== ''; parent = parentDirectory(parent)) {
+          ancestors.add(parent);
+        }
+      }
+      for (const ancestor of ancestors) {
+        if (!scopes.has(ancestor)) {
+          collect(store.getKey(toStoragePath(ancestor)), fileAncestors);
+        }
+      }
+      tx.addEventListener('complete', () => {
+        resolve();
+      });
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error('Failed to read scoped keys'));
+      });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error('Scoped key read aborted'));
+      });
+    });
+    const directorySet = new Set(directories);
+    for (const path of files) {
+      if (directorySet.has(path)) {
+        throw this._errno('EIO', 'persisted path is both a file and directory', path);
+      }
+    }
+    return { files: [...files, ...fileAncestors], directories, fileAncestors };
+  }
+
   private async _readPathIndexSnapshot(): Promise<{
     paths: Set<string>;
     directories: Set<string>;

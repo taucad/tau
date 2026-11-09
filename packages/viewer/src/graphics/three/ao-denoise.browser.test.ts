@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { DataTexture, PerspectiveCamera, Scene } from 'three';
-import { NodeMaterial, QuadMesh, WebGPUBackend, WebGLBackend } from 'three/webgpu';
+import { DataTexture, PerspectiveCamera, Scene, UnsignedByteType } from 'three';
+import { NodeMaterial, QuadMesh, RenderTarget, WebGPUBackend, WebGLBackend } from 'three/webgpu';
 import { float, sample, screenUV, texture, vec3, vec4 } from 'three/tsl';
 import { createRenderer } from '#graphics/three/renderer.js';
 import { createViewportFxaa } from '#graphics/three/fxaa.js';
@@ -87,6 +87,94 @@ it.each(['denoise', 'upsample', 'fxaa'] as const)(
     }
   },
 );
+
+it.each([
+  ['drop a lone firefly', 'firefly'],
+  ['keep a one-texel contact seam', 'seam'],
+] as const)('should %s on a flat surface', async (_name, pattern) => {
+  // 64 RGBA8 texels fill one 256-byte WebGPU readback row, so rows are unpadded.
+  const size = 64;
+  const centre = size / 2;
+  const renderer = await createRenderer('showcase', 'webgpu', document.createElement('canvas'));
+  const data = new Uint8Array(size * size * 4).fill(242);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (pattern === 'firefly' ? x === centre && y === centre : x === centre) {
+        data.fill(pattern === 'firefly' ? 0 : 102, (y * size + x) * 4, (y * size + x) * 4 + 3);
+      }
+    }
+  }
+  const input = new DataTexture(data, size, size);
+  input.needsUpdate = true;
+  const filter = createAoDenoise({
+    texture: texture(input),
+    depth: sample(() => float(0.5)),
+    normal: sample(() => vec4(0, 0, 1, 1)),
+    camera: new PerspectiveCamera(),
+  });
+  filter.step.value.set(1 / size, 1 / size);
+  const material = new NodeMaterial();
+  material.fragmentNode = vec4(vec3(filter.visibility(screenUV)), 1);
+  const quad = new QuadMesh(material);
+  const target = new RenderTarget(size, size, { type: UnsignedByteType });
+  try {
+    renderer.setRenderTarget(target);
+    quad.render(renderer);
+    const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)) as Uint8Array<ArrayBuffer>;
+    const at = (x: number, y: number): number => pixels[(y * size + x) * 4]! / 255;
+    if (pattern === 'firefly') {
+      // Every tap that saw the dark texel stays on the surface value: no dot grid.
+      for (let y = centre - 4; y < centre + 4; y++) {
+        for (let x = centre - 4; x < centre + 4; x++) {
+          expect(at(x, y)).toBeGreaterThan(0.9);
+        }
+      }
+    } else {
+      // Three of 13 taps lie on the seam: the plain mean (~0.82) must survive untrimmed.
+      expect(at(centre, centre)).toBeLessThan(0.84);
+    }
+  } finally {
+    renderer.setRenderTarget(null);
+    target.dispose();
+    material.dispose();
+    input.dispose();
+    renderer.dispose();
+  }
+});
+
+it.each([
+  ['keep occlusion on a face seen head-on', [0, 0, 1], 0],
+  ['drop occlusion on a face seen edge-on', [1, 0, 0], 1],
+] as const)('should %s', async (_name, [nx, ny, nz], expected) => {
+  // GTAO reports a face seen edge-on as fully occluded; the upsample must not print that as a black rim.
+  const size = 64;
+  const renderer = await createRenderer('showcase', 'webgpu', document.createElement('canvas'));
+  const input = new DataTexture(new Uint8Array(size * size * 4), size, size);
+  input.needsUpdate = true;
+  const filter = createAoDenoise({
+    texture: texture(input),
+    depth: sample(() => float(0.5)),
+    normal: sample(() => vec4(nx, ny, nz, 1)),
+    camera: new PerspectiveCamera(),
+  });
+  const material = new NodeMaterial();
+  material.fragmentNode = vec4(vec3(filter.upsample(texture(input), screenUV)), 1);
+  const quad = new QuadMesh(material);
+  const target = new RenderTarget(size, size, { type: UnsignedByteType });
+  try {
+    renderer.setRenderTarget(target);
+    quad.render(renderer);
+    const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)) as Uint8Array<ArrayBuffer>;
+    // The centre pixel's view ray is the camera axis, so the normal's facing is exact there.
+    expect(pixels[((size / 2) * size + size / 2) * 4]! / 255).toBeCloseTo(expected, 1);
+  } finally {
+    renderer.setRenderTarget(null);
+    target.dispose();
+    material.dispose();
+    input.dispose();
+    renderer.dispose();
+  }
+});
 
 it.each(['denoise', 'upsample', 'fxaa'] as const)(
   'should compile viewport %s with WebGL2 validation and an invalid-shader control',

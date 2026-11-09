@@ -1,5 +1,5 @@
 import { SiteLink } from '#www/site-link.js';
-import { appOrigin } from '#www/environment.js';
+import { appHref } from '#www/environment.js';
 import { desktopDownloads, desktopDownloadHref, desktopFileLabel } from '#www/downloads.js';
 import { sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
@@ -38,7 +38,7 @@ export const content = (): React.JSX.Element => (
               macOS · Windows · Linux
             </p>
           </div>
-          <div data-mac-intel hidden>
+          <div data-mac-intel='hero' hidden>
             <SiteLink
               className='button'
               href={desktopDownloadHref('macIntel')}
@@ -78,7 +78,8 @@ export const content = (): React.JSX.Element => (
           </p>
           <div className='actions'>
             {(['mac', 'macIntel', 'windows', 'linux'] as const).map((platform) => (
-              <div key={platform}>
+              // Intel Macs are unlisted until a qualified catalog publishes an Intel route (no channel publishes its ZIP).
+              <div key={platform} {...(platform === 'macIntel' ? { 'data-mac-intel': 'list', hidden: true } : {})}>
                 <SiteLink
                   className='text-link'
                   href={desktopDownloadHref(platform)}
@@ -95,7 +96,13 @@ export const content = (): React.JSX.Element => (
             ))}
           </div>
         </div>
-        <SiteLink className='text-link' href={`${appOrigin}/projects`} data-event='cta' data-placement='download-web'>
+        <SiteLink
+          className='text-link'
+          href={appHref('/projects')}
+          isAppLink
+          data-event='cta'
+          data-placement='download-web'
+        >
           Use Tau in your browser instead {out}
         </SiteLink>
       </article>

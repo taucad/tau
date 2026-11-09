@@ -67,6 +67,25 @@ describe('ChatEditorBreadcrumbs', () => {
     expect(screen.queryByRole('button', { name: 'Back to Print' })).not.toBeInTheDocument();
   });
 
+  it('should follow the file name with the cursor symbol path and reveal a symbol when its crumb is chosen', () => {
+    const reveal = vi.fn();
+    render(
+      <ChatEditorBreadcrumbs
+        filePath='main.kcl'
+        symbolPath={[
+          { name: 'annulus', kind: 'function', reveal: vi.fn() },
+          { name: 's', kind: 'variable', reveal },
+        ]}
+      />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'File breadcrumbs' });
+    expect(nav).toHaveTextContent('main.kclannuluss');
+    expect(screen.getByRole('button', { name: 'main.kcl' })).toHaveAttribute('aria-current', 'page');
+
+    fireEvent.click(screen.getByRole('button', { name: 's' }));
+    expect(reveal).toHaveBeenCalledOnce();
+  });
+
   it('should scroll breadcrumbs from vertical wheel input while preserving selection and child actions', () => {
     render(
       <ChatEditorBreadcrumbs filePath='src/components/part.ts'>

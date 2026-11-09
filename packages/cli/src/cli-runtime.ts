@@ -43,7 +43,6 @@ export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/smlib'),
     import('@taucad/gltf'),
     import('@taucad/brep'),
-    import('@taucad/rhino'),
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);

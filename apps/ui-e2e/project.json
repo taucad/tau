@@ -15,7 +15,7 @@
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts --environment=node"
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
         ],
         "env": {
           "TAU_E2E_UI_SNAPSHOT": "true",
@@ -275,6 +275,28 @@
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
         }
+      }
+    },
+    "test:e2e:filesystem-scenarios": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Filesystem capability charter W0: the S1–S20 scenario harness on real OPFS in Playwright's Chromium, with no UI server. Writes one timing + count row per scenario (fixture, browser, server and network named) to out/test-results/filesystem-scenarios and asserts the count gates against src/filesystem-scenarios/baseline/known-red.json. The default is the small (1/20) fixture (vitest.config.ts's default; an options-level env would override the full configuration's); the full configuration is the STO-25 shape. TAU_FS_SCENARIO_RUNS sets samples per scenario, TAU_FS_SCENARIO_RECORD=true rewrites the committed baseline without loosening a known-red gate (force records the observed values as they are), TAU_FS_SCENARIO_ENGINES adds firefox/webkit where installed, and TAU_E2E_CHROMIUM_EXECUTABLE points at another Chromium."
+      },
+      "configurations": {
+        "full": {
+          "env": {
+            "TAU_FS_SCENARIO_PROFILE": "full"
+          }
+        }
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node",
+          "vitest run --config apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts"
+        ]
       }
     },
     "test:observability-helpers": {

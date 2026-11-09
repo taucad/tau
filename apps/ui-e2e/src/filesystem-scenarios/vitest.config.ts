@@ -1,0 +1,126 @@
+import { execFileSync } from 'node:child_process';
+import process from 'node:process';
+import { resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
+import { playwright } from '@vitest/browser-playwright';
+import type { BrowserInstanceOption } from 'vitest/node';
+
+/**
+ * The filesystem scenario harness (charter W0): the S1–S20 runners on real
+ * OPFS in a real browser, with no UI server.
+ *
+ * `TAU_FS_SCENARIO_PROFILE` picks the fixture (`small`, CI's default, or `full`,
+ * the STO-25 shape); `TAU_FS_SCENARIO_RUNS` the samples per scenario;
+ * `TAU_FS_SCENARIO_RECORD=true` rewrites the baseline beside this file, keeping
+ * the better of the recorded and observed known-red values (count gates never
+ * loosen); `force` records the observed values as they are.
+ * `TAU_E2E_CHROMIUM_EXECUTABLE` points at another installed Chromium when the
+ * pinned Playwright's own is absent.
+ *
+ * The browser keeps a persistent profile under `node_modules/.cache` so OPFS
+ * is disk-backed, as a person's is; an ephemeral context keeps it in memory.
+ */
+const workspaceRoot = resolve(import.meta.dirname, '../../../..');
+const profile = process.env['TAU_FS_SCENARIO_PROFILE'] ?? 'small';
+if (profile !== 'small' && profile !== 'full') {
+  throw new Error(`TAU_FS_SCENARIO_PROFILE must be small or full; got ${profile}.`);
+}
+const runsSetting = process.env['TAU_FS_SCENARIO_RUNS'] ?? (profile === 'full' ? '1' : '3');
+const runs = Number(runsSetting);
+if (!/^\d+$/u.test(runsSetting) || !Number.isSafeInteger(runs) || runs < 1) {
+  throw new Error(`TAU_FS_SCENARIO_RUNS must be a whole number of at least 1; got ${runsSetting}.`);
+}
+const recordSetting = process.env['TAU_FS_SCENARIO_RECORD'] ?? 'false';
+if (recordSetting !== 'true' && recordSetting !== 'false' && recordSetting !== 'force') {
+  throw new Error(`TAU_FS_SCENARIO_RECORD must be true, false or force; got ${recordSetting}.`);
+}
+const head = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: workspaceRoot, encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+})();
+const executablePath = process.env['TAU_E2E_CHROMIUM_EXECUTABLE'];
+/* Count gates are hard on all three engines (D15); only engines Playwright has installed can run. */
+const engines = (process.env['TAU_FS_SCENARIO_ENGINES'] ?? 'chromium').split(',').map((engine) => engine.trim());
+for (const engine of engines) {
+  if (engine !== 'chromium' && engine !== 'firefox' && engine !== 'webkit') {
+    throw new Error(`TAU_FS_SCENARIO_ENGINES lists an unknown engine: ${engine}.`);
+  }
+}
+
+function profileDirectory(engine: string): string {
+  return resolve(workspaceRoot, `node_modules/.cache/tau-filesystem-scenarios/${engine}-profile`);
+}
+
+const instances: BrowserInstanceOption[] = [];
+if (engines.includes('chromium')) {
+  instances.push({
+    browser: 'chromium',
+    name: 'chromium',
+    provider: playwright({
+      persistentContext: profileDirectory('chromium'),
+      launchOptions: { channel: 'chromium', ...(executablePath === undefined ? {} : { executablePath }) },
+    }),
+  });
+}
+for (const engine of engines) {
+  if (engine === 'firefox' || engine === 'webkit') {
+    instances.push({
+      browser: engine,
+      name: engine,
+      provider: playwright({ persistentContext: profileDirectory(engine) }),
+    });
+  }
+}
+
+export default defineConfig({
+  root: import.meta.dirname,
+  server: { fs: { allow: [workspaceRoot] } },
+  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config
+   * does). The scanner starts from the test files only and never follows `new Worker(new URL(...))`, so the workers
+   * are entries too: what they reach through linked packages is found before the first load, not during it, where
+   * the reload skewed the first measured sample. */
+  optimizeDeps: {
+    entries: [`${import.meta.dirname}/scenario.worker.ts`, `${import.meta.dirname}/atomicity.worker.ts`],
+    include: [
+      '@cfworker/json-schema',
+      '@opentelemetry/api',
+      'diff',
+      'es-module-lexer',
+      'jszip',
+      'minimatch',
+      'xstate',
+      'zod',
+    ],
+  },
+  resolve: {
+    alias: [
+      { find: /^#filesystem-scenarios\/(.*)\.js$/u, replacement: `${import.meta.dirname}/$1.ts` },
+      { find: /^#filesystem-scenarios\/(.*\.json)$/u, replacement: `${import.meta.dirname}/$1` },
+    ],
+  },
+  test: {
+    include: ['**/*.scenario.ts'],
+    testTimeout: profile === 'full' ? 3_600_000 : 600_000,
+    hookTimeout: 600_000,
+    fileParallelism: false,
+    retry: 0,
+    provide: {
+      filesystemScenarioProfile: profile,
+      filesystemScenarioRuns: runs,
+      filesystemScenarioRecord: recordSetting === 'force' ? 'force' : recordSetting === 'true',
+      filesystemScenarioHead: head,
+      filesystemScenarioOutput: resolve(workspaceRoot, 'out/test-results/filesystem-scenarios'),
+    },
+    browser: {
+      enabled: true,
+      headless: true,
+      // Artifact requirement: the harness writes its timing and count rows and, when recording, the committed baseline.
+      api: { allowWrite: true },
+      screenshotFailures: false,
+      instances,
+    },
+  },
+});

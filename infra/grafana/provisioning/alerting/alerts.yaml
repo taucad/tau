@@ -317,6 +317,31 @@ groups:
           severity: warning
           service: tau-api
           component: api
+      - uid: redis-memory-high
+        title: 'P1: Redis Memory High'
+        condition: redis_memory_high
+        data:
+          - refId: redis_memory_high
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max(redis_memory_utilization{app=~".*",service_name="tau-api"}) > 0.7
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: redis_memory_high
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/redis.md
+          summary: 'Redis memory is above 70% of its limit for 10 minutes. The instance runs without eviction, so at 100% it refuses writes: pairing, GitHub connect, git leases and rate limits fail.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: redis
       - uid: gen-ai-prompt-cache-hit-rate-low
         title: 'GenAiPromptCacheHitRateLow: Prompt cache hit rate below 40% (cost bleed)'
         condition: cache_hit_rate_low
@@ -1162,11 +1187,11 @@ groups:
           - refId: erasure_stuck
             queryType: ''
             relativeTimeRange:
-              from: 3600
+              from: 7200
               to: 0
             datasourceUid: prometheus
             model:
-              expr: 'sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome=~"retry|present"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[1h])) > 0'
+              expr: '(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome=~"retry|present"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="recheck"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[2h])) > 0)'
               intervalMs: 15000
               maxDataPoints: 20
               refId: erasure_stuck
@@ -1175,7 +1200,7 @@ groups:
         for: 2h
         annotations:
           runbook_url: docs/handbooks/cloud/system/services/agent-observability.md
-          summary: "For 2 h Langfuse trace deletions have been retried or read back as still present, with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability and the deletion API's answer codes in the lifecycle log."
+          summary: "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
         labels:
           severity: warning
           service: tau-api
@@ -1205,6 +1230,116 @@ groups:
           severity: warning
           service: tau-api
           component: agent-observability
+      - uid: api-llm-stream-severed
+        title: 'P1: API Response Stream Severed (Fly PU05)'
+        condition: stream_severed_threshold
+        data:
+          - refId: stream_severed_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum by (fly_app_instance) (count_over_time({service_name="tau-api"} | event_provider="proxy" |= "[PU05]" [5m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: stream_severed_logs
+          - refId: stream_severed_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: stream_severed_logs
+              refId: stream_severed_reduce
+          - refId: stream_severed_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: stream_severed_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: stream_severed_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/chat-llm-failing.md
+          summary: "Fly's proxy logged [PU05] (could not finish reading the response body from the instance) for an API Machine in the last 5 min: a response stream was cut mid-body, in practice a funded LLM step on /v1/llm/* killed by a stop that did not drain (2026-11-05 deploy cut). Fly's proxy line carries no request path, so every API response counts. Check the Machine's stop lines and api-exit-without-drain, then whether a funded step was cut and settled."
+        labels:
+          severity: warning
+          service: tau-api
+          component: lifecycle
+      - uid: api-exit-without-drain
+        title: 'P1: API Exit Without Drain'
+        condition: exit_undrained_threshold
+        data:
+          - refId: exit_undrained_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum by (fly_app_instance) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Main child exited" |= `"process_group":"app"` [2m])) unless on (fly_app_instance) sum by (fly_app_instance) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Shutdown drained" [5m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: exit_undrained_logs
+          - refId: exit_undrained_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: exit_undrained_logs
+              refId: exit_undrained_reduce
+          - refId: exit_undrained_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: exit_undrained_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: exit_undrained_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/api.md
+          summary: "An API app Machine's init logged `Main child exited` with no `Shutdown drained` on the same Machine in the 5 min before: the process died without completing its graceful drain (a repeated stop signal, a crash or a SIGKILL at kill_timeout). In-flight model steps were cut without the zero settlement; read the Machine's log around the exit and the funded-operation recovery rules."
+        labels:
+          severity: warning
+          service: tau-api
+          component: lifecycle
   - orgId: 1
     name: tau-storage-critical
     folder: Tau Alerts

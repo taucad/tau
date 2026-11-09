@@ -1,7 +1,6 @@
 import { Global, Injectable, Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import { BillingModule, BillingService } from '@taucad/api-billing';
 import type {
   CommercialEntitlements,
   CommercialEntitlementsService,

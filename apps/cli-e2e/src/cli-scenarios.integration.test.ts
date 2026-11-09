@@ -1,6 +1,6 @@
 /**
  * The CLI headless scenarios T1–T12 (charter D29, W17; readiness lane C1 § A6) against the real built binary: tier 5,
- * `cli:test` after `cli:build`. Each `describe` names its scenario. Every process starts from an empty config
+ * `cli-e2e:test:scenarios` after `cli:build`. Each `describe` names its scenario. Every process starts from an empty config
  * directory and home, so nothing a developer machine holds is visible to it, and no scenario reaches the network
  * except where it says so.
  *
@@ -31,8 +31,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
 
-import { testRecord } from '#commands/test.js';
-import { loadCliRuntime } from '#runtime-options.js';
+/* oxlint-disable no-restricted-imports -- the CLI's own source, reached in process: `@taucad/cli` exports no internals. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the CLI's own source, reached in process: `@taucad/cli` exports no internals.
+import { testRecord } from '../../../packages/cli/src/commands/test.js';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the CLI's own source, reached in process: `@taucad/cli` exports no internals.
+import { loadCliRuntime } from '../../../packages/cli/src/runtime-options.js';
+/* oxlint-enable no-restricted-imports */
 
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../..');
 const cliBinPath = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
@@ -254,7 +258,9 @@ const holdPort = async (): Promise<Server & { port: number }> => {
 
 beforeAll(async () => {
   if (!existsSync(cliBinPath)) {
-    throw new Error(`${cliBinPath} is missing: run \`pnpm nx test cli\`, which builds the CLI first.`);
+    throw new Error(
+      `${cliBinPath} is missing: run \`pnpm nx run cli-e2e:test:scenarios\`, which builds the CLI first.`,
+    );
   }
   scratch = await mkdtemp(join(tmpdir(), 'tau-cli-scenarios-'));
   await mkdir(join(scratch, 'home'), { recursive: true });

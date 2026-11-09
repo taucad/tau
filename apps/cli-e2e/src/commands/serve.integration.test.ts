@@ -14,7 +14,7 @@
  *   `.cs` answers `KERNEL_NOT_PREPARED`, `prepare_kernel` prepares it, and the next `.cs` call composes PicoGK and
  *   launches its worker through the daemon; the synthetic runtime cannot evaluate, so the call reports the worker's
  *   failure, never the permission model's refusal. Real `.cs` geometry is tier 4b (macOS, the published layer).
- * - Build123d, where the seed `pnpm nx run build123d:seed` fills is present (`cli:test` depends on it): `.py`
+ * - Build123d, where the seed `pnpm nx run build123d:seed` fills is present (`cli-e2e:test:scenarios` depends on it): `.py`
  *   answers `KERNEL_NOT_PREPARED`, `prepare_kernel` prepares it from the seed under the locked profile, and the next
  *   `.py` call evaluates with geometry from a worker the daemon started in the sandbox.
  */
@@ -42,7 +42,7 @@ import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-tes
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
-/* Built, so the runtime children are the shipped child under `--permission`. `cli:test` depends on `build`. */
+/* Built, so the runtime children are the shipped child under `--permission`. `cli-e2e:test:scenarios` depends on `cli:build`. */
 const builtBin = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 const agentToken = 'serve-native-agent-token-at-least-32-characters';
 /** Milliseconds one agent run may take: kernel loads, a preparation and a cold native worker. */

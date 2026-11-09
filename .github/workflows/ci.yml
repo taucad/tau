@@ -57,6 +57,7 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
       billing: ${{ steps.plan.outputs.billing }}
+      cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
@@ -94,6 +95,8 @@ jobs:
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
           # Billing contracts: the project that owns them (`api-billing`) or one it depends on changed.
           billing=$(pnpm nx show projects --affected --with-target test:billing-foundation --json | tail -1)
+          # The CLI's end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
+          cli_e2e=$(pnpm nx show projects --affected --with-target test:scenarios --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
@@ -105,16 +108,18 @@ jobs:
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected with a test:billing-foundation target: $billing"
+          echo "Affected with a test:scenarios target: $cli_e2e"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
           echo "Affected standalone-oracle projects: $standalone"
-          # The queue run already ran the formal, browser and GeoSpec lanes on this tree.
+          # The queue run already ran the formal, browser, GeoSpec and CLI end-to-end lanes on this tree.
           if [ -n "$REUSED" ]; then
             formal='[]'
             browser='[]'
             geospec_examples='[]'
-            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip."
+            cli_e2e='[]'
+            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec and CLI end-to-end lanes skip."
           fi
           {
             echo "browser-projects=$browser"
@@ -122,7 +127,7 @@ jobs:
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "billing=$billing" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples" "standalone=$standalone"; do
+          for lane in "api=$api" "billing=$billing" "cli-e2e=$cli_e2e" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples" "standalone=$standalone"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -387,10 +392,10 @@ jobs:
     secrets: inherit
 
   # The required check. It passes only when the plan and every affected lane passed, and the
-  # browser and GeoSpec example-contract lanes too when this run needed them.
+  # browser, GeoSpec example-contract and CLI end-to-end lanes too when this run needed them.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane, browser, geospec-examples]
+    needs: [plan, affected-lane, browser, geospec-examples, cli-e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -402,6 +407,8 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
+          CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
           REUSED: ${{ needs.plan.outputs.reused }}
         run: |
           test "$PLAN_RESULT" = success
@@ -412,6 +419,7 @@ jobs:
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
+          if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -972,3 +980,27 @@ jobs:
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
+
+  # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
+  # `tau agent` as real child processes against real kernels, 10 to 14 minutes. Their own lane,
+  # out of the test shards, where they were the floor of one shard: it runs when the plan finds
+  # a project with a `test:scenarios` target affected, and `Run affected tasks` requires it then.
+  cli-e2e:
+    name: CLI end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # The suites spawn sandboxed kernel workers, as the shards' native suites do.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Run the CLI end-to-end suites
+        run: pnpm nx run-many -t test:scenarios --parallel=1 --outputStyle=static

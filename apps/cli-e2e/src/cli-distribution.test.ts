@@ -14,7 +14,10 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { validateGlbData } from '@taucad/runtime-testing';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
-import type { RuntimeWorkerData } from '#runtime.worker.js';
+/* oxlint-disable no-restricted-imports -- the CLI's own source, reached in process: `@taucad/cli` exports no internals. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the CLI's own source, reached in process: `@taucad/cli` exports no internals.
+import type { RuntimeWorkerData } from '../../../packages/cli/src/runtime.worker.js';
+/* oxlint-enable no-restricted-imports */
 
 const execFileAsync = promisify(execFile);
 
@@ -133,11 +136,13 @@ const runCli = async (
 describe('tau CLI dist (real binary)', () => {
   let workspace: string;
 
-  /* `cli:test` depends on `cli:build`, so Nx builds the binary before this suite. A nested `nx build` here would
+  /* `cli-e2e:test:scenarios` depends on `cli:build`, so Nx builds the binary before this suite. A nested `nx build` here would
    * inherit the outer run's `NX_SKIP_NX_CACHE` and rebuild the CLI's whole dependency graph inside the hook. */
   beforeAll(async () => {
     if (!existsSync(cliBinPath)) {
-      throw new Error(`${cliBinPath} is missing: run \`pnpm nx test cli\`, which builds the CLI first.`);
+      throw new Error(
+        `${cliBinPath} is missing: run \`pnpm nx run cli-e2e:test:scenarios\`, which builds the CLI first.`,
+      );
     }
     workspace = await mkdtemp(join(tmpdir(), 'tau-cli-dist-'));
   });

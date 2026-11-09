@@ -20,9 +20,9 @@ import {
   purchasesUnavailableMessage,
   recoverPaymentAction,
 } from '#lib/billing-payment-client.js';
-import { toast } from '#components/ui/sonner.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { IconId } from '#components/icons/svg-icon.js';
+import { toast } from '@taucad/ui/components/sonner';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import type { IconId } from '@taucad/ui-kit/icons/svg-icon';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@taucad/ui/components/dialog';

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { chatAttachmentsPath } from '#db/attachment-store.js';
-import { composerRecordPaths, recordAttachmentsPath } from '#db/composer-record-store.js';
+import { chatAttachmentsPath } from '@taucad/chat-ui/db/attachment-store';
+import { composerRecordPaths, recordAttachmentsPath } from '@taucad/chat-ui/db/composer-record-store';
 import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';

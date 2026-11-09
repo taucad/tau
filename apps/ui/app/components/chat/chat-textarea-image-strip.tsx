@@ -1,13 +1,13 @@
 import { memo, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
-import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { cn } from '@taucad/ui/utils/cn';
-import { focusTrapAttribute } from '#components/chat/use-composer-exit.js';
+import { focusTrapAttribute } from '@taucad/chat-ui/components/use-composer-exit';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
-import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
 

@@ -1,7 +1,7 @@
 /**
  * The path grammar of a files link, and the only R2 keys it can name.
  *
- * Three layouts exist. Two are the LFS keys `apps/api/app/api/git/lfs-keys.ts`
+ * Three layouts exist. Two are the LFS keys `apps/libs/api-git-core/src/lfs-keys.ts`
  * reads through: the tenant key every upload lands at since D24, and the
  * legacy per-project key under `blobs/`. The third is the cold-open surface
  * of a repository (charter D8): a live pack's body and its stored `.idx`

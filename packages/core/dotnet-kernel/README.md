@@ -75,7 +75,7 @@ export const sampleNative = defineDotnetKernelAdopter({
 The kernel registration carries it (`withNativeDeployment(defineKernel(...), sampleNative)`), and the kernel's
 `initialize()` resolves its options `{ closure?, requestTimeout, maxArtifactBytes }` with
 `bindDotnetKernel({ adopter: sampleNative, options })`: an explicit `closure` as given, otherwise the prepared closure
-from the host's resolver or the local payload store.
+from the host's resolver or the local dependency store.
 
 Its layer pin is rewritten by a three-line script over the layer rule, which the release job runs:
 
@@ -108,7 +108,7 @@ reference shape of the framing, request loop, parent watchdog and artifact confi
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@taucad/dotnet-kernel-core`         | `createDotnetSession` (the worker session on `NativeProcessSession`), `createDotnetWorkspaceMirror` (the mirror without `bin`, `obj`, `.vs` and compiled binaries) and `bindDotnetKernel`                                                  |
 | `@taucad/dotnet-kernel-core/adopter` | `defineDotnetKernelAdopter`, `dotnetLaunchSet`, `dotnetOptionsFromClosure`, `dotnetKernelOptionsSchema`, `dotnetClosureSchema`, `dotnetClosureOptionsSchema`. Imports no session code, so a host reads deployments without loading kernels |
-| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, CDN and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `payloadCdnBase`, `payloadKey`, `manifestText`                                                               |
+| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, CDN and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `dependencyBaseUrl`, `dependencyKey`, `manifestText`                                                         |
 
 ## Rust or other single-binary kernel
 
@@ -154,7 +154,7 @@ and the adopter contract directly. Its package holds:
 '--artifacts', mirror.artifactPath, '--parent-pid', String(process.pid)], runtimePath, resources: [],
 protocolVersion, parseReady, parseResponse, requestTimeout, maxArtifactBytes, logger, sessionName,
 executableName, shutdown })`, both from `@taucad/native-process-core`.
-3. `tau-plugin.json` with one `tar.gz` payload per target (destination `bin`), pinned by a small generator over
+3. `tau-plugin.json` with one `tar.gz` dependency file per target (destination `bin`), pinned by a small generator over
    `@taucad/archive-core`'s verified fetch and tar reader.
 4. A worker that speaks the one JSON-lines protocol every Tau native worker speaks: a `ready` frame carrying
    `protocolVersion`; requests `{ protocolVersion, requestId, method, params }`; responses

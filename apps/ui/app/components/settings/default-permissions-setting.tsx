@@ -7,7 +7,7 @@ import {
   permissionModeOptions,
   promptInjectionDisclosure,
 } from '#components/chat/permission-mode-copy.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import type { PermissionMode } from '#filesystem/desktop-permissions.js';
 import { useDefaultPermissionMode } from '#hooks/use-permission-mode.js';
 

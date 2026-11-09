@@ -1,5 +1,5 @@
-import spriteUrl from '#components/icons/generated/sprite.svg?url';
-import { SvgSpriteLoader } from '#components/icons/svg-sprite-loader.js';
+import spriteUrl from '@taucad/ui-kit/icons/generated/sprite.svg?url';
+import { SvgSpriteLoader } from '@taucad/ui-kit/icons/svg-sprite-loader';
 
 const spriteUrls = [spriteUrl];
 

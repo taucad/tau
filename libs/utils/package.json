@@ -29,7 +29,8 @@
     "./error": "./src/error.utils.ts",
     "./cache": "./src/cache.utils.ts",
     "./hash": "./src/hash.utils.ts",
-    "./worktree-database": "./src/worktree-database.utils.ts"
+    "./worktree-database": "./src/worktree-database.utils.ts",
+    "./keyed-mutex": "./src/keyed-mutex.utils.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -83,6 +84,11 @@
         "types": "./dist/worktree-database.utils.d.mts",
         "import": "./dist/worktree-database.utils.mjs",
         "default": "./dist/worktree-database.utils.mjs"
+      },
+      "./keyed-mutex": {
+        "types": "./dist/keyed-mutex.utils.d.mts",
+        "import": "./dist/keyed-mutex.utils.mjs",
+        "default": "./dist/keyed-mutex.utils.mjs"
       }
     }
   },

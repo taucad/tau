@@ -75,7 +75,7 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel: project.openPanel }),
 }));
 
-vi.mock('#components/chat/chat-context-insertion.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   geometryReferenceToToken: () => '@part',
   useChatContextInsertion: () => ({ addContextReferences: project.addContextReferences }),
 }));

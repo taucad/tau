@@ -8,7 +8,7 @@ import {
   chatComposerMainEditorAreaClassName,
   chatComposerPlaceholder,
   chatComposerShellClassName,
-} from '#components/chat/chat-input-styles.js';
+} from '@taucad/chat-ui/components/chat-input-styles';
 
 export type EarlyChatInput = {
   readonly text: string;

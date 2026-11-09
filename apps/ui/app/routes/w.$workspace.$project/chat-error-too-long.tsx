@@ -6,7 +6,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
-import { chatTooLongMessage } from '#utils/error.utils.js';
+import { chatTooLongMessage } from '@taucad/chat-ui/utils/error.utils';
 
 /**
  * A chat whose compaction could not make room (`NO_EVICTABLE_HISTORY`) or gave

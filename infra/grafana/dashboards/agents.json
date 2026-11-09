@@ -232,10 +232,42 @@
       "id": 13
     },
     {
+      "title": "Safeguard Interventions by Pattern",
+      "type": "timeseries",
+      "description": "Agent-loop safeguards that fired, by detector pattern and action (nudge or terminate), folded from the run's safeguard rows.",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, safeguard_pattern, safeguard_action) (increase(tau_agent_safeguard_interventions_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\"}[15m]))",
+          "legendFormat": "{{agent_id}} {{safeguard_pattern}} {{safeguard_action}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+      "id": 35
+    },
+    {
+      "title": "Compaction Decisions by Lane and Tier",
+      "type": "timeseries",
+      "description": "Context compactions the agent took: where (lane), how deep (tool-result clearing or summarization) and what each produced.",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, compaction_lane, compaction_tier, compaction_outcome) (increase(tau_agent_compactions_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\"}[15m]))",
+          "legendFormat": "{{agent_id}} {{compaction_lane}} {{compaction_tier}} {{compaction_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+      "id": 36
+    },
+    {
       "title": "Agent context",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
       "panels": [],
       "id": 14
     },
@@ -250,7 +282,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 39 },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 47 },
       "id": 15
     },
     {
@@ -264,7 +296,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 39 },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 47 },
       "id": 16
     },
     {
@@ -289,7 +321,7 @@
           }
         }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 39 },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 47 },
       "id": 17
     },
     {
@@ -314,7 +346,7 @@
           }
         }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 39 },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 47 },
       "id": 18
     },
     {
@@ -333,7 +365,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
       "id": 19
     },
     {
@@ -352,7 +384,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
       "id": 20
     },
     {
@@ -373,7 +405,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
       "id": 21
     },
     {
@@ -389,7 +421,7 @@
       "fieldConfig": {
         "defaults": { "unit": "percentunit", "min": 0, "max": 1 }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
       "id": 22
     },
     {
@@ -408,7 +440,7 @@
       "fieldConfig": {
         "defaults": { "unit": "bytes" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
       "id": 23
     },
     {
@@ -423,7 +455,7 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 },
       "id": 24
     },
     {
@@ -444,7 +476,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 76 },
       "id": 25
     },
     {
@@ -460,7 +492,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 76 },
       "id": 26
     },
     {
@@ -481,7 +513,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 76 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 84 },
       "id": 27
     },
     {
@@ -496,14 +528,14 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 76 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 84 },
       "id": 28
     },
     {
       "title": "Tau-funded LLM calls through the API gateway, by surface",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 84 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 92 },
       "panels": [],
       "id": 29
     },
@@ -520,7 +552,7 @@
       "fieldConfig": {
         "defaults": { "unit": "currencyUSD" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 85 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 93 },
       "id": 30
     },
     {
@@ -535,7 +567,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 85 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 93 },
       "id": 31
     },
     {
@@ -550,7 +582,7 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 93 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 101 },
       "id": 32
     },
     {
@@ -569,7 +601,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 93 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 101 },
       "id": 33
     },
     {
@@ -583,7 +615,7 @@
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 101 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 109 },
       "id": 34
     }
   ]

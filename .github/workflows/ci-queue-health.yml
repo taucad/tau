@@ -1,0 +1,62 @@
+# Weekly merge-queue health report (CI decomposition blueprint, Part 5a, defect X7, work package DC-21).
+#
+# Queue rebuilds multiply the demand that causes every runner wait: when the head of the merge queue fails,
+# every group behind it is cancelled and rebuilt. Once a week this reads the `merge_group` runs of `ci.yml`
+# from the last 7 days through the jobs API and reports runs by conclusion, failed runs by the lane that
+# failed first and the suites it names (the table suite owners read), what the cancelled runs had spent, and
+# each job's runner-wait share. The Markdown goes to the job summary and the JSON to an artifact kept 90 days,
+# so Part 5a can be re-measured two weeks after DC-16 to DC-20 land. It reads only: no issues or comments
+# are posted, nothing is written to the Nx remote cache and no environment is used.
+#
+# Monday 07:23 UTC: after the weekend's quiet queue, before the operator's week starts. The nightly watchdog
+# watches it as a weekly cron.
+name: CI queue health
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Days of merge-group runs to report on
+        type: number
+        default: 7
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Report merge-queue health
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Report merge-queue health
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DAYS: ${{ inputs.days || 7 }}
+        run: node scripts/src/ci-queue-health-cli.ts --days "$DAYS" --out out/reports/ci-queue-health/queue-health.json
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-queue-health
+          path: out/reports/ci-queue-health/queue-health.json
+          if-no-files-found: warn
+          retention-days: 90

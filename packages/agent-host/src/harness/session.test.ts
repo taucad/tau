@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
+import { recordingFetch } from '#harness/prefix-identity.fixture.js';
+import type { CapturedBody } from '#harness/prefix-identity.fixture.js';
+import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { hasFileRef, providerMessageToPi } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type * as SessionRecordModule from '#harness/session-record.js';
@@ -51,7 +54,7 @@ const userWithAttachments: ProviderMessage & { role: 'user' } = {
 const openSession = async (options: {
   readonly file: ReturnType<typeof createMemoryEventLogFile>;
   readonly runId: string;
-  readonly transport: RecordingTransport;
+  readonly transport: ModelTransport;
   readonly attachments?: AttachmentReader;
 }) =>
   createAgentSession({
@@ -191,6 +194,84 @@ describe('attachment materialisation in the session (D15)', () => {
 
     expect(transport.requests[0]?.messages.at(-1)?.content).toEqual(legacy);
     expect(transport.requests[0]?.documents).toBeUndefined();
+  });
+});
+
+describe('attachment eviction agrees across devices (I1)', () => {
+  const pathOf = (index: number): string => `attachments/${String(index).padStart(64, '0')}.png`;
+  const captures = 101;
+  /** A chat of more image attachments than one request may carry, as its durable log holds it. */
+  const chatLog = async (): Promise<ReturnType<typeof createMemoryEventLogFile>> => {
+    const file = createMemoryEventLogFile();
+    const log = await file.open();
+    for (let index = 0; index < captures; index++) {
+      // oxlint-disable-next-line no-await-in-loop -- rows are appended in order.
+      await log.append({
+        version: 1,
+        leaderEpoch: 'epoch-0',
+        sequence: index,
+        recordedAt: new Date(1_700_000_000_000 + index).toISOString(),
+        runId: 'run-0',
+        type: 'message.appended',
+        message: {
+          id: `user-${String(index)}`,
+          role: 'user',
+          content: [
+            { type: 'text', text: `capture ${String(index)}` },
+            { type: 'file-ref', path: pathOf(index), mimeType: 'image/png', byteLength: 3 },
+          ],
+        },
+      });
+    }
+    await log.close();
+    return file;
+  };
+  const bytesOf = (index: number): Uint8Array<ArrayBuffer> => new Uint8Array([index, 0, 0]);
+  const reader = (missing: ReadonlySet<number>): AttachmentReader => ({
+    read: async (_chatId: string, path: string) => {
+      const index = Number(path.slice('attachments/'.length, path.indexOf('.')));
+      return missing.has(index) ? undefined : bytesOf(index);
+    },
+  });
+  /** What one device sends the provider for the chat: the Anthropic body the gateway transport builds. */
+  const sentBy = async (runId: string, missing: ReadonlySet<number>): Promise<Array<Record<string, unknown>>> => {
+    const captured: CapturedBody[] = [];
+    const session = await openSession({
+      file: await chatLog(),
+      runId,
+      transport: createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: recordingFetch([{ text: 'seen' }], captured),
+      }),
+      attachments: reader(missing),
+    });
+    await session.prompt({ id: 'user-next', role: 'user', content: 'and now?' });
+    await session.close();
+    return captured[0]!['messages'] as Array<Record<string, unknown>>;
+  };
+  const blocksOf = (message: Record<string, unknown>): Array<Record<string, unknown>> =>
+    Array.isArray(message['content']) ? (message['content'] as Array<Record<string, unknown>>) : [];
+  const imagesIn = (messages: ReadonlyArray<Record<string, unknown>>): number =>
+    messages.filter((message) => blocksOf(message).some((block) => block['type'] === 'image')).length;
+  const omittedIn = (messages: ReadonlyArray<Record<string, unknown>>): number[] =>
+    messages.flatMap((message, index) =>
+      blocksOf(message).some((block) => block['text'] === '[attachment omitted]') ? [index] : [],
+    );
+
+  it('should evict the same attachments on a device that lacks one of them as on a device that has them all', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fromDesktop = await sentBy('run-desktop', new Set());
+    /* The phone never received two of the captures: one the chat has outgrown, one it still carries. */
+    const fromPhone = await sentBy('run-phone', new Set([5, 60]));
+
+    expect(omittedIn(fromDesktop).length).toBeGreaterThan(0);
+    expect(omittedIn(fromPhone)).toEqual(omittedIn(fromDesktop));
+    const differing = fromDesktop.flatMap((message, index) =>
+      JSON.stringify(message['content']) === JSON.stringify(fromPhone[index]?.['content']) ? [] : [index],
+    );
+    /* The capture the phone lacks and still carries: the one message that differs between the devices. */
+    expect(differing).toEqual([60]);
+    expect(imagesIn(fromDesktop)).toBeLessThanOrEqual(100);
   });
 });
 
@@ -353,14 +434,8 @@ describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
     const log = await file.open();
     expect(JSON.stringify(await log.read())).not.toContain(base64(jpegBytes));
     expect(attachments.read).toHaveBeenCalledWith('chat-1', `attachments/${jpegHash}.jpg`);
-    // Restored, the still reaches the model as an image, exactly as an inline still did (older images are elided).
-    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual([
-      expect.objectContaining({
-        type: 'text',
-        text: expect.stringMatching(/^Captured 1 screenshot\(s\)\./u) as string,
-      }),
-      { type: 'text', text: '[screenshot image - previously captured]' },
-    ]);
+    // Restored, the still reaches the model exactly as an inline still did: the capture keeps its image (I1).
+    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual(still);
   });
 });
 

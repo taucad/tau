@@ -68,6 +68,7 @@ export type {
   ProjectDiscoveryEntry,
   ProjectDiscoveryIssue,
   ResolvedProjectManifest,
+  ProjectRouteVerification,
   ProjectDiscoveryResult,
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,

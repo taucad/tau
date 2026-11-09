@@ -23,6 +23,9 @@ outputs:
   api:
     description: "Conclusion of that run's `API tests (Postgres + MinIO)` and `Billing contracts` jobs: 'success' when both passed, otherwise 'skipped'"
     value: ${{ steps.find.outputs.api }}
+  lanes:
+    description: "That run's conclusion of each service lane, as JSON keyed like `ci.yml`'s `lanes.json` (`api`, `billing-e2e`), 'missing' for a job it did not report; '{}' when there is no run"
+    value: ${{ steps.find.outputs.lanes }}
 
 runs:
   using: 'composite'
@@ -38,6 +41,7 @@ runs:
         set -euo pipefail
         run_id=''
         api=skipped
+        lanes='{}'
         if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
           run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=merge_group&status=success&per_page=1" \
             --jq '.workflow_runs[0].id // empty')
@@ -49,7 +53,12 @@ runs:
             [first(.[] | select(.name == "API tests (Postgres + MinIO)") | .conclusion) // "skipped",
              first(.[] | select(.name == "Billing contracts (no Stripe credentials)") | .conclusion) // "skipped"]
             | if all(. == "success") then "success" else "skipped" end' <<< "$jobs")
-          echo "::notice::Reusing the green merge-queue run $run_id on $GITHUB_SHA (API tests and billing contracts: $api)."
+          # Per lane, so a push reuses the lane the queue ran and runs only the one it did not.
+          lanes=$(jq -c '
+            {api: (first(.[] | select(.name == "API tests (Postgres + MinIO)") | .conclusion) // "missing"),
+             "billing-e2e": (first(.[] | select(.name == "Billing contracts (no Stripe credentials)") | .conclusion) // "missing")}' <<< "$jobs")
+          echo "::notice::Reusing the green merge-queue run $run_id on $GITHUB_SHA (service lanes: $lanes)."
         fi
         echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
         echo "api=$api" >> "$GITHUB_OUTPUT"
+        echo "lanes=$lanes" >> "$GITHUB_OUTPUT"

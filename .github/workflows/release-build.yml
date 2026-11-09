@@ -658,9 +658,14 @@ jobs:
   # If-None-Match and never replaced. The upload credential (go-live SEC-9) lives
   # on the `payloads` environment; until the operator sets it this job only
   # verifies the layer and says why it skipped.
+  # Production channel only: the `payloads` credential writes the production public bucket,
+  # which also holds user content, so staging tags (and the nightly staging cron) must not
+  # read it. Staging still gets the layer from its digest-named GitHub Release. Interim
+  # until the per-environment payload buckets exist (Brain incident
+  # 2026-11-09-r2-shared-bucket-blast-radius, blueprint phase 0).
   picogk-layer-mirror:
     needs: [resolve, desktop-macos, picogk-layer-linux]
-    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}
+    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' && needs.resolve.outputs.channel == 'production' }}
     name: Mirror the Tau PicoGK ${{ matrix.target }} layer to cdn.tau.new
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -756,7 +761,7 @@ jobs:
   # The Tau UI that `tau serve` serves (charter W18, D29): the serve build,
   # without its hidden source maps, as one deterministic tar.gz no larger than
   # 150 MB (X2). Before anything is published the built CLI prepares it from a
-  # file:// mirror into an empty payload store and serves it from there, and the
+  # file:// mirror into an empty dependency store and serves it from there, and the
   # serve-build gate runs against that store path with the in-tree build moved
   # aside. The pin is composed here and landed by a follow-up PR; until then
   # `packages/cli/serve-ui-layer.json` is a fail-closed placeholder.
@@ -801,7 +806,7 @@ jobs:
       # The pin is written into this checkout only, so the CLI built next embeds it; the mirror is
       # the one source the preparation host may use (no fallback to the pinned URLs, which are not
       # published yet).
-      - name: Prepare and serve the layer from an empty payload store
+      - name: Prepare and serve the layer from an empty dependency store
         run: |
           set -euo pipefail
           sha256=$(jq -r .sha256 out/serve-ui-layer/tau-layer.json)
@@ -813,11 +818,11 @@ jobs:
           cp "out/serve-ui-layer/$asset" "$RUNNER_TEMP/mirror/blobs/sha256/$sha256"
           pnpm nx run cli:build --outputStyle=stream
           mv apps/ui/serve/build/client apps/ui/serve/build/client.in-tree
-          TAU_CONFIG_DIR="$RUNNER_TEMP/tau-config" TAU_PAYLOAD_MIRROR="file://$RUNNER_TEMP/mirror/" \
-            TAU_PAYLOAD_MIRROR_NO_FALLBACK=1 node packages/cli/dist/bin/tau.mjs serve "$RUNNER_TEMP/project" \
+          TAU_CONFIG_DIR="$RUNNER_TEMP/tau-config" TAU_DEPENDENCY_MIRROR="file://$RUNNER_TEMP/mirror/" \
+            TAU_DEPENDENCY_MIRROR_NO_FALLBACK=1 node packages/cli/dist/bin/tau.mjs serve "$RUNNER_TEMP/project" \
             --smoke-test --json --port=0 --no-external-agents | tee "$RUNNER_TEMP/serve.json"
           jq -e '.kind == "serve" and .ok == true and .ui == true' "$RUNNER_TEMP/serve.json" > /dev/null
-          root=$(find "$RUNNER_TEMP/tau-config/payloads/closures/sha256" -mindepth 3 -maxdepth 3 \
+          root=$(find "$RUNNER_TEMP/tau-config/dependencies/closures/sha256" -mindepth 3 -maxdepth 3 \
             -path '*/client/index.html' -printf '%h\n')
           test "$(wc -l <<< "$root")" = 1
           echo "STORE_UI_ROOT=$root" >> "$GITHUB_ENV"

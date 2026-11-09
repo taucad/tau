@@ -1,0 +1,264 @@
+/**
+ * T30 (AR-W15-02/03/08, AR-W22-03, AR-W23-02): the generated runtime vocabularies equal the plugin registry, and the
+ * product `kernelIds` are untouched. Regenerate with `pnpm nx run telemetry:generate-runtime-vocabulary`.
+ *
+ * T33 (AR-W15-08, AR-W16-09, R19): every `PluginCapabilities` kind is classified to a producer vocabulary and a usage
+ * series, and every registry capability is named by both.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  capabilityOf,
+  codeClassOf,
+  errorTypes,
+  fileFormatOf,
+  kernelIds,
+  pluginUsageIds,
+  runtimeMetrics,
+  usageCoverage,
+} from '@taucad/telemetry';
+import type { PluginCapability } from '@taucad/telemetry';
+import * as generated from '@taucad/telemetry/runtime-vocabulary';
+
+/** The parts of `libs/telemetry/scripts/runtime-registry.mts` this test reads. */
+type RegistryModule = Readonly<{
+  capabilityKinds: readonly string[];
+  declaredCapabilityKinds: () => readonly string[];
+  deriveRuntimeVocabulary: () => Promise<Readonly<Record<string, readonly string[]>>>;
+  registryCapabilities: () => Promise<
+    ReadonlyArray<
+      Readonly<{
+        kind: string;
+        id: string;
+        name: string | undefined;
+        extensions: readonly string[];
+        exports: readonly string[];
+        edges: ReadonlyArray<Readonly<{ from: string; to: string }>>;
+      }>
+    >
+  >;
+}>;
+
+/*
+ * The derivation lives beside the telemetry generator (it imports the plugins, which that library must not depend on);
+ * this test lives here, in the workspace-wide `scripts` project, so the plugin sources are not `telemetry:test` inputs.
+ */
+const registryModule = new URL('../../libs/telemetry/scripts/runtime-registry.mts', import.meta.url).href;
+const registry = (await import(/* @vite-ignore */ registryModule)) as RegistryModule;
+const derived = await registry.deriveRuntimeVocabulary();
+
+describe('runtime vocabularies (T30)', () => {
+  it('should equal the vocabularies derived from the plugin registry', () => {
+    const { ...actual } = generated;
+    expect(actual).toEqual(derived);
+  });
+
+  it('should derive the same PicoGK exports from the native and the browser entry point', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const picogk = capabilities.filter((capability) => capability.kind === 'kernels' && capability.id === 'picogk');
+    // Both runtimes offer the author's own STL and VDB files alongside the meshed glTF, so the two
+    // entry points declare one export vocabulary. A build that wrote no authored file offers
+    // neither of those two, which is a property of the build rather than of the entry point.
+    expect(picogk).toHaveLength(2);
+    expect(picogk.map((capability) => [...capability.exports].sort())).toEqual([
+      ['glb', 'gltf', 'stl', 'vdb'],
+      ['glb', 'gltf', 'stl', 'vdb'],
+    ]);
+    expect(generated.exportFormats).toContain('vdb');
+  });
+
+  it('should keep the product kernelIds byte-identical to main (they are not runtime plugin ids)', () => {
+    expect(kernelIds).toEqual([
+      'picogk',
+      'picovoxel',
+      'build123d',
+      'smlibpy',
+      'openscad',
+      'replicad',
+      'manifold',
+      'zoo',
+      'jscad',
+      'opencascadejs',
+      'smlib',
+      'tscircuit',
+    ]);
+    expect(generated.runtimeKernelIds).toContain('smlib');
+    expect(generated.runtimeKernelIds).toContain('openrscad');
+    expect(generated.runtimeKernelIds).not.toContain('opencascadejs');
+  });
+
+  it('should list every transcoder, job provider and machine provider the registry composes', () => {
+    expect(generated.transcoderIds).toContain('slicer');
+    expect(generated.jobProviderIds.length).toBeGreaterThan(0);
+    expect(generated.machineProviderIds.length).toBeGreaterThan(0);
+    expect(generated.bundlerIds).toEqual(['esbuild', 'rolldown']);
+    expect(generated.middlewareIds).toContain('ParameterCache');
+  });
+
+  it('should derive format as kernel export extensions and transcoder edge targets, nothing else', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const expected = new Set([
+      ...capabilities.flatMap((capability) => capability.exports),
+      ...capabilities.flatMap((capability) => capability.edges.map((edge) => edge.to)),
+    ]);
+    expect(new Set(generated.exportFormats)).toEqual(expected);
+    for (const format of ['webp', 'jpeg', 'gcode.3mf', 'dae', 'fbx', 'usda', 'usdc', 'usdz', 'csv', 'txt', 'json']) {
+      expect(generated.exportFormats).toContain(format);
+    }
+    for (const format of ['3ds', 'x', 'x3d', 'wrl', 'vrml']) {
+      expect(generated.exportFormats).not.toContain(format);
+    }
+  });
+
+  it('should keep fileFormat a superset of format with every assimp extension', async () => {
+    const fileFormats = new Set<string>(generated.fileFormats);
+    for (const format of generated.exportFormats) {
+      expect(fileFormats.has(format)).toBe(true);
+    }
+    const capabilities = await registry.registryCapabilities();
+    const assimp = capabilities.find((capability) => capability.kind === 'kernels' && capability.id === 'assimp');
+    expect(assimp?.extensions).toHaveLength(24);
+    for (const extension of assimp?.extensions ?? []) {
+      expect(fileFormats.has(extension)).toBe(true);
+    }
+    expect(fileFormatOf('model.mesh.xml')).toBe('mesh.xml');
+  });
+
+  it('should equal the conversion edges to the transcoder edges', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const edges = capabilities.flatMap((capability) => capability.edges.map((edge) => `${edge.from}→${edge.to}`));
+    expect(generated.conversionEdges).toEqual([...new Set(edges)].toSorted());
+  });
+
+  it('should map every non-kernel plugin id to a capability, and classify every error type', () => {
+    for (const id of pluginUsageIds) {
+      expect(capabilityOf[id]).toBeDefined();
+    }
+    for (const id of generated.transcoderIds) {
+      expect(capabilityOf[id]).toBe('transcoder');
+    }
+    for (const id of generated.jobProviderIds) {
+      expect(capabilityOf[id]).toBe('job');
+    }
+    for (const code of errorTypes) {
+      expect(codeClassOf[code]).toBeDefined();
+    }
+    for (const code of generated.machineFailureCodes) {
+      expect(errorTypes).toContain(code);
+    }
+  });
+});
+
+type GeneratedVocabulary = {
+  [Key in keyof typeof generated]: (typeof generated)[Key] extends readonly string[] ? Key : never;
+}[keyof typeof generated];
+
+/**
+ * The producer table of §7.1 (R19) with the usage series of §7.5, per `PluginCapabilities` kind. A kind added to
+ * `PluginCapabilities` fails this contract until it is classified here (or recorded as a blind spot in the design and
+ * classified here with that reason).
+ */
+const capabilityClassification: Readonly<
+  Record<
+    string,
+    Readonly<{
+      vocabulary: GeneratedVocabulary;
+      series: string;
+      by: string;
+      capability: PluginCapability | undefined;
+    }>
+  >
+> = {
+  kernels: {
+    vocabulary: 'runtimeKernelIds',
+    series: 'tau_runtime_operations_total',
+    by: 'kernel_id',
+    capability: undefined,
+  },
+  middleware: {
+    vocabulary: 'middlewareIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="middleware"}',
+    by: 'tau_runtime_plugin',
+    capability: 'middleware',
+  },
+  bundlers: {
+    vocabulary: 'bundlerIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="bundler"}',
+    by: 'tau_runtime_plugin',
+    capability: 'bundler',
+  },
+  transcoders: {
+    vocabulary: 'transcoderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="transcoder"}',
+    by: 'tau_runtime_plugin',
+    capability: 'transcoder',
+  },
+  jobs: {
+    vocabulary: 'jobProviderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="job"}',
+    by: 'tau_runtime_plugin',
+    capability: 'job',
+  },
+  machines: {
+    vocabulary: 'machineProviderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="machine"}',
+    by: 'tau_runtime_plugin',
+    capability: 'machine',
+  },
+};
+
+const kernelLabel = runtimeMetrics.runtimeOperations.attributes.shape['kernel.id'];
+const pluginLabel = runtimeMetrics.runtimePluginOperations.attributes.shape['tau.runtime.plugin'];
+const machinePluginLabel = runtimeMetrics.runtimeMachineOperations.attributes.shape['tau.runtime.plugin'];
+
+describe('capability classification (T33)', () => {
+  it('should classify every capability kind PluginCapabilities declares, and read each in the derivation', () => {
+    const declared = registry.declaredCapabilityKinds().toSorted();
+    expect(declared).toHaveLength(6);
+    expect(Object.keys(capabilityClassification).toSorted()).toEqual(declared);
+    expect(registry.capabilityKinds.toSorted()).toEqual(declared);
+  });
+
+  it('should give every classified kind a usage series row', () => {
+    for (const [kind, { series, by }] of Object.entries(capabilityClassification)) {
+      expect(
+        usageCoverage.some((row) => row.series === series && row.by === by),
+        kind,
+      ).toBe(true);
+    }
+    expect(usageCoverage.some((row) => row.series === 'tau_runtime_machine_operations_total')).toBe(true);
+  });
+
+  it('should name every registry capability in its producer vocabulary and keep it as its usage label', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const problems = capabilities.flatMap(({ kind, id, name }) => {
+      const classification = capabilityClassification[kind];
+      if (classification === undefined) {
+        return [`${kind}:${id}: unclassified capability kind`];
+      }
+      // Middleware is counted under its `name`, every other capability under its id.
+      const label = kind === 'middleware' ? (name ?? id) : id;
+      const found: string[] = [];
+      if (!(generated[classification.vocabulary] as readonly string[]).includes(label)) {
+        found.push(`${kind}:${label}: not in ${classification.vocabulary}`);
+      }
+      if (classification.capability === undefined) {
+        if (kernelLabel.parse(label) !== label) {
+          found.push(`${kind}:${label}: kernel_id collapses it`);
+        }
+        return found;
+      }
+      if (pluginLabel.parse(label) !== label) {
+        found.push(`${kind}:${label}: tau_runtime_plugin collapses it`);
+      }
+      if (capabilityOf[label as keyof typeof capabilityOf] !== classification.capability) {
+        found.push(`${kind}:${label}: capabilityOf is ${String(capabilityOf[label as keyof typeof capabilityOf])}`);
+      }
+      if (kind === 'machines' && machinePluginLabel.parse(label) !== label) {
+        found.push(`${kind}:${label}: machine_operations collapses it`);
+      }
+      return found;
+    });
+    expect(capabilities.length).toBeGreaterThan(0);
+    expect(problems).toEqual([]);
+  });
+});

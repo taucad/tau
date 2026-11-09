@@ -58,7 +58,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 
-const { useContextPayload } = await import('#hooks/use-context-payload.js');
+const { useContextPayload, awaitContextPayload, resetContextPayloadPublication } =
+  await import('#hooks/use-context-payload.js');
 
 const encoder = new TextEncoder();
 
@@ -94,6 +95,7 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 describe('useContextPayload', () => {
   beforeEach(() => {
     contentObservations.clear();
+    resetContextPayloadPublication();
     vi.clearAllMocks();
     catalogClosed = Promise.withResolvers<void>();
     mockListDirectory.mockResolvedValue([]);
@@ -353,6 +355,54 @@ describe('useContextPayload', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('awaitContextPayload', () => {
+  beforeEach(() => {
+    contentObservations.clear();
+    resetContextPayloadPublication();
+    vi.clearAllMocks();
+    catalogClosed = Promise.withResolvers<void>();
+    mockGetEntry.mockResolvedValue(undefined);
+    mockReadFile.mockRejectedValue(new Error('not found'));
+    mockSubscribeTree.mockReturnValue(() => undefined);
+  });
+
+  it('should resolve at once when no chat surface publishes a payload', async () => {
+    await expect(awaitContextPayload()).resolves.toBeUndefined();
+  });
+
+  it('should hand the dispatch the catalog once it has been read, not the payload before it', async () => {
+    const listing = Promise.withResolvers<ListedDirectoryEntry[]>();
+    mockListDirectory.mockReturnValue(listing.promise);
+    const hook = renderHook(() => useContextPayload());
+    let settled = false;
+    const awaited = (async () => {
+      const payload = await awaitContextPayload();
+      settled = true;
+      return payload;
+    })();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(settled, 'the wait outlasts a pending catalog').toBe(false);
+    await act(async () => {
+      listing.resolve([]);
+    });
+    const payload = await awaited;
+    expect(payload?.skills).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'create-skill', source: 'system' })]),
+    );
+    hook.unmount();
+  });
+
+  it('should send the payload it has when the catalog outlasts the wait', async () => {
+    const never = Promise.withResolvers<ListedDirectoryEntry[]>();
+    mockListDirectory.mockReturnValue(never.promise);
+    const hook = renderHook(() => useContextPayload());
+    await expect(awaitContextPayload(10)).resolves.toBeUndefined();
+    hook.unmount();
   });
 });
 

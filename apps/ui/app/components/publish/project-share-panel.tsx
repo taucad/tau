@@ -29,7 +29,7 @@ import type {
   ShareMethodSource,
   ShareSource,
 } from '@taucad/workbench-panes/share/share-source';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -51,7 +51,7 @@ import {
   shareProviderRegistry,
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 

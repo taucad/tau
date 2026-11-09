@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } from '@taucad/formal/drift';
-import { createChatMessageQueueStore, chatMessageQueuePath } from '#db/chat-message-queue-store.js';
-import type { QueuedChatMessage } from '#db/chat-message-queue-store.js';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
+import type { QueuedChatMessage } from '@taucad/chat-ui/db/chat-message-queue-store';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueueMachine } from '#machines/chat-message-queue.machine.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
@@ -64,7 +64,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'QueuePlacement.unscoped-rebase.cfg',
         ]),
         sources: hashFiles(workspace, [
-          'apps/ui/app/db/chat-message-queue-store.ts',
+          'apps/libs/chat-ui/src/db/chat-message-queue-store.ts',
           'apps/ui/app/machines/chat-message-queue.machine.ts',
           'apps/ui/app/machines/chat-session.machine.ts',
           'apps/ui/app/services/chat-session-store.ts',
@@ -72,7 +72,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'apps/ui/app/chat-clients/_internal/use-turn-admission.ts',
           'apps/ui/app/chat-clients/use-cad-chat-client.ts',
           'apps/ui/app/components/chat/chat-message-queue.tsx',
-          'apps/ui/app/components/chat/chat-message-queue-view.tsx',
+          'apps/libs/chat-ui/src/components/chat-message-queue-view.tsx',
           'apps/ui/app/components/chat/chat-textarea.tsx',
           'apps/ui/app/hooks/use-chat.tsx',
         ]),

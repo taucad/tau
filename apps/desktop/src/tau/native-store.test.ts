@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createPreparationHost, detectHostIndicators, parsePluginDeployment } from '@taucad/runtime/preparation/node';
-import type { DependencyPayload, DependencyTarget, PreparationPlugin } from '@taucad/runtime/preparation/node';
+import type { DependencyFile, DependencyTarget, PreparationPlugin } from '@taucad/runtime/preparation/node';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
@@ -24,7 +24,7 @@ const hostTarget = (): DependencyTarget => {
     : { runtime: 'native', os: 'darwin', arch: host.arch };
 };
 
-const payloadOf = (name: keyof typeof files): DependencyPayload => {
+const dependencyFileOf = (name: keyof typeof files): DependencyFile => {
   const bytes = Buffer.from(files[name]);
   return {
     name,
@@ -54,7 +54,9 @@ beforeEach(async () => {
     directory,
     deployment: parsePluginDeployment({
       schemaVersion: 1,
-      dependencies: { engine: [{ target: hostTarget(), payloads: [payloadOf('worker.py'), payloadOf('model.py')] }] },
+      dependencies: {
+        engine: [{ target: hostTarget(), files: [dependencyFileOf('worker.py'), dependencyFileOf('model.py')] }],
+      },
       kernels: { demo: { requires: ['engine'], extensions: ['py'] } },
     }),
   };
@@ -128,14 +130,14 @@ describe('startNativeStore', () => {
 
   it('should refuse every kernel, naming the store, when the store cannot be opened', async () => {
     await writeFile(join(root, 'file'), '');
-    store = join(root, 'file', 'payloads');
+    store = join(root, 'file', 'dependencies');
 
     const { frames, report } = await start();
 
     expect(report).toBeUndefined();
     expect(frames).toHaveLength(1);
     expect(frames[0]?.kernels.map(({ kernel }) => kernel)).toEqual(['demo']);
-    expect(frames[0]?.kernels[0]?.refusal).toContain(`Tau could not open its payload store at ${store}`);
+    expect(frames[0]?.kernels[0]?.refusal).toContain(`Tau could not open its dependency store at ${store}`);
   });
 });
 

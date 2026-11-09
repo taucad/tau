@@ -23,12 +23,12 @@ import {
   installFetchTripwire,
   readGoldenReceipts,
   sha256Hex,
-  startPayloadMirror,
+  startDependencyMirror,
   tarGz,
   utf8,
   wheel,
 } from '#preparation/index.js';
-import type { FixtureClosure, PayloadMirror } from '#preparation/index.js';
+import type { FixtureClosure, DependencyMirror } from '#preparation/index.js';
 
 const linuxHost: HostIndicators = {
   os: 'linux',
@@ -43,7 +43,7 @@ const sitePackages = 'python/lib/python3.13/site-packages';
 
 const closureOf = async (): Promise<FixtureClosure> =>
   createFixtureClosure({
-    payloads: [
+    dependencyFiles: [
       {
         name: 'python',
         bytes: tarGz(
@@ -105,21 +105,21 @@ const prepared = async (host: PreparationHost, closure: FixtureClosure, offline 
 };
 
 describe('createFixtureClosure', () => {
-  it('should pin every payload by its real digest for every native target', async () => {
+  it('should pin every dependency file by its real digest for every native target', async () => {
     const closure = await closureOf();
 
     expect(Object.keys(closure.manifest)).toEqual(['schemaVersion', 'kernels', 'dependencies']);
     expect(closure.deployment.dependencies['engine']?.map(({ target }) => target)).toHaveLength(4);
-    expect(closure.payloads.map(({ payload }) => payload.integrity.split('-')[0])).toEqual([
+    expect(closure.dependencyFiles.map(({ dependencyFile }) => dependencyFile.integrity.split('-')[0])).toEqual([
       'sha256',
       'sha256',
       'sha512',
     ]);
-    expect(closure.byteLength).toBe(closure.payloads.reduce((sum, { bytes }) => sum + bytes.byteLength, 0));
+    expect(closure.byteLength).toBe(closure.dependencyFiles.reduce((sum, { bytes }) => sum + bytes.byteLength, 0));
     expect([...closure.routes.keys()]).toEqual([
-      'https://registry.example/payloads/python',
-      'https://registry.example/payloads/demo',
-      'https://registry.example/payloads/worker.py',
+      'https://registry.example/files/python',
+      'https://registry.example/files/demo',
+      'https://registry.example/files/worker.py',
     ]);
   });
 
@@ -138,7 +138,7 @@ describe('createFixtureClosure', () => {
       dependency: 'runtime',
       kernel: { name: 'picogk', extensions: ['cs'] },
       targets: [{ runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' }],
-      payloads: [
+      dependencyFiles: [
         {
           name: 'layer',
           bytes: utf8('layer'),
@@ -236,8 +236,11 @@ describe('preparing a fixture closure', () => {
     expect(JSON.parse(await readFile(join(seed, 'tau-seed.json'), 'utf8'))).toEqual({
       closures: [
         {
-          payloads: [
-            { integrity: closure.payloads[2]!.payload.integrity, blob: `blobs/sha256/${closure.payloads[2]!.sha256}` },
+          dependencyFiles: [
+            {
+              integrity: closure.dependencyFiles[2]!.dependencyFile.integrity,
+              blob: `blobs/sha256/${closure.dependencyFiles[2]!.sha256}`,
+            },
           ],
         },
       ],
@@ -247,7 +250,7 @@ describe('preparing a fixture closure', () => {
   it('should refuse a registry miss with DOWNLOAD_FAILED naming the URL', async () => {
     const closure = await closureOf();
     const registry = createFakeRegistry(closure.routes);
-    registry.route('https://registry.example/payloads/python', { status: 503 });
+    registry.route('https://registry.example/files/python', { status: 503 });
 
     const failure = hostOf(closure, { fetch: registry.fetch }).prepare({
       package: closure.package,
@@ -257,7 +260,7 @@ describe('preparing a fixture closure', () => {
     await expect(failure).rejects.toBeInstanceOf(PreparationError);
     await expect(failure).rejects.toMatchObject({
       code: 'DOWNLOAD_FAILED',
-      message: expect.stringContaining('https://registry.example/payloads/python') as unknown,
+      message: expect.stringContaining('https://registry.example/files/python') as unknown,
     });
   });
 });
@@ -301,11 +304,11 @@ describe('createFakeRegistry', () => {
   });
 });
 
-describe('startPayloadMirror', () => {
-  const mirrorOf = async (closure: FixtureClosure): Promise<PayloadMirror> => {
+describe('startDependencyMirror', () => {
+  const mirrorOf = async (closure: FixtureClosure): Promise<DependencyMirror> => {
     const seed = join(scratch, 'mirror-seed');
     await closure.writeSeed(seed);
-    const mirror = await startPayloadMirror(seed);
+    const mirror = await startDependencyMirror(seed);
     disposers.push(async () => mirror.close());
     return mirror;
   };
@@ -325,11 +328,11 @@ describe('startPayloadMirror', () => {
     );
 
     expect(receipt.closureIntegrity).toBe(closure.closureIntegrity);
-    /* Payloads download concurrently, so the mirror sees them in any order. */
+    /* Dependency files download concurrently, so the mirror sees them in any order. */
     const byPath = (left: { readonly path: string }, right: { readonly path: string }): number =>
       left.path.localeCompare(right.path);
     expect(mirror.requests.filter(({ path }) => path.startsWith('blobs/')).toSorted(byPath)).toEqual(
-      closure.payloads
+      closure.dependencyFiles
         .map(({ sha256 }) => ({ method: 'GET', path: `blobs/sha256/${sha256}`, status: 200 }))
         .toSorted(byPath),
     );
@@ -340,12 +343,12 @@ describe('startPayloadMirror', () => {
     vi.unstubAllGlobals();
     const closure = await closureOf();
     const mirror = await mirrorOf(closure);
-    const python = `blobs/sha256/${closure.payloads[0]!.sha256}`;
+    const python = `blobs/sha256/${closure.dependencyFiles[0]!.sha256}`;
     const redirectDestination = `blobs/sha256/${'0'.repeat(64)}`;
     mirror.override(python, { redirect: `${mirror.url}${redirectDestination}` });
     mirror.override('overridden', { status: 500 });
 
-    const head = await fetch(`${mirror.url}blobs/sha256/${closure.payloads[1]!.sha256}`, { method: 'HEAD' });
+    const head = await fetch(`${mirror.url}blobs/sha256/${closure.dependencyFiles[1]!.sha256}`, { method: 'HEAD' });
     const missing = await fetch(`${mirror.url}blobs/sha256/${sha256Hex(utf8('absent'))}`);
     const unserved = await fetch(`${mirror.url}../etc/passwd`);
     const overridden = await fetch(`${mirror.url}overridden`);
@@ -354,7 +357,7 @@ describe('startPayloadMirror', () => {
       signal: AbortSignal.timeout(30_000),
     });
 
-    expect(head.headers.get('content-length')).toBe(String(closure.payloads[1]!.bytes.byteLength));
+    expect(head.headers.get('content-length')).toBe(String(closure.dependencyFiles[1]!.bytes.byteLength));
     expect([missing.status, unserved.status, overridden.status]).toEqual([404, 404, 500]);
     await expect(failure).rejects.toBeInstanceOf(PreparationError);
     await expect(failure).rejects.toThrow('Could not download python');

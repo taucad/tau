@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDotnetLayer, manifestText, payloadKey, runComposeTauPlugin } from '#layer.js';
+import { createDotnetLayer, manifestText, dependencyKey, runComposeTauPlugin } from '#layer.js';
 import type { DotnetLayer, DotnetLayerRecord } from '#layer.js';
 
 const layer: DotnetLayer = {
@@ -43,7 +43,7 @@ const record: DotnetLayerRecord = {
 const dotnetUrl = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz';
 const variant = (os: string, arch: string, worker = true): Record<string, unknown> => ({
   target: { runtime: 'native', os, arch },
-  payloads: [
+  files: [
     {
       name: 'dotnet',
       integrity: `sha512-${Buffer.alloc(64, 1).toString('base64')}`,
@@ -69,7 +69,7 @@ const manifest = {
 describe('createDotnetLayer', () => {
   it('should pin a layer by its digest at the CDN key and at the release named after it', () => {
     expect(rule.releaseTag(record.sha256)).toBe('sample-layer-0123456789abcdef');
-    expect(rule.payload(record)).toEqual({
+    expect(rule.dependencyFile(record)).toEqual({
       name: 'worker',
       integrity: `sha256-${Buffer.from(record.sha256, 'hex').toString('base64')}`,
       byteLength: 40_000_000,
@@ -77,7 +77,7 @@ describe('createDotnetLayer', () => {
       origin: {
         kind: 'url',
         urls: [
-          `https://cdn.tau.new/${payloadKey(record.sha256)}`,
+          `https://cdn.tau.new/${dependencyKey(record.sha256)}`,
           'https://github.com/taucad/tau/releases/download/sample-layer-0123456789abcdef/tau-sample-layer-darwin-arm64.tar.gz',
         ],
       },
@@ -88,22 +88,22 @@ describe('createDotnetLayer', () => {
 
   it("should rewrite only the record target's worker pin and keep the rest of the manifest", () => {
     const composed = rule.composeManifest(manifest, record);
-    const { runtime } = composed['dependencies'] as { runtime: Array<{ payloads: unknown[] }> };
+    const { runtime } = composed['dependencies'] as { runtime: Array<{ files: unknown[] }> };
 
-    expect(runtime[0]?.payloads[1]).toEqual(rule.payload(record));
+    expect(runtime[0]?.files[1]).toEqual(rule.dependencyFile(record));
     expect(runtime[1]).toEqual(variant('linux', 'x64', false));
     expect(manifestText(rule.composeManifest(composed, record))).toBe(manifestText(composed));
     expect(manifest.dependencies.runtime[0]).toEqual(variant('darwin', 'arm64'));
   });
 
-  it('should refuse a manifest without a worker payload for the record target', () => {
+  it('should refuse a manifest without a worker dependency file for the record target', () => {
     expect(() => rule.composeManifest({ dependencies: {} }, record)).toThrow(/no darwin-arm64 runtime variant/u);
     expect(() =>
       rule.composeManifest(
-        { dependencies: { runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, payloads: {} }] } },
+        { dependencies: { runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, files: {} }] } },
         record,
       ),
-    ).toThrow(/worker payload/u);
+    ).toThrow(/worker dependency file/u);
   });
 
   it('should add a staged variant with the worker pin when the manifest has none for the record target', () => {
@@ -112,13 +112,13 @@ describe('createDotnetLayer', () => {
     const staged = { 'linux-x64': variant('linux', 'x64', false) };
 
     const composed = rule.composeManifest(darwinOnly, linux, staged);
-    const { runtime } = composed['dependencies'] as { runtime: Array<{ payloads: unknown[] }> };
+    const { runtime } = composed['dependencies'] as { runtime: Array<{ files: unknown[] }> };
 
     expect(runtime).toEqual([
       variant('darwin', 'arm64'),
       {
         ...variant('linux', 'x64', false),
-        payloads: [...(variant('linux', 'x64', false)['payloads'] as unknown[]), rule.payload(linux)],
+        files: [...(variant('linux', 'x64', false)['files'] as unknown[]), rule.dependencyFile(linux)],
       },
     ]);
     expect(manifestText(rule.composeManifest(composed, linux, staged))).toBe(manifestText(composed));
@@ -179,8 +179,8 @@ describe('createDotnetLayer', () => {
     ]);
   });
 
-  it('should refuse to describe a worker payload this rule did not publish', () => {
-    expect(() => rule.composeSbom(manifest)).toThrow('does not describe the worker payload');
+  it('should refuse to describe a worker dependency file this rule did not publish', () => {
+    expect(() => rule.composeSbom(manifest)).toThrow('does not describe the worker dependency file');
   });
 });
 
@@ -247,7 +247,7 @@ describe('runComposeTauPlugin', () => {
   it('should compose a target the manifest does not pin from the staged variants file', async () => {
     const { manifestPath } = await setUp();
     const linux = { ...record, target: 'linux-x64', asset: 'tau-sample-layer-linux-x64.tar.gz' };
-    // The darwin-arm64 worker is a published layer, so the SBOM describes every payload.
+    // The darwin-arm64 worker is a published layer, so the SBOM describes every dependency file.
     const darwinOnly = rule.composeManifest(
       { schemaVersion: 1, dependencies: { runtime: [variant('darwin', 'arm64')] } },
       record,

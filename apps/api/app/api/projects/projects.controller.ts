@@ -28,7 +28,7 @@ import {
   isProjectRepositoryId,
   projectRegistrationsPerOwnerPerDay,
   registeredProjectLimitPerOwner,
-} from '#api/git/git.constants.js';
+} from '@taucad/api-git-core/git.constants';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 

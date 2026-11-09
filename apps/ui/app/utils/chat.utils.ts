@@ -23,9 +23,9 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
 import { formatExportDate } from '#utils/date.utils.js';
-import { getRpcOutcome } from '#services/rpc-ledger.js';
-import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
-import type { AttachmentName, StoredAttachmentRef } from '#utils/attachment.utils.js';
+import { getRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
+import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
+import type { AttachmentName, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 

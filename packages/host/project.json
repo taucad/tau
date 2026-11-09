@@ -61,6 +61,12 @@
           "TAU_SHELL_CONFORMANCE": "1"
         }
       }
+    },
+    "qualify-x1c": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register packages/host/scripts/qualify-x1c.mts"
+      }
     }
   }
 }

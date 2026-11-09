@@ -6,15 +6,15 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/project-deletion.js';
-import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
+import { completeProjectDeletion, requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
+import { storeTombstoneFence } from '@taucad/api-git-core/store/tombstone-fence';
 import { releaseDeletedProjectPublicationReferences } from '#api/publications/publication-deletion.js';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import type { ObjectStorageServiceContract } from '@taucad/api-object-storage';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 
 describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project deletion during account closure', () => {
   let observer: postgres.Sql;

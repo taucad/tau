@@ -12,10 +12,10 @@ import {
   completeProjectDeletion,
   readOwnedProjectDeletion,
   requestProjectDeletion,
-} from '#api/projects/project-deletion.js';
-import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
+} from '@taucad/api-git-core/project-deletion';
+import type { ProjectDeletionStatus } from '@taucad/api-git-core/project-deletion';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { GitExecutor } from '@taucad/api-git-core/forwarding/git-executor';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
@@ -23,7 +23,7 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 // The HTTP adapter, guard and exception filter are real. The durable deletion
 // protocol is mocked here; its PostgreSQL and storage semantics have separate tests.
-vi.mock('#api/projects/project-deletion.js', () => ({
+vi.mock('@taucad/api-git-core/project-deletion', () => ({
   completeProjectDeletion: vi.fn(),
   readOwnedProjectDeletion: vi.fn(),
   requestProjectDeletion: vi.fn(),

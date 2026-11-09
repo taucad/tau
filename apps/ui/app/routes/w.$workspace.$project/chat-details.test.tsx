@@ -44,7 +44,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 
-vi.mock('#components/ui/input-tags.js', () => ({
+vi.mock('@taucad/ui-kit/components/input-tags', () => ({
   Tags: ({ children, onTagsChange }: { children: React.ReactNode; onTagsChange: (tags: string[]) => void }) => (
     <div>
       {children}

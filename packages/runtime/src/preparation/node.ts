@@ -1,6 +1,6 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public preparation/node subpath */
 // The preparation host (API 4) for Node hosts: the `tau-plugin.json` v1 contract, host indicators and variant
-// selection, the digest-keyed payload store, and the managed profile. `tau mcp`, `tau export`, `tau prepare`, the
+// selection, the digest-keyed dependency store, and the managed profile. `tau mcp`, `tau export`, `tau prepare`, the
 // daemon parent and the desktop main process compose it; the sandboxed worker never does.
 export { computeClosureIntegrity, computeTreeIntegrity } from '#preparation/closure-receipt.js';
 export { reverifyClosure } from '#preparation/closure-verify.js';
@@ -40,17 +40,17 @@ export type {
 } from '#preparation/preparation-host.types.js';
 export type {
   ClosureReceipt,
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   DependencyVariant,
   HostIndicators,
   Integrity,
   KernelDeployment,
-  PayloadAcquisition,
-  PayloadFormat,
-  PayloadOrigin,
+  DependencyFileAcquisition,
+  DependencyFileFormat,
+  DependencyFileOrigin,
   PluginDeployment,
   PreparationErrorCode,
-  ReceiptFile,
+  InstalledFile,
   VariantAxis,
 } from '#preparation/preparation.types.js';

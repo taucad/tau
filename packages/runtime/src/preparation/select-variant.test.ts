@@ -7,7 +7,7 @@ import type { DependencyTarget, DependencyVariant, HostIndicators } from '#prepa
 
 const variant = (target: DependencyTarget): DependencyVariant => ({
   target,
-  payloads: [
+  files: [
     {
       name: 'runtime',
       integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',

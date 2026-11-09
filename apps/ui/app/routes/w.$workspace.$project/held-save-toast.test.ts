@@ -12,7 +12,7 @@ const navigate = vi.hoisted(() => vi.fn());
 type Runs = Record<string, { appendState: string }>;
 const runs = vi.hoisted((): { value: Runs } => ({ value: {} }));
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: { info: toastInfo } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { info: toastInfo } }));
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: [{ id: 'chat-mount', name: 'Mount holes' }] }) }));

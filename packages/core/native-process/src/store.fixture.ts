@@ -11,7 +11,7 @@ import { defineNativeKernelDeployment } from '#native-kernel-adopter.js';
 /** The URL every fixture deployment names as its entry. */
 export const fixtureUrl = import.meta.url;
 
-const payload = (name: string, byteLength: number) => ({
+const dependencyFile = (name: string, byteLength: number) => ({
   name,
   integrity: `sha256-${createHash('sha256').update(name).digest('base64')}`,
   byteLength,
@@ -27,9 +27,9 @@ export const engineManifest = {
     runtime: [
       {
         target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' },
-        payloads: [payload('engine-linux', 3000)],
+        files: [dependencyFile('engine-linux', 3000)],
       },
-      { target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, payloads: [payload('engine-darwin', 2000)] },
+      { target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, files: [dependencyFile('engine-darwin', 2000)] },
     ],
   },
 };
@@ -37,7 +37,7 @@ export const voxelManifest = {
   schemaVersion: 1,
   kernels: { voxel: { requires: ['runtime'], extensions: ['vox'] } },
   dependencies: {
-    runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, payloads: [payload('voxel', 5000)] }],
+    runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, files: [dependencyFile('voxel', 5000)] }],
   },
 };
 

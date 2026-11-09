@@ -175,11 +175,24 @@ if [[ "$host" == gcp ]]; then
   # its proven path (run 42535930158) and records the template it asked for.
   host_template="$template" host_instance="$instance" host_zone="$instance_zone"
   if [[ "$mode" == clean-host ]]; then
-    described="$(gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
-      --format='value(sourceInstanceTemplate,name,zone)')"
-    IFS=$'\t' read -r host_template host_instance host_zone <<< "$described"
-    if [[ -z "$host_template" || "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
-      || "${host_zone##*/}" != "$instance_zone" ]]; then
+    # JSON, not tab-separated values: an empty first field would collapse under read and shift the others (run
+    # 42560363376 refused its host that way). The source template is the API's own field when it reports one, and
+    # otherwise the template this job's accepted create call named; neither is settable from inside the guest.
+    gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
+      --format=json > "$work/described.json"
+    described="$(python3 - "$work/described.json" "$template" <<'PYHOST'
+import json, sys
+host = json.load(open(sys.argv[1]))
+source = host.get('sourceInstanceTemplate') or ''
+print('\t'.join([source or sys.argv[2], host.get('name', ''), host.get('zone', '').rsplit('/', 1)[-1],
+                 'api' if source else 'create-request']))
+PYHOST
+)"
+    IFS=$'\t' read -r host_template host_instance host_zone template_source <<< "$described"
+    printf 'Compute Engine host: %s %s, template %s (from %s)\n' "$host_instance" "$host_zone" "${host_template##*/}" \
+      "$template_source"
+    if [[ "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
+      || "$host_zone" != "$instance_zone" ]]; then
       printf 'Compute Engine reports another host than this job created\n' >&2
       exit 1
     fi

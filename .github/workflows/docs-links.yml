@@ -1,17 +1,48 @@
+# Docs external links: lychee over the https/http links of `apps/docs/content/**/*.mdx`
+# (CI throughput program, row DL-1). Three triggers, one job:
+# - Pull request and merge queue: only the `.mdx` pages the change adds or modifies, so a new
+#   broken link is caught before it lands and a third-party outage cannot fail an unrelated
+#   landing. A change to the link config or to this workflow checks every page, because it can
+#   change any page's result. `merge_group` takes no `paths` filter, so the select step decides,
+#   and a group with no docs change finishes without running lychee.
+# - Push to `main` with the same paths: every page.
+# - Daily schedule: every page, because external links rot without any commit. The nightly
+#   watchdog reads every scheduled workflow, so a red or missing sweep alerts the operator.
+# Not a `ci.yml` lane: `ci.yml` is the colour of `main` and the gate every release reads, so a
+# third-party site must not decide it; its lanes select affected Nx projects and cached targets,
+# while this checks changed files over the network uncached; and `ci.yml` is in `sharedGlobals`.
+# It is not a required check. Read-only: no deployment credentials, no Nx.
+#
+# `apps/docs/lychee.toml` accepts no 403: npm's website answers automated clients with 403, so it
+# remaps www.npmjs.com package pages to the registry, which answers 404 for a missing package.
+# Page lists reach lychee through `--files-from`, never through `args`, which the action
+# evaluates as shell.
 name: Docs external links
 
 on:
-  push:
-    branches: [geospec]
+  pull_request:
     paths:
       - 'apps/docs/content/**'
+      - 'apps/docs/lychee.toml'
+      - '.github/workflows/docs-links.yml'
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+    paths:
+      - 'apps/docs/content/**'
+      - 'apps/docs/lychee.toml'
       - '.github/workflows/docs-links.yml'
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 4 * * *' # daily 04:17 UTC
   workflow_dispatch: {}
 
 permissions:
   contents: 'read'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   links:
@@ -21,23 +52,67 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # pull_request: the base branch commit the merge ref was built on; merge_group: the
+      # queue's base. Every other event checks every page.
+      - name: Select the pages to check
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PAGES: ${{ runner.temp }}/docs-links-pages.txt
+        run: |
+          set -euo pipefail
+          full() {
+            echo 'apps/docs/content/**/*.mdx' > "$PAGES"
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "Checking every page: $1"
+          }
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            full "$EVENT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE"
+          changed=$(git diff --name-only --diff-filter=d "$BASE" HEAD)
+          if grep -qxE 'apps/docs/lychee\.toml|\.github/workflows/docs-links\.yml' <<< "$changed"; then
+            full 'the link config or this workflow changed'
+            exit 0
+          fi
+          pages=$(grep -E '^apps/docs/content/.*\.mdx$' <<< "$changed" || true)
+          if [ -z "$pages" ]; then
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo 'No docs page changed: nothing to check.'
+            exit 0
+          fi
+          # `--files-from` reads globs too: refuse a page name that is not a plain path.
+          if grep -vqE '^apps/docs/content/[A-Za-z0-9._/@()-]+\.mdx$' <<< "$pages"; then
+            echo '::error::A changed docs page has a name outside [A-Za-z0-9._/@()-].'
+            exit 1
+          fi
+          printf '%s\n' "$pages" > "$PAGES"
+          echo "mode=changed" >> "$GITHUB_OUTPUT"
+          echo 'Checking the changed pages:'
+          cat "$PAGES"
 
       - name: Restore lychee cache
+        if: steps.select.outputs.mode != 'none'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .lycheecache
           key: docs-links-${{ runner.os }}-${{ github.run_id }}
           restore-keys: docs-links-${{ runner.os }}-
 
-      # Check GeoSpec documentation pushes while the weekly schedule awaits default-branch adoption.
-      # This workflow never runs on pull requests and needs no deployment credentials.
+      # A changed page may hold no external link, so an empty result fails only a full check.
       - name: Check external documentation links
+        if: steps.select.outputs.mode != 'none'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: >-
-            --cache --max-cache-age 7d --no-progress
-            --root-dir "${{ github.workspace }}" --scheme https --scheme http
-            'apps/docs/content/**/*.mdx'
+            --config apps/docs/lychee.toml
+            --root-dir "${{ github.workspace }}"
+            --files-from "${{ runner.temp }}/docs-links-pages.txt"
           fail: true
-          failIfEmpty: true
+          failIfEmpty: ${{ steps.select.outputs.mode == 'full' }}
           jobSummary: true

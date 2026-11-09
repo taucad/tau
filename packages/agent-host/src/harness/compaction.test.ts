@@ -79,6 +79,7 @@ const recordFor = (
       journaled.push(event);
     },
     events: async () => journaled as unknown as readonly AgentLogEvent[],
+    rows: async () => journaled as unknown as readonly AgentLogEvent[],
     history: async () => history,
   };
 };
@@ -701,6 +702,7 @@ describe('Compaction', () => {
         messages: identities,
         append: async () => undefined,
         events: async () => durable as unknown as readonly AgentLogEvent[],
+        rows: async () => durable as unknown as readonly AgentLogEvent[],
         history: async () => second.map((message) => piMessageToProvider(message, identities)),
       },
       projectHistory: async () => second,
@@ -1563,6 +1565,7 @@ describe('Compaction', () => {
         messages: identities,
         append: async () => undefined,
         events: async () => [],
+        rows: async () => [],
         history: async () => durable,
       },
       projectHistory: async () => reloaded,

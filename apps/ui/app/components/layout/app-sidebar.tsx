@@ -11,7 +11,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '#components/ui/sidebar.js';
-import { TauTextWordmark } from '#components/icons/tau-text-wordmark.js';
+import { TauTextWordmark } from '@taucad/ui-kit/icons/tau-text-wordmark';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { useFeatureFlags } from '#flags/use-feature.js';

@@ -2,8 +2,8 @@ import { TriangleAlert, ChevronRight } from 'lucide-react';
 import type { UIMessagePart } from 'ai';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeBlockContent, Pre } from '#components/code/code-block.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 
 export function ChatMessagePartUnknown({ part }: { readonly part: UIMessagePart<never, never> }): React.JSX.Element {
   return (

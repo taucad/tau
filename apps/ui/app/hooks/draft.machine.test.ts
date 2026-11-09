@@ -8,11 +8,11 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
-import { createAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { draftIgnoredEvents, draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
-import { attachmentCapBytes } from '#utils/attachment.utils.js';
-import type { Attachment, StoredAttachment } from '#utils/attachment.utils.js';
+import { attachmentCapBytes } from '@taucad/chat-ui/utils/attachment.utils';
+import type { Attachment, StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
 
 type PersistDraftInput = { draft: MyUIMessage };
 type PersistEditInput = { messageId: string; draft: MyUIMessage };

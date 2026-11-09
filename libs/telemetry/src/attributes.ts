@@ -21,6 +21,12 @@ export const AttributeKey = {
   AGENT_LOOKUP_OUTCOME: 'lookup.outcome',
   AGENT_RUN_STATUS: 'run.status',
   AGENT_ASSERTION_RESULT: 'result',
+  /* Agent loop (R9): safeguard interventions and compaction decisions folded from the run's rows. */
+  AGENT_SAFEGUARD_PATTERN: 'safeguard.pattern',
+  AGENT_SAFEGUARD_ACTION: 'safeguard.action',
+  AGENT_COMPACTION_LANE: 'compaction.lane',
+  AGENT_COMPACTION_TIER: 'compaction.tier',
+  AGENT_COMPACTION_OUTCOME: 'compaction.outcome',
   /* Hosted Remote Storage: where git ran (`in_process` | `forwarded`) and how tau-storage was chosen (`off` | `rendezvous`). */
   GIT_EXECUTION: 'tau.git.execution',
   GIT_AFFINITY: 'tau.git.affinity',

@@ -8,7 +8,7 @@ import {
   chatComposerEditorTextClassName,
   chatComposerFrameClassName,
   chatComposerPlaceholder,
-} from '#components/chat/chat-input-styles.js';
+} from '@taucad/chat-ui/components/chat-input-styles';
 
 /** Run the served inline script the way the browser does: in place, where it was served. */
 const runEarlyScript = (container: HTMLElement): void => {

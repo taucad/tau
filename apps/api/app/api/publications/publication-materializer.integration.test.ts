@@ -30,22 +30,18 @@ import { Readable } from 'node:stream';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
-import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
-import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
+import { gitLfsObjectKey } from '@taucad/api-git-core/git.constants';
+import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
+import { createMemoryRepositoryStore, seedLease } from '@taucad/api-git-core/testing/publication-lease.fixture';
 import {
   materializePublication,
   materializePublishedTags,
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import type {
-  ObjectStorageServiceContract,
-  PutBlobResult,
-  PutBlobStreamArgs,
-} from '#storage/object-storage.service.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import type { ObjectStorageServiceContract, PutBlobResult, PutBlobStreamArgs } from '@taucad/api-object-storage';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 
 // Real lifecycle lock interleavings live in publication-deletion.integration.test.ts.
 vi.mock('@taucad/api-database/project-lifecycle', () => ({ assertProjectActive: vi.fn() }));

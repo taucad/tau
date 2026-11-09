@@ -8,15 +8,17 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { ENV } from '#environment.config.js';
-import { cardOf } from '#utils/chat-error-card.js';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
+  autoResumableProviderUnavailableCode,
   autoResumableRateLimitCode,
   canAutoResumeModelPending,
   lookUpModelAttempt,
   modelPendingPollMilliseconds,
   modelPendingResumeBy,
+  nextProviderUnavailableRetry,
   recordModelPendingAutoResume,
 } from '#utils/run-auto-resume.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
@@ -433,6 +435,26 @@ function codedErrorCard({
         />
       );
     }
+    /* A provider outage reads `pausedTurn` in the card map, so the category switch below never sees it: the resumable
+     * one gets its auto-resume card here while its one automatic resume is unspent, then the paused card with its Tau
+     * Debug details (regression review R6). */
+    if (
+      code === autoResumableProviderUnavailableCode &&
+      retry === 'resume' &&
+      resumable &&
+      autoResume !== undefined &&
+      nextProviderUnavailableRetry(autoResume.runId, autoResume.attempt) !== undefined
+    ) {
+      return (
+        <ChatErrorServiceUnavailable
+          className={className}
+          resumable
+          title='Service Temporarily Unavailable'
+          description={error.message}
+          autoResume={autoResume}
+        />
+      );
+    }
     return paused;
   }
 
@@ -800,6 +822,11 @@ function ChatErrorBody({
           resumable={resumable}
           title={category === 'billingRecovery' ? 'Finalizing earlier work' : undefined}
           description={parsedError.message}
+          autoResume={
+            parsedError.code === autoResumableProviderUnavailableCode
+              ? autoResumeTarget(currentRunId, currentAttempt)
+              : undefined
+          }
         />
       );
     }

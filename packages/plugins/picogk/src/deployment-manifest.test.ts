@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { parsePluginDeployment, selectVariant, targetKey } from '@taucad/runtime/preparation/node';
 import type {
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   HostIndicators,
   SelectVariantOptions,
@@ -19,11 +19,11 @@ const sbomText = readFileSync(resolve(import.meta.dirname, '../tau-plugin.cdx.js
 const stagedText = readFileSync(resolve(import.meta.dirname, '../tau-plugin.variants.json'), 'utf8');
 const deployment = parsePluginDeployment(JSON.parse(text), '@taucad/picogk tau-plugin.json');
 const variants = deployment.dependencies['runtime'] ?? [];
-const payload = (name: string, key: string): DependencyPayload => {
+const dependencyFile = (name: string, key: string): DependencyFile => {
   const variant = variants.find(({ target }) => targetKey(target) === key);
-  const found = variant?.payloads.find((candidate) => candidate.name === name);
+  const found = variant?.files.find((candidate) => candidate.name === name);
   if (found === undefined) {
-    throw new Error(`No ${name} payload for ${key}`);
+    throw new Error(`No ${name} dependency file for ${key}`);
   }
   return found;
 };
@@ -52,7 +52,7 @@ describe('tau-plugin.json', () => {
     { key: 'darwin-arm64', rid: 'osx-arm64' },
     { key: 'linux-x64-glibc', rid: 'linux-x64' },
   ])("pins Microsoft's $rid runtime archive verbatim from its publisher", ({ key, rid }) => {
-    const dotnet = payload('dotnet', key);
+    const dotnet = dependencyFile('dotnet', key);
 
     expect(dotnet).toMatchObject({ format: 'tar.gz', destination: 'dotnet' });
     expect(dotnet.stripComponents).toBeUndefined();
@@ -75,7 +75,7 @@ describe('tau-plugin.json', () => {
     { key: 'darwin-arm64', asset: 'tau-picogk-layer-darwin-arm64.tar.gz' },
     { key: 'linux-x64-glibc', asset: 'tau-picogk-layer-linux-x64.tar.gz' },
   ])('addresses the $key Tau layer by its digest on the CDN and on its immutable release', ({ key, asset }) => {
-    const worker = payload('worker', key);
+    const worker = dependencyFile('worker', key);
     const sha256 = hex(worker.integrity);
 
     expect(worker).toMatchObject({ format: 'tar.gz', destination: 'tau-worker' });
@@ -163,7 +163,7 @@ describe('tau-plugin.json targets', () => {
 });
 
 describe('tau-plugin.cdx.json', () => {
-  it('ships the SBOM the manifest derives: a purl, the pinned hash and every URL per payload (D26)', () => {
+  it('ships the SBOM the manifest derives: a purl, the pinned hash and every URL per dependency file (D26)', () => {
     const sbom = JSON.parse(sbomText) as {
       readonly specVersion: string;
       readonly components: ReadonlyArray<{
@@ -173,7 +173,7 @@ describe('tau-plugin.cdx.json', () => {
         readonly externalReferences: ReadonlyArray<{ readonly type: string; readonly url: string }>;
       }>;
     };
-    const pinned = variants.flatMap((variant) => variant.payloads);
+    const pinned = variants.flatMap((variant) => variant.files);
 
     expect(sbom).toEqual(composeSbom(JSON.parse(text) as Record<string, unknown>));
     expect(sbom.specVersion).toBe('1.6');
@@ -186,11 +186,11 @@ describe('tau-plugin.cdx.json', () => {
       })),
     ).toEqual(
       expect.arrayContaining(
-        pinned.map((payload) => ({
-          name: payload.name === 'dotnet' ? 'dotnet-runtime' : 'tau-picogk-layer',
-          purl: payload.name === 'dotnet' ? 'pkg:generic/microsoft/dotnet-runtime' : 'pkg:github/taucad/tau',
-          hash: hex(payload.integrity),
-          urls: payload.origin.kind === 'url' ? payload.origin.urls : [],
+        pinned.map((dependencyFile) => ({
+          name: dependencyFile.name === 'dotnet' ? 'dotnet-runtime' : 'tau-picogk-layer',
+          purl: dependencyFile.name === 'dotnet' ? 'pkg:generic/microsoft/dotnet-runtime' : 'pkg:github/taucad/tau',
+          hash: hex(dependencyFile.integrity),
+          urls: dependencyFile.origin.kind === 'url' ? dependencyFile.origin.urls : [],
         })),
       ),
     );

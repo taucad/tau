@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 const state = vi.hoisted(() => ({
   paths: ['/Users/tester/Documents/Tau Workspace'],
@@ -63,7 +63,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => ({
     workspaceOpenFailed: vi.fn(),
   }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 beforeEach(() => {
   vi.clearAllMocks();

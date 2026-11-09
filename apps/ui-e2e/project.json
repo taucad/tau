@@ -10,20 +10,12 @@
     "test": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
+      "metadata": {
+        "description": "Node-only suites: none of them serves apps/ui/build (ui-build-snapshot.test.ts builds a fixture tree in a temp directory), so this target builds no web UI variant and carries no env fixture. serve-ui-build.test.ts reads apps/ui/serve/build, which the ui:build:serve dependency produces and caches. The browser tiers below still build ui themselves."
+      },
       "options": {
         "cwd": "{workspaceRoot}",
-        "parallel": false,
-        "commands": [
-          "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
-        ],
-        "env": {
-          "TAU_E2E_UI_SNAPSHOT": "true",
-          "TAU_CLOUD_ENABLED": "false",
-          "TAU_API_URL": "http://localhost:4000",
-          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
-          "TAU_FRONTEND_URL": "http://localhost:3000"
-        }
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
       }
     },
     "test:e2e": {

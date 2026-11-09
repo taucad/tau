@@ -76,7 +76,7 @@ vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon'>{id}</span>,
 }));
 

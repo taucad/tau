@@ -50,6 +50,12 @@
       "path": "./apps/libs/api-email"
     },
     {
+      "path": "./apps/libs/api-git-core"
+    },
+    {
+      "path": "./apps/libs/api-git-mirror"
+    },
+    {
       "path": "./apps/libs/api-hosts"
     },
     {
@@ -59,10 +65,16 @@
       "path": "./apps/libs/api-llm-gateway"
     },
     {
+      "path": "./apps/libs/api-object-storage"
+    },
+    {
       "path": "./apps/libs/api-observability"
     },
     {
       "path": "./apps/libs/api-redis"
+    },
+    {
+      "path": "./apps/libs/api-testing"
     },
     {
       "path": "./apps/libs/billing"

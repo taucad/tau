@@ -17,7 +17,7 @@ const manifest = (urls: readonly string[], pin = integrity('sha512', bytes), byt
     runtime: [
       {
         target: { runtime: 'native', os: 'darwin', arch: 'arm64' },
-        payloads: [
+        files: [
           {
             name: 'worker',
             integrity: pin,
@@ -83,7 +83,7 @@ describe('check-payload-urls', () => {
   it('skips a placeholder pin with a notice naming the package and still checks every real pin', async () => {
     const placeholder = integrity('sha256', new Uint8Array());
     const value = manifest(['https://real.test/x']);
-    value.dependencies.runtime[0]!.payloads.push({
+    value.dependencies.runtime[0]!.files.push({
       name: 'layer',
       integrity: placeholder,
       byteLength: 1,

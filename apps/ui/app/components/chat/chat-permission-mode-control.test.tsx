@@ -37,7 +37,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     session: state.chatId === undefined ? undefined : { activeChatId: state.chatId },
   }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
 
 let stored: PermissionMode = 'ask';
 const setChatMode = vi.fn(async (_chat: unknown, mode: PermissionMode, _confirmed: boolean) => {

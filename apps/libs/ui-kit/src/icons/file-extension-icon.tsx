@@ -1,0 +1,215 @@
+import { File as FileIcon } from 'lucide-react';
+import type { FileExtension } from '@taucad/types';
+import { fileExtensionSet } from '@taucad/types/constants';
+import { FormatBadge } from '@taucad/workbench-panes/components/format-badge';
+import { SvgIcon } from '#icons/svg-icon.js';
+import type { SvgIcons } from '#icons/generated/svg-icons.js';
+
+type IconConfig =
+  | {
+      type: 'lib';
+      id: SvgIcons;
+    }
+  | {
+      type: 'format-3d';
+      id: FileExtension;
+    };
+
+// Export-only text formats in the extension catalog; they carry no 3D badge.
+const textFormats: ReadonlySet<FileExtension> = new Set<FileExtension>(['csv', 'json', 'txt']);
+
+// Only lib types and renamed format-3d types (where extension doesn't match format name)
+const iconConfigMap: Partial<Record<string, IconConfig>> = {
+  // Languages (lib types)
+  scad: {
+    type: 'lib',
+    id: 'openscad',
+  },
+  kcl: {
+    type: 'lib',
+    id: 'zoo',
+  },
+  js: {
+    type: 'lib',
+    id: 'javascript',
+  },
+  jsx: {
+    type: 'lib',
+    id: 'react',
+  },
+  ts: {
+    type: 'lib',
+    id: 'typescript',
+  },
+  tsx: {
+    type: 'lib',
+    id: 'react',
+  },
+  py: {
+    type: 'lib',
+    id: 'python',
+  },
+  cs: {
+    type: 'lib',
+    id: 'csharp',
+  },
+  wasm: {
+    type: 'lib',
+    id: 'webassembly',
+  },
+
+  // Special lib types for 3D formats
+  gltf: {
+    type: 'lib',
+    id: 'gltf',
+  },
+  glb: {
+    type: 'lib',
+    id: 'gltf',
+  },
+  fbx: {
+    type: 'lib',
+    id: 'autodesk',
+  },
+  dae: {
+    type: 'lib',
+    id: 'collada',
+  },
+
+  // USD formats
+  usda: {
+    type: 'lib',
+    id: 'usd',
+  },
+  usdc: {
+    type: 'lib',
+    id: 'usd',
+  },
+  usdz: {
+    type: 'lib',
+    id: 'usd',
+  },
+
+  // Renamed format-3d types (extension doesn't match format name)
+  stp: {
+    type: 'format-3d',
+    id: 'step',
+  },
+  // A sliced print container is a G-code program first, not a 3MF mesh.
+  'gcode.3mf': {
+    type: 'format-3d',
+    id: 'gcode',
+  },
+
+  // Version Control (lib types)
+  gitignore: {
+    type: 'lib',
+    id: 'git',
+  },
+  gitkeep: {
+    type: 'lib',
+    id: 'git',
+  },
+  gitattributes: {
+    type: 'lib',
+    id: 'git',
+  },
+};
+
+// Configured multi-part extensions such as `gcode.3mf`, which win over their last segment.
+const compoundExtensions = Object.keys(iconConfigMap).filter((extension) => extension.includes('.'));
+
+// Whole-filename matches, checked before the extension table so `tau.json`
+// and `package.json` do not collapse into the generic `.json` icon — the same
+// rule editors use to badge `package.json` or `vite.config.ts`.
+const iconConfigByFilename: Partial<Record<string, IconConfig>> = {
+  'tau.json': {
+    type: 'lib',
+    id: 'tau',
+  },
+  'package.json': {
+    type: 'lib',
+    id: 'npm',
+  },
+  'readme.md': {
+    type: 'lib',
+    id: 'readme.md',
+  },
+};
+
+/** Lowercased text after the last dot, or `''` when there is none (same rule as the app's `getFileExtension`). */
+function getFileExtension(filename: string): string {
+  const lastDotIndex = filename.lastIndexOf('.');
+  if (lastDotIndex === -1 || lastDotIndex === filename.length - 1) {
+    return '';
+  }
+
+  return filename.slice(lastDotIndex + 1).toLowerCase();
+}
+
+/** Last path segment, lowercased — call sites pass bare names and full paths alike. */
+function getBasename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+}
+
+function getIconConfig(filename: string): IconConfig | undefined {
+  // Priority 1: whole-filename match
+  const basename = getBasename(filename);
+  const filenameConfig = iconConfigByFilename[basename];
+  if (filenameConfig) {
+    return filenameConfig;
+  }
+
+  // Priority 2: extension match
+  const extension =
+    compoundExtensions.find((candidate) => basename.endsWith(`.${candidate}`)) ?? getFileExtension(filename);
+  const explicitConfig = iconConfigMap[extension];
+  if (explicitConfig) {
+    return explicitConfig;
+  }
+
+  if (fileExtensionSet.has(extension as FileExtension) && !textFormats.has(extension as FileExtension)) {
+    return {
+      type: 'format-3d',
+      id: extension as FileExtension,
+    };
+  }
+
+  // Priority 3: Fallback (return undefined, will use FileIcon)
+  return undefined;
+}
+
+/**
+ * Renders an icon based on a file's extension, using branded SVG icons for known
+ * languages and 3D format badges for CAD file types, with a generic file icon fallback.
+ */
+export function FileExtensionIcon({
+  filename,
+  className,
+}: {
+  readonly filename: string;
+  readonly className?: string;
+}): React.JSX.Element {
+  const config = getIconConfig(filename);
+
+  if (!config) {
+    return <FileIcon className={className} />;
+  }
+
+  if (config.type === 'lib') {
+    return <SvgIcon id={config.id} className={className} />;
+  }
+
+  return <FormatBadge extension={config.id} className={className} />;
+}
+
+/**
+ * Get the icon ID for a filename or path using the priority system:
+ * 1. Whole-filename config
+ * 2. Extension config
+ * 3. Supported 3D formats
+ * 4. Returns undefined for fallback
+ */
+export function getIconIdForFilename(filename: string): string | undefined {
+  return getIconConfig(filename)?.id;
+}

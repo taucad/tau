@@ -1,7 +1,7 @@
 import { Hammer, Printer, Import, Plug, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
-import { PartsIcon } from '#components/icons/parts.js';
+import { PartsIcon } from '@taucad/ui-kit/icons/parts';
 
 export type NavRoute = {
   title: string;
@@ -20,7 +20,7 @@ export const navRoutes: {
 } = {
   navMain: [
     {
-      title: 'All projects',
+      title: 'Projects',
       url: '/projects',
       icon: Hammer,
       // Items: [

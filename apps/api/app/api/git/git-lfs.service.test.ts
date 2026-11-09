@@ -5,17 +5,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GoneException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '@taucad/api-database';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
+import { gitLfsObjectKey } from '@taucad/api-git-core/git.constants';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import type { ConfigService } from '@nestjs/config';
 import { verifyFileLink, decodeBase64, importFileLinkVerifyKey } from '@taucad/file-links';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
-import { FileLinksService } from '#storage/file-links.service.js';
-import type { FileLinksEnvironment } from '#storage/file-links.service.js';
-import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import { FileLinksService } from '@taucad/api-object-storage/file-links';
+import type { FileLinksEnvironment } from '@taucad/api-object-storage/file-links';
+import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 
 const access: GitAccess = {
   projectId: 'proj_1',

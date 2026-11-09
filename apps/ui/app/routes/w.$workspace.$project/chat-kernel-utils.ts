@@ -8,8 +8,8 @@ import type {
   SpanNode,
   TelemetryTrace,
   TelemetryTraceKind,
-} from '#routes/w.$workspace.$project/chat-kernel-types.js';
-import { categoryLabels, phaseLabels, phaseOrder } from '#routes/w.$workspace.$project/chat-kernel-types.js';
+} from '@taucad/project-workspace/utils/chat-kernel-types';
+import { categoryLabels, phaseLabels, phaseOrder } from '@taucad/project-workspace/utils/chat-kernel-types';
 
 const traceKindsByRootName: Record<string, TelemetryTraceKind> = {
   'kernel.bootstrap': 'bootstrap',

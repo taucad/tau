@@ -25,7 +25,7 @@ import type { TauCloudOwner } from '#git/tau-cloud-fixture.js';
 /**
  * Charter W10, items 4 and 6: fault injection and chaos, in real processes.
  *
- * `apps/api/app/api/git/store/commit.integration.test.ts` already crashes the
+ * `apps/libs/api-git-core/src/store/commit.integration.test.ts` already crashes the
  * committer at each of `fault-points.ts`'s five points **inside one process**,
  * with the callback the commit protocol awaits. This suite is the other half:
  * the worker is a real operating-system process, the fault is on the wire

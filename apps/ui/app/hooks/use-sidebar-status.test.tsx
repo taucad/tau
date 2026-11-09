@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
-import * as questionTool from '#utils/question-tool.js';
+import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
+import * as questionTool from '@taucad/chat-ui/utils/question-tool';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
@@ -1249,7 +1249,7 @@ const compiledHooks = await (async () => {
   const modules: Record<string, unknown> = {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
-    '#utils/question-tool.js': questionTool,
+    '@taucad/chat-ui/utils/question-tool': questionTool,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),

@@ -5,7 +5,7 @@ import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import type { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import type { ProjectAccessService, ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type {
@@ -14,7 +14,7 @@ import type {
 } from '#api/entitlements/commercial-entitlements.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
 import { UsageController } from '#api/git/usage.controller.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 

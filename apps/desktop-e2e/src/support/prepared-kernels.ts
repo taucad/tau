@@ -13,7 +13,7 @@ import { expectGeometryFramed } from '#support/scenario.js';
  * Prepared native kernels for the desktop suite.
  *
  * The app ships no kernel closure: a native kernel (Build123d, PicoGK, SMLibPy) downloads on first use into the
- * payload store, `<TAU_CONFIG_DIR>/payloads`, which the fixture gives every launch afresh. So the suite does not
+ * dependency store, `<TAU_CONFIG_DIR>/dependencies`, which the fixture gives every launch afresh. So the suite does not
  * download a few hundred megabytes per spec, it keeps one store of sealed closures for the whole run: before a launch
  * the fixture copies them into the launch's store, where main composes and links them at startup like any other
  * ready closure, and when the session closes it copies back any closure the launch prepared. A spec that exercises
@@ -22,7 +22,7 @@ import { expectGeometryFramed } from '#support/scenario.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 /** Reproducible from the pins in each native package's `tau-plugin.json`, so a dependency reinstall may delete it. */
-const cacheRoot = join(workspaceRoot, 'node_modules/.cache/desktop-e2e/payloads');
+const cacheRoot = join(workspaceRoot, 'node_modules/.cache/desktop-e2e/dependencies');
 const execFileAsync = promisify(execFile);
 
 /* Through the session rather than from `playwright`, which only the suite's driver boundary imports. */
@@ -58,7 +58,7 @@ const copyTree = async (source: string, target: string): Promise<void> => {
 
 /**
  * Copy every cached closure the store lacks into it, before the app opens the store.
- * @param store - The launch's payload store, `<TAU_CONFIG_DIR>/payloads`.
+ * @param store - The launch's dependency store, `<TAU_CONFIG_DIR>/dependencies`.
  * @returns Nothing.
  */
 export const restorePreparedKernels = async (store: string): Promise<void> => {
@@ -79,7 +79,7 @@ export const restorePreparedKernels = async (store: string): Promise<void> => {
  * Copy every sealed closure of the store that the cache lacks, or holds with another seal, into the cache. Each
  * closure is copied beside its place and renamed in, so a concurrent reader never sees a partial one; when another
  * session got there first, its copy stands.
- * @param store - The closed session's payload store; nothing may still be preparing in it.
+ * @param store - The closed session's dependency store; nothing may still be preparing in it.
  * @returns Nothing.
  */
 export const savePreparedKernels = async (store: string): Promise<void> => {

@@ -9,7 +9,7 @@ import {
   chatComposerFrameClassName,
   chatComposerMainEditorAreaClassName,
   chatComposerShellClassName,
-} from '#components/chat/chat-input-styles.js';
+} from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
@@ -35,17 +35,17 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
-import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
+import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea-border-beam';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
-import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
+import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
 import type { CadReference } from '@taucad/chat/references';
 import {
   buildEditorContentJson,
@@ -53,13 +53,13 @@ import {
   extractContent,
   useChatEditor,
 } from '#components/chat/tiptap/use-chat-editor.js';
-import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
-import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
-import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
-import { buildPastedContent, commandInvocation } from '#utils/at-reference.utils.js';
+import type { ContextSuggestionItem, SlashCommandItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
+import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
+import { createScreenshotContextHandler } from '@taucad/chat-ui/components/screenshot-actions.utils';
+import { buildPastedContent, commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 import { skillMetadataToSlashCommand, useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import type { SkillsCatalogState } from '#hooks/use-skills-catalog.js';
-import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
+import type { ChatContextReference } from '@taucad/chat-ui/components/chat-context-insertion';
 
 /** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
 const noSkills: SkillsCatalogState['commands'] = [];

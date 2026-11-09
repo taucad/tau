@@ -143,7 +143,7 @@ describe('createBillableModelEvidenceCollector', () => {
     );
     collector.accept(
       bytes(
-        'data: {"message":{"id":"msg_1","usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"output_tokens":1}}}\n\ndata: {"usage":{"output_tokens":9}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
+        'data: {"message":{"id":"msg_1","usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":30,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}\n\ndata: {"usage":{"output_tokens":9}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
       ),
     );
 
@@ -152,9 +152,78 @@ describe('createBillableModelEvidenceCollector', () => {
       meterItems: [
         { dimension: 'uncached_input', quantity: 10n },
         { dimension: 'cache_read', quantity: 20n },
-        { dimension: 'cache_write', quantity: 30n },
+        { dimension: 'cache_write', tier: '5m', quantity: 30n },
+        { dimension: 'cache_write', tier: '1h', quantity: 0n },
         { dimension: 'output', quantity: 9n },
       ],
+    });
+  });
+
+  /*
+   * A one-hour write costs 2× base input and a five-minute write 1.25×, so the
+   * collector prices Anthropic writes only from the supplier's per-lifetime split.
+   */
+  describe('Anthropic cache writes by lifetime', () => {
+    const dimensions = new Set(['uncached_input', 'cache_read', 'cache_write', 'output']);
+    const settle = (usage: string) => {
+      const collector = createBillableModelEvidenceCollector('anthropic', dimensions, 'anthropic');
+      collector.accept(
+        bytes(
+          `data: {"message":{"id":"msg_1","usage":${usage}}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`,
+        ),
+      );
+      return collector.complete();
+    };
+
+    it('should meter each lifetime at its own tier', () => {
+      expect(
+        settle(
+          '{"input_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":30},"output_tokens":2}',
+        ),
+      ).toMatchObject({
+        kind: 'final_usage',
+        meterItems: [
+          { dimension: 'uncached_input', quantity: 4n },
+          { dimension: 'cache_read', quantity: 0n },
+          { dimension: 'cache_write', tier: '5m', quantity: 20n },
+          { dimension: 'cache_write', tier: '1h', quantity: 30n },
+          { dimension: 'output', quantity: 2n },
+        ],
+      });
+    });
+
+    it('should price a turn that wrote nothing and reported no split', () => {
+      expect(
+        settle('{"input_tokens":4,"cache_read_input_tokens":7,"cache_creation_input_tokens":0,"output_tokens":2}'),
+      ).toMatchObject({
+        kind: 'final_usage',
+        meterItems: [
+          { dimension: 'uncached_input', quantity: 4n },
+          { dimension: 'cache_read', quantity: 7n },
+          { dimension: 'cache_write', tier: '5m', quantity: 0n },
+          { dimension: 'cache_write', tier: '1h', quantity: 0n },
+          { dimension: 'output', quantity: 2n },
+        ],
+      });
+    });
+
+    it('should leave writes unpriced when the split is missing', () => {
+      const evidence = settle(
+        '{"input_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":50,"output_tokens":2}',
+      );
+      expect(evidence.kind).toBe('absorbed_unknown');
+      expect(
+        evidence.kind === 'absorbed_unknown'
+          ? evidence.meterItems?.some((item) => item.dimension === 'cache_write')
+          : undefined,
+      ).toBe(false);
+    });
+
+    it('should leave writes unpriced when the split does not add up to the total', () => {
+      const evidence = settle(
+        '{"input_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":20},"output_tokens":2}',
+      );
+      expect(evidence.kind).toBe('absorbed_unknown');
     });
   });
 

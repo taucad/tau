@@ -127,6 +127,23 @@ describe('searchSettings', () => {
     expect(settingsSections.flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('browser-storage');
   });
 
+  it('should offer the analytics switch in Data controls on desktop only, where cookie preferences do not apply', async () => {
+    const dataControls = (sections: typeof settingsSections): string[] =>
+      sections.find(({ id }) => id === 'data-controls')?.entries.map(({ id }) => id) ?? [];
+    expect(dataControls(settingsSections)).not.toContain('desktop-analytics');
+    expect(dataControls(settingsSections)).toContain('cookie-preferences');
+
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    vi.resetModules();
+    const desktop = await import('#components/settings/settings-registry.js');
+
+    expect(dataControls(desktop.settingsSections)).toContain('desktop-analytics');
+    expect(dataControls(desktop.settingsSections)).not.toContain('cookie-preferences');
+    expect(desktop.searchSettings('analytics').flatMap(({ entries }) => entries.map(({ id }) => id))).toEqual([
+      'desktop-analytics',
+    ]);
+  });
+
   it('should hide automatic reload from search and Experimental', () => {
     expect(searchSettings('automatic reload')).toEqual([]);
     expect(experimentalFeatureFlagNames).not.toContain('automaticReload');

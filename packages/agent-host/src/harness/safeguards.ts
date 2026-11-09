@@ -2,20 +2,9 @@ import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { anomalyPattern } from '#harness/safeguard-pattern.js';
+import type { AnomalyPattern } from '#harness/safeguard-pattern.js';
 import { canonicalJson } from '#log/canonical-json.js';
-
-/** Stable safeguard pattern identifiers shared with the transitional agent. @public */
-export const anomalyPattern = {
-  identicalError: 'identical_error',
-  identicalCall: 'identical_call',
-  perTargetEdit: 'per_target_edit',
-  pingPong: 'ping_pong',
-  emptyResult: 'empty_result',
-  sameErrorDifferentArgs: 'same_error_different_args',
-} as const;
-
-/** Stable identifier for one safeguard detector family. @public */
-export type AnomalyPattern = (typeof anomalyPattern)[keyof typeof anomalyPattern];
 
 /** Normalized tool execution consumed by safeguard detectors. @public */
 export type ToolEventSummary = {

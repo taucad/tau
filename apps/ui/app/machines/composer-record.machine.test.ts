@@ -16,8 +16,12 @@ import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MyUIMessage } from '@taucad/chat';
-import type { ComposerRecord, ComposerRecordPatch, ComposerRecordReadResult } from '#db/composer-record-store.js';
-import { ComposerRecordInputError } from '#db/composer-record-store.js';
+import type {
+  ComposerRecord,
+  ComposerRecordPatch,
+  ComposerRecordReadResult,
+} from '@taucad/chat-ui/db/composer-record-store';
+import { ComposerRecordInputError } from '@taucad/chat-ui/db/composer-record-store';
 import * as machineModule from './composer-record.machine.js';
 import { composerRecordIgnoredEvents, composerRecordMachine } from './composer-record.machine.js';
 import type { ComposerRecordMachineEmitted } from './composer-record.machine.js';

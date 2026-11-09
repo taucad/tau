@@ -6,7 +6,7 @@
     "runtime": [
       {
         "target": { "runtime": "native", "os": "darwin", "arch": "arm64" },
-        "payloads": [
+        "files": [
           {
             "name": "dotnet",
             "integrity": "sha512-6WqKgQjVo7cOgnVnskk+3lQPNwXBIJ5/NHNrpqo5jdTQ0V8x62Z8nMo9vNMK2DsxWobV6aE/0sNw4vwM7OckNg==",

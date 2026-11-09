@@ -4,7 +4,7 @@ import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
 import { Button } from '@taucad/ui/components/button';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { CollectionEmptyState } from '@taucad/ui-kit/components/collection-empty-state';
 
 export const ChatExamples = memo(function () {
   // Lazy initialization to ensure consistent examples across renders.

@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { Link, useParams } from 'react-router';
 import { Download, LayoutGrid, Link2 } from 'lucide-react';
-import { TauWordmark } from '#components/icons/tau-wordmark.js';
+import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { ForkAction } from '#components/share/fork-action.js';
@@ -9,7 +9,7 @@ import type { ParsedPublication } from '#components/share/parsed-publication.js'
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 type PublicationTopbarProps = {
   readonly publication: ParsedPublication;

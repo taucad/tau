@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   defaultConfigDirectory,
-  defaultPayloadStore,
+  defaultDependencyStore,
   hostCredentialPath,
   readHostCredential,
   removeHostCredential,
@@ -41,15 +41,15 @@ describe('host credential store', () => {
   });
 });
 
-describe('defaultPayloadStore', () => {
+describe('defaultDependencyStore', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('should be <TAU_CONFIG_DIR>/payloads when the one override is set', () => {
+  it('should be <TAU_CONFIG_DIR>/dependencies when the one override is set', () => {
     vi.stubEnv('TAU_CONFIG_DIR', '/srv/tau-config');
 
-    expect(defaultPayloadStore()).toBe(join('/srv/tau-config', 'payloads'));
+    expect(defaultDependencyStore()).toBe(join('/srv/tau-config', 'dependencies'));
   });
 
   it.runIf(process.platform === 'linux')('should live under the XDG data root, never the config root, on Linux', () => {
@@ -57,7 +57,7 @@ describe('defaultPayloadStore', () => {
     vi.stubEnv('XDG_CONFIG_HOME', '/home/user/.config');
     vi.stubEnv('XDG_DATA_HOME', '/home/user/.local/share');
 
-    expect(defaultPayloadStore()).toBe('/home/user/.local/share/tau/payloads');
-    expect(defaultPayloadStore().startsWith(defaultConfigDirectory())).toBe(false);
+    expect(defaultDependencyStore()).toBe('/home/user/.local/share/tau/dependencies');
+    expect(defaultDependencyStore().startsWith(defaultConfigDirectory())).toBe(false);
   });
 });

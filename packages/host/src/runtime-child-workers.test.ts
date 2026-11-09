@@ -61,7 +61,7 @@ describe('createRuntimeChildRuntimeVerifier', () => {
     const refused = verify('/b', signal);
     const malformed = verify('/c', signal);
     channel.answer({ type: 'native-worker:verified', id: 'verify-1' });
-    channel.answer({ type: 'native-worker:verified', id: 'verify-2', message: 'not inside the payload store' });
+    channel.answer({ type: 'native-worker:verified', id: 'verify-2', message: 'not inside the dependency store' });
     channel.answer({ type: 'native-worker:verified', id: 'verify-3', files: [1], remedy: 'x' });
 
     await expect(Promise.all([intact, refused, malformed])).resolves.toEqual([undefined, undefined, undefined]);

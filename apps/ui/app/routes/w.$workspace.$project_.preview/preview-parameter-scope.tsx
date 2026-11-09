@@ -4,7 +4,7 @@ import { parametersDirectory } from '@taucad/types';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 type SourceFiles = Pick<ReturnType<typeof useFileManager>, 'exists' | 'readdir' | 'stat' | 'readFile'>;
 type ParameterState = { service: ParameterSetService } | { error: string } | undefined;

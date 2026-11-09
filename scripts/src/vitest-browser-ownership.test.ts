@@ -118,6 +118,8 @@ describe('Vitest Browser test-runner ownership', () => {
       // The staging billing harness pays a hosted Stripe Checkout in headless Chromium, which Browser Mode cannot
       // host; its specs reach the driver only through this module.
       'apps/billing-e2e/src/support/checkout.ts',
+      // The attach readiness proof launches a browser on its own debugging port, as the installed app is launched.
+      'apps/desktop-e2e/scripts/qualification-cdp-ready.test.mts',
       // Installed release qualification attaches only to an explicitly disposable Electron renderer over loopback
       // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
       'apps/desktop-e2e/scripts/qualification-renderer.mts',
@@ -314,6 +316,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/components/terminal/terminal-renderer.vitest.browser.config.ts',
+        'apps/ui/app/machines/project-open.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',

@@ -46,10 +46,10 @@ import {
   projectAgentHostLiveEvent,
   projectAgentHostUserTurn,
   runFailureText,
-} from '#services/agent-host-event-projection.js';
-import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
+} from '@taucad/chat-ui/services/agent-host-event-projection';
+import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
-import { isQuestionTool } from '#utils/question-tool.js';
+import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
 export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];

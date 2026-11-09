@@ -21,7 +21,7 @@ vi.mock('@taucad/utils/file', async (importOriginal) => ({
   ...(await importOriginal<typeof FileUtilsModule>()),
   downloadBlob,
 }));
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { warning: vi.fn(), error: vi.fn(), promise: vi.fn() },
 }));
 vi.mock('#components/geometry/converter/format-selector.js', () => ({

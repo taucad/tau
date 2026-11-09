@@ -52,7 +52,7 @@ import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '#hooks/resize-image.actor.js';
+import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -71,9 +71,9 @@ import { useModels } from '#hooks/use-models.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
-import { withTauExecutionModel } from '#utils/chat-execution.js';
+import { withTauExecutionModel } from '@taucad/chat-ui/utils/chat-execution';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import {
   draftHydrationOf,
   draftPersistenceFor,
@@ -83,9 +83,9 @@ import {
 } from '#hooks/composer-record.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
-import { createAttachmentStore } from '#db/attachment-store.js';
-import type { AttachmentStore } from '#db/attachment-store.js';
-import { attachmentUrl } from '#utils/attachment.utils.js';
+import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
+import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
+import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';

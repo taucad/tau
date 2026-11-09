@@ -90,7 +90,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   }),
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: mockToastSuccess },
 }));
 

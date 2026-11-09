@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { stringToBase64 } from 'uint8array-extras';
-import { tauLogoPathData } from '#components/icons/tau.js';
+import { tauLogoPathData } from '@taucad/ui-kit/icons/tau';
 import { useColor } from '#hooks/use-color.js';
 
 const faviconBase = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="{color}" d="${tauLogoPathData}"/></svg>`;

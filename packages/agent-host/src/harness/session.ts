@@ -83,6 +83,7 @@ import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/t
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
 import { createEventLogRecentSkills } from '#harness/recent-skills.js';
 import { withReadDedup } from '#harness/read-dedup.js';
+import { createToolResultBatchBudget } from '#harness/tool-result-budget.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
@@ -1691,11 +1692,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   );
   /* R5: a re-read whose text an earlier visible read returned answers with a pointer to it. */
   const dedupedRegistry = withReadDedup(options.toolRegistry, async () => record.history());
+  /* R4: one model response's calls share an aggregate result budget; each model request starts a fresh one. */
+  const resultBatch = createToolResultBatchBudget();
   const toolRegistry: ToolRegistry = {
     list: () => options.toolRegistry.list().filter((tool) => selectedTools.has(tool.name)),
     invoke: async (invocation) =>
       selectedTools.has(invocation.toolName)
-        ? dedupedRegistry.invoke(invocation)
+        ? dedupedRegistry.invoke({ ...invocation, resultBudget: resultBatch.budget })
         : {
             content: {
               errorCode: 'TOOL_NOT_FOUND',
@@ -2049,6 +2052,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     return { context: { ...context, messages } };
   };
   agent.streamFunction = composeModelCallMiddleware(base, [
+    asMiddleware(
+      (next): StreamFn =>
+        async (...request) => {
+          resultBatch.reset();
+          return next(...request);
+        },
+    ),
     asMiddleware(compaction.wrapStreamFn),
     createToolResultTrimmerMiddleware({
       allowImageBlocks: options.allowImageBlocks,

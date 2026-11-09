@@ -14,7 +14,7 @@ export const navigation: Array<[string, string]> = [
 
 /** The three promises, each with a line diagram drawn in the site's fine-line language. */
 export const principles: Array<{
-  id: 'design' | 'verify' | 'make';
+  id: 'design' | 'verify' | 'build';
   title: string;
   body: string;
   detail: string;
@@ -32,7 +32,7 @@ export const principles: Array<{
     detail: 'Dimensions · clearances · fit',
   },
   {
-    id: 'make',
+    id: 'build',
     title: 'Export and make it.',
     body: 'Export STEP for machining, or STL and 3MF for 3D printing. Keep the source so you can revise the part after testing it.',
     detail: 'Machine · print · assemble',

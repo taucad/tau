@@ -24,7 +24,8 @@ export const content = (): React.JSX.Element => (
       <div className='cell hero-copy'>
         {kicker('AI-native CAD')}
         <h1 id='hero-title'>
-          <span className='w w1'>Design</span> <span className='w w2'>Verify</span> <span className='w w3'>Make.</span>
+          <span className='w w1'>Design.</span> <span className='w w2'>Verify.</span>{' '}
+          <span className='w w3'>Build.</span>
         </h1>
         <p className='lead'>
           Describe the part you need. Tau builds it as editable parametric CAD, checks the geometry against your

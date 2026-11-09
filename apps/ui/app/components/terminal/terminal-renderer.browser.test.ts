@@ -101,6 +101,26 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     expect(getComputedStyle(textbox()).caretColor).toBe('rgba(0, 0, 0, 0)');
   });
 
+  it('repaints the open terminal in the new theme', async () => {
+    const renderer = await create();
+    await write('hello from tau');
+    const background = (): number[] => {
+      const copy = document.createElement('canvas');
+      copy.width = 1;
+      copy.height = 1;
+      const context = copy.getContext('2d', { willReadFrequently: true })!;
+      /* The WebGL canvas sits under the overlay canvas, and either can be the one that drew. */
+      for (const canvas of host.querySelectorAll('canvas')) {
+        context.drawImage(canvas, canvas.width - 40, canvas.height - 40, 1, 1, 0, 0, 1, 1);
+      }
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    renderer.setTheme({ ...theme, background: '#fafafa' }, { textBlending: 'linear', textWeight: 0.65 });
+    expect(background()).toEqual([250, 250, 250, 255]);
+    renderer.setTheme(theme, { textBlending: 'linear-corrected', textWeight: 1.15 });
+    expect(background()).toEqual([16, 16, 16, 255]);
+  });
+
   it('draws output to a hidden canvas and mirrors it as text for screen readers', async () => {
     await create();
     await write('hello from tau\r\n$ ');

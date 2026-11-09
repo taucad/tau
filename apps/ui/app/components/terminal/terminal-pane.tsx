@@ -310,6 +310,23 @@ export function TerminalPane({
     viewRef.current?.setScreenReaderMode(screenReaderMode);
   }, [screenReaderMode]);
 
+  const applyTheme = useCallback(() => {
+    const host = hostRef.current;
+    if (host && viewRef.current) {
+      const theme = readTerminalTheme(host);
+      viewRef.current.setTheme(theme, terminalTextRendering(theme));
+    }
+  }, []);
+
+  /* The canvas holds resolved colours, so it re-reads the tokens whenever the root element that scopes them changes. */
+  useEffect(() => {
+    const observer = new MutationObserver(applyTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    return () => {
+      observer.disconnect();
+    };
+  }, [applyTheme]);
+
   /* Keep the grid fitted while the pane is resized, hidden and shown again. */
   useEffect(() => {
     const host = hostRef.current;
@@ -397,6 +414,8 @@ export function TerminalPane({
       return;
     }
     viewRef.current = view;
+    /* The theme may have changed while the renderer loaded. */
+    applyTheme();
     /* Counts the shells this port has served. An access replacement keeps the port but starts the host's offsets
      * again at zero, so output of the replaced shell that paints afterwards acknowledges nothing: its offset would be
      * beyond the new shell's, which the host refuses as an invalid frame and ends the Terminal. */
@@ -525,7 +544,7 @@ export function TerminalPane({
     } finally {
       initialFrames.length = 0;
     }
-  }, [bridge, loadRenderer, projectRoot, teardown]);
+  }, [applyTheme, bridge, loadRenderer, projectRoot, teardown]);
   useEffect(() => {
     startRef.current = start;
   }, [start]);

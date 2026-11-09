@@ -78,6 +78,7 @@ const createHarness = (): Harness => {
     fit: () => ({ columns: 120, rows: 30 }),
     focus: vi.fn(),
     setScreenReaderMode: vi.fn(),
+    setTheme: vi.fn(),
     search: vi.fn(() => true),
     clearFind: vi.fn(),
     dispose: vi.fn(),
@@ -246,6 +247,17 @@ describe('TerminalPane', () => {
     /* The jsdom environment resolves no tokens, so the theme falls back to black and gets the dark-background blending. */
     expect(harness.options()).toMatchObject({ textBlending: 'linear-corrected', textWeight: 1.15, fontWeight: 400 });
     expect(harness.view.focus).toHaveBeenCalled();
+  });
+
+  it('should re-theme the open Terminal when the root theme class changes', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    vi.mocked(harness.view.setTheme).mockClear();
+    document.documentElement.classList.add('dark');
+    await act(async () => undefined);
+    document.documentElement.classList.remove('dark');
+    await act(async () => undefined);
+    expect(harness.view.setTheme).toHaveBeenCalledTimes(2);
   });
 
   it('should refit and resize the session when the font loads after the Terminal opened', async () => {

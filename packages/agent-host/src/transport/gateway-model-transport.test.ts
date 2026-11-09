@@ -48,12 +48,22 @@ const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamReques
   ...overrides,
 });
 
+const isPrefixStamp = (event: ModelStreamEvent): boolean =>
+  event.type === 'message-metadata' && event.metadata['prefix'] !== undefined;
+
+/** The reply's events. The request's prefix stamp leads them and has its own cases, so it is left out here. */
 const collect = async (stream: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> => {
   const events: ModelStreamEvent[] = [];
   for await (const event of stream) {
     events.push(event);
   }
-  return events;
+  return events.filter((event) => !isPrefixStamp(event));
+};
+
+/** Read past the request's prefix stamp, which leads every generation stream. */
+const skipPrefixStamp = async (iterator: AsyncIterator<ModelStreamEvent>): Promise<void> => {
+  const first = await iterator.next();
+  expect(first.done === true ? undefined : isPrefixStamp(first.value)).toBe(true);
 };
 
 const usage = (
@@ -332,7 +342,11 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(async () => held.response),
     });
     const iterator = transport.stream(request({ providerKind: 'anthropic' }))[Symbol.asyncIterator]();
-    const first = iterator.next();
+    // async-iife: bootstrap -- the read is left pending on purpose, so the test can race it against a timer.
+    const first = (async () => {
+      await skipPrefixStamp(iterator);
+      return iterator.next();
+    })();
 
     try {
       await held.waiting.promise;
@@ -2248,6 +2262,7 @@ describe('createGatewayModelTransport', () => {
     const iterator = transport
       .stream(request({ providerKind: 'anthropic', signal: operation.signal }))
       [Symbol.asyncIterator]();
+    await skipPrefixStamp(iterator);
     await expect(iterator.next()).resolves.toEqual({
       done: false,
       value: { type: 'text-start', contentIndex: 0 },

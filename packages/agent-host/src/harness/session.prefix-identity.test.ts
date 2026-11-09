@@ -6,6 +6,9 @@
  * Each scenario drives the real `createAgentSession` middleware stack, `createGatewayModelTransport` and pi-ai's
  * Anthropic codec through two turns over one durable log; only `fetch` is scripted. The last request of turn one is
  * compared with the first request of turn two in cache order (`prefix-identity.fixture`).
+ *
+ * P1 (provider reasoning replay contract): where the prefix does change, the reply to the first request after the
+ * change records one typed break on its durable row (`metadata.prefix.break`), and no other reply records any.
  */
 import { describe, expect, it } from 'vitest';
 import { skillsUpdateMessageId } from '#harness/cad-middleware.js';
@@ -16,9 +19,11 @@ import type { CapturedBody, ScriptedReply } from '#harness/prefix-identity.fixtu
 import { createSessionRecord } from '#harness/session-record.js';
 import { attachTurnContexts, createAgentSession } from '#harness/session.js';
 import { failureMarkerClearance } from '#host/run-history.js';
-import type { ProviderMessage, TurnContextSnapshot, UserProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, ProviderMessage, TurnContextSnapshot, UserProviderMessage } from '#log/event-types.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
+import { readPrefixStamp } from '#log/prefix-stamp.js';
+import type { PrefixBreakCause } from '#log/prefix-stamp.js';
 import type {
   HostToolDefinition,
   ModelStreamEvent,
@@ -27,18 +32,20 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 
-const toolRegistry: ToolRegistry = {
+/** A registry whose `read_file` answers with the given body. */
+const registryReading = (body: string): ToolRegistry => ({
   list: () => fixtureTools,
   invoke: async (invocation) => ({
     content: {
       success: true,
       path: String((invocation.input as { targetFile?: string }).targetFile ?? ''),
-      content: 'module nut() {}',
+      content: body,
       lineCount: 1,
     },
     isError: false,
   }),
-};
+});
+const toolRegistry = registryReading('module nut() {}');
 
 const staticPrompt = 'STATIC '.repeat(400).trim();
 const dynamicPrompt = 'Your conversation log: `.tau/chats/chat-t1/events.jsonl`\n\nModel: anthropic-claude-haiku-4.5';
@@ -69,6 +76,13 @@ type Turn = Readonly<{
   contextWindow?: number | undefined;
   /** The summary compaction writes; the placeholder when absent. */
   summarize?: string | undefined;
+  effort?: 'medium' | 'high' | undefined;
+  /** What `read_file` answers with; a long body gives tool-result clearing something to free. */
+  fileBody?: string | undefined;
+  /** The composing build's release label. */
+  release?: string | undefined;
+  /** A seeded regression: what a harness defect does to the request on its way to the transport. */
+  tamper?: ((request: ModelStreamRequest) => ModelStreamRequest) | undefined;
 }>;
 
 const contextMessagesOf = (turn: Turn): UserProviderMessage[] | undefined =>
@@ -83,7 +97,29 @@ const contextMessagesOf = (turn: Turn): UserProviderMessage[] | undefined =>
         },
       ];
 
-type ChatRun = Readonly<{ turns: readonly CapturedBody[][]; requests: readonly ModelStreamRequest[][] }>;
+type ChatRun = Readonly<{
+  turns: readonly CapturedBody[][];
+  requests: readonly ModelStreamRequest[][];
+  /** The typed prefix break each reply's durable row records, per turn in reply order; `undefined` where none. */
+  breaks: ReadonlyArray<ReadonlyArray<PrefixBreakCause | undefined>>;
+}>;
+
+/** The break each run's replies recorded: the last row of each assistant message is its final one. */
+const recordedBreaks = (events: readonly AgentLogEvent[], runId: string): Array<PrefixBreakCause | undefined> => {
+  const replies = new Map<string, ProviderMessage>();
+  for (const event of events) {
+    const message =
+      event.type === 'message.appended'
+        ? event.message
+        : event.type === 'message.envelope-replaced'
+          ? event.replacement
+          : undefined;
+    if (event.runId === runId && message?.role === 'assistant') {
+      replies.set(message.id, message);
+    }
+  }
+  return [...replies.values()].map((message) => readPrefixStamp(message.metadata?.['prefix'])?.break);
+};
 
 /** Run one chat, turn by turn, over one durable log; each turn opens its own session as a host does. */
 const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
@@ -103,12 +139,14 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
     const gateway = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
       fetch: recordingFetch(turn.replies, captured),
+      ...(turn.release === undefined ? {} : { release: turn.release }),
     });
     const transport: ModelTransport = {
       funding: gateway.funding,
       stream: (request) => {
-        requests.push(request);
-        return gateway.stream(request);
+        const sent = turn.tamper?.(request) ?? request;
+        requests.push(sent);
+        return gateway.stream(sent);
       },
     };
     // oxlint-disable-next-line no-await-in-loop -- turns are sequential by nature.
@@ -147,9 +185,13 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
         contextWindow: turn.contextWindow ?? 200_000,
         maxTokens: 8192,
         providerKind: 'anthropic',
+        ...(turn.effort === undefined ? {} : { reasoning: { effort: turn.effort } }),
       },
       modelTransport: transport,
-      toolRegistry: turn.tools === undefined ? toolRegistry : { ...toolRegistry, list: () => turn.tools! },
+      toolRegistry: {
+        ...(turn.fileBody === undefined ? toolRegistry : registryReading(turn.fileBody)),
+        ...(turn.tools === undefined ? {} : { list: () => turn.tools! }),
+      },
       eventLog: log,
       ...(turn.summarize === undefined ? {} : { summarize: async () => turn.summarize! }),
       contextMessages: contextMessagesOf(turn),
@@ -168,7 +210,9 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
     perTurnRequests.push(requests);
     expect(outcome.outcome, JSON.stringify(outcome.failure)).toBe(turn.expectOutcome ?? 'completed');
   }
-  return { turns: perTurn, requests: perTurnRequests };
+  const log = await file.open();
+  const events = await log.read();
+  return { turns: perTurn, requests: perTurnRequests, breaks: turns.map((turn) => recordedBreaks(events, turn.runId)) };
 };
 
 /** A turn boundary: the last request of one turn against the first request of the next. */
@@ -426,6 +470,97 @@ describe('I1 request prefix identity across consecutive user turns', () => {
       expect(next.slice(0, ids.length)).toEqual(ids);
       expect(next.indexOf('tau:snapshot-context:run-2')).toBe(next.indexOf('user-run-2') - 1);
     });
+  });
+});
+
+describe('P1 typed prefix breaks on the durable log', () => {
+  const window = { contextWindow: 8192, summarize: 'Earlier work.' } as const;
+
+  it('should record no break while every request only appends', async () => {
+    const run = await runChat([turnOne, turnTwo, { ...turnTwo, runId: 'run-3', userText: 'Thicker' }]);
+    expect(run.breaks).toEqual([[undefined, undefined], [undefined], [undefined]]);
+  });
+
+  it.each([
+    ['tools', { tools: fixtureTools.slice(0, 2) }],
+    ['instructions', { staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` }],
+    ['settings', { effort: 'medium' }],
+  ] as const)('should record one %s break on the first reply after the change', async (cause, change) => {
+    const run = await runChat([
+      { ...turnOne, effort: 'high' },
+      { ...turnTwo, effort: 'high', ...change, replies: [readFile, done] },
+    ]);
+    expect(run.breaks).toEqual([
+      [undefined, undefined],
+      [cause, undefined],
+    ]);
+  });
+
+  it('should record a definitions break when the prompt text changes under another release', async () => {
+    const run = await runChat([
+      { ...turnOne, release: 'ui@1' },
+      { ...turnTwo, release: 'ui@2', staticPrompt: `${staticPrompt}\n\nA sentence the release added.` },
+    ]);
+    expect(run.breaks).toEqual([[undefined, undefined], ['definitions']]);
+  });
+
+  it('should record a model break on a switch and on the switch back, and none on the turn that follows', async () => {
+    const run = await runChat([
+      turnOne,
+      { ...turnTwo, modelId: 'anthropic-claude-sonnet-4.5' },
+      { ...turnTwo, runId: 'run-3', userText: 'Thicker' },
+      { ...turnTwo, runId: 'run-4', userText: 'Chamfer it' },
+    ]);
+    expect(run.breaks).toEqual([[undefined, undefined], ['model'], ['model'], [undefined]]);
+  });
+
+  it('should record one compaction break on the first reply after a summary replaced the head', async () => {
+    const run = await runChat([
+      {
+        ...turnOne,
+        ...window,
+        replies: [
+          { ...readFile, inputTokens: 3000 },
+          { ...readFile, inputTokens: 7000 },
+          { ...done, inputTokens: 200 },
+        ],
+      },
+      { ...turnTwo, ...window },
+    ]);
+    expect(run.breaks).toEqual([[undefined, undefined, 'compaction'], [undefined]]);
+  });
+
+  it('should record one clearing break on the first reply after old tool results were cleared in place', async () => {
+    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
+      tool: 'read_file',
+      input: { targetFile: `part-${String(index)}.scad` },
+      inputTokens: index === 9 ? 7000 : 3,
+    }));
+    /* Long results and no skills catalog: clearing alone frees enough of the window, so no summary is written. */
+    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
+    const run = await runChat([
+      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
+      { ...turnTwo, ...long },
+    ]);
+    expect(run.breaks.flat().filter((cause) => cause !== undefined)).toEqual(['clearing']);
+    expect(run.breaks[0]!.indexOf('clearing')).toBe(10);
+  });
+
+  it('should record an unsanctioned break when a defect rewrites an earlier message with nothing to explain it', async () => {
+    /* The seeded regression: a sliding window that trims a tool result the previous request already sent. */
+    const run = await runChat([
+      turnOne,
+      {
+        ...turnTwo,
+        tamper: (request) => ({
+          ...request,
+          messages: request.messages.map((message) =>
+            message.role === 'tool-output' ? { ...message, content: '[older result trimmed]' } : message,
+          ),
+        }),
+      },
+    ]);
+    expect(run.breaks).toEqual([[undefined, undefined], ['unsanctioned']]);
   });
 });
 

@@ -76,6 +76,105 @@ describe('protected lifecycle command boundary', () => {
     expect(database.database.select).not.toHaveBeenCalled();
   });
 
+  it('should list financial cases with the read key alone, since list-cases changes nothing', async () => {
+    const database = mockDeep<DatabaseService>();
+    const firstSeenAt = new Date('2026-11-08T01:45:00Z');
+    // The stored row carries evidence and its dedupe key; the listing must leave both out.
+    const stored = {
+      id: 'case_1',
+      environment: 'staging',
+      stripeAccountId: 'acct_test',
+      livemode: false,
+      kind: 'missing_local_payment',
+      dedupeKey: 'missing_local_payment:pi_1',
+      accountId: null,
+      sourceType: 'payment_intent',
+      sourceId: 'pi_1',
+      currency: 'usd',
+      knownAmountMinor: 2000n,
+      evidence: { customer: null, description: '(created by Stripe CLI)' },
+      owner: 'billing-operations',
+      nextStep: 'qualify_source_and_resolve',
+      state: 'open',
+      firstEffectiveAt: firstSeenAt,
+      firstSeenAt,
+      lastSeenAt: firstSeenAt,
+      deadlineAt: null,
+      resolvedAt: null,
+      resolutionEvidence: null,
+      ageSeconds: 90_000,
+    };
+    database.database.query.billingFinancialCase.findMany.mockResolvedValue([stored]);
+
+    const listed = await runBillingLifecycleCommand({
+      database,
+      sourceStripe: createBillingStripeClient({ secretKey: 'rk_test_unconfigured' }),
+      environment: 'staging',
+      stripeAccountId: 'acct_test',
+      livemode: false,
+      request: {
+        operation: 'list-cases',
+        environment: 'staging',
+        state: ['open', 'attention'],
+        attributed: 'any',
+        limit: 100,
+      },
+    });
+
+    expect(listed).toEqual({
+      cases: [
+        {
+          id: 'case_1',
+          kind: 'missing_local_payment',
+          state: 'open',
+          attributed: false,
+          accountId: null,
+          sourceType: 'payment_intent',
+          sourceId: 'pi_1',
+          currency: 'usd',
+          knownAmountMinor: 2000n,
+          owner: 'billing-operations',
+          nextStep: 'qualify_source_and_resolve',
+          deadlineAt: null,
+          firstSeenAt,
+          lastSeenAt: firstSeenAt,
+          ageSeconds: 90_000,
+        },
+      ],
+    });
+    expect(database.database.query.billingFinancialCase.findMany).toHaveBeenCalledOnce();
+    expect(database.database.transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'an unknown key', change: { customer: 'cus_1' } },
+    { name: 'a limit below 1', change: { limit: 0 } },
+    { name: 'a limit above 100', change: { limit: 101 } },
+    { name: 'an attribution outside any, true and false', change: { attributed: 'yes' } },
+    { name: 'an empty state filter', change: { state: [] } },
+  ])('should reject a list-cases request with $name before database work', async ({ change }) => {
+    const database = mockDeep<DatabaseService>();
+
+    const listing = runBillingLifecycleCommand({
+      database,
+      sourceStripe: createBillingStripeClient({ secretKey: 'rk_test_unconfigured' }),
+      environment: 'staging',
+      stripeAccountId: 'acct_test',
+      livemode: false,
+      request: {
+        operation: 'list-cases',
+        environment: 'staging',
+        state: ['open', 'attention'],
+        attributed: false,
+        limit: 100,
+        ...change,
+      },
+    });
+
+    await expect(listing).rejects.toThrow(ZodError);
+    expect(database.database.query.billingFinancialCase.findMany).not.toHaveBeenCalled();
+  });
+
   it.each(['prepare-refund', 'execute-refund', 'recover-refund'])(
     'should reject the retired %s operation before database work, since refunds are made in the Stripe Dashboard',
     async (operation) => {

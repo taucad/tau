@@ -24,8 +24,8 @@ const sources: Record<LegalSlug, string> = {
 };
 
 /**
- * Heading fragment ids, kept identical to the ones the app's former legal routes minted so existing links
- * such as `/legal/privacy#9.2.1-ai-service-improvement` keep resolving.
+ * Heading fragment ids, in the format the app's former legal routes minted, so links
+ * such as `/legal/privacy#2-improving-tau-with-your-chats` keep resolving.
  * @param text - Heading text.
  * @returns The fragment id.
  */

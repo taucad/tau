@@ -21,8 +21,8 @@ describe('legal documents', () => {
   test('should keep the heading anchors the app and emails link to', () => {
     const { html } = renderLegalDocument('privacy');
     expect(slugify('9.2.1 AI Service Improvement')).toBe('9.2.1-ai-service-improvement');
-    expect(html).toContain('id="9.2.1-ai-service-improvement"');
-    expect(html).toContain('id="4.1-marketing-communications"');
+    expect(html).toContain('id="2-improving-tau-with-your-chats"');
+    expect(html).toContain('id="10-marketing"');
   });
 
   test('should let wide tables scroll inside a focusable region', () => {

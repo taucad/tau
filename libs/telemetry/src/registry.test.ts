@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(200);
+    expect(metrics).toHaveLength(201);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -542,6 +542,32 @@ describe('TauMetrics', () => {
         'tau.billing.unpriced.reason': 'provider supplied text',
       }).success,
     ).toBe(false);
+  });
+
+  it('should report open financial cases and the oldest open case age per kind and a true or false attribution', () => {
+    expect(TauMetrics.billingOpenFinancialCases).toMatchObject({
+      name: 'tau.billing.open_financial_cases',
+      unit: '{case}',
+      type: 'gauge',
+    });
+    expect(TauMetrics.billingOpenFinancialCaseAge).toMatchObject({
+      name: 'tau.billing.open_financial_case_age_seconds',
+      unit: 's',
+      type: 'gauge',
+    });
+    expect(toPrometheusName(TauMetrics.billingOpenFinancialCases.name, 'gauge')).toBe(
+      'tau_billing_open_financial_cases',
+    );
+    expect(toPrometheusName(TauMetrics.billingOpenFinancialCaseAge.name, 'gauge')).toBe(
+      'tau_billing_open_financial_case_age_seconds',
+    );
+    for (const gauge of [TauMetrics.billingOpenFinancialCases, TauMetrics.billingOpenFinancialCaseAge]) {
+      expect(Object.keys(gauge.attributes.shape).sort()).toEqual(['attributed', 'kind']);
+      for (const attributed of ['true', 'false']) {
+        expect(gauge.attributes.safeParse({ kind: 'missing_local_payment', attributed }).success).toBe(true);
+      }
+      expect(gauge.attributes.safeParse({ kind: 'missing_local_payment', attributed: 'unknown' }).success).toBe(false);
+    }
   });
 
   it('should expose the WebSocket upgrade-rejection counter with a bounded label set', () => {

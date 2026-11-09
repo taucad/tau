@@ -16,7 +16,7 @@ export const content = (): React.JSX.Element => (
       <h2>Optional analytics</h2>
       <p>
         Analytics is off until you allow it. Your choice also applies to the Tau web app on this domain, where analytics
-        means PostHog product analytics, including session recording. Declining does not change what the site shows.
+        means product analytics, including session recording. Declining does not change what the site shows.
       </p>
       <p>
         On this website, we do not use session replay, automatic click capture, fingerprinting, account identifiers or

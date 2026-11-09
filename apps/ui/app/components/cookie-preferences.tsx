@@ -78,9 +78,7 @@ function CookiePreferencesContent({
             <Label htmlFor='product-analytics' className='font-medium'>
               Product analytics
             </Label>
-            <p className='text-sm text-muted-foreground'>
-              Helps improve Tau through PostHog, including session recording.
-            </p>
+            <p className='text-sm text-muted-foreground'>Helps improve Tau, including session recording.</p>
             {globalPrivacyControl ? (
               <p className='text-sm text-muted-foreground'>
                 Your browser’s Global Privacy Control signal turns analytics off.

@@ -543,6 +543,51 @@ describe('an identity change on the open client (audit R6)', () => {
     expect(scripted.client.close).not.toHaveBeenCalled();
   });
 
+  it('should have a Tau Cloud remote refused while signed out try again on sign-in', async () => {
+    githubProjectBinding.remove(projectId);
+    setRevisionSessionUser(undefined);
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ kind: 'tau', phase: 'connected' }, { state: 'failed', reason: 'unauthorized' });
+    scripted.client.send.mockClear();
+
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    await vi.waitFor(() => {
+      expect(scripted.sent()).toStrictEqual([{ command: 'syncNow' }]);
+    });
+
+    expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }]);
+    expect(scripted.client.close).not.toHaveBeenCalled();
+    expect(scripted.client.open).toHaveBeenCalledOnce();
+  });
+
+  it('should withdraw the last person credential before minting for the next one', async () => {
+    const second = Promise.withResolvers<Token>();
+    githubToken
+      .mockResolvedValueOnce({ accessToken: 'ada', expiresAt: expiringIn(eightHours), generation: 3 })
+      .mockReturnValueOnce(second.promise);
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+
+    setRevisionSessionUser({ id: 'user-2', name: 'Grace' });
+    await Promise.resolve();
+
+    /* While the next person's mint is out, the root holds no credential of the last one's. */
+    expect(scripted.frames()).toStrictEqual([
+      expect.objectContaining({ authorization: basic('ada') }),
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+    ]);
+    second.resolve({ accessToken: 'grace', expiresAt: expiringIn(eightHours), generation: 3 });
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ authorization: basic('grace') });
+    });
+    expect(scripted.client.close).not.toHaveBeenCalled();
+  });
+
   it('should open only once the newest identity has its frame (D36)', async () => {
     const first = Promise.withResolvers<Token>();
     githubToken.mockReturnValueOnce(first.promise);

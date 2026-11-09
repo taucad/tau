@@ -581,7 +581,7 @@ const isTransientGithubFailure = (error: unknown): boolean =>
  *
  * @param client - The project's revision client.
  */
-const resumeGithubRemote = (client: RevisionClient): void => {
+const resumeRefusedRemote = (client: RevisionClient): void => {
   const status = client.status();
   if (status?.remote.phase === 'reconnectRequired') {
     client.send({ command: 'authorizeRemote' });
@@ -671,7 +671,7 @@ function scheduleGithubCredential(client: RevisionClient, projectId: string, ren
     // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
     void (async (): Promise<void> => {
       if ((await mintGithubCredential(client, projectId, 'retry')) && withdrawn) {
-        resumeGithubRemote(client);
+        resumeRefusedRemote(client);
       }
     })();
   }, renewDelay);
@@ -938,6 +938,7 @@ const revisionIdentityCommands = (
 
   const say = async (next: RevisionSessionUser | undefined): Promise<void> => {
     const opening = !told;
+    const previous = user;
     told = true;
     user = next;
     generation += 1;
@@ -951,11 +952,21 @@ const revisionIdentityCommands = (
       if (opening || bound) {
         await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
       }
+      if (next !== undefined && !opening && asked === generation) {
+        /* A Tau Cloud remote is reached with the session cookie, not a frame: a
+         * remote refused while signed out tries again under the new session. */
+        resumeRefusedRemote(client());
+      }
       return;
     }
     if (!opening) {
-      /* Retire the last identity's renewals and any mint still in flight for it. */
-      stopGithubCredential(projectId);
+      if (previous === undefined) {
+        /* Retire any renewal and any mint still in flight for the signed-out session. */
+        stopGithubCredential(projectId);
+      } else {
+        /* An account switch: the last person's credential is withdrawn before the next one's is minted. */
+        await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+      }
     }
     const minted = await setCredential({ kind: 'github' });
     if (asked !== generation) {
@@ -964,7 +975,7 @@ const revisionIdentityCommands = (
     recovered = !minted;
     if (minted && !opening) {
       /* A remote refused while signed out tries again with the new credential. */
-      resumeGithubRemote(client());
+      resumeRefusedRemote(client());
     }
   };
 
@@ -1498,8 +1509,9 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * Who is signed in reaches the open client as an event: the session store's
    * changes are relayed to `setUser`, which mints or withdraws the GitHub
    * credential on the connection that is already up. A sign-in, a sign-out or
-   * a session refetch never closes the port, stops the root or re-arms D2's
-   * one-retry latch. The open's own `setUser` runs first, so the credential
+   * a session refetch never closes the port or stops the root. A refetch or a
+   * new display name leaves D2's one-retry latch as it was; a real sign-in
+   * arms it once its own mint has answered. The open's own `setUser` runs first, so the credential
    * frame is queued before the connection that starts the root (D36).
    */
   useEffect(() => {

@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
 import { listFinancialCases } from '#billing-case-list.js';
+import { createOperationsGaugeSource } from '#cli/billing-command.operations.js';
 import { runBillingLifecycleCommand } from '#billing-lifecycle.command.js';
 import { createBillingStripeClient } from '#billing-stripe.js';
 
@@ -147,6 +148,48 @@ describe('financial case listing foundation', () => {
       expect(attributed.cases.map((row) => row.id)).toEqual([attributedId]);
       expect(oldest.cases.map((row) => row.id)).toEqual([unattributedId]);
     });
+  });
+
+  it('should read the hourly gauge groups by kind and attribution with the oldest case age', async () => {
+    // The gauge counts the whole environment, which other suites share, so the read is compared before and after.
+    const gauge = createOperationsGaugeSource(adminClient, 'staging');
+    const group = (rows: ReadonlyArray<Record<string, unknown>>, kind: string, attributed: boolean) =>
+      rows.find((row) => row['kind'] === kind && row['attributed'] === attributed);
+    const scope = { environment: 'staging', stripeAccountId: `acct_gauge_${randomUUID()}`, livemode: false } as const;
+    const accountId = randomUUID();
+    await database.insert(schema.creditAccount).values({ id: accountId, environment: 'staging' });
+    const before = await gauge.openCases();
+    await database.insert(schema.billingFinancialCase).values([
+      {
+        ...caseRow({
+          scope,
+          id: randomUUID(),
+          kind: 'missing_local_payment',
+          sourceType: 'payment_intent',
+          sourceId: `pi_${randomUUID()}`,
+        }),
+        firstSeenAt: sql`clock_timestamp() - interval '2 days'`,
+      },
+      caseRow({
+        scope,
+        id: randomUUID(),
+        kind: 'dispute_unresolved',
+        sourceType: 'dispute',
+        sourceId: `dp_${randomUUID()}`,
+        accountId,
+      }),
+    ]);
+
+    const after = await gauge.openCases();
+
+    const unattributedBefore = Number(group(before, 'missing_local_payment', false)?.['open'] ?? 0);
+    const attributedBefore = Number(group(before, 'dispute_unresolved', true)?.['open'] ?? 0);
+    expect(group(after, 'missing_local_payment', false)).toEqual(
+      expect.objectContaining({ open: unattributedBefore + 1 }),
+    );
+    expect(group(after, 'missing_local_payment', false)?.['oldestAgeSeconds']).toBeGreaterThanOrEqual(twoDays);
+    expect(group(after, 'dispute_unresolved', true)).toEqual(expect.objectContaining({ open: attributedBefore + 1 }));
+    expect(group(after, 'dispute_unresolved', true)?.['oldestAgeSeconds']).toBeGreaterThanOrEqual(0);
   });
 
   it('should close an unattributed case with resolve-case resolved through the lifecycle command alone', async () => {

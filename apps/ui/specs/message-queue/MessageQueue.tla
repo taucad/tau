@@ -80,6 +80,9 @@
 \* wrapper (ui-kit extraction); only an import moved, and queue paths unchanged.
 \* The queue store and the queue view moved into the chat-ui library (UI wave B) with no change
 \* to their code beyond import specifiers; queue paths unchanged.
+\* The machines, the session store and the turn host take their xstate, privacy and observation
+\* helpers from the ui-core library (UI wave E) instead of the app's lib; only imports moved,
+\* and queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

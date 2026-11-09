@@ -133,6 +133,17 @@ jobs:
       - name: Install ripgrep
         run: command -v rg || brew install ripgrep
 
+      # node-pty 1.1.0 publishes its macOS `spawn-helper` mode 0644 and its fork path execs it, so every Terminal
+      # launch from the checkout fails with `posix_spawnp failed`. The packaged app sets the bit at staging
+      # (`runtime-stage.mts`); the rows run node-pty from the workspace, so they set it the same way here.
+      - name: Make the workspace node-pty spawn-helper executable
+        run: |
+          set -euo pipefail
+          helpers=$(find node_modules/.pnpm -path '*/node-pty/prebuilds/darwin-*/spawn-helper' -type f)
+          [ -n "$helpers" ] || { echo '::error::no node-pty darwin spawn-helper in the workspace'; exit 1; }
+          echo "$helpers" | xargs chmod 0755
+          echo "$helpers" | xargs ls -l
+
       - name: Run the conformance target
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}

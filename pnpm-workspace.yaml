@@ -486,6 +486,7 @@ patchedDependencies:
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
   react-router@7.18.2: tools/pnpm/patches/react-router@7.18.2.patch
   '@aurigax-ai/ghostty-web@0.3.6': tools/pnpm/patches/@aurigax-ai__ghostty-web@0.3.6.patch
+  '@anthropic-ai/sandbox-runtime@0.0.75': tools/pnpm/patches/@anthropic-ai__sandbox-runtime@0.0.75.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

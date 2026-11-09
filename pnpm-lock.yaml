@@ -1029,6 +1029,7 @@ pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 patchedDependencies:
   '@agentclientprotocol/codex-acp@1.7.0': 81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
+  '@anthropic-ai/sandbox-runtime@0.0.75': 9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9
   '@aurigax-ai/ghostty-web@0.3.6': ae00244940cbe14262a64e97218f3d598e633037301e135afcb228358d139a84
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
@@ -2048,7 +2049,7 @@ importers:
         version: 1.7.0(patch_hash=81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
-        version: 0.0.75
+        version: 0.0.75(patch_hash=9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9)
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
@@ -5222,7 +5223,7 @@ importers:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
-        version: 0.0.75
+        version: 0.0.75(patch_hash=9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -5283,7 +5284,7 @@ importers:
     devDependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
-        version: 0.0.75
+        version: 0.0.75(patch_hash=9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9)
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
@@ -27607,7 +27608,7 @@ snapshots:
       '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.232
       '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.232
 
-  '@anthropic-ai/sandbox-runtime@0.0.75':
+  '@anthropic-ai/sandbox-runtime@0.0.75(patch_hash=9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9)':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0

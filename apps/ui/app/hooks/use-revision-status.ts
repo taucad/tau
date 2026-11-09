@@ -936,6 +936,19 @@ const revisionIdentityCommands = (
     })();
   };
 
+  /*
+   * What a fresh root did implicitly when an identity change reopened it: the
+   * remote is read afresh under the new session (a Tau Cloud remote and its
+   * move stream are reached with the session cookie, not a frame), and a
+   * remote waiting on a credential takes the one just sent.
+   */
+  const announceSession = (): void => {
+    client().send({ command: 'sessionChanged' });
+    if (client().status()?.remote.phase === 'reconnectRequired') {
+      client().send({ command: 'authorizeRemote' });
+    }
+  };
+
   const say = async (next: RevisionSessionUser | undefined): Promise<void> => {
     const opening = !told;
     const previous = user;
@@ -952,10 +965,8 @@ const revisionIdentityCommands = (
       if (opening || bound) {
         await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
       }
-      if (next !== undefined && !opening && asked === generation) {
-        /* A Tau Cloud remote is reached with the session cookie, not a frame: a
-         * remote refused while signed out tries again under the new session. */
-        resumeRefusedRemote(client());
+      if (!opening && asked === generation) {
+        announceSession();
       }
       return;
     }
@@ -973,9 +984,8 @@ const revisionIdentityCommands = (
       return;
     }
     recovered = !minted;
-    if (minted && !opening) {
-      /* A remote refused while signed out tries again with the new credential. */
-      resumeRefusedRemote(client());
+    if (!opening) {
+      announceSession();
     }
   };
 

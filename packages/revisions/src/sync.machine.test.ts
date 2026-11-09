@@ -2695,6 +2695,53 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
+  it('reads a refused stream afresh when the session changes (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.holds.sendBack('remoteMoves', { type: 'remoteRefused', code: 'REMOTE_UNAUTHORIZED', message: 'x' });
+    const before = harness.holds.deliveries.length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+
+    await vi.waitFor(() => {
+      expect(harness.holds.deliveries.slice(before).map(({ event }) => event)).toEqual([
+        { type: 'unwatch' },
+        { type: 'watch', remote: 'tau' },
+      ]);
+    });
+
+    harness.stop();
+  });
+
+  it('opens a failed project again when the session changes, whatever the refusal (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    expect(harness.holds.deliveries.slice(-2).map(({ event }) => event)).toEqual([
+      { type: 'unwatch' },
+      { type: 'watch', remote: 'tau' },
+    ]);
+
+    harness.stop();
+  });
+
   it('row 52 (D13, B6): another device’s push reaches this checkout without reopening', async () => {
     const harness = start();
     await openCleanly(harness);

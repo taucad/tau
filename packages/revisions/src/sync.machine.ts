@@ -258,6 +258,11 @@ export type SyncMachineEvent =
   | Readonly<{ type: 'remoteRefused'; code: string; message: string }>
   /** A durable project record changed after the current push snapshot was built. */
   | Readonly<{ type: 'recordsChanged' }>
+  /**
+   * The page's signed-in person changed (audit R6): the remote is read afresh
+   * under the new session, its move stream included, as a fresh root would.
+   */
+  | Readonly<{ type: 'sessionChanged' }>
   /** Push now, and — with a `pushId` — tell the requester how it ended. */
   | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
   /** One explicit push; never retried without another request. */
@@ -1329,6 +1334,18 @@ const syncMachineDefinition = setup({
      * stream until the remote is watched afresh, so this is one pull. */
     remoteRefused: (_arguments, enq) => {
       enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
+      return {};
+    },
+    /*
+     * A new session may be answered where the last one was refused (rule 19):
+     * the move stream is watched afresh, since a refused one is never re-read
+     * for the remote it already watches. `failed` also opens again on it.
+     */
+    sessionChanged: ({ context }, enq) => {
+      if (context.remote !== undefined && context.remote !== '') {
+        enq.sendTo('remoteMoves', { type: 'unwatch' });
+        enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote });
+      }
       return {};
     },
     leaseRetired: { context: { leaseSettled: true } },
@@ -2444,6 +2461,12 @@ const syncMachineDefinition = setup({
                 target: 'opening',
                 context: carry(context, event),
               },
+        /* Any terminal refusal may be the last session's (rule 19): open again,
+         * the stream unwatched first so `opening` watches it afresh. */
+        sessionChanged: ({ context }, enq) => {
+          enq.sendTo('remoteMoves', { type: 'unwatch' });
+          return context.quiescing ? {} : { target: 'opening' };
+        },
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({

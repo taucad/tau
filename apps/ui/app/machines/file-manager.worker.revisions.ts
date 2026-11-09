@@ -180,6 +180,8 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /** The page's signed-in person changed (audit R6): read the remote afresh under the new session. */
+  | Readonly<{ command: 'sessionChanged' }>
   /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
   | Readonly<{ command: 'retryLargeObjects' }>
   /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
@@ -1638,6 +1640,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'syncNow': {
           actor.send({ type: 'syncNow' });
+          return;
+        }
+        case 'sessionChanged': {
+          actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
           return;
         }
         case 'retryLargeObjects': {

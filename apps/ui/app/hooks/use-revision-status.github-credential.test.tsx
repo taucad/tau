@@ -472,7 +472,7 @@ describe('an identity change on the open client (audit R6)', () => {
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
 
     await vi.waitFor(() => {
-      expect(scripted.sent()).toStrictEqual([{ command: 'authorizeRemote' }]);
+      expect(scripted.sent()).toStrictEqual([{ command: 'sessionChanged' }, { command: 'authorizeRemote' }]);
     });
     expect(scripted.client.close).not.toHaveBeenCalled();
     expect(scripted.client.open).toHaveBeenCalledOnce();
@@ -543,7 +543,7 @@ describe('an identity change on the open client (audit R6)', () => {
     expect(scripted.client.close).not.toHaveBeenCalled();
   });
 
-  it('should have a Tau Cloud remote refused while signed out try again on sign-in', async () => {
+  it('should have the root read a Tau Cloud remote afresh on sign-in', async () => {
     githubProjectBinding.remove(projectId);
     setRevisionSessionUser(undefined);
     const scripted = mountBound();
@@ -555,7 +555,7 @@ describe('an identity change on the open client (audit R6)', () => {
 
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
     await vi.waitFor(() => {
-      expect(scripted.sent()).toStrictEqual([{ command: 'syncNow' }]);
+      expect(scripted.sent()).toStrictEqual([{ command: 'sessionChanged' }]);
     });
 
     expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }]);

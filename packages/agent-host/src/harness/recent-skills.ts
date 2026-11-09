@@ -9,10 +9,13 @@
  * @module
  */
 import type { RecentSkill, RecentSkillsPort } from '#harness/cad-middleware.js';
-import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
+import type { AgentLogEvent, JsonObject, JsonValue } from '#log/event-types.js';
 
 /** Activations kept, newest first; the LangChain plane's bound. */
 export const maxRecentSkills = 8;
+
+const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+  value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
 
 const useSkillToolName = 'use_skill';
 
@@ -25,7 +28,7 @@ const objectOf = (content: JsonValue): Readonly<Record<string, JsonValue>> | und
       return undefined;
     }
   }
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
+  return isJsonObject(value) ? value : undefined;
 };
 
 const stringAt = (record: Readonly<Record<string, JsonValue>>, key: string): string | undefined => {

@@ -42,7 +42,7 @@ import {
   systemPreferences,
   utilityProcess,
 } from 'electron';
-import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron';
 import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
@@ -85,6 +85,7 @@ import {
   isPermissionGranted,
   isTrustedSender,
   navigationDecision,
+  postHogConnectOrigins,
   rendererOrigins,
 } from '#main/navigation-policy.js';
 import type { SenderFrame } from '#main/navigation-policy.js';
@@ -110,6 +111,8 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
+import { createImportGrants, importGrantCapacity } from '#main/import-grants.js';
+import type { ImportGrant } from '#main/import-grants.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
@@ -160,6 +163,8 @@ import {
   isQuickLookEnabled,
   openFilesIpcChannel,
   quickLookIpcChannels,
+  releaseImportGrantsIpcChannel,
+  selectImportFolderIpcChannel,
 } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
@@ -295,10 +300,33 @@ const applicationResource = (name: string): string =>
 const applicationIcon = applicationResource(`icon.${process.platform === 'win32' ? 'ico' : 'png'}`);
 const themedApplicationIcon = (theme: AppIconTheme): string =>
   applicationResource(`icon${theme === 'dark' ? '-dark' : ''}.png`);
+/* A window's import grants go with it (W7.4): watched once, from its first grant. */
+const watchedImportOwners = new Set<number>();
+const watchImportOwner = (sender: WebContents): void => {
+  if (watchedImportOwners.has(sender.id)) {
+    return;
+  }
+  const { id } = sender;
+  watchedImportOwners.add(id);
+  sender.once('destroyed', () => {
+    watchedImportOwners.delete(id);
+    importGrants.releaseOwner(id);
+  });
+};
+/* The services host is told every grant once it exists, and again on each change (W7.4). */
+let publishImportGrants: (grants: readonly ImportGrant[]) => void = () => undefined;
+const importGrants = createImportGrants({
+  maxGrants: importGrantCapacity(quickLookManifest.limits.maxFiles),
+  publish: (grants) => {
+    publishImportGrants(grants);
+  },
+});
 const openFiles = createOpenFileQueue({
   extensions: quickLookManifest.formats.flatMap((format) => format.extensions),
   maxBytes: quickLookManifest.limits.maxSourceBytes,
   maxFiles: quickLookManifest.limits.maxFiles,
+  /* An opened file is imported by a grant the services host copies from: its bytes stay on this computer. */
+  grant: async (path, owner) => importGrants.mint(path, 'file', owner),
 });
 let showOpenFileImport: (() => void) | undefined;
 const enqueueOpenFiles = (paths: readonly string[]): void => {
@@ -688,11 +716,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
     /* The files service's signed LFS downloads; the bucket origin stays for uploads and rollback. */
     const filesOrigin = originOf(environment['TAU_FILES_ORIGIN']);
-    /* Product analytics post straight to PostHog; never an authenticated origin, so no bearer reaches it. */
-    const analyticsOrigin = environment['POSTHOG_CLIENT_KEY'] ? originOf(environment['POSTHOG_API_HOST']) : undefined;
-    const connectOrigins = [storageOrigin, filesOrigin, analyticsOrigin].filter(
-      (origin): origin is string => origin !== undefined,
-    );
+    /* Product analytics post straight to PostHog and read its remote config from the region's assets host; never an
+     * authenticated origin, so no bearer reaches either. */
+    const analyticsOrigins = environment['POSTHOG_CLIENT_KEY']
+      ? postHogConnectOrigins(environment['POSTHOG_API_HOST'])
+      : [];
+    const connectOrigins = [
+      ...[storageOrigin, filesOrigin].filter((origin): origin is string => origin !== undefined),
+      ...analyticsOrigins,
+    ];
     registerAppProtocol({
       clientRoot,
       protocol,
@@ -1187,6 +1219,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
   };
+  /* The import grants the services host resolves (W7.4): the latest frame is replayed to a respawned utility. */
+  publishImportGrants = (grants) => {
+    services.post({ type: 'importGrants', grants });
+  };
+  publishImportGrants(importGrants.list());
   /* The session's user id rides with the bearer as the launcher's `principal` (GI-Q6). */
   const publishCredential = (): void => {
     services.post({ type: 'authToken', token: auth.token(), principal: auth.principal() });
@@ -1484,7 +1521,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return [];
     }
     try {
-      return await openFiles.consume();
+      watchImportOwner(event.sender);
+      return await openFiles.consume(event.sender.id);
     } catch (error) {
       log.log('error', 'open-files.failed', error);
       throw error;
@@ -1605,6 +1643,39 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return directory;
   });
 
+  /* The import picker (W7.4): the chosen folder is copied by the services host, so it is granted, not admitted. */
+  ipcMain.handle(selectImportFolderIpcChannel, async (event) => {
+    if (!trusted(event.senderFrame)) {
+      return undefined;
+    }
+    const directory = await (async () => {
+      if (seededPick !== undefined) {
+        return seededPick;
+      }
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const request = { properties: ['openDirectory'] as Array<'openDirectory'> };
+      const result = await (window ? dialog.showOpenDialog(window, request) : dialog.showOpenDialog(request));
+      return result.canceled ? undefined : result.filePaths[0];
+    })();
+    if (directory === undefined) {
+      return undefined;
+    }
+    watchImportOwner(event.sender);
+    const granted = await importGrants.mint(directory, 'directory', event.sender.id);
+    log.log('info', 'dialog.import-folder-granted', { seeded: seededPick !== undefined });
+    return granted;
+  });
+
+  ipcMain.handle(releaseImportGrantsIpcChannel, (event, grants: unknown) => {
+    if (!trusted(event.senderFrame) || !Array.isArray(grants)) {
+      return;
+    }
+    importGrants.release(
+      grants.filter((grant): grant is string => typeof grant === 'string'),
+      event.sender.id,
+    );
+  });
+
   ipcMain.on(servicesPortRelayTag, (event, payload: unknown) => {
     if (!trusted(event.senderFrame)) {
       return;
@@ -1663,10 +1734,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
         refuse('services.invalid-compute-mode');
         return;
       }
+      /* A filesystem connection resolves only the import grants minted for the window that asked for it (W7.4):
+       * main names that window here, over anything the renderer sent. */
+      const scoped = concern === 'nodeFs' ? { ...resolved, importOwner: String(event.sender.id) } : resolved;
       const port =
         concern === 'exactMeasurement'
           ? geometry.connectMeasurement()
-          : services.connect(concern as ServicesConcern, resolved);
+          : services.connect(concern as ServicesConcern, scoped);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       /* Quit and reload refuse new concerns by design: an expected answer the

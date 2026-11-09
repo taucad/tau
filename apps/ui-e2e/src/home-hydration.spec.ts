@@ -37,7 +37,7 @@ test('should retain the app home after a confirmed anonymous session', async () 
     };
   });
   await target.navigate('/');
-  await target.expectVisible(selectors.getByRole('heading', { name: 'Design parts and assemblies in code' }), 30_000);
+  await target.expectVisible(selectors.getByRole('heading', { name: 'What do you want to build?' }), 30_000);
   await target.expectVisible(selectors.getByRole('heading', { name: 'Projects', level: 2 }));
 });
 

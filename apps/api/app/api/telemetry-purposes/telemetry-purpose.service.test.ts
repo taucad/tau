@@ -80,15 +80,23 @@ describe('TelemetryPurposeService', () => {
       expect(effective.purposes.every((state) => state.refusal === 'no-decision')).toBe(true);
     });
 
-    it('never reads the legacy privacy booleans', async () => {
-      const { service, database } = createService({ noticeVersion: notice });
+    it('records a free account by default while its switch is on, and never a paid one', async () => {
+      type UserRow = Awaited<ReturnType<DatabaseService['database']['query']['user']['findFirst']>>;
+      const free = createService({ noticeVersion: notice });
+      free.database.database.query.user.findFirst.mockResolvedValue({ allowsAiTraining: true } as UserRow);
+      const off = createService({ noticeVersion: notice });
+      off.database.database.query.user.findFirst.mockResolvedValue({ allowsAiTraining: false } as UserRow);
+      const paid = createService({ noticeVersion: notice, tier: 'pro' });
+      paid.database.database.query.user.findFirst.mockResolvedValue({ allowsAiTraining: true } as UserRow);
 
-      await service.getEffectivePurposes('user-a');
-
-      /* The `user` row carries `allows_ai_training` and `allows_usage_metrics`,
-       * both defaulting to on. Neither authorises a purpose here, so the
-       * authority never reads that row at all. */
-      expect(database.database.query.user.findFirst).not.toHaveBeenCalled();
+      const [onFree, offFree, onPaid] = await Promise.all([
+        free.service.getEffectivePurposes('user-a'),
+        off.service.getEffectivePurposes('user-a'),
+        paid.service.getEffectivePurposes('user-a'),
+      ]);
+      expect(allowedPurposes(onFree.purposes)).toEqual(['summary', 'content', 'reuse', 'training']);
+      expect(allowedPurposes(offFree.purposes)).toEqual([]);
+      expect(allowedPurposes(onPaid.purposes)).toEqual([]);
     });
 
     it('keeps every purpose unavailable while no notice is approved', async () => {

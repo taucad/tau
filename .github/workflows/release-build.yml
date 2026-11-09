@@ -57,6 +57,7 @@ jobs:
       macos: ${{ steps.tag.outputs.macos }}
       macos-targets: ${{ steps.tag.outputs.macos-targets }}
       notarize: ${{ steps.tag.outputs.notarize }}
+      sentry-release: ${{ steps.tag.outputs.sentry-release }}
     steps:
       - name: Resolve the release tag
         id: tag
@@ -89,7 +90,13 @@ jobs:
             exit 0
           fi
           kind=app
-          if [ "$project" = desktop ]; then kind=desktop; fi
+          sentry_release=
+          if [ "$project" = desktop ]; then
+            kind=desktop
+            # One Sentry release per desktop tag, whatever the platform: `tau-desktop@0.2.0` or
+            # `tau-desktop@0.2.0-staging.3`. Baked into main (`tauSentryRelease`) and given its commits on promotion.
+            sentry_release="tau-desktop@${TAG#*@}"
+          fi
 
           # Only build what release.yml released: a tag the bot pushed, naming a
           # commit already on main. Release managers can push release tags too,
@@ -135,6 +142,7 @@ jobs:
             echo "macos=$macos"
             echo "macos-targets=$(sed -E 's/(^| )/\1darwin-/g' <<< "$arches")"
             echo "notarize=$notarize"
+            echo "sentry-release=$sentry_release"
           } >> "$GITHUB_OUTPUT"
 
   verify-app:
@@ -332,6 +340,9 @@ jobs:
       GEOSPEC_WORKERS: 1
       # Public DSN owned by tau-repo Terraform on each signed desktop environment.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      # The explicit Sentry release every event of this build reports (`tauSentryRelease`), never the SDK's
+      # `<productName>@<appVersion>` default; desktop-promote attaches its commits.
+      SENTRY_RELEASE: ${{ needs.resolve.outputs.sentry-release }}
       # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
@@ -1022,6 +1033,8 @@ jobs:
       # Runtime telemetry's own build signal, as in `desktop-macos`; this matrix has no `environment:`, hence a literal.
       TAU_TELEMETRY_HOST: cloud
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      # Inert while this matrix bakes no DSN; set so a reporting portable build names the same release as macOS.
+      SENTRY_RELEASE: ${{ needs.resolve.outputs.sentry-release }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
       # Windows checkouts default to CRLF, which breaks the lockfile parse; keep
@@ -1381,6 +1394,19 @@ jobs:
           TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
           export TAU_DESKTOP_SOURCE_SHA
           pnpm nx run desktop:publish --args=promote
+
+      # Commits and the deploy marker go to the release this build reports, once users can receive it
+      # (bookkeeping, never a promotion gate; see .github/actions/sentry-release-commits).
+      - name: Attach this release's commits to its Sentry release
+        if: steps.qualification.outputs.accepted == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/sentry-release-commits
+        with:
+          release: ${{ needs.resolve.outputs.sentry-release }}
+          project: tau-desktop
+          environment: ${{ needs.resolve.outputs.channel }}
+          auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          cli: scripts/node_modules/.bin/sentry-cli
 
   production-api:
     needs: [resolve, verify-app, app-release]

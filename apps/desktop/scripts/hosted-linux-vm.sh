@@ -2,7 +2,8 @@
 # Run disposable full Linux guests for infrastructure proof or protected staging qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
-# Optional env: TAU_VM_MODE (proof default, tooling, or qualification with protected staging inputs);
+# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging inputs, or clean-host for
+#   consumer acceptance from desktop-route-vm-acceptance.yml on a gcp host);
 #   TAU_VM_HOST (qemu default: a nested guest on this runner; gcp: a disposable spot T4 host in Google Cloud
 #   project TAU_GCP_PROJECT, tried in TAU_GCP_ZONES order, reached over an IAP tunnel; tau-cloud stacks/gcp). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
 # Exit codes: 0 proof passed; 1 failed assertion/external operation; 3 missing host prerequisite.
@@ -19,6 +20,20 @@ case "$mode" in
     [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
        "${GITHUB_REPOSITORY:-}" == taucad/tau && "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux &&
        "${TAU_QUALIFICATION_CHANNEL:-}" == staging ]] || { printf 'Hosted qualification requires protected Linux staging main dispatch\n' >&2; exit 1; }
+    [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
+    [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
+    : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
+    ;;
+  clean-host)
+    # Consumer ("vm") acceptance: only the protected Linux-scoped staging dispatch of the clean-host workflow, on a
+    # Google Cloud GPU host with stock graphics. The guest adds a standard consumer account that runs the app.
+    [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
+       "${GITHUB_REPOSITORY:-}" == taucad/tau &&
+       "${GITHUB_WORKFLOW_REF:-}" == taucad/tau/.github/workflows/desktop-route-vm-acceptance.yml@refs/heads/main &&
+       "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux && "${TAU_DESKTOP_ACCEPTANCE_KIND:-}" == vm &&
+       "${TAU_QUALIFICATION_CHANNEL:-}" == staging && "${TAU_VM_HOST:-}" == gcp &&
+       "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] ||
+      { printf 'Clean-host acceptance requires the protected Linux staging main dispatch on a GPU host\n' >&2; exit 1; }
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
@@ -65,6 +80,9 @@ if [[ "$host" == gcp ]]; then
   instance="${instance:0:63}"
 fi
 instance_zone=''
+host_template=''
+host_instance=''
+host_zone=''
 tunnel_pid=''
 cleanup() {
   if [[ -n "$tunnel_pid" ]]; then
@@ -151,7 +169,35 @@ if [[ "$host" == gcp ]]; then
     fi
   done
   [[ -n "$instance_zone" ]] || { printf 'No zone had spot GPU capacity\n' >&2; exit 1; }
-  printf 'gcp %s %s %s\n' "$template" "$instance_zone" "$instance" > "$output/image.txt"
+  # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
+  # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
+  # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps
+  # its proven path (run 42535930158) and records the template it asked for.
+  host_template="$template" host_instance="$instance" host_zone="$instance_zone"
+  if [[ "$mode" == clean-host ]]; then
+    # JSON, not tab-separated values: an empty first field would collapse under read and shift the others (run
+    # 42560363376 refused its host that way). The source template is the API's own field when it reports one, and
+    # otherwise the template this job's accepted create call named; neither is settable from inside the guest.
+    gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
+      --format=json > "$work/described.json"
+    described="$(python3 - "$work/described.json" "$template" <<'PYHOST'
+import json, sys
+host = json.load(open(sys.argv[1]))
+source = host.get('sourceInstanceTemplate') or ''
+print('\t'.join([source or sys.argv[2], host.get('name', ''), host.get('zone', '').rsplit('/', 1)[-1],
+                 'api' if source else 'create-request']))
+PYHOST
+)"
+    IFS=$'\t' read -r host_template host_instance host_zone template_source <<< "$described"
+    printf 'Compute Engine host: %s %s, template %s (from %s)\n' "$host_instance" "$host_zone" "${host_template##*/}" \
+      "$template_source"
+    if [[ "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
+      || "$host_zone" != "$instance_zone" ]]; then
+      printf 'Compute Engine reports another host than this job created\n' >&2
+      exit 1
+    fi
+  fi
+  printf 'gcp %s %s %s\n' "$host_template" "$instance_zone" "$host_instance" > "$output/image.txt"
   : > "$work/known_hosts"
   for _attempt in $(seq 1 60); do
     if gcloud compute instances get-guest-attributes "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
@@ -222,9 +268,10 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' > "$
 [[ "$(cat "$output/guest-boot-id.txt")" != "$(cat /proc/sys/kernel/random/boot_id)" ]]
 printf 'Full guest infrastructure proof passed; any selected harness outcome is recorded separately.\n' | tee "$output/result.txt"
 
-if [[ "$mode" != qualification ]]; then
+if [[ "$mode" == proof || "$mode" == tooling ]]; then
   # Installed sandbox bwrap on the stock image: Tau-scoped profile only, shipped sysctl untouched.
-  # Qualification guests install real candidates under the same package names, so they skip this fixture.
+  # Qualification and clean-host guests install real candidates under the same package names, so they skip this
+  # fixture (a clean host must have no prior Tau package at all).
   # dpkg-deb refuses control directories the 077 umask above would create.
   (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
   ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture'
@@ -241,7 +288,10 @@ if [[ "$mode" != proof ]]; then
   node_root="$(dirname "$(dirname "$(command -v node)")")"
   ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/node'
   tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
-  TAU_VM_MODE="$mode" python3 - "$work/qualification-env.json" <<'PYENV'
+  # A clean-host guest checks its own metadata-server instance name and zone against the Compute API's description of
+  # the host this job created; the source template comes only from that description.
+  TAU_VM_MODE="$mode" TAU_GCP_HOST_TEMPLATE="${host_template:-}" TAU_GCP_HOST_INSTANCE="${host_instance:-}" \
+    TAU_GCP_HOST_ZONE="${host_zone##*/}" python3 - "$work/qualification-env.json" <<'PYENV'
 import json, os, sys
 names = ['GH_TOKEN', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID',
          'TAU_DESKTOP_QUALIFICATION_SCOPE', 'TAU_QUALIFICATION_ROUTE', 'TAU_QUALIFICATION_CHANNEL',
@@ -249,6 +299,8 @@ names = ['GH_TOKEN', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_RE
          'TAU_APPIMAGE_PUBLIC_KEYS', 'TAU_APPIMAGE_KEY_ID', 'TAU_APT_PRIMARY_FINGERPRINT', 'TAU_APT_SIGNING_FINGERPRINT']
 if os.environ['TAU_VM_MODE'] == 'tooling':
     names = ['GITHUB_SHA']
+if os.environ['TAU_VM_MODE'] == 'clean-host':
+    names += ['TAU_DESKTOP_ACCEPTANCE_KIND', 'TAU_GCP_HOST_TEMPLATE', 'TAU_GCP_HOST_INSTANCE', 'TAU_GCP_HOST_ZONE']
 values = {name: os.environ[name] for name in names}
 values['TAU_VM_MODE'] = os.environ['TAU_VM_MODE']
 with open(sys.argv[1], 'x') as output:

@@ -261,7 +261,7 @@ describe('useProjects listing query', () => {
   });
 
   /* R5: the next load reserves this many rows and cards, server-side through the cookie. */
-  it('remembers the live list shape, newest first, after every listing', async () => {
+  it('remembers the live project count, and no names, after every listing', async () => {
     const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
       projectId: id,
       manifest: { name: `Name ${id}` },
@@ -278,13 +278,7 @@ describe('useProjects listing query', () => {
 
     await queryFn({ signal: new AbortController().signal });
 
-    expect(projectListShapeStore.get()).toEqual({
-      count: 2,
-      projects: [
-        { id: 'newer', name: 'Name newer' },
-        { id: 'older', name: 'Name older' },
-      ],
-    });
+    expect(projectListShapeStore.get()).toEqual({ count: 2 });
     expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
   });
 });

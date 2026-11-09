@@ -8,7 +8,20 @@
  */
 
 import type { NodeFsPort } from '#backend/node/port.js';
-import type { NodeFsBatchReceipt, NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type {
+  NodeFsBatchReceipt,
+  NodeFsImportCopyReceipt,
+  NodeFsRequest,
+  NodeFsResponse,
+  NodeFsWatchEvent,
+} from '#backend/node/protocol.js';
+import {
+  copyFromImportGrant,
+  importSourceGrant,
+  listImportSource,
+  readImportSource,
+} from '#backend/node/import-source.js';
+import type { ImportSourceGrant } from '#backend/node/import-source.js';
 import type { BatchEntry, BatchReceipt } from '#changeset.js';
 import {
   nodeFsMaxWatchBatch,
@@ -26,6 +39,7 @@ import {
   readNodeFileBounded,
   listNodeEntriesBounded,
 } from '#backend/node/provider.js';
+import type { ImportCopyReceipt } from '#backend/node/provider.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { PathPolicy } from '#types.js';
@@ -325,6 +339,14 @@ export type NodeFsHostOptions = {
    * accepts such a write.
    */
   largeObjectStore?(root: string): string | undefined;
+  /**
+   * The source a person chose on this host for an import (W7.4), by the
+   * opaque grant the host minted when they chose it, or `undefined` for a
+   * grant it never minted or has let go. Listings, previews and `importCopy`
+   * resolve every path against it here, so the client names a grant and a
+   * path inside it, never a host path (I6). Omitted, every grant is refused.
+   */
+  importSource?(grant: string): ImportSourceGrant | undefined | Promise<ImportSourceGrant | undefined>;
 };
 
 declare const entryIdentityBrand: unique symbol;
@@ -977,10 +999,16 @@ const wireReceipt = ({ outcome, kind, created, largeObject, error }: BatchReceip
   };
 };
 
+/* What a host copy answers, as it crosses the port. */
+const wireCopyReceipt = (receipt: ImportCopyReceipt): NodeFsImportCopyReceipt => ({
+  ...wireReceipt(receipt),
+  ...(receipt.facts === undefined ? {} : { facts: receipt.facts }),
+});
+
 const runOperation = async (
   provider: NodeFsProvider,
   request: NodeFsRequest,
-  authority?: NodeFsAuthorityHost,
+  { authority, importSource }: Pick<NodeFsHostOptions, 'authority' | 'importSource'> = {},
 ): Promise<unknown> => {
   const mutate = async <T>(root: string, paths: readonly string[], operation: () => Promise<T>): Promise<T> =>
     authority === undefined ? operation() : authority.run({ root, paths }, async () => operation());
@@ -1006,6 +1034,15 @@ const runOperation = async (
       const paths = entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
       const receipts = await mutate(request.root, paths, async () => provider.applyBatch(entries));
       return receipts.map((receipt) => wireReceipt(receipt));
+    }
+    case 'importCopy': {
+      const grant = await importSourceGrant(importSource, request.grant);
+      const receipts = await mutate(
+        request.root,
+        request.entries.map((entry) => entry.path),
+        async () => copyFromImportGrant(provider, grant, request.entries),
+      );
+      return receipts.map((receipt) => wireCopyReceipt(receipt));
     }
     case 'writeFile': {
       const data = typeof request.data === 'string' ? request.data : new Uint8Array(request.data);
@@ -1204,6 +1241,32 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       return;
     }
 
+    if (request.op === 'importSourceList' || request.op === 'importSourceRead') {
+      // async-iife: bootstrap — a port listener cannot be async; every outcome is a reply frame.
+      const operation = (async () => {
+        let response: NodeFsResponse;
+        try {
+          const grant = await importSourceGrant(options.importSource, request.grant);
+          const value =
+            request.op === 'importSourceList'
+              ? await listImportSource(grant, request.path, request.offset)
+              : await readImportSource(grant, request.path, request);
+          response = { v: nodeFsProtocolVersion, id: request.id, type: 'result', value };
+        } catch (error) {
+          response = errorFrame(request.id, error);
+        }
+        send(response);
+      })();
+      operations.add(operation);
+      const forgetSettledRead = async (): Promise<void> => {
+        await operation.catch(() => undefined);
+        operations.delete(operation);
+      };
+      // async-iife: bootstrap -- the read is retained and awaited by the async disposer.
+      void forgetSettledRead();
+      return;
+    }
+
     if (request.op === 'watch') {
       const previousPending = pendingSubscriptions.get(request.id);
       if (previousPending !== undefined) {
@@ -1286,7 +1349,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
           v: nodeFsProtocolVersion,
           id: request.id,
           type: 'result',
-          value: await runOperation(await providerFor(request.root), request, options.authority),
+          value: await runOperation(await providerFor(request.root), request, options),
         };
       } catch (error) {
         if (

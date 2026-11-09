@@ -24,7 +24,7 @@ const isProjectId = (value: string): boolean => value.startsWith(`${idPrefix.pro
 
 type RouteProject = Pick<ProjectListItem, 'id' | 'locator' | 'slugs'>;
 
-/** Resolve either URL segment by slug or durable id, rejecting old engine slugs. */
+/** Resolve a unique project by slug or durable id, rejecting ambiguous and old engine slugs. */
 export function resolveProjectRoute(
   projects: readonly RouteProject[],
   workspaceSegment: string,
@@ -34,9 +34,10 @@ export function resolveProjectRoute(
     return undefined;
   }
 
-  return projects.find((candidate) => {
+  let resolvedId: string | undefined;
+  for (const candidate of projects) {
     if (!candidate.slugs) {
-      return false;
+      continue;
     }
     const workspaceMatches = isWorkspaceId(workspaceSegment)
       ? candidate.locator.backend === 'webaccess' && candidate.locator.workspaceId === workspaceSegment
@@ -44,8 +45,17 @@ export function resolveProjectRoute(
     const projectMatches = isProjectId(projectSegment)
       ? candidate.id === projectSegment
       : equalsFolded(candidate.slugs.projectSlug, projectSegment);
-    return workspaceMatches && projectMatches;
-  })?.id;
+    if (!workspaceMatches || !projectMatches) {
+      continue;
+    }
+    // A folded slug can name different projects or workspaces. Listing order
+    // must never decide which project's session receives the navigation.
+    if (resolvedId !== undefined && resolvedId !== candidate.id) {
+      return undefined;
+    }
+    resolvedId = candidate.id;
+  }
+  return resolvedId;
 }
 
 /** Resolution outcome. `resolving` must not render a not-found. */

@@ -132,6 +132,21 @@ export const scrubTransaction = <TransactionEvent extends Event>(event: Transact
 };
 
 /**
+ * Resource-timing span ops a page-load transaction leaves out. SB17's scope is the page load, navigations, web vitals
+ * and API calls (`http.client`); one span per fetched script, stylesheet or asset is not in it. Measured on staging
+ * over 48 h to 2026-11-09: about 258 spans per page load, 206 of them `resource.script` and 33 more `resource.other`
+ * and `resource.link`; and on an emulated constrained phone (Moto G4, 4x CPU throttle) about 480 ms of `sentry.lib`
+ * main-thread time per load with tracing against about 120 ms without it.
+ */
+const ignoredResourceSpanOps = [
+  'resource.script',
+  'resource.css',
+  'resource.link',
+  'resource.img',
+  'resource.other',
+] as const;
+
+/**
  * The tracing integration for an environment, or none in production (see the module comment).
  *
  * @param environment - The SDK environment.
@@ -139,4 +154,6 @@ export const scrubTransaction = <TransactionEvent extends Event>(event: Transact
  * @public
  */
 export const tracingIntegrations = (environment: string | undefined): SentryIntegration[] =>
-  tracesSampleRate(environment) === undefined ? [] : [Sentry.browserTracingIntegration()];
+  tracesSampleRate(environment) === undefined
+    ? []
+    : [Sentry.browserTracingIntegration({ ignoreResourceSpans: [...ignoredResourceSpanOps] })];

@@ -183,6 +183,12 @@ const settingsCatalog = [
         keywords: ['training', 'sharing', 'no train', 'ai', 'privacy', 'agent', 'recording', 'summaries', 'evaluation'],
       },
       {
+        id: 'desktop-analytics',
+        label: 'Analytics',
+        description: 'Send usage analytics to help improve Tau',
+        keywords: ['analytics', 'usage', 'events', 'tracking', 'opt out', 'privacy'],
+      },
+      {
         id: 'cookie-preferences',
         label: 'Cookie preferences',
         description: 'Choose whether Tau uses optional analytics',
@@ -397,17 +403,20 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections.map((section) =>
       section.id === 'filesystem'
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
-        : /* The desktop shell has no optional analytics cookies to choose. */
+        : /* The desktop shell has no optional analytics cookies to choose; its analytics switch stands in. */
           section.id === 'data-controls'
           ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'cookie-preferences') }
           : section,
     )
   : cloudSections
       .filter((section) => section.id !== 'machines' && section.id !== 'browser')
-      /* The permission selector governs the desktop shell, which the web build has none of (D1). */
+      /* The permission selector governs the desktop shell, which the web build has none of (D1). The web asks for
+       * analytics consent through cookie preferences, so the desktop analytics switch is not offered there. */
       .map((section) => ({
         ...section,
-        entries: section.entries.filter((entry) => entry.id !== 'default-permissions'),
+        entries: section.entries.filter(
+          (entry) => entry.id !== 'default-permissions' && entry.id !== 'desktop-analytics',
+        ),
       }));
 
 export const settingsSections: readonly SettingsSectionDefinition[] = platformSections

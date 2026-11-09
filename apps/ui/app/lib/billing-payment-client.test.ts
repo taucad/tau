@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { followPaymentRedirect, getUnresolvedPaymentActions, prepareTopup } from './billing-payment-client.js';
+import {
+  BillingPaymentConflict,
+  followPaymentRedirect,
+  getUnresolvedPaymentActions,
+  prepareTopup,
+} from './billing-payment-client.js';
 import type { WirePaymentAction } from '@taucad/billing';
 
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
@@ -124,6 +129,30 @@ describe('billing payment client', () => {
         },
       ),
     ).rejects.toMatchObject({ code: 'action_already_pending', action });
+  });
+
+  it('should surface an unknown 409 as a generic failure, never a cash-scope message', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'cash_scope_attention' }), {
+        status: 409,
+      }),
+    );
+    const refusal = await prepareTopup(
+      {
+        apiBaseUrl: 'https://api.tau.new',
+        environment: 'development',
+        ownerId: 'user-a',
+      },
+      {
+        requestId: 'request_1',
+        amountMinor: '2500',
+        method: 'checkout',
+        returnPath: '/',
+      },
+    ).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).not.toBeInstanceOf(BillingPaymentConflict);
+    expect((refusal as Error).message).toBe('Billing payment request failed with 409');
   });
 
   it('rejects a response from another billing environment', async () => {

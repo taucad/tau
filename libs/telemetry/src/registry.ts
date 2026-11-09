@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
 import {
   agentPlacements,
+  agentCompactionLanes,
+  agentCompactionOutcomes,
+  agentCompactionTiers,
+  agentSafeguardPatterns,
   agentToolKinds,
   builtInSkillSlugs,
   evaluationClasses,
@@ -352,110 +356,6 @@ export const TauMetrics = {
     }),
   }),
 
-  genAiToolInvocations: defineCounter({
-    name: 'gen_ai.tool.invocations',
-    unit: '{invocation}',
-    description: 'Tool use frequency and success rate',
-    attributes: z.object({
-      'gen_ai.tool.name': z.string().optional(),
-      'gen_ai.tool.status': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-      'gen_ai.file_edit.interface': z.string().optional(),
-      'gen_ai.file_edit.outcome': z.string().optional(),
-      'gen_ai.file_edit.recovery': z.string().optional(),
-      'gen_ai.file_edit.operation_count': z.number().int().nonnegative().optional(),
-      'gen_ai.file_edit.hunk_count': z.number().int().nonnegative().optional(),
-    }),
-  }),
-
-  genAiToolDuration: defineHistogram({
-    name: 'gen_ai.tool.duration',
-    unit: 's',
-    description: 'Tool execution latency by bounded outcome',
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'gen_ai.tool.name': z.string().optional(),
-      'gen_ai.tool.status': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-      'gen_ai.file_edit.interface': z.string().optional(),
-      'gen_ai.file_edit.outcome': z.string().optional(),
-      'gen_ai.file_edit.recovery': z.string().optional(),
-      'gen_ai.file_edit.operation_count': z.number().int().nonnegative().optional(),
-      'gen_ai.file_edit.hunk_count': z.number().int().nonnegative().optional(),
-    }),
-  }),
-
-  genAiToolInputRepairs: defineCounter({
-    name: 'gen_ai.tool_input.repairs',
-    unit: '{repair}',
-    description: 'Tool input compatibility repairs applied before strict schema validation',
-    attributes: z.object({
-      'gen_ai.tool.name': z.string().optional(),
-      'gen_ai.tool_input.repair_kind': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-    }),
-  }),
-
-  genAiAgentIterations: defineHistogram({
-    name: 'gen_ai.agent.iterations',
-    unit: '{iteration}',
-    description: 'Agent loop iterations per user request',
-    buckets: [1, 2, 3, 5, 8, 13, 21, 34, 55],
-    attributes: z.object({
-      'gen_ai.operation.name': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-    }),
-  }),
-
-  /**
-   * Agent loop safeguards: counts how often a doom-loop / anti-pattern
-   * detector ([apps/api/app/api/chat/middleware/agent-safeguards.middleware.ts])
-   * decided to intervene with a `<system-reminder>` nudge or with a synthetic
-   * `AIMessage` termination. Tracks whether the nudge changed the agent's
-   * behavior on the next turn (`helped=true|false`) so we can tune detector
-   * thresholds against real production traffic.
-   */
-  genAiAgentSafeguardInterventions: defineCounter({
-    name: 'gen_ai.agent.safeguard.interventions',
-    unit: '{intervention}',
-    description: 'Agent-loop safeguard interventions (nudge or terminate) by detected anti-pattern',
-    attributes: z.object({
-      'gen_ai.agent.safeguard.pattern': z.string().optional(),
-      'gen_ai.agent.safeguard.action': z.string().optional(),
-      'gen_ai.agent.safeguard.helped': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-    }),
-  }),
-
-  /**
-   * Counts how often the interrupt-recovery middleware
-   * ([apps/api/app/api/chat/middleware/interrupt-recovery.middleware.ts])
-   * decided to inject a turn-level `<system-reminder>` after detecting a
-   * contiguous tail of `USER_INTERRUPTED` ToolMessages from the previous
-   * turn — and how often it suppressed a duplicate emission for the same
-   * parent AIMessage signature.
-   *
-   * - `outcome = "emitted"` — reminder injected on this turn.
-   * - `outcome = "already_fired"` — detection matched but state-level dedup
-   *   suppressed the emission (the LLM has already seen the reminder for
-   *   this AIMessage signature on a prior superstep).
-   */
-  genAiInterruptRecoveryReminders: defineCounter({
-    name: 'gen_ai.agent.interrupt_recovery.reminders',
-    unit: '{reminder}',
-    description: 'Turn-level interrupt-recovery reminders emitted (or de-duped) by the agent middleware',
-    attributes: z.object({
-      'gen_ai.agent.interrupt_recovery.outcome': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-    }),
-  }),
-
   /**
    * Tool-result offloading: emitted once per tool result the
    * `tool-offloading.middleware.ts` persists to `.tau/tool-results/<chatId>/`.
@@ -535,26 +435,6 @@ export const TauMetrics = {
       'gen_ai.context_budget.component': z.string().optional(),
       'gen_ai.context_budget.kind': z.string().optional(),
       'gen_ai.context_budget.trigger_reason': z.string().optional(),
-      'gen_ai.request.model': z.string().optional(),
-      'gen_ai.provider.name': z.string().optional(),
-    }),
-  }),
-
-  /**
-   * Context-compaction decision counter. Emits one decision per model-call
-   * budget evaluation so production can distinguish skipped, compacted,
-   * failed, and overflow-retry outcomes.
-   */
-  genAiContextCompactionDecisions: defineCounter({
-    name: 'gen_ai.context_compaction.decisions',
-    unit: '{decision}',
-    description: 'Context-compaction decisions by trigger reason and outcome',
-    attributes: z.object({
-      'gen_ai.context_budget.kind': z.string().optional(),
-      'gen_ai.context_budget.trigger_reason': z.string().optional(),
-      'gen_ai.context_compaction.status': z.string().optional(),
-      'gen_ai.context_compaction.failure_kind': z.string().optional(),
-      'gen_ai.context_compaction.failure_disposition': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
     }),
@@ -840,8 +720,16 @@ export const TauMetrics = {
     name: 'tau.billing.open_financial_cases',
     unit: '{case}',
     description:
-      'Open or attention financial cases by kind after each hourly reconciliation (alert on unfulfilled_purchase_obligation > 0)',
-    attributes: z.object({ kind: z.string() }),
+      'Open or attention financial cases by kind and whether the case names an account, after each hourly reconciliation (alert on attributed="false" > 0)',
+    attributes: z.object({ kind: z.string(), attributed: z.enum(['true', 'false']) }),
+  }),
+
+  billingOpenFinancialCaseAge: defineGauge({
+    name: 'tau.billing.open_financial_case_age_seconds',
+    unit: 's',
+    description:
+      'Age of the oldest open or attention financial case by kind and whether it names an account, after each hourly reconciliation; 0 when none is open',
+    attributes: z.object({ kind: z.string(), attributed: z.enum(['true', 'false']) }),
   }),
 
   billingFundedOperationRecoveries: defineCounter({
@@ -1055,6 +943,31 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'error.code': z.string(),
+    }),
+  }),
+
+  /** Successor of the API plane's `gen_ai.agent.safeguard.interventions`, folded from the run's `safeguard.recorded` rows (R9). */
+  agentSafeguardInterventions: defineCounter({
+    name: 'tau.agent.safeguard_interventions',
+    unit: '{intervention}',
+    description: 'Agent-loop safeguard interventions by detected pattern and action (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'safeguard.pattern': z.enum(agentSafeguardPatterns),
+      'safeguard.action': z.enum(['nudge', 'terminate']),
+    }),
+  }),
+
+  /** Successor of the API plane's `gen_ai.context_compaction.decisions`, folded from the run's compaction rows (R9). */
+  agentCompactions: defineCounter({
+    name: 'tau.agent.compactions',
+    unit: '{decision}',
+    description: 'Context-compaction decisions by lane, tier and outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'compaction.lane': z.enum(agentCompactionLanes),
+      'compaction.tier': z.enum(agentCompactionTiers),
+      'compaction.outcome': z.enum(agentCompactionOutcomes),
     }),
   }),
 

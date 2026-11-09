@@ -2397,6 +2397,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           await ensureDiscoveryReady();
         }
         const worker = await getReadiedWorker();
+        const recoveryStarted = (): boolean =>
+          [...recoveriesRef.current.values()].some((entry) => entry.projectId === projectId);
         // A manifest/root event can supersede a shared pass while it is in flight.
         /* oxlint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
         for (;;) {
@@ -2425,7 +2427,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           }
           if (verification.status === 'verified') {
             const library = await ensureProjectLibraryState(worker, projectId);
-            if (verificationEpoch !== discoveryEpochRef.current) {
+            // A recovery that began during these reads (a permanent delete, say) wins: the loop's
+            // first check reports it.
+            if (verificationEpoch !== discoveryEpochRef.current || recoveryStarted()) {
               continue;
             }
             accessOutcome = 'ok';
@@ -2453,7 +2457,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           );
           if (valid) {
             const library = await ensureProjectLibraryState(worker, projectId);
-            if (epoch !== discoveryEpochRef.current) {
+            if (epoch !== discoveryEpochRef.current || recoveryStarted()) {
               continue;
             }
             accessOutcome = 'ok';

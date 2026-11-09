@@ -846,6 +846,47 @@ describe('useProjectManager.createProject', () => {
     expect(mockListProjectManifests).not.toHaveBeenCalled();
   });
 
+  it('reports a recovery that starts while the routed project is still being read', async () => {
+    const begun = Promise.withResolvers<string>();
+    const libraryRead = Promise.withResolvers<ProjectLibraryState | undefined>();
+    const deletion = Promise.withResolvers<{ status: 'deleted' }>();
+    mockBeginPermanentDeleteProject.mockReturnValueOnce(begun.promise);
+    mockPermanentlyDeleteProjectDirectory.mockReturnValueOnce(deletion.promise);
+    mockVerifyProjectRoute.mockResolvedValue({
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    });
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValue([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    // The deletion's own discovery pass is over before the route asks for access.
+    const deleting = result.current.permanentlyDeleteProject(fakeProject.id);
+    await vi.waitFor(() => {
+      expect(mockBeginPermanentDeleteProject).toHaveBeenCalled();
+    });
+    mockGetProjectLibraryState.mockReturnValueOnce(libraryRead.promise);
+    const access = result.current.getProjectRouteAccess(fakeProject.id);
+    await vi.waitFor(() => {
+      expect(mockGetProjectLibraryState).toHaveBeenCalled();
+    });
+    // The recovery starts while the route is still reading the library row.
+    begun.resolve(pendingPermanentDelete.operationId);
+    await vi.waitFor(() => {
+      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalled();
+    });
+    libraryRead.resolve({ projectId: fakeProject.id, lastActivityAt: 10 });
+
+    await expect(access).resolves.toMatchObject({ status: 'recovering' });
+    deletion.resolve({ status: 'deleted' });
+    await act(async () => deleting.catch(() => undefined));
+  });
+
   it('retries superseded target verification without publishing its old result', async () => {
     mockVerifyProjectRoute.mockResolvedValueOnce({ status: 'superseded' }).mockResolvedValueOnce({
       status: 'verified',

@@ -913,7 +913,13 @@ const approvalAnswers = (
       '</system-reminder>',
     ].join('\n'),
     metadata: {
-      tauInternal: { kind: 'approval-answer', anchorId, pruning: 'preserve-until-compaction' },
+      tauInternal: {
+        kind: 'approval-answer',
+        anchorId,
+        pruning: 'preserve-until-compaction',
+        /* Told to a new run before its message: the turn's context goes before it (`attachTurnContexts`). */
+        ...(ended ? { opensTurn: true } : {}),
+      },
       timestamp,
     },
   };

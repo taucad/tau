@@ -53,7 +53,7 @@ import {
   latexDelimiterMiddleware,
 } from '#harness/cad-middleware.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
-import { installCompaction, isCompactionSummary } from '#harness/compaction.js';
+import { installCompaction, isCompactionSummaryRow } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { agentHistory } from '#harness/agent-context.js';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
@@ -202,6 +202,111 @@ const providerHistory = (
     return [provider, ...calls];
   });
 
+/**
+ * One committed turn's context and the user message it rides with (I2), read back from the turn's
+ * `turn.history-projection-committed` row.
+ *
+ * @public
+ */
+export type CommittedTurnContext = Readonly<{ anchorId: string; context: TurnContextSnapshot }>;
+
+/**
+ * Every turn a log committed, each under the latest commit of its message id: a retry recommits a message under the
+ * same id once a rewind has dropped it, and the live commit is the last one.
+ *
+ * @param events - The log's rows in append order.
+ * @returns The committed turns.
+ * @internal
+ */
+export const committedTurnContexts = (events: readonly AgentLogEvent[]): readonly CommittedTurnContext[] => {
+  const byAnchor = new Map<string, TurnContextSnapshot>();
+  for (const event of events) {
+    if (event.type === 'turn.history-projection-committed') {
+      byAnchor.set(event.message.id, event.context);
+    }
+  }
+  return [...byAnchor].map(([anchorId, context]) => ({ anchorId, context }));
+};
+
+/** The bytes of a context that reach a provider: role and content, never ids or metadata. */
+const contextKey = (messages: readonly UserProviderMessage[]): string =>
+  JSON.stringify(messages.map(({ role, content }) => ({ role, content })));
+
+/**
+ * An approval answer the host tells a new run before its user message (`prepareStart`): the turn's context goes
+ * before it, so the context opens the turn and the answer sits between the context and the message.
+ */
+const opensTurn = (message: ProviderMessage): boolean =>
+  message.role === 'user' &&
+  message.metadata?.tauInternal?.['kind'] === 'approval-answer' &&
+  message.metadata.tauInternal['opensTurn'] === true;
+
+/**
+ * Attach each committed turn's context to the history, immediately before that turn's user message (I2).
+ *
+ * The context is frozen: it is the one the turn's commit row recorded, placed where that turn's own requests placed
+ * it, so every later request reproduces the earlier request's bytes through its last message (I1). A context whose
+ * bytes equal the last one emitted is skipped, which bounds growth and says nothing stale: the newest snapshot sits
+ * next to the newest message, and an unchanged one still describes the project. A turn committed after a compaction
+ * summary rides with its post-compaction context (RA-S10). A turn whose user message compaction evicted keeps no
+ * context, except the current turn, which rides after the last summary, or at the head when there is none.
+ *
+ * @param history - The durable history, as the request carries it.
+ * @param turns - The log's committed turns.
+ * @param current - This run's turn, placed even when compaction evicted its message.
+ * @returns The request messages.
+ * @internal
+ */
+export const attachTurnContexts = (
+  history: readonly ProviderMessage[],
+  turns: readonly CommittedTurnContext[],
+  current?: CommittedTurnContext,
+): ProviderMessage[] => {
+  const byAnchor = new Map(turns.map((turn) => [turn.anchorId, turn.context] as const));
+  if (current) {
+    byAnchor.set(current.anchorId, current.context);
+  }
+  const out: ProviderMessage[] = [];
+  let lastEmitted: string | undefined;
+  let summarySeen = false;
+  let afterLastSummary = 0;
+  let currentAnchored = false;
+  const emit = (context: TurnContextSnapshot, at: number): void => {
+    const block = summarySeen ? context.postCompactionMessages : context.initialMessages;
+    if (block.length === 0) {
+      return;
+    }
+    const key = contextKey(block);
+    if (key === lastEmitted) {
+      return;
+    }
+    lastEmitted = key;
+    out.splice(at, 0, ...block);
+  };
+  for (const message of history) {
+    if (isCompactionSummaryRow(message)) {
+      summarySeen = true;
+      out.push(message);
+      afterLastSummary = out.length;
+      continue;
+    }
+    const context = message.role === 'user' ? byAnchor.get(message.id) : undefined;
+    if (context !== undefined) {
+      let head = out.length;
+      while (head > 0 && opensTurn(out[head - 1]!)) {
+        head--;
+      }
+      emit(context, head);
+      currentAnchored ||= message.id === current?.anchorId;
+    }
+    out.push(message);
+  }
+  if (current && !currentAnchored) {
+    emit(current.context, afterLastSummary);
+  }
+  return out;
+};
+
 const hostTools = (context: Context): HostToolDefinition[] =>
   getCurrentTools(normalizeContext(context).messages).map((tool) => ({
     name: tool.name,
@@ -231,8 +336,12 @@ type CreateTransportStreamOptions = {
   readonly createId: () => string;
   /** The side table for the messages this request carries (D15). */
   readonly documents?: (() => ReadonlyMap<string, MaterializedDocument>) | undefined;
+  /** This run's committed context: its system prompt, blocks and model row. */
   readonly committedContext?: (() => TurnContextSnapshot | undefined) | undefined;
-  readonly usePostCompactionContext?: (() => boolean) | undefined;
+  /** The chat's committed turns (I2): each context rides before its user message, frozen (I1). */
+  readonly committedTurns?: (() => Promise<readonly CommittedTurnContext[]>) | undefined;
+  /** This run's turn, so its context is placed even when compaction has evicted its message. */
+  readonly currentTurn?: (() => CommittedTurnContext | undefined) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
   readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void | Promise<void>) | undefined;
   readonly prestartTool?:
@@ -603,6 +712,8 @@ export const createTransportStreamFunction =
             : options.createId();
         signal.throwIfAborted();
         const committedContext = options.committedContext?.();
+        const committedTurns = (await options.committedTurns?.()) ?? [];
+        signal.throwIfAborted();
         const documents = options.documents?.();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
         const request = new AbortController();
@@ -636,14 +747,12 @@ export const createTransportStreamFunction =
           contextWindow: model.contextWindow,
           systemPrompt: committedContext?.systemPrompt ?? getCurrentSystemPrompt(normalizeContext(context).messages),
           systemPromptBlocks: committedContext?.systemPromptBlocks ?? options.systemPromptBlocks?.(),
-          messages: [
-            ...(committedContext
-              ? options.usePostCompactionContext?.()
-                ? committedContext.postCompactionMessages
-                : committedContext.initialMessages
-              : []),
-            ...providerHistory(context.messages as AgentMessage[], options),
-          ],
+          /* I2: per-turn context never sits before history; each turn's rides before its own message. */
+          messages: attachTurnContexts(
+            providerHistory(context.messages as AgentMessage[], options),
+            committedTurns,
+            options.currentTurn?.(),
+          ),
           // A copy: the session's table grows with later turns while a transport may still hold this one.
           ...(documents === undefined || documents.size === 0 ? {} : { documents: new Map(documents) }),
           tools: hostTools(context),
@@ -1398,6 +1507,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   /* A Resume's selection replaces the committed model on every request of this attempt (L4 D-087). */
   let committedContext =
     projected === undefined || options.selection === undefined ? projected : { ...projected, model: options.selection };
+  /* The user message this run's context rides with: the committed one on a continuation, the prompted one on a start. */
+  let committedTurnId: string | undefined =
+    initialProjection?.type === 'turn.history-projection-committed' ? initialProjection.message.id : undefined;
   const effectiveModel: AgentSessionModel = options.selection ?? committedContext?.model ?? options.model;
   const model = modelFor(effectiveModel);
   const hydrateHistory = (history: readonly ProviderMessage[]): AgentMessage[] =>
@@ -1650,7 +1762,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     });
     return attemptId;
   };
-  let restoreRecentSkillContent = initialMessages.some((message) => isCompactionSummary(message));
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
     stallBound: {
@@ -1666,7 +1777,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     documents: () => documents,
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
-    usePostCompactionContext: () => restoreRecentSkillContent,
+    committedTurns: async () => committedTurnContexts(await record.events()),
+    currentTurn: () =>
+      committedContext === undefined || committedTurnId === undefined
+        ? undefined
+        : { anchorId: committedTurnId, context: committedContext },
     systemPromptBlocks: () => options.systemPromptBlocks,
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     prestartTool: async (toolCall, contentIndex, messageId, partial, signal) => {
@@ -1814,9 +1929,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           documents: () => documents,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
         }),
-    onSummary: () => {
-      restoreRecentSkillContent = true;
-    },
     settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
@@ -2009,6 +2121,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
             context,
           });
           committedContext = context;
+          committedTurnId = message.id;
           state = 'running';
           tell();
           if (wasAbortRequested()) {

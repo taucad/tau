@@ -6,7 +6,8 @@ import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-
 import type { Api, AssistantMessage, Model, Models, Usage, UserMessage } from '@earendil-works/pi-ai';
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
 import type { SessionLogEvent, SessionRecord } from '#harness/session-record.js';
-import type { CompactionTrace } from '#log/event-types.js';
+import type { CompactionTrace, ProviderMessage } from '#log/event-types.js';
+import { util as zodUtility } from 'zod';
 
 const clearedToolResultContent = '[Old tool result content cleared]';
 const oversizedToolResultContent =
@@ -201,6 +202,29 @@ const summaryText = (message: AgentMessage): string | undefined => {
  * @returns `true` for a summary.
  */
 export const isCompactionSummary = (message: AgentMessage): boolean => summaryText(message) !== undefined;
+
+/**
+ * {@link isCompactionSummary} over a durable row: the request assembly reads the log's envelopes, and a turn
+ * committed after a summary rides with its post-compaction context (RA-S10).
+ *
+ * @internal
+ * @param message - One durable provider message.
+ * @returns `true` for a summary.
+ */
+export const isCompactionSummaryRow = (message: ProviderMessage): boolean => {
+  if (message.role !== 'user') {
+    return false;
+  }
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : Array.isArray(message.content)
+        ? message.content
+            .map((block) => (zodUtility.isObject(block) && typeof block['text'] === 'string' ? block['text'] : ''))
+            .join('')
+        : '';
+  return /^<summary>\n[\s\S]*\n<\/summary>$/u.test(text);
+};
 
 const isValidCutPoint = (message: AgentMessage): boolean => message.role !== 'toolResult';
 

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
-import { ChatEditorBinaryWarning } from '#routes/w.$workspace.$project/chat-editor-binary-warning.js';
+import { ChatEditorBinaryWarning } from '#components/chat-editor-binary-warning.js';
 
 describe('ChatEditorBinaryWarning', () => {
   it('should render warning copy explaining the file is binary or unsupported encoding', () => {

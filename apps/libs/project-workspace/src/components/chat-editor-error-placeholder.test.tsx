@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
+import { ChatEditorErrorPlaceholder } from '#components/chat-editor-error-placeholder.js';
 
 describe('ChatEditorErrorPlaceholder', () => {
   it('should render the failure title', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sniffNativeImageFormat } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';
+import { sniffNativeImageFormat } from '#utils/native-image-format.js';
 
 const ascii = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 

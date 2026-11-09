@@ -16,7 +16,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type * as HighlightTextModule from '@taucad/ui/components/highlight-text';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
-import { rowWindowThreshold } from '#routes/w.$workspace.$project/use-row-window.js';
+import { rowWindowThreshold } from '@taucad/project-workspace/hooks/use-row-window';
 
 /** Row renders, counted where each file or folder row draws its name. */
 const renders = vi.hoisted(() => ({ row: 0 }));

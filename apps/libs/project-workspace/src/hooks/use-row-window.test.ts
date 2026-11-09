@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { rowWindowThreshold, useRowWindow } from '#routes/w.$workspace.$project/use-row-window.js';
+import { rowWindowThreshold, useRowWindow } from '#hooks/use-row-window.js';
 
 const rectAt = (top: number): DOMRect => ({
   top,

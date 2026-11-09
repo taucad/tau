@@ -1,4 +1,4 @@
-import { getFileTreeParentDirectory, joinFileTreePath } from '#routes/w.$workspace.$project/file-tree-targets.js';
+import { getFileTreeParentDirectory, joinFileTreePath } from '#utils/file-tree-targets.js';
 
 export type DroppedFile = {
   readonly kind: 'file';

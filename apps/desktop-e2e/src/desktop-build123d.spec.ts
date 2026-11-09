@@ -362,7 +362,7 @@ const validateStep = (path: string): readonly number[] => {
 };
 
 const openFirstProjectCardPreview = async (page: Page): Promise<Locator> => {
-  await page.getByRole('link', { name: 'All projects', exact: true }).click();
+  await page.getByRole('link', { name: 'Projects', exact: true }).click();
   await page.waitForURL((url) => url.pathname === '/projects', { timeout: 60_000 });
   await expectVisible(page.getByPlaceholder('Search projects…'), 60_000);
   const card = page

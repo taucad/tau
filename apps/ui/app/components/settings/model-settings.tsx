@@ -7,7 +7,7 @@ import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { useModels } from '#hooks/use-models.js';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { Loader } from '@taucad/ui/components/loader';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
 
@@ -141,7 +141,22 @@ function ModelsEmptyState({
   const className = 'h-64 rounded-xl border bg-card';
 
   if (isLoading) {
-    return <PanelEmptyState icon={Loader} title='Loading models' aria-busy className={className} />;
+    return (
+      <div role='status' aria-busy='true' className='flex flex-col gap-0.5 rounded-xl border bg-card p-1'>
+        <span className='sr-only'>Loading models</span>
+        {Array.from({ length: 6 }, (_, index) => (
+          // The shape of a model row: provider icon, name and description, then the switch.
+          <div key={index} aria-hidden='true' className='flex items-center gap-3 px-3 py-2.5'>
+            <Skeleton className='size-4 shrink-0' />
+            <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+              <Skeleton className='h-3.5 w-36 max-w-full' />
+              <Skeleton className='h-3 w-64 max-w-full' />
+            </div>
+            <Skeleton className='h-5 w-9 shrink-0 rounded-full' />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   if (search) {

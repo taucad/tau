@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { Card } from '@taucad/ui/components/card';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import type { SettingId } from '#components/settings/settings-registry.js';
@@ -180,4 +181,103 @@ export function SettingsRow({
     </div>
   );
   return settingId === undefined ? row : <SettingsItem settingId={settingId}>{row}</SettingsItem>;
+}
+
+/**
+ * The placeholder for one {@link SettingsRow} while its data loads: a title
+ * line, a description line and the control, at the row's own height, so the
+ * page does not move when the real row arrives.
+ *
+ * @param props - Whether the row has a control, and an optional class name.
+ * @returns The placeholder row. It is hidden from assistive technology; the group names the wait.
+ */
+export function SettingsRowSkeleton({
+  hasControl = true,
+  className,
+}: {
+  readonly hasControl?: boolean;
+  readonly className?: string;
+}): React.JSX.Element {
+  return (
+    <div
+      aria-hidden='true'
+      data-slot='settings-row-skeleton'
+      className={cn('flex items-center justify-between gap-4 py-3.5', className)}
+    >
+      <div className='flex min-w-0 flex-1 flex-col gap-2 py-0.5'>
+        <Skeleton className='h-3.5 w-32 max-w-full' />
+        <Skeleton className='h-3 w-56 max-w-full' />
+      </div>
+      {hasControl ? <Skeleton className='h-8 w-20 shrink-0' /> : undefined}
+    </div>
+  );
+}
+
+/**
+ * Loading rows inside a group that is already on screen. It announces the wait
+ * once, as a status, and draws the rows that are about to arrive.
+ *
+ * @param props - What is loading, in words, and how many rows to draw.
+ * @returns The status region with its placeholder rows.
+ */
+export function SettingsRowsLoading({
+  label,
+  rows = 2,
+  hasControl = true,
+}: {
+  /** What is loading, for screen readers: `Loading repositories…`. */
+  readonly label: string;
+  readonly rows?: number;
+  readonly hasControl?: boolean;
+}): React.JSX.Element {
+  return (
+    <div role='status' aria-busy='true' data-slot='settings-rows-loading' className='[&>*:not(:first-child)]:border-t'>
+      <span className='sr-only'>{label}</span>
+      {Array.from({ length: rows }, (_, index) => (
+        <SettingsRowSkeleton key={index} hasControl={hasControl} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A whole settings page while it loads: group headings and cards of rows in
+ * the page's own layout, in place of a spinner or a line of text.
+ *
+ * @param props - What is loading, in words, and the rows in each group.
+ * @returns The status region with one placeholder group per entry in `groups`.
+ */
+export function SettingsPageSkeleton({
+  label = 'Loading settings',
+  groups = [3, 2],
+  className,
+}: {
+  readonly label?: string;
+  /** The number of rows in each group, top to bottom. */
+  readonly groups?: readonly number[];
+  readonly className?: string;
+}): React.JSX.Element {
+  return (
+    <div
+      role='status'
+      aria-label={label}
+      aria-busy='true'
+      data-slot='settings-page-skeleton'
+      className={cn('flex flex-col gap-8', className)}
+    >
+      {groups.map((rows, groupIndex) => (
+        // oxlint-disable-next-line react/no-array-index-key -- the groups are static placeholders
+        <div key={groupIndex} aria-hidden='true' className='flex flex-col gap-3'>
+          <div className='flex min-h-8 items-center'>
+            <Skeleton className='h-3.5 w-28' />
+          </div>
+          <div className='flex flex-col rounded-xl border bg-card px-4 [&>*:not(:first-child)]:border-t'>
+            {Array.from({ length: rows }, (_, index) => (
+              <SettingsRowSkeleton key={index} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

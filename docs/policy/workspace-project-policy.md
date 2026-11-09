@@ -3,11 +3,12 @@ title: 'Workspace Project Policy'
 description: 'Placement, tagging, layering, generation, and dependency rules for Tau workspace projects and private application libraries.'
 status: active
 created: '2026-08-22'
-updated: '2026-11-08'
+updated: '2026-11-09'
 related:
   - docs/research/ui-feature-library-architecture-blueprint.md
   - docs/research/api-module-layout-blueprint.md
   - docs/research/workspace-license-boundary-migration.md
+  - docs/research/ci-decomposition-blueprint.md
   - docs/policy/library-api-policy.md
   - docs/policy/public-surface-policy.md
 ---
@@ -101,6 +102,26 @@ pnpm nx g ./tools/workspace-plugin/generators.json:package api-billing \
 
 Do not create deployable apps with the package generator. Add a charter under `docs/research/` and review this policy plus `workspace-license-boundary-migration.md` first.
 
+### 10. Size Projects for CI (Advisory)
+
+A project is the right size for CI when its own `test` task is not the floor of a lane and when the share of landings that make it affected stays close to the share that touch it. Aim for:
+
+| Measure               | Advisory target                          |
+| --------------------- | ---------------------------------------- |
+| Non-test source files | ≤ 100 (source lines, ≤ 10 k, break ties) |
+| `it`/`test` cases     | ≤ 300                                    |
+| Uncached `test` task  | ≤ 3 min                                  |
+| Graph-affected rate   | ≤ 2 × touched rate                       |
+
+These are guidance, not a gate: nothing fails a build on them, and existing projects held at their size by the CI decomposition blueprint stay as they are. Before growing a project past a target, or when choosing what to split, read the census:
+
+```bash
+pnpm nx run nx:census            # flagged projects; --all for every project
+pnpm nx run nx:census --commits 700 --durations <seconds.json>
+```
+
+It counts source files and `it`/`test` call sites (a static approximation of the test count), dependency closure and fan-in from the Nx graph, and replays recent first-parent history to simulate each project's touched and affected rates; global files (`sharedGlobals`, the lockfile) are reported separately and left out of the affected check, which applies only to projects touched by at least 2 % of the window. Test time is flagged only when `--durations` supplies measured seconds. The full report is written to `out/reports/census/census.json`. Split by stability, not only by size: a high fan-in project lowers the whole workspace's affected rates when its rarely touched core is separated from its churning edges.
+
 ## Review Checklist
 
 - [ ] Placement matches the audience router.
@@ -110,10 +131,11 @@ Do not create deployable apps with the package generator. Add a charter under `d
 - [ ] Cross-cutting app concerns are injected.
 - [ ] Every subpath has an audience note and exports-map test.
 - [ ] The project was produced by the workspace generator.
+- [ ] A project growing past the advisory size target was checked against `nx:census`.
 
 ## References
 
 - [Nx project dependency rules](https://nx.dev/docs/kb/project-dependency-rules)
 - [Nx project size guidance](https://nx.dev/docs/concepts/decisions/project-size)
 - Related: `docs/policy/library-api-policy.md`
-- Research: `docs/research/ui-feature-library-architecture-blueprint.md`
+- Research: `docs/research/ui-feature-library-architecture-blueprint.md`, `docs/research/ci-decomposition-blueprint.md` (Part 2, F5–F6)

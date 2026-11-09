@@ -21,12 +21,13 @@ import type { Model, ProviderId } from '@taucad/chat/model-catalog';
  * Live acceptance for the self-host helper path (Tau Cloud off).
  *
  * For every configured provider it runs, through one `DirectModelInvocationService`:
- * (a) a streaming `project_name` helper request, (b) the same with a tiny inline PNG,
+ * (a) a streaming `project_name` helper request, (b) the same with a small inline PNG,
  * both forced onto that provider's helper model, and (c) a tool-call request through
  * the `gateway` surface on the same model, which shares the provider transport.
  *
  * It prints one line per case — provider, model id, HTTP status, latency and token
- * counts — and never a key, a prompt or a model's output.
+ * counts — and never a key, a prompt or a model's output. A helper case that streams
+ * no answer text fails: an empty name is not a name.
  *
  * Skipped unless `TAU_LIVE_PROVIDERS=1`. Run it with
  * `TAU_LIVE_PROVIDERS=1 pnpm nx run api:test:live -- app/api/llm/helper-path.live.test.ts`.
@@ -51,9 +52,12 @@ const credentialNames: Partial<Record<ProviderId, string>> = {
   xai: 'XAI_API_KEY',
 };
 
-/** A 1×1 transparent PNG. */
-const tinyPng =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+/**
+ * A 64×64 solid blue RGB PNG. xAI refuses a 1×1 image as `invalid_image`, and
+ * Anthropic answered one with no text; every provider accepts this size.
+ */
+const solidPng =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAT0lEQVR42u3PQQkAAAgEsMtnJ2PZzwi+hcEKLNXzWgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQELgsUXcFavzhoNAAAAABJRU5ErkJggg==';
 
 type LiveCase = {
   readonly label: string;
@@ -335,7 +339,7 @@ describe.skipIf(!enabled)('self-host helper path (live)', () => {
                     kind === 'image'
                       ? [
                           { type: 'text', text: 'A small flat mounting bracket. A picture is attached.' },
-                          { type: 'file', mediaType: 'image/png', data: tinyPng },
+                          { type: 'file', mediaType: 'image/png', data: solidPng },
                         ]
                       : 'A small flat mounting bracket with two holes.',
                 },
@@ -362,6 +366,13 @@ describe.skipIf(!enabled)('self-host helper path (live)', () => {
         });
         throw error;
       }
+      // Reasoning that fills the 64-token ceiling leaves the name empty while the request still answers 200.
+      const failure =
+        counts.textChars > 0
+          ? undefined
+          : (counts.reasoning ?? 0) > 0
+            ? 'empty_text_reasoning_spent_output'
+            : 'empty_text';
       report({
         provider: liveCase.label,
         model: model.model,
@@ -373,9 +384,11 @@ describe.skipIf(!enabled)('self-host helper path (live)', () => {
         cache_read_tokens: counts.cacheRead,
         reasoning_tokens: counts.reasoning,
         text_chars: counts.textChars,
+        failure,
       });
       expect(status).toBe(200);
       expect(counts.input ?? 0).toBeGreaterThan(0);
+      expect(counts.textChars, `${liveCase.label} ${kind}: ${failure ?? 'text'}`).toBeGreaterThan(0);
     };
 
     it('streams a helper request', async (context) => {

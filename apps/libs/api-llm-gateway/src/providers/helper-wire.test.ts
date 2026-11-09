@@ -47,7 +47,7 @@ const routeOf = (model: Model): HelperModelRoute => {
 };
 
 const bodyFor = (model: Model, prompt: HelperPrompt = textPrompt): Record<string, unknown> =>
-  helperRequestBody(routeOf(model), model.configuration, prompt);
+  helperRequestBody(routeOf(model), model, prompt);
 
 const ollamaModel = {
   id: 'llama3.2:latest',
@@ -87,13 +87,14 @@ describe('helperModelRoute', () => {
 });
 
 describe('helperRequestBody', () => {
-  it('should send OpenAI the row reasoning, temperature and the helper output ceiling on the Responses wire', () => {
+  it('should send OpenAI no reasoning, the row temperature and the helper output ceiling on the Responses wire', () => {
     expect(bodyFor(catalogRow('openai', 'gpt-5.6-luna'), imagePrompt)).toEqual({
       model: 'gpt-5.6-luna',
       stream: true,
       max_output_tokens: 64,
       temperature: 1,
-      reasoning: { effort: 'high', summary: 'auto' },
+      // The funded helper's effort; the row's `high` and its summary would spend the 64 tokens thinking.
+      reasoning: { effort: 'none' },
       input: [
         { role: 'system', content: 'Name it.' },
         {
@@ -110,15 +111,28 @@ describe('helperRequestBody', () => {
     });
   });
 
-  it('should send xAI its Responses reasoning block and the helper ceiling, not the row ceiling', () => {
-    expect(bodyFor(catalogRow('xai', 'grok-4.6'))).toMatchObject({
-      model: 'grok-4.6',
-      max_output_tokens: 64,
-      reasoning: { effort: 'high', summary: 'auto' },
-    });
+  it.each(['grok-4.7', 'grok-4.6'])(
+    'should send xAI %s its lowest effort and the helper ceiling, not the row ceiling',
+    (slug) => {
+      const body = bodyFor(catalogRow('xai', slug));
+
+      expect(body).toMatchObject({ model: slug, max_output_tokens: 64 });
+      expect(body['reasoning']).toEqual({ effort: 'low' });
+    },
+  );
+
+  it('should send a Responses row without reasoning no reasoning block', () => {
+    const row = catalogRow('openai', 'gpt-4o-mini');
+    const body = helperRequestBody(
+      { providerId: 'openai', modelId: row.model, wire: 'openai-responses' },
+      row,
+      textPrompt,
+    );
+
+    expect(body).not.toHaveProperty('reasoning');
   });
 
-  it('should send Anthropic adaptive thinking, output effort, a top-level system prompt and image sources', () => {
+  it('should send Anthropic no thinking or effort, a top-level system prompt and image sources', () => {
     const row = catalogRow('anthropic', 'claude-haiku-5.5');
     const body = bodyFor(row, imagePrompt);
 
@@ -126,8 +140,6 @@ describe('helperRequestBody', () => {
       model: row.model,
       stream: true,
       max_tokens: 64,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'high' },
       system: 'Name it.',
       messages: [
         {
@@ -146,13 +158,20 @@ describe('helperRequestBody', () => {
     expect(body).not.toHaveProperty('max_tokens', 16_000);
   });
 
-  it('should prefix the Vertex model with google/ and send its thinking level under extra_body', () => {
+  it('should send no Anthropic thinking even on a row with adaptive display and a higher effort', () => {
+    const body = bodyFor(catalogRow('anthropic', 'claude-fable-5.1'));
+
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('output_config');
+  });
+
+  it('should prefix the Vertex model with google/ and send its lowest thinking level under extra_body', () => {
     expect(bodyFor(catalogRow('vertexai', 'gemini-3.8-flash'), imagePrompt)).toEqual({
       model: 'google/gemini-3.8-flash',
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 64,
-      extra_body: { google: { thinking_config: { thinking_level: 'HIGH' } } },
+      extra_body: { google: { thinking_config: { thinking_level: 'LOW' } } },
       messages: [
         { role: 'system', content: 'Name it.' },
         {
@@ -169,13 +188,19 @@ describe('helperRequestBody', () => {
     });
   });
 
+  it('should send the argon row LOW, not its HIGH default', () => {
+    expect(bodyFor(catalogRow('vertexai', 'gemini-4-argon'))).toMatchObject({
+      extra_body: { google: { thinking_config: { thinking_level: 'LOW' } } },
+    });
+  });
+
   it('should carry a Vertex row temperature', () => {
     const row = catalogRow('vertexai', 'gemini-3.1-pro');
 
     expect(bodyFor(row)).toMatchObject({ model: `google/${row.model}`, temperature: 1 });
   });
 
-  it('should send Together Kimi the standard ceiling without a Moonshot reasoning effort', () => {
+  it('should send Together Kimi the standard ceiling and thinking off, without a Moonshot reasoning effort', () => {
     const body = bodyFor(catalogRow('together', 'kimi-k3'));
 
     expect(body).toEqual({
@@ -183,11 +208,30 @@ describe('helperRequestBody', () => {
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 64,
+      reasoning: { enabled: false },
       messages: [
         { role: 'system', content: 'Name it.' },
         { role: 'user', content: 'A bracket with two holes' },
       ],
     });
+  });
+
+  it('should turn Together GLM thinking off', () => {
+    const body = bodyFor(catalogRow('together', 'glm-5.2'));
+
+    expect(body).toMatchObject({ model: 'zai-org/GLM-5.2', max_tokens: 64, reasoning: { enabled: false } });
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('should send a Together row outside the Kimi and GLM families no reasoning switch', () => {
+    const row = catalogRow('together', 'llama-4-maverick');
+    const body = helperRequestBody(
+      { providerId: 'together', modelId: row.model, wire: 'openai-completions' },
+      row,
+      textPrompt,
+    );
+
+    expect(body).not.toHaveProperty('reasoning');
   });
 
   it('should send Morph the ceiling but not the row reasoning effort it never received', () => {
@@ -198,18 +242,18 @@ describe('helperRequestBody', () => {
     expect(body).not.toHaveProperty('reasoning');
   });
 
-  it('should send Moonshot Kimi its reasoning effort and omit the fixed K3 sampling and ceiling', () => {
+  it('should send Moonshot Kimi its lowest reasoning effort and omit the fixed K3 sampling and ceiling', () => {
     // The row is disabled, so no listed model routes here today; the codec still owns its shape.
     const row = catalogRow('moonshot', 'kimi-k3');
     const body = helperRequestBody(
       { providerId: 'moonshot', modelId: row.model, wire: 'openai-completions' },
-      row.configuration,
+      row,
       imagePrompt,
     );
 
     expect(body).toMatchObject({
       model: 'kimi-k3',
-      reasoning_effort: 'high',
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: 'Name it.' },
         {
@@ -228,16 +272,20 @@ describe('helperRequestBody', () => {
   });
 
   it('should fold system messages into the system prompt and drop tool traffic', () => {
-    const body = helperRequestBody(routeOf(catalogRow('anthropic', 'claude-haiku-5.5')), {} as Model['configuration'], {
-      system: 'Name it.',
-      messages: [
-        { role: 'system', content: 'Prefer short names.' },
-        { role: 'user', content: 'A vase' },
-        { role: 'assistant', content: [{ type: 'text', text: 'Vase' }] },
-        { role: 'tool', content: [] },
-      ],
-      maximumOutputTokens: 64,
-    });
+    const body = helperRequestBody(
+      routeOf(catalogRow('anthropic', 'claude-haiku-5.5')),
+      { configuration: { streaming: true } },
+      {
+        system: 'Name it.',
+        messages: [
+          { role: 'system', content: 'Prefer short names.' },
+          { role: 'user', content: 'A vase' },
+          { role: 'assistant', content: [{ type: 'text', text: 'Vase' }] },
+          { role: 'tool', content: [] },
+        ],
+        maximumOutputTokens: 64,
+      },
+    );
 
     expect(body['system']).toBe('Name it.\n\nPrefer short names.');
     expect(body['messages']).toEqual([

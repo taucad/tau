@@ -191,13 +191,11 @@ describe('DirectModelInvocationService', () => {
     expect(text).toBe('Named part');
     const [url, init] = fetchOnce.mock.calls[0] ?? [];
     expect(url).toBe('https://api.anthropic.com/v1/messages');
-    expect(JSON.parse(init?.body as string)).toMatchObject({
-      model: 'claude-fable-5',
-      stream: true,
-      max_tokens: 64,
-      thinking: { type: 'adaptive', display: 'summarized' },
-      output_config: { effort: 'high' },
-    });
+    const sent = JSON.parse(init?.body as string) as Record<string, unknown>;
+    expect(sent).toMatchObject({ model: 'claude-fable-5', stream: true, max_tokens: 64 });
+    // The row's adaptive thinking at `high` would spend the 64-token ceiling before the name.
+    expect(sent).not.toHaveProperty('thinking');
+    expect(sent).not.toHaveProperty('output_config');
     expect(init?.headers).toMatchObject({ 'x-api-key': 'provider-key', 'anthropic-version': '2023-06-01' });
     await result.completion;
   });

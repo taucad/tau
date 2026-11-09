@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire fields use snake_case. */
 import type { ModelMessage } from 'ai';
+import { reasoningLevels } from '@taucad/chat/constants';
+import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { Model } from '@taucad/chat/model-catalog';
 import type { ModelProviderWire } from '#model-invocation.types.js';
 import { upstreamModelId } from '#providers/provider-gateway.js';
@@ -52,6 +54,9 @@ export class HelperStreamFailure extends Error {
     this.name = 'HelperStreamFailure';
   }
 }
+
+/** The parts of a catalog row a helper request reads. */
+export type HelperModelRow = Pick<Model, 'configuration'> & Partial<Pick<Model, 'support' | 'details'>>;
 
 type RequestOptions = Model['configuration'];
 type JsonRecord = Record<string, unknown>;
@@ -132,14 +137,42 @@ const anthropicImage = (url: string): JsonRecord => {
 const sampling = (options: RequestOptions): JsonRecord =>
   options.temperature === undefined ? {} : { temperature: options.temperature };
 
-const responsesBody = (model: string, options: RequestOptions, prompt: HelperPrompt): JsonRecord => {
+/*
+ * A helper answers a two-word name inside a 64-token ceiling, and a reasoning
+ * model spends that ceiling thinking before it writes a word. So a helper asks
+ * every row for the least reasoning it accepts, never the row's default:
+ *
+ * - The Responses wire takes OpenAI's `none`, the effort the funded helper
+ *   sends; xAI has no off switch, so it takes the row's lowest level.
+ * - Anthropic gets no `thinking` and no `output_config` effort.
+ * - Vertex gets the row's lowest Gemini thinking level. Tau's levels start at
+ *   `low`, the floor every Gemini row accepts; `minimal` is not one of them.
+ * - Moonshot's Kimi gets its lowest `reasoning_effort`.
+ * - Together's Kimi and GLM take no effort; they turn thinking off with
+ *   `reasoning.enabled: false`, the switch pi-ai's Together codec sends for
+ *   these models.
+ */
+
+/** Providers with an effort that turns reasoning off, as the funded helper sends it. */
+const reasoningOffEffort: Partial<Record<HelperModelRoute['providerId'], string>> = { openai: 'none' };
+
+/** Together families that take `reasoning.enabled` instead of an effort. */
+const togetherThinkingFamilies = new Set<string>(['kimi', 'glm']);
+
+/** The row's lowest reasoning level: its first declared level, else the floor every Tau level starts at. */
+const lowestLevel = (row: HelperModelRow): ReasoningLevel => row.support?.reasoning?.levels[0] ?? reasoningLevels[0];
+
+const responsesBody = (route: HelperModelRoute, row: HelperModelRow, prompt: HelperPrompt): JsonRecord => {
   const { system, messages } = neutralPrompt(prompt);
+  const options = row.configuration;
   return {
-    model,
+    model: upstreamModelId(route),
     stream: true,
     max_output_tokens: prompt.maximumOutputTokens,
     ...sampling(options),
-    ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
+    ...(options.reasoning === undefined
+      ? {}
+      : { reasoning: { effort: reasoningOffEffort[route.providerId] ?? lowestLevel(row) } }),
     input: [
       ...(system.length > 0 ? [{ role: 'system', content: system }] : []),
       ...messages.map((message) =>
@@ -168,8 +201,6 @@ const anthropicBody = (model: string, options: RequestOptions, prompt: HelperPro
     stream: true,
     max_tokens: prompt.maximumOutputTokens,
     ...sampling(options),
-    ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
-    ...(options.outputConfig === undefined ? {} : { output_config: options.outputConfig }),
     ...(system.length > 0 ? { system } : {}),
     messages: messages.map((message) => ({
       role: message.role,
@@ -186,35 +217,38 @@ const anthropicBody = (model: string, options: RequestOptions, prompt: HelperPro
  *
  * - Moonshot's Kimi fixes its sampling and output ceiling and takes
  *   `reasoning_effort`, so neither limit nor temperature is sent.
- * - Vertex takes Gemini's thinking level under `extra_body.google`. Thoughts
- *   are not requested: a helper reads only the answer.
+ * - Vertex takes Gemini's thinking level under `extra_body.google`, upper-cased
+ *   as the portable host sends it. Thoughts are not requested: a helper reads
+ *   only the answer.
+ * - Together's Kimi and GLM take `reasoning.enabled`.
  */
-const completionsOptions = (route: HelperModelRoute, options: RequestOptions, prompt: HelperPrompt): JsonRecord => {
+const completionsOptions = (route: HelperModelRoute, row: HelperModelRow, prompt: HelperPrompt): JsonRecord => {
+  const options = row.configuration;
   if (route.providerId === 'moonshot') {
-    return options.reasoning?.effort === undefined ? {} : { reasoning_effort: options.reasoning.effort };
+    return options.reasoning?.effort === undefined ? {} : { reasoning_effort: lowestLevel(row) };
   }
-  const thinkingLevel =
+  const thinks =
     route.providerId === 'vertexai' &&
     options.thinkingLevel !== undefined &&
-    options.thinkingLevel !== 'THINKING_LEVEL_UNSPECIFIED'
-      ? options.thinkingLevel
-      : undefined;
+    options.thinkingLevel !== 'THINKING_LEVEL_UNSPECIFIED';
+  const togetherThinks = route.providerId === 'together' && togetherThinkingFamilies.has(row.details?.family ?? '');
   return {
     max_tokens: prompt.maximumOutputTokens,
     ...sampling(options),
-    ...(thinkingLevel === undefined
-      ? {}
-      : { extra_body: { google: { thinking_config: { thinking_level: thinkingLevel } } } }),
+    ...(thinks
+      ? { extra_body: { google: { thinking_config: { thinking_level: lowestLevel(row).toUpperCase() } } } }
+      : {}),
+    ...(togetherThinks ? { reasoning: { enabled: false } } : {}),
   };
 };
 
-const completionsBody = (route: HelperModelRoute, options: RequestOptions, prompt: HelperPrompt): JsonRecord => {
+const completionsBody = (route: HelperModelRoute, row: HelperModelRow, prompt: HelperPrompt): JsonRecord => {
   const { system, messages } = neutralPrompt(prompt);
   return {
     model: upstreamModelId(route),
     stream: true,
     stream_options: { include_usage: true },
-    ...completionsOptions(route, options, prompt),
+    ...completionsOptions(route, row, prompt),
     messages: [
       ...(system.length > 0 ? [{ role: 'system', content: system }] : []),
       ...messages.map((message) => ({
@@ -234,30 +268,25 @@ const completionsBody = (route: HelperModelRoute, options: RequestOptions, promp
 /**
  * The native streaming request a helper sends on its route's wire.
  *
- * The catalog row's request options reach the provider the way the previous
- * helper path sent them: the Responses `reasoning` block and Anthropic's
- * `thinking`/`output_config` as configured, Vertex's thinking level, Moonshot's
- * reasoning effort, the row's temperature, and the helper's own output ceiling.
+ * The row's temperature and the helper's own output ceiling reach the
+ * provider. Reasoning does not run at the row's default: each wire asks for the
+ * least reasoning the row accepts, so the answer fits the ceiling.
  *
  * @param route - The helper's resolved route.
- * @param options - The catalog row's `configuration`.
+ * @param row - The catalog row: its `configuration`, reasoning `support` and family.
  * @param prompt - The helper prompt.
  * @returns The JSON body for `executeGatewayProviderRequest`.
  */
-export const helperRequestBody = (
-  route: HelperModelRoute,
-  options: RequestOptions,
-  prompt: HelperPrompt,
-): JsonRecord => {
+export const helperRequestBody = (route: HelperModelRoute, row: HelperModelRow, prompt: HelperPrompt): JsonRecord => {
   switch (route.wire) {
     case 'openai-responses': {
-      return responsesBody(upstreamModelId(route), options, prompt);
+      return responsesBody(route, row, prompt);
     }
     case 'anthropic': {
-      return anthropicBody(upstreamModelId(route), options, prompt);
+      return anthropicBody(upstreamModelId(route), row.configuration, prompt);
     }
     case 'openai-completions': {
-      return completionsBody(route, options, prompt);
+      return completionsBody(route, row, prompt);
     }
   }
 };

@@ -274,7 +274,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
       maxTokens: prompt.maximumOutputTokens,
     });
     const call: HelperCall = { intent, route, span };
-    const events = await this.openHelperStream(call, helperRequestBody(route, selected.configuration, prompt));
+    const events = await this.openHelperStream(call, helperRequestBody(route, selected, prompt));
     /* Pull the first event before the caller gets `streaming` and the controller sends 200: a
      * provider that refuses inside its stream is then still a typed JSON status rather than a
      * destroyed socket. */

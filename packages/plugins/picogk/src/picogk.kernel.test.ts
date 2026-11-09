@@ -343,10 +343,11 @@ describe('PicoGK kernel', () => {
       expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {} } }),
     );
 
-    const meshing = { adaptivity: 0.5, relax: true };
+    // The protocol still carries OpenVDB's relax pass, always off.
+    const meshing = { adaptivity: 0.5, relax: false };
     value.session.request.mockResolvedValueOnce({ ...buildResult(), meshing });
     const built = await definition.evaluate(
-      { entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5, meshRelax: true } },
+      { entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5 } },
       runtime,
       value,
     );
@@ -354,7 +355,8 @@ describe('PicoGK kernel', () => {
       expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {}, meshing } }),
     );
     const artifact = await definition.render!({ view: 'model', handle: built.handle, options: {} }, runtime, value);
-    expect(artifact.tessellation).toMatchObject({ adaptivity: 0.5, relax: true });
+    expect(artifact.tessellation).toMatchObject({ adaptivity: 0.5 });
+    expect(artifact.tessellation).not.toHaveProperty('relax');
     expect(
       definition.deserializeHandle!(
         { serialized: structuredClone(definition.serializeHandle!({ handle: built.handle }, runtime, value)) },
@@ -362,26 +364,26 @@ describe('PicoGK kernel', () => {
         value,
       ),
     ).toEqual(built.handle);
+    // A snapshot written while meshRelax existed restores, without the field.
+    const serialized = structuredClone(definition.serializeHandle!({ handle: built.handle }, runtime, value));
+    const older = { ...serialized, tessellation: { ...serialized.tessellation!, relax: true } };
+    expect(definition.deserializeHandle!({ serialized: older }, runtime, value)).toEqual(built.handle);
   });
 
   it('refuses an adaptive view from a worker that does not echo the meshing it applied', async () => {
     const value = context();
-    for (const echoed of [undefined, { adaptivity: 0.5, relax: false }, { adaptivity: 0.25, relax: true }]) {
+    for (const echoed of [undefined, { adaptivity: 0.5, relax: true }, { adaptivity: 0.25, relax: false }]) {
       value.session.request.mockResolvedValueOnce(echoed ? { ...buildResult(), meshing: echoed } : buildResult());
       // oxlint-disable-next-line no-await-in-loop -- each refusal is checked against its own worker reply.
       await expect(
-        definition.evaluate(
-          { entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5, meshRelax: true } },
-          runtime,
-          value,
-        ),
+        definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5 } }, runtime, value),
       ).rejects.toMatchObject({
         issues: [
           {
             code: 'RUNTIME',
             type: 'kernel',
             severity: 'error',
-            details: { reason: 'meshing-unsupported', meshAdaptivity: 0.5, meshRelax: true },
+            details: { reason: 'meshing-unsupported', meshAdaptivity: 0.5 },
           },
         ],
       });
@@ -400,13 +402,15 @@ describe('PicoGK kernel', () => {
     expect(value.session.request).toHaveBeenLastCalledWith(
       expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {}, meshing } }),
     );
-    expect(built.handle.tessellation).toMatchObject({ adaptivity: 0.25, relax: false });
+    expect(built.handle.tessellation).toMatchObject({ adaptivity: 0.25 });
+    expect(built.handle.tessellation).not.toHaveProperty('relax');
   });
 
   it('accepts the uniform mesh of a worker without adaptive meshing for a view that sets none, built once', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce(buildResult());
     const built = await definition.evaluate(
+      // A saved meshRelax from before its removal is dropped, so the worker is asked for relax off.
       { entryPath: 'main.cs', parameters: {}, options: picogkRenderSchema.parse({ meshRelax: true }) },
       runtime,
       value,
@@ -414,7 +418,7 @@ describe('PicoGK kernel', () => {
     expect(value.session.request.mock.calls.filter(([request]) => request.method === 'build')).toHaveLength(1);
     expect(value.session.request).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        params: { entryPath: 'main.cs', parameters: {}, meshing: { adaptivity: 0.25, relax: true } },
+        params: { entryPath: 'main.cs', parameters: {}, meshing: { adaptivity: 0.25, relax: false } },
       }),
     );
     // The report states the mesh the worker built: uniform.
@@ -425,20 +429,17 @@ describe('PicoGK kernel', () => {
   it('reports the meshing a handle holds as its export build, and a report-less snapshot as nothing', () => {
     const glb = new Uint8Array(4);
     const tessellation = { triangles: 1, vertices: 3, elapsed: 1 };
-    const options = picogkRenderSchema.parse({ meshRelax: true });
+    const options = picogkRenderSchema.parse({});
     const effective = (handle: Parameters<NonNullable<typeof definition.effectiveOptions>>[0]['handle']) =>
       definition.effectiveOptions!({ handle, options }, runtime, context());
-    expect(effective({ glb, tessellation })).toEqual({ meshAdaptivity: 0, meshRelax: false });
-    expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } })).toEqual({
-      meshAdaptivity: 0.25,
-      meshRelax: true,
-    });
+    expect(effective({ glb, tessellation })).toEqual({ meshAdaptivity: 0 });
+    expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25 } })).toEqual({ meshAdaptivity: 0.25 });
     expect(effective({ glb })).toBeUndefined();
     // A default export's construction options are exactly a uniform handle's, and an adaptive export's an adaptive one's.
-    const exportMeshing = picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true });
+    const exportMeshing = picogkExportSchemas.glb.pick({ meshAdaptivity: true });
     expect(exportMeshing.parse({})).toEqual(effective({ glb, tessellation }));
-    expect(exportMeshing.parse({ meshAdaptivity: 0.25, meshRelax: true })).toEqual(
-      effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } }),
+    expect(exportMeshing.parse({ meshAdaptivity: 0.25 })).toEqual(
+      effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25 } }),
     );
   });
 
@@ -452,7 +453,7 @@ describe('PicoGK kernel', () => {
         value,
       ),
     ).rejects.toMatchObject({
-      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25, meshRelax: false } }],
+      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25 } }],
     });
   });
 
@@ -466,21 +467,20 @@ describe('PicoGK kernel', () => {
         value,
       ),
     ).rejects.toMatchObject({
-      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25, meshRelax: false } }],
+      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25 } }],
     });
   });
 
   it('leaves view adaptivity unset by default and meshes every export uniformly unless it asks', () => {
-    expect(picogkRenderSchema.parse({})).toEqual({ meshRelax: false });
-    expect(picogkRenderSchema.parse({ meshAdaptivity: 0 })).toEqual({ meshAdaptivity: 0, meshRelax: false });
+    expect(picogkRenderSchema.parse({})).toEqual({});
+    expect(picogkRenderSchema.parse({ meshAdaptivity: 0 })).toEqual({ meshAdaptivity: 0 });
+    expect(picogkRenderSchema.parse({ meshRelax: true })).toEqual({});
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
     for (const schema of [picogkExportSchemas.glb, picogkExportSchemas.gltf]) {
-      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
-      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
-        meshAdaptivity: 0.5,
-        meshRelax: true,
-      });
+      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0 });
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({ meshAdaptivity: 0.5 });
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).not.toHaveProperty('meshRelax');
       expect(schema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
       expect(schema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
     }

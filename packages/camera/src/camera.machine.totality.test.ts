@@ -47,7 +47,7 @@ const initialView = createCameraView({
 const input = { initialView };
 
 /*
- * One valid sample per event type. The `satisfies` clause fails to compile when the alphabet gains a type this
+ * At least one valid sample per event type. The `satisfies` clause fails to compile when the alphabet gains a type this
  * baseline does not sample, so the enumeration below always covers the whole public alphabet.
  */
 const samples = {
@@ -75,7 +75,7 @@ const serializeState = (snapshot: AnyMachineSnapshot): string => {
 
 const enumeration = { input, events: publicEvents, limit: 1000, serializeState };
 
-/* One payload per event type that the camera domain refuses today. */
+/* Payloads the camera domain refuses today, at least one per payload-carrying event type. */
 const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachineEvent]> = [
   ['a non-finite field of view', { type: 'setVerticalFieldOfView', verticalFieldOfView: Number.NaN }],
   ['a field of view above 179 degrees', { type: 'setVerticalFieldOfView', verticalFieldOfView: 180 }],
@@ -102,37 +102,29 @@ const recordingDriver = () => {
 };
 
 describe('cameraMachine totality baseline', () => {
-  it('samples every event type of the public alphabet', () => {
+  it('should sample every event type the machine handles', () => {
     expect(new Set(publicEvents.map((event) => event.type))).toEqual(
-      new Set<EventType>([
-        'setVerticalFieldOfView',
-        'setViewport',
-        'setBounds',
-        'setView',
-        'frame',
-        'saveHome',
-        'reset',
-      ]),
+      new Set(Object.keys(cameraMachine.config.on ?? {})),
     );
   });
 
-  it('declares no ignored events today', () => {
+  it('should declare no ignored events today', () => {
     expect(cameraIgnoredEvents).toEqual([]);
   });
 
-  it('answers every sampled public event in every reachable state', () => {
+  it('should answer every sampled public event in every reachable state', () => {
     expect(unansweredEvents(cameraMachine, { ...enumeration, ignore: cameraIgnoredEvents })).toEqual([]);
     expect(unreachedStates(cameraMachine, enumeration)).toEqual([]);
   });
 
-  it('reaches both projections of its one state, as the path table records', () => {
+  it('should reach both projections of its one state, as the path table records', () => {
     expect(pathTable(cameraMachine, enumeration)).toEqual([
       { state: {}, events: [] },
       { state: {}, events: [{ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 }] },
     ]);
   });
 
-  it('leaves no dead letter, unanswered delivery or fault over the whole alphabet', () => {
+  it('should leave no dead letter, unanswered delivery or fault over the whole alphabet', () => {
     const guard = guardActors({ ignore: { camera: cameraIgnoredEvents } });
     const driver = recordingDriver();
     const actor = createActor(cameraMachine.provide({ actors: { cameraDriver: driver.logic } }), {
@@ -151,7 +143,7 @@ describe('cameraMachine totality baseline', () => {
     expect(guard.take()).toEqual([]);
   });
 
-  it('answers any sequence of valid events, syncing the driver once per view change', () => {
+  it('should answer any sequence of valid events, syncing the driver once per view change', () => {
     const coordinate = fc.double({ min: -100, max: 100, noNaN: true });
     const vector = fc.tuple(coordinate, coordinate, coordinate);
     const length = fc.double({ min: 0.01, max: 100, noNaN: true });
@@ -230,12 +222,12 @@ describe('cameraMachine totality baseline', () => {
   });
 
   describe('known defect: a refused payload errors the actor', () => {
-    it.each(refusedPayloads)('throws from can() for %s', (_label, event) => {
+    it.each(refusedPayloads)('should throw from can() for %s', (_label, event) => {
       const snapshot = createActor(cameraMachine, { input }).getSnapshot();
       expect(() => snapshot.can(event)).toThrow(RangeError);
     });
 
-    it.each(refusedPayloads)('errors the actor and dead-letters what follows, for %s', (_label, event) => {
+    it.each(refusedPayloads)('should error the actor and dead-letter what follows, for %s', (_label, event) => {
       const guard = guardActors({ ignore: { camera: cameraIgnoredEvents } });
       const actor = createActor(cameraMachine, { input, inspect: guard.inspect });
       const errors: unknown[] = [];

@@ -57,9 +57,6 @@ revisions-maintenance = "node /app/dist/maintenance-command.js worker"
 NODE_ENV = 'production'
 WEB_CONCURRENCY = '1'
 TAU_FRONTEND_URL = 'https://taucad.dev'
-LANGSMITH_TRACING = true
-LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
-LANGSMITH_PROJECT = 'tau-api-staging'
 AUTH_URL = 'https://api.taucad.dev'
 # Browser-facing origin of this API, used to build authenticated publication file
 # proxy URLs. Required by the env schema with no default.

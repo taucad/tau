@@ -114,7 +114,7 @@ jobs:
           pnpm exec esbuild apps/desktop/scripts/renew-desktop-apt.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/renew-desktop-apt.mjs
           docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci",target=/fixtures,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /fixtures/linux-apt-repository.mjs && node /fixtures/desktop-apt-publication.mjs && node /fixtures/renew-desktop-apt.mjs'
       - name: Qualification evidence refuses incomplete and synthetic acceptance
-        run: pnpm nx run-many -p desktop -t test-qualification-evidence test-qualification-metadata
+        run: pnpm nx run-many -p desktop -t test-qualification-evidence test-qualification-metadata test-qualification-profile-access
       - name: Real probe processes and isolated HTTPS transport
         run: pnpm nx run-many -p desktop -t test-qualification-probe-process test-qualification-mirror test-qualification-tls test-collect-qualification-rows
       - name: Native quit refuses foreign processes and stale sessions

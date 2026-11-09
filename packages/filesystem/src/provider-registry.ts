@@ -3,7 +3,7 @@ import { MemoryProvider } from '#backend/memory-provider.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
-import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
+import { NodeFsChannel, NodeFsImportSources, NodeFsProviderClient } from '#backend/node/client.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { WorkspaceScope } from '#mount-table.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
@@ -181,6 +181,28 @@ export class ProviderRegistry {
    */
   public resolveStorageRootKey(scope: WorkspaceScope): string {
     return resolveStorageRootKey(scope, this._databasePrefix);
+  }
+
+  /**
+   * The sources a person chose on the node host for an import (W7.4), over
+   * the node transport, or `undefined` on a host without one.
+   *
+   * @returns The host's import sources.
+   */
+  public async importSources(): Promise<NodeFsImportSources | undefined> {
+    if (this._createNodeFsPort === undefined) {
+      return undefined;
+    }
+    this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
+    const opening = this._nodeFsChannel;
+    try {
+      return new NodeFsImportSources(await opening);
+    } catch (error) {
+      if (this._nodeFsChannel === opening) {
+        this._nodeFsChannel = undefined;
+      }
+      throw error;
+    }
   }
 
   private _recovered(storageRootKey: string, providerPaths: readonly string[]): void {

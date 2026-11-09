@@ -27,7 +27,10 @@ jobs:
     env:
       GEOSPEC_WORKERS: 1
       NPM_CONFIG_PROVENANCE: true
-      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+      # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
+      # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -203,8 +203,8 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
         <p>
           <strong>Help us improve Tau?</strong>
           <br />
-          Allow optional PostHog analytics in the Tau app, including session recording, and basic page counts on this
-          site. <Link to='/legal/cookies/'>Cookie policy</Link>
+          Allow optional analytics in the Tau app, including session recording, and basic page counts on this site.{' '}
+          <Link to='/legal/cookies/'>Cookie policy</Link>
         </p>
         <div className='actions'>
           <Button variant='outline' data-consent='declined'>

@@ -130,7 +130,7 @@ type MainModule = Record<string, unknown>;
 type ExportInput = Parameters<NonNullable<typeof definition.export>>[0];
 
 // A view's default meshing: the uniform mesh.
-const uniformMesh = { meshAdaptivity: 0, meshRelax: false } as const;
+const uniformMesh = { meshAdaptivity: 0 } as const;
 const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
 /**
@@ -1743,14 +1743,23 @@ describe('picovoxel kernel', () => {
             context,
           ),
         ).toThrow('tessellation: triangles must be a nonnegative number');
-        const adaptive = { ...snapshot, tessellation: { ...snapshot.tessellation!, adaptivity: 0.5, relax: true } };
+        const adaptive = { ...snapshot, tessellation: { ...snapshot.tessellation!, adaptivity: 0.5 } };
         expect(definition.deserializeHandle!({ serialized: adaptive }, runtime, context).tessellation).toEqual(
           adaptive.tessellation,
         );
+        // A snapshot written while meshRelax existed restores, without the field.
+        const older = { ...snapshot, tessellation: { ...snapshot.tessellation!, adaptivity: 0.5, relax: true } };
+        expect(
+          definition.deserializeHandle!(
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- An older snapshot carries the removed relax field.
+            { serialized: older as Parameters<NonNullable<typeof definition.deserializeHandle>>[0]['serialized'] },
+            runtime,
+            context,
+          ).tessellation,
+        ).toEqual(adaptive.tessellation);
         for (const meshing of [
-          { adaptivity: 0.5 },
           { relax: false },
-          { adaptivity: 0, relax: false },
+          { adaptivity: 0 },
           { adaptivity: 1, relax: false },
           { adaptivity: 0.5, relax: 'yes' },
         ]) {
@@ -1765,7 +1774,7 @@ describe('picovoxel kernel', () => {
               runtime,
               context,
             ),
-          ).toThrow('adaptivity in (0, 1) and a boolean relax must appear together');
+          ).toThrow('adaptivity must be in (0, 1)');
         }
       } finally {
         await definition.onDispose!(context);
@@ -1776,7 +1785,7 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'serial' }, runtime);
       try {
-        const options = { meshAdaptivity: 0.5, meshRelax: true } as const;
+        const options = { meshAdaptivity: 0.5 } as const;
         expect(
           await buildIssues(
             definition.evaluate(
@@ -1796,7 +1805,8 @@ describe('picovoxel kernel', () => {
           runtime,
           context,
         );
-        expect(result.handle.tessellation).toMatchObject({ adaptivity: 0.5, relax: true });
+        expect(result.handle.tessellation).toMatchObject({ adaptivity: 0.5 });
+        expect(result.handle.tessellation).not.toHaveProperty('relax');
       } finally {
         await definition.onDispose!(context);
       }
@@ -1812,7 +1822,7 @@ describe('picovoxel kernel', () => {
         expect(
           await buildIssues(
             definition.evaluate(
-              { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast', meshAdaptivity: 0.5, meshRelax: true } },
+              { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast', meshAdaptivity: 0.5 } },
               runtime,
               context,
             ),
@@ -1825,7 +1835,7 @@ describe('picovoxel kernel', () => {
         ]);
         // An unset adaptivity never refuses: under 0.1.0 it is the uniform mesh on the fast lane too.
         const result = await definition.evaluate(
-          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'fast', meshRelax: false } },
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'fast' } },
           runtime,
           context,
         );
@@ -1844,7 +1854,7 @@ describe('picovoxel kernel', () => {
       const context = await initialize({ wasm: 'serial' }, runtime);
       try {
         const result = await definition.evaluate(
-          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane, meshRelax: false } },
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane } },
           runtime,
           context,
         );
@@ -1852,7 +1862,8 @@ describe('picovoxel kernel', () => {
           expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
           expect(result.handle.tessellation).not.toHaveProperty('relax');
         } else {
-          expect(result.handle.tessellation).toMatchObject({ adaptivity, relax: false });
+          expect(result.handle.tessellation).toMatchObject({ adaptivity });
+          expect(result.handle.tessellation).not.toHaveProperty('relax');
         }
       } finally {
         await definition.onDispose!(context);

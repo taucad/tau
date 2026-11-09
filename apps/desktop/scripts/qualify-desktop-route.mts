@@ -5,7 +5,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, stat, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, writeFile, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -16,7 +16,13 @@ import { defaultPayloadStore } from '@taucad/host';
 import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
-import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
+import {
+  assertDisposableQualificationHost,
+  linuxConsumerTlsOwner,
+  prepareQualificationTls,
+} from './qualification-tls.mjs';
+import { observeLinuxCleanHost, startLinuxConsumer } from './qualification-linux-consumer.mjs';
+import type { LinuxConsumer } from './qualification-linux-consumer.mjs';
 import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver, isAptLockRefusal } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
@@ -28,6 +34,7 @@ import { observeMacosCleanHost } from './qualification-macos-host.mjs';
 import { downloadWithBrowser } from './qualification-browser-download.mjs';
 import { discoverQualificationProcesses } from './qualification-processes.mjs';
 import {
+  assertLinuxCleanHost,
   assertMacosCleanHost,
   assertWindowsConsumerHost,
   collectQualificationReceipt,
@@ -35,53 +42,51 @@ import {
   macosCleanHostApplication,
   qualificationProbeObservationSchema,
 } from './qualification-evidence.mjs';
-import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
+import type {
+  LinuxCleanHost,
+  LinuxCleanHostAcceptance,
+  QualificationEvidence,
+  QualificationStageEvidence,
+} from './qualification-evidence.mjs';
 import type { QualificationCandidate, QualificationPlatformDriver } from './qualification-platform-types.mjs';
+import { consumerProfile, localProfile } from './qualification-profile-access.mjs';
 
 const execFileAsync = promisify(execFile);
 const required = (name: string): string => z.string().min(1).parse(process.env[name]);
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, 'utf8'));
-const digest = async (path: string): Promise<string> =>
-  createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex');
 const absentOnEnoent = (error: unknown): false => {
   if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
     return false;
   }
   throw error;
 };
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 /**
  * What a process that ignored an ordinary quit was doing, for the job log of a disposable Linux guest: the app's own
  * quit, shutdown and updater events since `logOffset` (event name and its first fields only, never the whole log), the kernel's
  * process state, and every window it still maps with its title. Each part reports its own failure instead of hiding it.
  */
-const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: number): Promise<string> => {
+const linuxQuitDiagnostics = async (
+  pid: number,
+  log: { path: string; offset: number; read: (path: string) => Promise<Uint8Array<ArrayBuffer>> },
+): Promise<string> => {
+  const { path: logPath, offset: logOffset, read } = log;
   const parts: string[] = [];
   try {
     // The offset is a byte count. When the log has rotated past it (diagnostics.ts renames it to desktop.1.log over
     // 5 MiB), the offset belongs to the rotated file and the whole current file is newer.
-    const current = await readFile(logPath);
+    const current = await read(logPath);
     const sources =
       current.length >= logOffset
         ? [current.subarray(logOffset)]
         : [
-            await readFile(join(dirname(logPath), 'desktop.1.log')).then(
+            await read(join(dirname(logPath), 'desktop.1.log')).then(
               (rotated) => rotated.subarray(logOffset),
-              () => Buffer.alloc(0),
+              () => new Uint8Array(),
             ),
             current,
           ];
     const events = sources
-      .map((bytes) => bytes.toString('utf8'))
+      .map((bytes) => Buffer.from(bytes).toString('utf8'))
       .join('\n')
       .split('\n')
       .filter((line) =>
@@ -162,6 +167,8 @@ const rendererSchema = z.object({
   exported: z.object({ path: z.string(), sha256: z.string(), vertices: z.number().positive() }),
   nativeEngineLogs: z.array(z.string()).min(1),
   softwareRenderer: z.string().optional(),
+  /** The viewer's WebGL renderer, reported on request for Linux clean-host stock graphics. */
+  glRenderer: z.string().optional(),
 });
 async function waitFor<T>(read: () => Promise<T | undefined>, message: string, timeout = 900_000): Promise<T> {
   const deadline = Date.now() + timeout;
@@ -174,10 +181,6 @@ async function waitFor<T>(read: () => Promise<T | undefined>, message: string, t
   }
   throw new Error(message);
 }
-const atomicJson = async (path: string, value: unknown): Promise<void> => {
-  await writeFile(`${path}.tmp`, JSON.stringify(value), { mode: 0o600 });
-  await rename(`${path}.tmp`, path);
-};
 const snapshotObjects = async (root: string, prefix = ''): Promise<Map<string, QualificationMirrorObject>> => {
   const result = new Map<string, QualificationMirrorObject>();
   for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
@@ -270,9 +273,43 @@ const main = async (): Promise<void> => {
     acceptanceKind === 'vm' && route === 'windows-nsis'
       ? assertWindowsConsumerHost(observeWindowsConsumerHost(required('RUNNER_NAME')))
       : undefined;
-  if (acceptanceKind === 'vm' && !cleanHost && !windowsHost) {
+  // Linux clean host: the consumer account owns the profile and the app; this administrator process never runs it.
+  let linuxConsumer: LinuxConsumer | undefined;
+  let linuxHost: LinuxCleanHost | undefined;
+  // Trusted identity: the runner's Compute API description of the host it created (`instances describe`).
+  const linuxHostIdentity =
+    acceptanceKind === 'vm' && route.startsWith('linux-')
+      ? {
+          template: required('TAU_GCP_HOST_TEMPLATE'),
+          instance: required('TAU_GCP_HOST_INSTANCE'),
+          zone: required('TAU_GCP_HOST_ZONE'),
+        }
+      : undefined;
+  if (linuxHostIdentity) {
+    if (
+      process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'linux' ||
+      process.env['TAU_QUALIFICATION_DISPOSABLE_VM'] !== '1' ||
+      graphics !== 'stock'
+    ) {
+      throw new Error('Linux clean-host acceptance is a Linux-scoped stock-graphics guest run only');
+    }
+    linuxConsumer = await startLinuxConsumer({
+      name: required('TAU_QUALIFICATION_CONSUMER'),
+      repository: process.cwd(),
+    });
+    try {
+      // Observed before this run creates its profile or installs anything, so prior Tau state stops the row here.
+      linuxHost = await observeLinuxCleanHost(linuxConsumer, linuxHostIdentity);
+      assertLinuxCleanHost(linuxHost);
+    } catch (error) {
+      await linuxConsumer.close();
+      throw error;
+    }
+  }
+  if (acceptanceKind === 'vm' && !cleanHost && !windowsHost && !linuxHost) {
     throw new Error('Consumer acceptance requires its staging platform scope');
   }
+  const files = linuxConsumer ? consumerProfile(linuxConsumer) : localProfile;
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));
   // The run directory itself stays non-recursive so a leftover one fails the
   // row instead of being reused, but a fresh checkout has no `out/` yet.
@@ -302,26 +339,52 @@ const main = async (): Promise<void> => {
   }
   const name = channel === 'staging' ? 'Tau Staging' : 'Tau';
   const profile = join(
-    process.platform === 'darwin'
-      ? join(homedir(), 'Library/Application Support')
-      : process.platform === 'win32'
-        ? required('APPDATA')
-        : (process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config')),
+    linuxConsumer
+      ? join(linuxConsumer.home, '.config')
+      : process.platform === 'darwin'
+        ? join(homedir(), 'Library/Application Support')
+        : process.platform === 'win32'
+          ? required('APPDATA')
+          : (process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config')),
     name,
   );
   // Same split as the run directory: the profile leaf must be absent for the
   // cold-store check below, but its parent need not exist on a fresh host.
-  await mkdir(dirname(profile), { recursive: true });
-  await mkdir(profile, { recursive: false });
+  await files.mkdir(dirname(profile), true);
+  await files.mkdir(profile, false);
+  if (linuxConsumer && channel !== 'staging') {
+    throw new Error('Linux clean-host acceptance is staging only');
+  }
   const store = channel === 'staging' ? join(profile, 'config/payloads') : defaultPayloadStore();
-  const coldEntries = await readdir(join(store, 'closures/sha256')).catch((error: unknown) => {
-    absentOnEnoent(error);
-    return [];
-  });
+  const coldEntries = await files.readdir(join(store, 'closures/sha256'));
   if (coldEntries.length > 0) {
     throw new Error('First-use qualification requires an initially cold payload store');
   }
+  const readJson = async (path: string): Promise<unknown> => {
+    const bytes = await files.read(path);
+    return JSON.parse(Buffer.from(bytes).toString('utf8'));
+  };
+  const logSize = async (): Promise<number> => {
+    const size = await files.size(join(profile, 'logs/desktop.log'));
+    return size ?? 0;
+  };
+  const presentLogSize = async (): Promise<number> => {
+    const size = await files.size(join(profile, 'logs/desktop.log'));
+    if (size === undefined) {
+      throw new Error('Installed app wrote no desktop log');
+    }
+    return size;
+  };
+  const consumerCommand = async (file: string, args: readonly string[]): Promise<void> => {
+    const result = await linuxConsumer!.exec(file, args, { killAfter: 30_000 });
+    if (result.status !== 0) {
+      throw new Error(`Consumer ${file} failed: ${result.stderr}`);
+    }
+  };
   const nonce = randomUUID();
+  /** Linux clean host: the renderer harness runs as the consumer and writes here; results are copied into `root`. */
+  const consumerRenderer = linuxConsumer ? join('/tmp', `tau-qualification-renderer-${nonce}`) : undefined;
+  const linuxRenderers: string[] = [];
   const installationPath = cleanHost
     ? macosCleanHostApplication
     : route.startsWith('macos-')
@@ -346,11 +409,13 @@ const main = async (): Promise<void> => {
   const snapshots: Array<Map<string, QualificationMirrorObject>> = [];
   const stages: QualificationStageEvidence[] = [];
   let ordinaryQuit: QualificationEvidence['lifecycle']['ordinaryQuit'];
+  let offlinePid: number | undefined;
   let projectUrl: string | undefined;
   let offset = 0;
   let currentPid: number | undefined;
   try {
-    tls = await prepareQualificationTls(root);
+    // The consumer's browser and app trust the run mirror through the consumer's own NSS database.
+    tls = await prepareQualificationTls(root, linuxConsumer ? linuxConsumerTlsOwner(linuxConsumer.name) : undefined);
     const transport = await startQualificationMirrorProcess({
       key: tls.key,
       certificate: tls.certificate,
@@ -420,6 +485,7 @@ const main = async (): Promise<void> => {
             mode: 'release',
             installationPath: linuxInstallation(channel, route === 'linux-appimage').root,
             repository: apt!.repositories[0]!,
+            ...(linuxConsumer ? { cleanHost: { consumer: linuxConsumer, origin: transport.origin } } : {}),
           }));
 
     const installedA = await driver.install(candidate(0));
@@ -450,10 +516,10 @@ const main = async (): Promise<void> => {
       const { manifest } = candidates[index]!;
       return { tag: manifest.tag, version: manifest.version, sourceCommit: manifest.sourceCommit };
     };
-    await atomicJson(join(profile, 'route-qualification.request.json'), {
+    await files.writeJson(join(profile, 'route-qualification.request.json'), {
       schemaVersion: 1,
       nonce,
-      profile: await realpath(profile),
+      profile: await files.realpath(profile),
       route,
       target,
       channel,
@@ -466,14 +532,22 @@ const main = async (): Promise<void> => {
       b: identity(1),
       c: identity(2),
     });
+    let consumerLaunches = 0;
     const launch = async (): Promise<void> => {
-      offset = await stat(join(profile, 'logs/desktop.log')).then(
-        (info) => info.size,
-        (error: unknown) => {
-          absentOnEnoent(error);
-          return 0;
-        },
-      );
+      offset = await logSize();
+      if (aptDriver?.launchConsumer) {
+        // The shipping probe admits a new run only from its nonce argument, so the consumer's first (offline) launch is
+        // the installed launcher; the stage A session is then started from the installed desktop entry.
+        const first = consumerLaunches++ === 0;
+        await aptDriver.launchConsumer(
+          first ? 'offline' : 'initial',
+          first ? [`--tau-route-qualification=${nonce}`] : [],
+          {
+            TAU_DESKTOP_UPDATE_FEED: transport.origin,
+          },
+        );
+        return;
+      }
       if (driver.launch) {
         // Clean host: LaunchServices launch from /Applications, honouring Gatekeeper's first-launch decision.
         await driver.launch('initial', [`--tau-route-qualification=${nonce}`], {
@@ -498,30 +572,55 @@ const main = async (): Promise<void> => {
     const render = async (stage: string, pid: number, request?: string | { action: string; openedFile: string }) => {
       const action = typeof request === 'string' ? request : request?.action;
       const openedFile = typeof request === 'string' ? undefined : request?.openedFile;
-      const output = join(root, `renderer-${stage}-${pid}-${action ?? 'render'}.json`);
-      await execFileAsync(
-        process.execPath,
-        ['--import', '@oxc-node/core/register', 'apps/desktop-e2e/scripts/qualification-renderer.mts'],
-        {
-          env: {
-            ...process.env,
-            TAU_QUALIFICATION_PROFILE: profile,
-            TAU_QUALIFICATION_STAGE: stage,
-            TAU_QUALIFICATION_RENDERER_OUTPUT: output,
-            TAU_QUALIFICATION_LOG_OFFSET: String(offset),
-            TAU_QUALIFICATION_EXPECTED_PID: String(pid),
-            ...(projectUrl ? { TAU_QUALIFICATION_PROJECT_URL: projectUrl } : {}),
-            ...(action ? { TAU_QUALIFICATION_RENDERER_ACTION: action } : {}),
-            ...(openedFile ? { TAU_QUALIFICATION_OPEN_FILE: basename(openedFile) } : {}),
-          },
-          maxBuffer: 8 * 1024 * 1024,
-          timeout: 1_200_000,
-        },
+      const fileName = `renderer-${stage}-${pid}-${action ?? 'render'}.json`;
+      const output = join(root, fileName);
+      const rendererEnv = {
+        TAU_QUALIFICATION_PROFILE: profile,
+        TAU_QUALIFICATION_STAGE: stage,
+        TAU_QUALIFICATION_RENDERER_OUTPUT: consumerRenderer ? join(consumerRenderer, fileName) : output,
+        TAU_QUALIFICATION_LOG_OFFSET: String(offset),
+        TAU_QUALIFICATION_EXPECTED_PID: String(pid),
+        ...(projectUrl ? { TAU_QUALIFICATION_PROJECT_URL: projectUrl } : {}),
+        ...(action ? { TAU_QUALIFICATION_RENDERER_ACTION: action } : {}),
+        ...(openedFile ? { TAU_QUALIFICATION_OPEN_FILE: basename(openedFile) } : {}),
+      };
+      const rendererArguments = [
+        '--import',
+        '@oxc-node/core/register',
+        resolve('apps/desktop-e2e/scripts/qualification-renderer.mts'),
+      ];
+      await (
+        linuxConsumer && consumerRenderer
+          ? (async () => {
+              // The consumer connects to its own app; only the harness switches cross, never this job's environment.
+              const result = await linuxConsumer.exec(process.execPath, rendererArguments, {
+                env: {
+                  ...rendererEnv,
+                  TAU_QUALIFICATION_GRAPHICS: graphics,
+                  TAU_QUALIFICATION_REPORT_GL_RENDERER: '1',
+                },
+                killAfter: 1_200_000,
+              });
+              for (const suffix of ['', '.png', '.failure.json', '.failure.png']) {
+                const bytes = await linuxConsumer.readFile(join(consumerRenderer, `${fileName}${suffix}`));
+                if (bytes) {
+                  await writeFile(`${output}${suffix}`, bytes, { flag: 'wx' });
+                }
+              }
+              if (result.status !== 0) {
+                throw new Error(`Consumer renderer exited ${result.status}: ${result.stderr.slice(-4096)}`);
+              }
+            })()
+          : execFileAsync(process.execPath, rendererArguments, {
+              env: { ...process.env, ...rendererEnv },
+              maxBuffer: 8 * 1024 * 1024,
+              timeout: 1_200_000,
+            })
       ).catch(async (error: unknown) => {
         /* A renderer that never answers leaves no evidence of its own; the app's log since this step began says
          * whether the main process was busy, still starting or already gone. Bounded, and only on failure. */
-        const log = await readFile(join(profile, 'logs/desktop.log')).then(
-          (bytes) => bytes.subarray(offset).subarray(-16_384).toString(),
+        const log = await files.read(join(profile, 'logs/desktop.log')).then(
+          (bytes) => Buffer.from(bytes.subarray(offset).subarray(-16_384)).toString(),
           () => '(no desktop log)',
         );
         throw new Error(
@@ -533,25 +632,29 @@ const main = async (): Promise<void> => {
         ? undefined
         : rendererSchema.parse(await json(output));
     };
+    if (linuxConsumer && consumerRenderer) {
+      await linuxConsumer.mkdirOne(consumerRenderer);
+    }
     await transport.setAvailable(false);
     await launch();
     if (!route.startsWith('macos-')) {
       const outageStart = Date.now();
       const offlineReady = await waitFor(async () => {
         try {
-          const value = readySchema.parse(await json(join(profile, 'route-qualification.ready.json')));
+          const value = readySchema.parse(await readJson(join(profile, 'route-qualification.ready.json')));
           return value.stage === 'a' && value.nonce === nonce ? value : undefined;
         } catch {
           return undefined;
         }
       }, 'Offline baseline did not become ready');
       currentPid = offlineReady.pid;
+      offlinePid = offlineReady.pid;
       const rendered = await render('a', offlineReady.pid);
       if (!rendered) {
         throw new Error('Initial renderer evidence missing');
       }
       projectUrl = rendered.url;
-      await atomicJson(join(profile, 'route-qualification.command.json'), {
+      await files.writeJson(join(profile, 'route-qualification.command.json'), {
         schemaVersion: 1,
         nonce,
         pid: offlineReady.pid,
@@ -562,7 +665,7 @@ const main = async (): Promise<void> => {
       const observed = await waitFor(async () => {
         try {
           const value = qualificationProbeObservationSchema.parse(
-            await json(join(profile, 'route-qualification.a.json')),
+            await readJson(join(profile, 'route-qualification.a.json')),
           );
           return value.pid === offlineReady.pid && value.action === 'observe' ? value : undefined;
         } catch {
@@ -591,7 +694,7 @@ const main = async (): Promise<void> => {
       }
       const afterReconnect = await driver.observe(candidate(0));
       if (
-        !alive(offlineReady.pid) ||
+        !(await files.alive(offlineReady.pid)) ||
         beforeReconnect.executableSha256 !== afterReconnect.executableSha256 ||
         beforeReconnect.asarSha256 !== afterReconnect.asarSha256
       ) {
@@ -616,16 +719,20 @@ const main = async (): Promise<void> => {
       await render('a', offlineReady.pid, apt ? 'quit' : 'quit-ready');
       try {
         await waitFor(
-          async () => (alive(offlineReady.pid) ? undefined : true),
+          async () => ((await files.alive(offlineReady.pid)) ? undefined : true),
           'Baseline ordinary quit did not exit',
           60_000,
         );
       } catch (error) {
         // The ubuntu-apt-x11 row has stayed alive here in four runs (41783968750 the latest) while debian-apt-x11 exits.
-        if (process.platform !== 'linux' || !alive(offlineReady.pid)) {
+        if (process.platform !== 'linux' || !(await files.alive(offlineReady.pid))) {
           throw error;
         }
-        const diagnostics = await linuxQuitDiagnostics(offlineReady.pid, join(profile, 'logs/desktop.log'), offset);
+        const diagnostics = await linuxQuitDiagnostics(offlineReady.pid, {
+          path: join(profile, 'logs/desktop.log'),
+          offset,
+          read: files.read,
+        });
         throw new Error(`Baseline ordinary quit did not exit; ${diagnostics}`, { cause: error });
       }
       if (route !== 'linux-apt') {
@@ -642,7 +749,7 @@ const main = async (): Promise<void> => {
       const previousPid = currentPid;
       const ready = await waitFor(async () => {
         try {
-          const value = readySchema.parse(await json(join(profile, 'route-qualification.ready.json')));
+          const value = readySchema.parse(await readJson(join(profile, 'route-qualification.ready.json')));
           return value.stage === stage && value.nonce === nonce && value.pid !== previousPid ? value : undefined;
         } catch {
           return undefined;
@@ -653,12 +760,18 @@ const main = async (): Promise<void> => {
       if (!rendered) {
         throw new Error('Renderer evidence absent');
       }
+      if (linuxConsumer) {
+        if (!rendered.glRenderer) {
+          throw new Error('Clean-host viewer did not report its WebGL renderer');
+        }
+        linuxRenderers.push(rendered.glRenderer);
+      }
       projectUrl = rendered.url;
       const installed = await driver.observe(candidate(index));
       let processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
       let security = await driver.measureSecurity(processes);
       const command = async (action: 'observe' | 'install') => {
-        await atomicJson(join(profile, 'route-qualification.command.json'), {
+        await files.writeJson(join(profile, 'route-qualification.command.json'), {
           schemaVersion: 1,
           nonce,
           pid: ready.pid,
@@ -669,7 +782,7 @@ const main = async (): Promise<void> => {
         return waitFor(async () => {
           try {
             const value = qualificationProbeObservationSchema.parse(
-              await json(join(profile, `route-qualification.${stage}.json`)),
+              await readJson(join(profile, `route-qualification.${stage}.json`)),
             );
             return value.pid === ready.pid && value.action === action ? value : undefined;
           } catch {
@@ -689,7 +802,7 @@ const main = async (): Promise<void> => {
           },
         });
         const active = await render(stage, ready.pid, 'active');
-        if (!active || !alive(ready.pid) || active.project.sha256 !== rendered.project.sha256) {
+        if (!active || !(await files.alive(ready.pid)) || active.project.sha256 !== rendered.project.sha256) {
           throw new Error('Old APT session cannot export its retained saved project after selector upgrade');
         }
         /* The selector upgrade and the active export can restart the native workers, so the stage evidence takes its
@@ -710,7 +823,7 @@ const main = async (): Promise<void> => {
       if (stage === 'a' && route.startsWith('macos-')) {
         await render(stage, ready.pid, 'offline');
         await transport.flush();
-        if (!alive(ready.pid) || !transport.requests.some((request) => request.status === 503)) {
+        if (!(await files.alive(ready.pid)) || !transport.requests.some((request) => request.status === 503)) {
           throw new Error('Mac offline transport did not fail while baseline remained live');
         }
         const reconnectStart = Date.now();
@@ -742,7 +855,7 @@ const main = async (): Promise<void> => {
         },
         security,
       });
-      offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
+      offset = await presentLogSize();
       if (stage === 'a' && !apt) {
         await setLatest(2);
       }
@@ -757,6 +870,9 @@ const main = async (): Promise<void> => {
             ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:TAU_Q_OPEN_URI'],
             { env: { ...process.env, TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
           );
+        } else if (linuxConsumer) {
+          // The consumer's own session opens the link and the file, as a second instance of their running app.
+          await consumerCommand('xdg-open', [uri]);
         } else if (apt) {
           await execFileAsync('xdg-open', [uri], { timeout: 30_000 });
         } else {
@@ -765,6 +881,8 @@ const main = async (): Promise<void> => {
         await render(stage, ready.pid, 'uri');
         if (process.platform === 'darwin') {
           await execFileAsync('open', ['-a', installationPath, rendered.exported.path], { timeout: 30_000 });
+        } else if (linuxConsumer) {
+          await consumerCommand(installationPath, [rendered.exported.path]);
         } else {
           await execFileAsync(
             route === 'linux-apt' || route === 'linux-appimage' ? installationPath : installed.executablePath,
@@ -774,20 +892,24 @@ const main = async (): Promise<void> => {
         }
         await render(stage, ready.pid, { action: 'file', openedFile: rendered.exported.path });
         await render(stage, ready.pid, 'quit');
-        await waitFor(async () => (alive(ready.pid) ? undefined : true), 'Final application did not quit', 60_000);
+        await waitFor(
+          async () => ((await files.alive(ready.pid)) ? undefined : true),
+          'Final application did not quit',
+          60_000,
+        );
       }
     }
     const final = stages[2]!;
     const preserved = [
-      { path: final.renderer.projectPath, sha256: await digest(final.renderer.projectPath) },
+      { path: final.renderer.projectPath, sha256: await files.sha256(final.renderer.projectPath) },
       {
         path: join(profile, 'route-qualification.sentinel'),
-        sha256: await digest(join(profile, 'route-qualification.sentinel')),
+        sha256: await files.sha256(join(profile, 'route-qualification.sentinel')),
       },
     ];
     await driver.remove(preserved);
     const after = await Promise.all(
-      preserved.map(async (file) => ({ path: file.path, sha256: await digest(file.path) })),
+      preserved.map(async (file) => ({ path: file.path, sha256: await files.sha256(file.path) })),
     );
     const removedInstallationPath = route === 'windows-nsis' ? final.installed.executablePath : installationPath;
     const existsAfter = await stat(removedInstallationPath).then(() => true, absentOnEnoent);
@@ -795,11 +917,13 @@ const main = async (): Promise<void> => {
       throw new Error('Uninstalled entry remains present');
     }
     const reinstalled = await driver.reinstall(candidate(2), preserved);
-    await rm(join(profile, 'DevToolsActivePort'), { force: true });
-    offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
+    await files.rm(join(profile, 'DevToolsActivePort'));
+    offset = await presentLogSize();
     const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', ...graphicsArguments];
     let resumedPid: number | undefined;
-    if (driver.launch) {
+    if (aptDriver?.launchConsumer) {
+      resumedPid = await aptDriver.launchConsumer('reinstall', resumedArgs, { TAU_DESKTOP_UPDATES: 'off' });
+    } else if (driver.launch) {
       resumedPid = await driver.launch('reinstall', resumedArgs, { TAU_DESKTOP_UPDATES: 'off' });
     } else {
       const resumed = spawn(
@@ -819,15 +943,7 @@ const main = async (): Promise<void> => {
     const resumed = { pid: resumedPid };
     currentPid = resumed.pid;
     await waitFor(
-      async () => {
-        try {
-          await readFile(join(profile, 'DevToolsActivePort'));
-          return true;
-        } catch (error) {
-          absentOnEnoent(error);
-          return undefined;
-        }
-      },
+      async () => ((await files.size(join(profile, 'DevToolsActivePort'))) === undefined ? undefined : true),
       'Reinstalled renderer debugging endpoint unavailable',
       60_000,
     );
@@ -836,18 +952,34 @@ const main = async (): Promise<void> => {
       throw new Error('Reinstalled saved project evidence missing');
     }
     await render('c', resumed.pid, 'reinstall-quit');
-    await waitFor(async () => (alive(resumed.pid) ? undefined : true), 'Reinstalled app did not quit', 60_000);
+    await waitFor(
+      async () => ((await files.alive(resumed.pid)) ? undefined : true),
+      'Reinstalled app did not quit',
+      60_000,
+    );
     const reinstalledFiles = await Promise.all(
-      preserved.map(async (file) => ({ path: file.path, sha256: await digest(file.path) })),
+      preserved.map(async (file) => ({ path: file.path, sha256: await files.sha256(file.path) })),
     );
     await driver.remove(preserved);
     await transport.flush();
+    // Observed again once Tau is removed: the stock security policy and the consumer must not have changed.
+    const linuxAcceptance: LinuxCleanHostAcceptance | undefined =
+      linuxConsumer && linuxHost && linuxHostIdentity && aptDriver?.cleanHostRecord
+        ? {
+            kind: 'vm',
+            host: linuxHost,
+            after: await observeLinuxCleanHost(linuxConsumer, linuxHostIdentity),
+            ...aptDriver.cleanHostRecord(),
+            renderers: z.tuple([z.string(), z.string(), z.string()]).parse(linuxRenderers),
+          }
+        : undefined;
     const evidence: QualificationEvidence = {
       mode: graphics === 'isolated-software' ? 'software-ci' : 'release',
       route,
       target,
       stages: [stages[0]!, stages[1]!, final],
       lifecycle: {
+        ...(offlinePid === undefined ? {} : { offline: { pid: offlinePid } }),
         ...(ordinaryQuit ? { ordinaryQuit } : {}),
         reinstall: {
           installed: reinstalled,
@@ -867,9 +999,10 @@ const main = async (): Promise<void> => {
       ...(apt ? { scheduler } : {}),
       mirrorRequests: transport.requests.map((request) => ({ ...request, at: Date.parse(request.at) })),
       logs: `https://github.com/taucad/tau/actions/runs/${required('GITHUB_RUN_ID')}`,
-      suite: (cleanHost ?? windowsHost) ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
+      suite: (cleanHost ?? windowsHost ?? linuxHost) ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
       ...(driver.acceptance ? { acceptance: driver.acceptance() } : {}),
       ...(driver.windowsAcceptance ? { windowsAcceptance: driver.windowsAcceptance() } : {}),
+      ...(linuxAcceptance ? { linuxAcceptance } : {}),
       trustIdentity:
         route === 'windows-nsis'
           ? required('TAU_WINDOWS_PUBLISHER')
@@ -891,10 +1024,16 @@ const main = async (): Promise<void> => {
     // Every independent cleanup must run, especially trust removal after a package-manager failure.
     for (const cleanup of [
       async () => {
-        if (currentPid && alive(currentPid)) {
-          process.kill(currentPid, 'SIGTERM');
+        if (currentPid && (await files.alive(currentPid))) {
+          await files.terminate(currentPid);
         }
       },
+      async () => {
+        if (consumerRenderer) {
+          await linuxConsumer?.exec('rm', ['-rf', '--', consumerRenderer], { killAfter: 60_000 });
+        }
+      },
+      async () => linuxConsumer?.close(),
       async () => apt?.cleanup(),
       async () => mirror?.close(),
       async () => tls?.remove(),

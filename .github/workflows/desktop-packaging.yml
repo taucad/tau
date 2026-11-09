@@ -9,7 +9,8 @@ on:
       - 'packages/filesystem/project.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/desktop-packaging.yml'
-      - '.github/actions/setup-nx/**'
+      # Not `.github/actions/setup-nx/**`: a change to the shared setup action alone requests no macOS
+      # runner here; dispatch this workflow on the branch to qualify one on macOS.
   workflow_dispatch:
 
 permissions:

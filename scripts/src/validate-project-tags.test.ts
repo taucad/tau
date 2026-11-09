@@ -69,6 +69,8 @@ describe('apiLibraryAppEdges()', () => {
       'api-core',
       'api-database',
       'api-email',
+      'api-git-core',
+      'api-git-mirror',
       'api-hosts',
       'api-lifecycle',
       'api-llm-gateway',

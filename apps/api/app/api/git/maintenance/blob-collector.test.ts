@@ -13,7 +13,7 @@ import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/t
 import { ObjectStorageService } from '@taucad/api-object-storage';
 import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
 import { StorageModule } from '@taucad/api-object-storage/module';
-import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
+import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
 import { applyBlobReferences } from '#api/publications/publication-materializer.js';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';

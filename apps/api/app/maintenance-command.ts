@@ -11,23 +11,24 @@ import * as schema from '@taucad/api-database/schema';
 import { project, projectGitLfsObject, storageTombstone } from '@taucad/api-database/schema';
 import { ObjectStorageService } from '@taucad/api-object-storage';
 import type { StorageAccount } from '@taucad/api-object-storage';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
-import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
-import { liveOwnerIds, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
+import { liveOwnerIds, purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
-import { purgeDeletedProject, purgeDeletedProjects } from '#api/git/maintenance/project-purge.js';
-import { recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintenance/worker.js';
-import { restoreRepository } from '#api/git/maintenance/restore.js';
-import { copiedProjects, listCopySnapshots, restoreFromCopy } from '#api/git/maintenance/restore-copy.js';
-import { S3MirrorDestination } from '#api/git/mirror/destination.js';
-import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
-import { readMaintenanceLiveness, recordMaintenancePass } from '#api/git/maintenance/liveness.js';
-import { freezeEverything, parseFreezeSeconds, thawEverything } from '#api/git/routing/global-freeze.js';
-import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
-import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.js';
-import { holdInStandby } from '#api/git/maintenance/standby.js';
+import { purgeDeletedProject, purgeDeletedProjects } from '@taucad/api-git-mirror/maintenance/project-purge';
+import { releaseDeletedProjectPublicationReferences } from '#api/publications/publication-deletion.js';
+import { recoverProjectDeletions, runMaintenanceWorker } from '@taucad/api-git-mirror/maintenance/worker';
+import { restoreRepository } from '@taucad/api-git-mirror/maintenance/restore';
+import { copiedProjects, listCopySnapshots, restoreFromCopy } from '@taucad/api-git-mirror/maintenance/restore-copy';
+import { S3MirrorDestination } from '@taucad/api-git-mirror/mirror/destination';
+import { assertSingletonProcessGroup } from '@taucad/api-git-mirror/maintenance/singleton';
+import { readMaintenanceLiveness, recordMaintenancePass } from '@taucad/api-git-mirror/maintenance/liveness';
+import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/api-git-core/routing/global-freeze';
+import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
+import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
+import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
@@ -374,6 +375,7 @@ async function main(): Promise<void> {
                   database,
                   driver,
                   store: new S3RepositoryStore(driver),
+                  releasePublicationReferences: releaseDeletedProjectPublicationReferences,
                 })) {
                   // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
                   await writeLine(JSON.stringify(outcome));
@@ -436,6 +438,7 @@ async function main(): Promise<void> {
               database,
               driver,
               store: new S3RepositoryStore(driver),
+              releasePublicationReferences: releaseDeletedProjectPublicationReferences,
             })) {
               // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
               await writeLine(JSON.stringify(outcome));
@@ -445,6 +448,7 @@ async function main(): Promise<void> {
               database,
               driver,
               store: new S3RepositoryStore(driver),
+              releasePublicationReferences: releaseDeletedProjectPublicationReferences,
               projectId,
               dryRun: args.includes('--dry-run'),
               ...(option(args, 'confirm-plan') === undefined

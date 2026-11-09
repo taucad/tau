@@ -7,7 +7,7 @@ import type { ProjectAccessService } from '#api/collaboration/project-access.ser
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
-import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
+import { objectStoragePreviewWriter } from '@taucad/api-git-core/project-preview-store';
 import { inspectProjectPreview, ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { projectPreviewSchema } from '#api/projects/project-preview.dto.js';
 import type { DatabaseService } from '@taucad/api-database';

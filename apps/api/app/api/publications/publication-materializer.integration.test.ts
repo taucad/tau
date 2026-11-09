@@ -30,10 +30,10 @@ import { Readable } from 'node:stream';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
-import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
-import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
+import { gitLfsObjectKey } from '@taucad/api-git-core/git.constants';
+import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
+import { createMemoryRepositoryStore, seedLease } from '@taucad/api-git-core/testing/publication-lease.fixture';
 import {
   materializePublication,
   materializePublishedTags,

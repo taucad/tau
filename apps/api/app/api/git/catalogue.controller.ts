@@ -26,11 +26,11 @@ import {
   parseCatalogueFamilies,
 } from '#api/git/catalogue.js';
 import type { Catalogue } from '#api/git/catalogue.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { repositoryObjectKey } from '#api/git/store/repository-key.js';
+import { decodeManifest, isTombstoned } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { repositoryObjectKey } from '@taucad/api-git-core/store/repository-key';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 const catalogueWindowSeconds = 60;

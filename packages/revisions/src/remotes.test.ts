@@ -390,7 +390,7 @@ describe('remoteTransportError', () => {
    * status — but it is a quota answer, not a rule the caller broke, so it must
    * reach the machine as `quota` and not offer "Sync now" again. It is told
    * apart by the marker the hook opens with (`ceilingRefusalMarker`,
-   * `apps/api/app/api/git/git.constants.ts`), and the remote's own sentence and
+   * `apps/libs/api-git-core/src/git.constants.ts`), and the remote's own sentence and
    * file list are still what the caller reads (NI13, N4).
    */
   it('reads the ceiling refusal on the sideband as a quota answer, with the file list intact', () => {

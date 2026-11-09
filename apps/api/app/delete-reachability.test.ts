@@ -27,17 +27,17 @@ const deleteCommand = /new\s+Delete\w*Command\s*\(/u;
 /** Where the capability is defined: the driver, and the repository-store adapter that forwards to it. */
 const definitions = new Set([
   '../libs/api-object-storage/src/object-storage.service.ts',
-  'app/api/git/store/s3-repository-store.ts',
+  '../libs/api-git-core/src/store/s3-repository-store.ts',
 ]);
 
 /** The storage commit path: a commit sweeps the packs it retired (W6). DC1 moves it into `tau-storage`. */
-const commitPath = new Set(['app/api/git/store/sweep.ts']);
+const commitPath = new Set(['../libs/api-git-core/src/store/sweep.ts']);
 
 /** The `tau-storage` image's only entry (Dockerfile `storage` target, DC1). */
 const storageEntry = 'app/storage-worker.ts';
 
 /** DC1's in-process fallback: how an API without `TAU_STORAGE_URL` still serves git. */
-const inProcessFallback = 'app/api/git/forwarding/in-process-executor.ts';
+const inProcessFallback = '../libs/api-git-core/src/forwarding/in-process-executor.ts';
 
 /**
  * The API image's request-serving and billing entries: `vite.config.ts`
@@ -52,9 +52,9 @@ const maintenanceEntry = 'app/maintenance-command.ts';
 
 /** The lifecycle jobs that must stay reachable from the maintenance image, so the test is never vacuous. */
 const maintenanceDeleters = [
-  'app/api/git/maintenance/purge.ts',
-  'app/api/git/maintenance/project-purge.ts',
-  'app/api/git/maintenance/blob-collector.ts',
+  '../libs/api-git-mirror/src/maintenance/purge.ts',
+  '../libs/api-git-mirror/src/maintenance/project-purge.ts',
+  '../libs/api-git-mirror/src/maintenance/blob-collector.ts',
   'app/api/git/lfs-retirement.ts',
 ];
 

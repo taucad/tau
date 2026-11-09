@@ -237,9 +237,10 @@ const memberOrdering = [
  * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
  * instead names the API libraries it may depend on (the "May depend on" column of
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
- * project. Every edge points down `object-storage -> billing -> llm-gateway -> hosts ->
- * auth -> {database, email, redis} -> lifecycle -> observability -> core`, with `testing`
- * beside `database`; no library may depend on the `api` app (its `type:app` tag is
+ * project. Every edge points down `git-mirror -> git-core -> object-storage -> billing ->
+ * llm-gateway -> hosts -> auth -> {database, email, redis} -> lifecycle -> observability ->
+ * core`, with `testing` beside `database`; no library but `api` imports `git-mirror`, and no
+ * library may depend on the `api` app (its `type:app` tag is
  * outside every `type:app-lib` allowlist). Entries marked "measured" are downward edges the moved code already
  * had that the blueprint's column did not list.
  */
@@ -265,6 +266,11 @@ const apiLibraryDependencies = {
   // The object store, signed file links and storage accounting (P1-b). Git imports it, so it may not name
   // git; accounting reads the subscription tier from billing and keeps its snapshots in Redis.
   'object-storage': ['billing', 'database', 'redis', 'core', 'observability'],
+  // The repository store, the storage worker, routing, admission and forwarding (P1-c). Projects and
+  // publications sit above it; the API binds their hooks (`project-deletion`, the preview writer).
+  'git-core': ['object-storage', 'database', 'redis', 'lifecycle', 'core', 'observability'],
+  // The off-site mirror and the maintenance jobs (P1-c). Only the `api` app's command entries import it.
+  'git-mirror': ['git-core', 'object-storage', 'database', 'core'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({

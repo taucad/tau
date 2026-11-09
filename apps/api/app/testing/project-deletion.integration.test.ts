@@ -11,16 +11,16 @@ import {
   completeProjectDeletion,
   readOwnedProjectDeletion,
   requestProjectDeletion,
-} from '#api/projects/project-deletion.js';
-import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
-import { decodeManifest, encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
-import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+} from '@taucad/api-git-core/project-deletion';
+import { storeTombstoneFence } from '@taucad/api-git-core/store/tombstone-fence';
+import { decodeManifest, encodeManifest, succeedManifest } from '@taucad/api-git-core/store/manifest';
+import { retentionWindowMilliseconds } from '@taucad/api-git-core/store/limits';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
 import { assertProjectActive, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import { readOwnerUsage, withOwnerLock } from '@taucad/api-database/owner-lock';
 import type { Database } from '@taucad/api-database/owner-lock';
 import * as schema from '@taucad/api-database/schema';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 /** Real migrations/transactions plus the existing conditional-write repository port fixture. */

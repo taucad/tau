@@ -49,5 +49,5 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
 
 - `src/object-storage.service.test.ts` needs MinIO and reads `TAU_S3_*` from `apps/api/.env` (loaded after `api-core/.env.test` in `vitest.config.ts`); without MinIO its 19 store round-trips fail with `ECONNREFUSED`, as they do under `api:test`.
-- Never import git (`apps/api/app/api/git`, later `api-git-*`): git depends on this library. The lint constraint `api:object-storage` allows only `billing`, `database`, `redis`, `core` and `observability`.
+- Never import git (`api-git-core`, `api-git-mirror`): git depends on this library. The lint constraint `api:object-storage` allows only `billing`, `database`, `redis`, `core` and `observability`.
 - Process entries import the narrowest subpath: the module-graph tests in `apps/api/app/*-app.test.ts`, `app/delete-reachability.test.ts` and `app/api/git/forwarding/storage-boundary.test.ts` assert what each entry reaches, and the root barrel is only the driver for that reason.

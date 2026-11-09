@@ -11,6 +11,6 @@
  * Defined in this library, which git builds on, because storage accounting
  * reports quota bands against it and may not import git;
  * the git commit protocol imports it from here, and its other bounds stay in
- * `apps/api/app/api/git/store/limits.ts`.
+ * `apps/libs/api-git-core/src/store/limits.ts`.
  */
 export const repositoryByteCeiling = 1024 ** 3;

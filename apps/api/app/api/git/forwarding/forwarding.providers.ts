@@ -7,18 +7,18 @@ import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { RedisService } from '@taucad/api-redis';
 import { ObjectStorageService } from '@taucad/api-object-storage';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
-import { developmentPublicKeysJson } from '#api/git/forwarding/contract/development-keys.js';
-import { parsePublicKeys } from '#api/git/forwarding/contract/keys.js';
-import { createGitExecution, gitExecutionKey } from '#api/git/forwarding/git-execution.js';
-import type { GitExecution } from '#api/git/forwarding/git-execution.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
-import { inProcessPreviewWriter } from '#api/git/forwarding/in-process-executor.js';
-import { memoryReceiptLedger, redisReceiptLedger } from '#api/git/forwarding/receipt-ledger.js';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import { developmentPublicKeysJson } from '@taucad/api-git-core/forwarding/contract/development-keys';
+import { parsePublicKeys } from '@taucad/api-git-core/forwarding/contract/keys';
+import { createGitExecution, gitExecutionKey } from '@taucad/api-git-core/forwarding/git-execution';
+import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { GitExecutor } from '@taucad/api-git-core/forwarding/git-executor';
+import { inProcessPreviewWriter } from '@taucad/api-git-core/forwarding/in-process-executor';
+import { memoryReceiptLedger, redisReceiptLedger } from '@taucad/api-git-core/forwarding/receipt-ledger';
 import { GitRepositoryService, receiptVerificationKey } from '#api/git/git.service.js';
 import type { ReceiptVerification } from '#api/git/git.service.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
 
 /**
  * The tau-api side of the hop as `GitModule` binds it (DC1). Where git runs is

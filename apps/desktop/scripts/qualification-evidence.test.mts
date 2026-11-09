@@ -514,11 +514,10 @@ const linuxCleanHostFixture = (
     gcp: {
       instance: 'tau-ci-gpu-run-1',
       zone: 'projects/1234/zones/us-central1-a',
-      template: `projects/1234/global/instanceTemplates/${template}`,
-      requested: {
+      compute: {
         template: `https://www.googleapis.com/compute/v1/projects/tau-ci/global/instanceTemplates/${template}`,
         instance: 'tau-ci-gpu-run-1',
-        zone: 'us-central1-a',
+        zone: 'https://www.googleapis.com/compute/v1/projects/tau-ci/zones/us-central1-a',
       },
     },
     osRelease,
@@ -543,8 +542,9 @@ const linuxCleanHostFixture = (
         size: artifact.size,
         mode: 0o644,
         uid: 1001,
+        root: { uid: 1001, mode: 0o644, size: artifact.size },
       },
-      ...(artifact.kind === 'linux-appimage' ? { executable: { mode: 0o755, offset: '193728' } } : {}),
+      ...(artifact.kind === 'linux-appimage' ? { executable: { mode: 0o755, rootMode: 0o755, offset: '193728' } } : {}),
     }));
     return {
       stage: phase,
@@ -554,13 +554,19 @@ const linuxCleanHostFixture = (
         uid: 1000,
         packages: downloads
           .filter((entry) => entry.artifact.name.endsWith('.deb'))
-          .map((entry) => ({ path: entry.download.path, before: entry.artifact.sha256, after: entry.artifact.sha256 })),
+          .map((entry) => ({
+            path: entry.download.path,
+            copy: `/var/lib/tau-qualification-consent.Ab12Cd34/${entry.artifact.name}`,
+            before: entry.artifact.sha256,
+            after: entry.artifact.sha256,
+          })),
       },
       installedPath: launcher,
       desktopEntry,
     };
   };
   const offlinePid = input.lifecycle.ordinaryQuit?.exitedPid ?? 40;
+  input.lifecycle.offline = { pid: offlinePid };
   const renderer = 'ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)';
   input.linuxAcceptance = {
     kind: 'vm',
@@ -576,6 +582,7 @@ const linuxCleanHostFixture = (
         pid: offlinePid,
         processUid: 1001,
         executable: input.stages[0].installed.executablePath,
+        root: { uid: 1001, executable: input.stages[0].installed.executablePath },
       },
       {
         stage: 'initial',
@@ -585,6 +592,7 @@ const linuxCleanHostFixture = (
         pid: input.stages[0].probe.pid,
         processUid: 1001,
         executable: input.stages[0].installed.executablePath,
+        root: { uid: 1001, executable: input.stages[0].installed.executablePath },
       },
       {
         stage: 'reinstall',
@@ -594,6 +602,7 @@ const linuxCleanHostFixture = (
         pid: input.lifecycle.reinstall.mainPid,
         processUid: 1001,
         executable: input.stages[2].installed.executablePath,
+        root: { uid: 1001, executable: input.stages[2].installed.executablePath },
       },
     ],
     renderers: [renderer, renderer, renderer],
@@ -723,8 +732,7 @@ const linuxCleanHostRefusals = (): void => {
         const { gcp } = input.linuxAcceptance!.host;
         input.linuxAcceptance!.host.gcp = {
           ...gcp,
-          template: gcp.template.replace('ubuntu2404', 'debian13'),
-          requested: { ...gcp.requested, template: gcp.requested.template.replace('ubuntu2404', 'debian13') },
+          compute: { ...gcp.compute, template: gcp.compute.template.replace('ubuntu2404', 'debian13') },
         };
       },
       /GPU host this job created/u,
@@ -783,7 +791,7 @@ const linuxCleanHostRefusals = (): void => {
       'package executed',
       (input) => {
         const entry = downloads(input).find((item) => item.artifact.name.endsWith('.deb'))!;
-        entry.executable = { mode: 0o755, offset: '1' };
+        entry.executable = { mode: 0o755, rootMode: 0o755, offset: '1' };
       },
       /Debian package was executed/u,
     ],
@@ -800,6 +808,116 @@ const linuxCleanHostRefusals = (): void => {
         input.linuxAcceptance!.installs[1]!.consent.packages[0]!.after = hash(6);
       },
       /administrator consent/u,
+    ],
+    [
+      'root sees another download owner',
+      (input) => {
+        const entry = downloads(input)[0]!;
+        entry.download.root = { ...entry.download.root, uid: 0 };
+      },
+      /exact candidate/u,
+    ],
+    [
+      'root sees another download mode',
+      (input) => {
+        const entry = downloads(input)[0]!;
+        entry.download.root = { ...entry.download.root, mode: 0o600 };
+      },
+      /exact candidate/u,
+    ],
+    [
+      'root sees another download size',
+      (input) => {
+        const entry = downloads(input)[0]!;
+        entry.download.root = { ...entry.download.root, size: entry.download.size + 1 };
+      },
+      /exact candidate/u,
+    ],
+    [
+      'package installed from the consumer home',
+      (input) => {
+        const item = input.linuxAcceptance!.installs[0]!.consent.packages[0]!;
+        item.copy = item.path;
+      },
+      /administrator consent/u,
+    ],
+    [
+      'kernel reports another process owner',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[1] = { ...launches[1]!, root: { ...launches[1]!.root, uid: 1000 } };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'root sees another executable',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[2] = { ...launches[2]!, root: { ...launches[2]!.root, executable: '/tmp/Tau' } };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'offline launch pid mismatch',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[0] = { ...launches[0]!, pid: 7 };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'offline pid not recorded',
+      (input) => {
+        delete input.lifecycle.offline;
+      },
+      /desktop entry/u,
+    ],
+    [
+      'metadata zone differs from the Compute API',
+      (input) => {
+        input.linuxAcceptance!.host.gcp = {
+          ...input.linuxAcceptance!.host.gcp,
+          zone: 'projects/1234/zones/us-east1-c',
+        };
+      },
+      /GPU host this job created/u,
+    ],
+    [
+      'virgl renderer',
+      (input) => {
+        input.linuxAcceptance!.host.glxinfo = 'direct rendering: Yes\nOpenGL renderer string: virgl (Tesla T4)';
+      },
+      /hardware GL renderer/u,
+    ],
+    [
+      'zink renderer',
+      (input) => {
+        input.linuxAcceptance!.host.glxinfo =
+          'direct rendering: Yes\nOpenGL renderer string: zink Vulkan 1.3(llvm-free Mesa device (MESA_ZINK))';
+      },
+      /hardware GL renderer/u,
+    ],
+    [
+      'viewer on virgl although the host has the T4',
+      (input) => {
+        input.linuxAcceptance!.renderers = [
+          input.linuxAcceptance!.renderers[0],
+          input.linuxAcceptance!.renderers[1],
+          'ANGLE (Mesa, virgl (Tesla T4), OpenGL 4.3)',
+        ];
+      },
+      /host GPU/u,
+    ],
+    [
+      'distribution release changed during the run',
+      (input) => {
+        input.linuxAcceptance!.after = {
+          ...input.linuxAcceptance!.after,
+          osRelease: 'PRETTY_NAME="Ubuntu 26.04 LTS"\nID=ubuntu\nVERSION_ID="26.04"',
+        };
+      },
+      // Another release no longer fits this host's template family, and differs from the pre-run observation.
+      /changed during the run|GPU host this job created/u,
     ],
     [
       'launch pid mismatch',
@@ -845,6 +963,7 @@ const linuxCleanHostRefusals = (): void => {
       'AppImage already executable',
       (entry) => {
         entry.download.mode = 0o755;
+        entry.download.root = { ...entry.download.root, mode: 0o755 };
       },
       /already executable/u,
     ],
@@ -858,7 +977,14 @@ const linuxCleanHostRefusals = (): void => {
     [
       'AppImage runtime did not answer',
       (entry) => {
-        entry.executable = { mode: 0o755, offset: '' };
+        entry.executable = { mode: 0o755, rootMode: 0o755, offset: '' };
+      },
+      /make the downloaded AppImage executable/u,
+    ],
+    [
+      'root observes another mode than the consumer reported',
+      (entry) => {
+        entry.executable = { ...entry.executable!, rootMode: 0o644 };
       },
       /make the downloaded AppImage executable/u,
     ],
@@ -879,6 +1005,18 @@ const linuxCleanHostRefusals = (): void => {
   const offlineLaunches = offline.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
   offlineLaunches[0] = { ...offlineLaunches[0]!, pid: 7 };
   assert.throws(() => collectQualificationReceipt(offline), /desktop entry/u);
+  for (const group of ['lxd', 'incus-admin', 'docker', 'libvirt', 'disk']) {
+    const input = linuxCleanHostFixture('linux-apt');
+    input.linuxAcceptance!.host.consumer.groups = ['consumer', group];
+    assert.throws(() => collectQualificationReceipt(input), /administrator rights/u, group);
+  }
+  // Unattended upgrades may rewrite os-release (base-files) mid-run; the same distribution release still qualifies.
+  const rewritten = linuxCleanHostFixture('linux-apt');
+  rewritten.linuxAcceptance!.after = {
+    ...rewritten.linuxAcceptance!.after,
+    osRelease: 'PRETTY_NAME="Ubuntu 24.04.4 LTS"\nID=ubuntu\nVERSION_ID="24.04"',
+  };
+  assert.equal(collectQualificationReceipt(rewritten).environment.kind, 'vm');
   const mixed = linuxCleanHostFixture('linux-apt');
   mixed.acceptance = cleanHostFixture('macos-zip').acceptance!;
   assert.throws(() => collectQualificationReceipt(mixed), /mixed consumer platforms/u);

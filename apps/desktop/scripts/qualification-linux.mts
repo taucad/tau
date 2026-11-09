@@ -33,6 +33,11 @@ const host = (): void => {
     throw new QualificationUnavailable('Linux x64 disposable-host authorization is required');
   }
 };
+/** Root's own `stat` of a path: owner uid, raw mode and size. */
+const rootStat = (path: string): { uid: number; mode: number; size: number } => {
+  const [uid, mode, size] = command('sudo', ['-n', 'stat', '-c', '%u %f %s', '--', path]).trim().split(' ');
+  return { uid: Number(uid), mode: Number.parseInt(mode ?? '', 16), size: Number(size) };
+};
 const command = (file: string, args: string[], inheritOutput = false): string => {
   host();
   const result = spawnSync(file, args, {
@@ -595,11 +600,19 @@ export const createLinuxAptQualificationDriver = (
       if (downloaded.sha256 !== artifact.sha256 || downloaded.size !== artifact.size) {
         throw new Error('Browser-downloaded bytes differ from the candidate manifest');
       }
-      // oxlint-disable-next-line no-bitwise -- POSIX execute permission bits.
-      if ((downloaded.mode & 0o111) !== 0 || downloaded.uid !== consumer.uid) {
+      // Root re-reads the file the agent reported, so its owner, mode and size are not only the agent's word.
+      const rootDownload = rootStat(downloaded.path);
+      if (
+        // oxlint-disable-next-line no-bitwise -- POSIX execute permission bits.
+        (downloaded.mode & 0o111) !== 0 ||
+        downloaded.uid !== consumer.uid ||
+        rootDownload.uid !== downloaded.uid ||
+        rootDownload.mode !== downloaded.mode ||
+        rootDownload.size !== downloaded.size
+      ) {
         throw new QualificationUnavailable('Browser download is already executable or not owned by the consumer');
       }
-      let executable: { mode: number; offset: string } | undefined;
+      let executable: { mode: number; rootMode: number; offset: string } | undefined;
       if (kind === 'linux-appimage') {
         // What the consumer does with a downloaded AppImage: `chmod +x`, then run it.
         // oxlint-disable-next-line no-await-in-loop, no-bitwise -- Ordered consumer steps on POSIX mode bits.
@@ -609,7 +622,11 @@ export const createLinuxAptQualificationDriver = (
         if (probe.status !== 0 || !/^[1-9]\d*$/u.test(probe.stdout.trim())) {
           throw new QualificationUnavailable(`Downloaded AppImage did not run for the consumer: ${probe.stderr}`);
         }
-        executable = { mode, offset: probe.stdout.trim() };
+        const rootMode = rootStat(downloaded.path).mode;
+        if (rootMode !== mode) {
+          throw new QualificationUnavailable('Root observes another AppImage mode than the consumer set');
+        }
+        executable = { mode, rootMode, offset: probe.stdout.trim() };
       }
       downloads.push({
         artifact: { kind, name: artifact.name, sha256: artifact.sha256, size: artifact.size },
@@ -621,31 +638,47 @@ export const createLinuxAptQualificationDriver = (
           size: downloaded.size,
           mode: downloaded.mode,
           uid: downloaded.uid,
+          root: rootDownload,
         },
         ...(executable ? { executable } : {}),
       });
     }
     const packages = downloads.filter((entry) => entry.artifact.name.endsWith('.deb'));
     const rootDigest = (path: string): string => command('sudo', ['-n', 'sha256sum', '--', path]).split(/\s+/u)[0]!;
-    const before = packages.map((entry) => rootDigest(entry.download.path));
-    if (before.some((value, index) => value !== packages[index]!.artifact.sha256)) {
-      throw new Error('Administrator read different package bytes than the consumer downloaded');
+    // The administrator's consent installs a root-owned copy of each download, hashed after copying, so the consumer
+    // cannot change the bytes between the digest and `apt-get install` (and `_apt` can read them).
+    const consentDirectory = command('sudo', [
+      '-n',
+      'mktemp',
+      '-d',
+      '/var/lib/tau-qualification-consent.XXXXXXXX',
+    ]).trim();
+    command('sudo', ['-n', 'chmod', '0755', '--', consentDirectory]);
+    let consented: LinuxCleanInstall['consent']['packages'];
+    try {
+      const copies = packages.map((entry) => {
+        const copy = join(consentDirectory, entry.artifact.name);
+        command('sudo', ['-n', 'install', '-m', '0644', '-o', 'root', '-g', 'root', '--', entry.download.path, copy]);
+        return { path: entry.download.path, copy, before: rootDigest(copy) };
+      });
+      if (copies.some((value, index) => value.before !== packages[index]!.artifact.sha256)) {
+        throw new Error('Administrator copied different package bytes than the consumer downloaded');
+      }
+      runQualificationApt(
+        'install',
+        copies.map((entry) => entry.copy),
+      );
+      consented = copies.map((entry) => ({ ...entry, after: rootDigest(entry.copy) }));
+    } finally {
+      command('sudo', ['-n', 'rm', '-rf', '--', consentDirectory]);
     }
-    runQualificationApt(
-      'install',
-      packages.map((entry) => entry.download.path),
-    );
     record.installs.push({
       stage,
       downloads,
       consent: {
         account: userInfo().username,
         uid: process.getuid?.() ?? -1,
-        packages: packages.map((entry, index) => ({
-          path: entry.download.path,
-          before: before[index]!,
-          after: rootDigest(entry.download.path),
-        })),
+        packages: consented,
       },
       installedPath: launcher,
       desktopEntry: `/usr/share/applications/${name}.desktop`,
@@ -843,6 +876,13 @@ export const createLinuxAptQualificationDriver = (
     if (started.length !== 1 || !main || (spawned !== undefined && main.pid !== spawned)) {
       throw new QualificationUnavailable('Consumer launch did not start exactly one installed main process');
     }
+    // Independent of the consumer agent's reply: the kernel's owner of the process and root's view of its executable.
+    const status = await readFile(`/proc/${main.pid}/status`, 'utf8');
+    const rootUid = Number(/^Uid:\s+(\d+)/mu.exec(status)?.[1] ?? Number.NaN);
+    const rootExecutable = command('sudo', ['-n', 'readlink', '--', `/proc/${main.pid}/exe`]).trim();
+    if (rootUid !== consumer.uid || main.uid !== rootUid || rootExecutable !== main.executable) {
+      throw new QualificationUnavailable('Launched main process is not owned by the consumer as the agent reported');
+    }
     record.launches.push({
       stage,
       via: stage === 'initial' ? 'desktop-entry' : 'launcher',
@@ -851,6 +891,7 @@ export const createLinuxAptQualificationDriver = (
       pid: main.pid,
       processUid: main.uid,
       executable: main.executable,
+      root: { uid: rootUid, executable: rootExecutable },
     });
     return main.pid;
   };

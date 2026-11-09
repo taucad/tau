@@ -63,8 +63,9 @@ if [[ "$mode" == clean-host ]]; then
   # Same rights a desktop user has on their own display, from the session's cookie.
   xauth -f "$HOME/.Xauthority" nlist :0 |
     sudo -n -u "$consumer" env -i "HOME=/home/$consumer" xauth -f "/home/$consumer/.Xauthority" nmerge -
-  # Read-only reach to the public harness checkout and the verified Node runtime only. The job's environment file
-  # and run directory keep owner-only modes; nothing grants the consumer any administrator path.
+  # Search (x) on this home and read on the verified Node runtime. The public harness checkout is world-readable under
+  # umask 022, so the consumer reads it as any local user could; the job's environment file (the only credential) is
+  # 0600, and the run's output directory is made owner-only below. Nothing grants the consumer a write or admin path.
   sudo setfacl -m "u:$consumer:x" "$HOME"
   sudo setfacl -R -m "u:$consumer:rX" "$HOME/node"
   # The consumer's download browser, installed once outside every home and read-only to it.
@@ -72,7 +73,8 @@ if [[ "$mode" == clean-host ]]; then
   PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright pnpm exec playwright install chromium
   sudo env "PATH=$PATH" "$PWD/node_modules/.bin/playwright" install-deps chromium
   # The consumer has no administrator rights (the harness re-observes this as the consumer and records it).
-  if id -nG "$consumer" | grep -qwE 'sudo|admin|adm|wheel|google-sudoers' ||
+  # Container, VM and raw-disk groups are root-equivalent, so they count as administrator rights too.
+  if id -nG "$consumer" | grep -qwE 'root|sudo|admin|adm|wheel|google-sudoers|lxd|incus-admin|docker|libvirt|disk' ||
     sudo -n -u "$consumer" sudo -n true 2>/dev/null; then
     printf 'Consumer account has administrator rights\n' >&2
     exit 1
@@ -96,6 +98,8 @@ subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=mod
 # The harness now creates both parents itself; these stay as a guest-side belt
 # and braces, and neither touches the leaves it creates with recursive=false.
 (root / 'out').mkdir(exist_ok=True)
+# Run outputs stay with this account; a clean-host consumer has no reason to read them.
+(root / 'out').chmod(0o700)
 (pathlib.Path.home() / '.config').mkdir(exist_ok=True)
 # Exercise the same native ZIP listing/extraction used by authenticated artifact admission.
 with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:

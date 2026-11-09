@@ -27,6 +27,12 @@ import type { LinuxCleanHost } from './qualification-evidence.mjs';
 import { discoverQualificationProcesses } from './qualification-processes.mjs';
 import type { QualificationProcesses, QualificationSecurity } from './qualification-platform-types.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
+import {
+  assertConsumerAgentHost,
+  handleConsumerReply,
+  linuxAccount,
+  linuxConsumerEnvironment,
+} from './qualification-linux-consumer-protocol.mjs';
 /* oxlint-enable no-restricted-imports */
 
 const absent = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -296,9 +302,7 @@ type Method = keyof typeof handlers;
 
 /** Agent side: answer the orchestrator's requests as this (consumer) account until stdin closes. */
 const serve = async (input: Readable, output: Writable): Promise<void> => {
-  if (process.getuid?.() === 0 || process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'] !== '1') {
-    throw new Error('The consumer agent runs as an ordinary account on a disposable host');
-  }
+  assertConsumerAgentHost(process.getuid?.(), process.env['TAU_QUALIFICATION_DISPOSABLE_HOST']);
   // Each request settles itself (it never rejects); the agent drains them all before it exits.
   const pending: Array<Promise<void>> = [];
   for await (const line of createInterface({ input, crlfDelay: Infinity })) {
@@ -321,41 +325,6 @@ const serve = async (input: Readable, output: Writable): Promise<void> => {
     pending.push(task);
   }
   await Promise.all(pending);
-};
-
-/** The agent's environment: only the consumer's session, display and harness switches, never the job's credentials. */
-export const linuxConsumerEnvironment = (account: {
-  name: string;
-  uid: number;
-  home: string;
-}): Record<string, string> => ({
-  /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
-  HOME: account.home,
-  USER: account.name,
-  LOGNAME: account.name,
-  PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-  LANG: 'C.UTF-8',
-  DISPLAY: ':0',
-  XAUTHORITY: join(account.home, '.Xauthority'),
-  XDG_SESSION_TYPE: 'x11',
-  XDG_RUNTIME_DIR: `/run/user/${account.uid}`,
-  DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${account.uid}/bus`,
-  TAU_QUALIFICATION_DISPOSABLE_HOST: '1',
-  // Shared, read-only browser install for the download step (the guest installs it outside every home).
-  PLAYWRIGHT_BROWSERS_PATH: '/usr/local/share/ms-playwright',
-  /* eslint-enable @typescript-eslint/naming-convention -- End environment variables. */
-});
-/** Resolve a local account from the system database. */
-export const linuxAccount = (name: string): { name: string; uid: number; home: string } => {
-  if (!/^[a-z_][a-z\d_-]{0,31}$/u.test(name)) {
-    throw new Error('Invalid consumer account name');
-  }
-  const entry = spawnSync('getent', ['passwd', name], { encoding: 'utf8', timeout: 30_000 });
-  const fields = entry.stdout.trim().split(':');
-  if (entry.status !== 0 || fields.length < 7 || fields[0] !== name) {
-    throw new QualificationUnavailable('Consumer account does not exist');
-  }
-  return { name, uid: Number(fields[2]), home: fields[5]! };
 };
 
 export type LinuxConsumer = LinuxCleanHostConsumer & {
@@ -423,19 +392,14 @@ export const startLinuxConsumer = async (options: { name: string; repository: st
   });
   const replies = createInterface({ input: child.stdout, crlfDelay: Infinity });
   replies.on('line', (line) => {
-    const reply = z
-      .union([
-        z.strictObject({ id: z.number().int(), ok: z.literal(true), result: z.unknown() }),
-        z.strictObject({ id: z.number().int(), ok: z.literal(false), error: z.string() }),
-      ])
-      .parse(JSON.parse(line));
-    const entry = waiting.get(reply.id);
-    waiting.delete(reply.id);
-    if (reply.ok) {
-      entry?.resolve(reply.result);
-    } else {
-      entry?.reject(new Error(`Consumer ${account.name}: ${reply.error}`));
-    }
+    handleConsumerReply(line, {
+      waiting,
+      account: account.name,
+      fail: (error) => {
+        fail(error);
+        child.kill('SIGTERM');
+      },
+    });
   });
   const call = async (method: Method, params: unknown = null): Promise<unknown> => {
     if (failure) {
@@ -626,12 +590,13 @@ const systemResidue = async (): Promise<string[]> => {
   return found;
 };
 /**
- * Raw facts only; `assertLinuxCleanHost` in the evidence writer decides whether they qualify. Host identity comes from
- * the Compute Engine metadata server, consumer facts from the consumer's own agent.
+ * Raw facts only; `assertLinuxCleanHost` in the evidence writer decides whether they qualify. The trusted host identity
+ * (`compute`) is the runner's Compute API description of the instance it created; the guest's metadata-server instance
+ * name and zone must match it. Consumer facts come from the consumer's own agent.
  */
 export const observeLinuxCleanHost = async (
   consumer: LinuxConsumer,
-  requested: { template: string; instance: string; zone: string },
+  compute: { template: string; instance: string; zone: string },
 ): Promise<LinuxCleanHost> => {
   const identity = await consumer.identity();
   let restriction = 'absent';
@@ -648,8 +613,7 @@ export const observeLinuxCleanHost = async (
     gcp: {
       instance: await metadata('name'),
       zone: await metadata('zone'),
-      template: await metadata('attributes/instance-template'),
-      requested,
+      compute,
     },
     osRelease: await readFile('/etc/os-release', 'utf8'),
     kernel: spawnSync('uname', ['-r'], { encoding: 'utf8' }).stdout.trim(),

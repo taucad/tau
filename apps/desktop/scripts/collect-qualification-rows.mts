@@ -68,6 +68,31 @@ const assertOperatingSystem = (id: string, target: string, receipt: DesktopAccep
     throw new Error('Native row does not observe its declared operating system');
   }
 };
+/** The distribution, release and tau-cloud template family each Linux row is defined on. */
+const linuxRowDistribution = (id: string) =>
+  id.startsWith('ubuntu2604-')
+    ? { id: 'ubuntu', versionId: '26.04', template: 'ubuntu2604' }
+    : id.startsWith('ubuntu-')
+      ? { id: 'ubuntu', versionId: '24.04', template: 'ubuntu2404' }
+      : id.startsWith('debian-')
+        ? { id: 'debian', versionId: '13', template: 'debian13' }
+        : undefined;
+/** A clean-host Linux receipt's own host facts name its row's distribution and GPU-host template. */
+const assertLinuxRowHost = (id: string, receipt: DesktopAcceptanceReceipt): void => {
+  const expected = linuxRowDistribution(id);
+  const { host } = receipt.environment;
+  if (!expected || !host) {
+    return;
+  }
+  if (
+    host.platform !== 'linux' ||
+    host.distribution.id !== expected.id ||
+    host.distribution.versionId !== expected.versionId ||
+    !host.host.template.startsWith(`ci-gpu-${expected.template}-`)
+  ) {
+    throw new Error('Linux clean-host row does not observe its declared distribution');
+  }
+};
 
 /** Pure admission only: callers separately own authenticated artifact retrieval and output publication. */
 export const collectQualificationRows = (
@@ -120,6 +145,7 @@ export const collectQualificationRows = (
       throw new Error('Native row identity, signer or workflow evidence differs');
     }
     assertOperatingSystem(id, target, receipt);
+    assertLinuxRowHost(id, receipt);
     return { id, receipt };
   });
   const receipts = hostMatrix

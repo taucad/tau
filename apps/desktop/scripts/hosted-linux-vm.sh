@@ -80,6 +80,9 @@ if [[ "$host" == gcp ]]; then
   instance="${instance:0:63}"
 fi
 instance_zone=''
+host_template=''
+host_instance=''
+host_zone=''
 tunnel_pid=''
 cleanup() {
   if [[ -n "$tunnel_pid" ]]; then
@@ -166,7 +169,17 @@ if [[ "$host" == gcp ]]; then
     fi
   done
   [[ -n "$instance_zone" ]] || { printf 'No zone had spot GPU capacity\n' >&2; exit 1; }
-  printf 'gcp %s %s %s\n' "$template" "$instance_zone" "$instance" > "$output/image.txt"
+  # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
+  # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
+  described="$(gcloud compute instances describe "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
+    --format='value(sourceInstanceTemplate,name,zone)')"
+  IFS=$'\t' read -r host_template host_instance host_zone <<< "$described"
+  if [[ "${host_template##*/}" != "${template##*/}" || "$host_instance" != "$instance" \
+    || "${host_zone##*/}" != "$instance_zone" ]]; then
+    printf 'Compute Engine reports another host than this job created\n' >&2
+    exit 1
+  fi
+  printf 'gcp %s %s %s\n' "$host_template" "$instance_zone" "$host_instance" > "$output/image.txt"
   : > "$work/known_hosts"
   for _attempt in $(seq 1 60); do
     if gcloud compute instances get-guest-attributes "$instance" --project "$TAU_GCP_PROJECT" --zone "$instance_zone" \
@@ -257,9 +270,10 @@ if [[ "$mode" != proof ]]; then
   node_root="$(dirname "$(dirname "$(command -v node)")")"
   ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/node'
   tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
-  # A clean-host guest checks its own metadata-server identity against the host this job asked Compute Engine for.
-  TAU_VM_MODE="$mode" TAU_GCP_HOST_TEMPLATE="${template:-}" TAU_GCP_HOST_INSTANCE="${instance:-}" \
-    TAU_GCP_HOST_ZONE="$instance_zone" python3 - "$work/qualification-env.json" <<'PYENV'
+  # A clean-host guest checks its own metadata-server instance name and zone against the Compute API's description of
+  # the host this job created; the source template comes only from that description.
+  TAU_VM_MODE="$mode" TAU_GCP_HOST_TEMPLATE="${host_template:-}" TAU_GCP_HOST_INSTANCE="${host_instance:-}" \
+    TAU_GCP_HOST_ZONE="${host_zone##*/}" python3 - "$work/qualification-env.json" <<'PYENV'
 import json, os, sys
 names = ['GH_TOKEN', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID',
          'TAU_DESKTOP_QUALIFICATION_SCOPE', 'TAU_QUALIFICATION_ROUTE', 'TAU_QUALIFICATION_CHANNEL',

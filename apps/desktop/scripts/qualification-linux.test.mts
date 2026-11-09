@@ -6,7 +6,6 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, realpath, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createPackage } from '@electron/asar';
 import { desktopArtifactName, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Exercise real driver filesystem behavior with explicit diagnostic trust. */
@@ -17,7 +16,12 @@ import {
   isAptLockRefusal,
   waitForScheduledAptCompletion,
 } from './qualification-linux.mjs';
-import { linuxAccount, linuxConsumerEnvironment } from './qualification-linux-consumer.mjs';
+import {
+  assertConsumerAgentHost,
+  handleConsumerReply,
+  linuxAccount,
+  linuxConsumerEnvironment,
+} from './qualification-linux-consumer-protocol.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
@@ -244,19 +248,40 @@ const consumerBoundary = (): void => {
   for (const name of ['root;id', '../consumer', 'Consumer', '', 'a'.repeat(33)]) {
     assert.throws(() => linuxAccount(name), /Invalid consumer account name/u);
   }
-  // Outside a disposable host (and never as root) the agent refuses to serve.
-  const agent = spawnSync(
-    process.execPath,
-    [
-      '--import',
-      '@oxc-node/core/register',
-      fileURLToPath(new URL('qualification-linux-consumer.mts', import.meta.url)),
-      '--serve',
-    ],
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-    { input: '', encoding: 'utf8', env: { PATH: process.env['PATH'] ?? '' }, timeout: 60_000 },
-  );
-  assert.notEqual(agent.status, 0);
+  // Replies settle their own request; a malformed line fails the agent instead of throwing from the stream handler.
+  const settled: unknown[] = [];
+  const failures: Error[] = [];
+  const waiting = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>([
+    [1, { resolve: (value) => settled.push(value), reject: (error) => settled.push(error) }],
+    [2, { resolve: (value) => settled.push(value), reject: (error) => settled.push(error) }],
+  ]);
+  const context = { waiting, account: 'consumer', fail: (error: Error) => failures.push(error) };
+  handleConsumerReply('{"id":1,"ok":true,"result":42}', context);
+  handleConsumerReply('{"id":2,"ok":false,"error":"denied"}', context);
+  assert.equal(settled[0], 42);
+  assert.match(String(settled[1]), /Consumer consumer: denied/u);
+  assert.equal(failures.length, 0);
+  for (const line of ['not json', '{"id":3,"ok":true}', '{"id":"3","ok":false,"error":"x"}', '[]']) {
+    assert.doesNotThrow(() => {
+      handleConsumerReply(line, context);
+    });
+  }
+  assert.equal(failures.length, 4);
+  assert.match(failures[0]!.message, /malformed reply/u);
+  // Outside a disposable host, and never as root, the agent refuses to serve.
+  assert.doesNotThrow(() => {
+    assertConsumerAgentHost(1001, '1');
+  });
+  for (const [uid, disposable] of [
+    [0, '1'],
+    [undefined, '1'],
+    [1001, undefined],
+    [1001, '0'],
+  ] as const) {
+    assert.throws(() => {
+      assertConsumerAgentHost(uid, disposable);
+    }, /ordinary account on a disposable host/u);
+  }
   console.log('PASS Linux clean-host consumer agent environment allowlist, account-name refusal and serve guard');
 };
 try {

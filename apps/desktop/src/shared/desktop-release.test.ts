@@ -367,6 +367,21 @@ describe('desktop installed acceptance receipt', () => {
   it.each([
     ['software renderer', { graphics: { ...linuxHost.graphics, webglRenderer: 'llvmpipe (LLVM 19.1.1, 256 bits)' } }],
     ['SwiftShader', { graphics: { ...linuxHost.graphics, glRenderer: 'SwiftShader Device (Subzero)' } }],
+    ['virgl', { graphics: { ...linuxHost.graphics, glRenderer: 'virgl (Tesla T4)' } }],
+    [
+      'zink',
+      { graphics: { ...linuxHost.graphics, webglRenderer: 'ANGLE (Mesa, zink Vulkan 1.3(Tesla T4), OpenGL 4.6)' } },
+    ],
+    ['a GPU other than the T4', { graphics: { ...linuxHost.graphics, glRenderer: 'AMD Radeon Pro V520' } }],
+    [
+      'WebGL on another GPU than GL',
+      {
+        graphics: {
+          ...linuxHost.graphics,
+          webglRenderer: 'ANGLE (NVIDIA Corporation, NVIDIA L4/PCIe/SSE2, OpenGL 4.5)',
+        },
+      },
+    ],
     ['Ubuntu userns restriction off', { usernsRestriction: '0' }],
     ['another distribution template', { host: { ...linuxHost.host, template: 'ci-gpu-debian13-20261101' } }],
     ['consumer is the administrator', { consent: { ...linuxHost.consent, account: 'consumer' } }],

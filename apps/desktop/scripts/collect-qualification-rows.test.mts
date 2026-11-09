@@ -548,6 +548,16 @@ rejectLinuxVm((value) => ({
       : row,
   ),
 }));
+// A complete, self-consistent Ubuntu 26.04 receipt cannot fill the Ubuntu 24.04 row: the row id names the distribution.
+const resoluteReceipt = linuxVm.rows.find((row) => row.id === 'ubuntu2604-apt-x11')!.receipts[0]!;
+assert.throws(
+  () =>
+    collectQualificationRows({
+      ...linuxVm,
+      rows: linuxVm.rows.map((row) => (row.id === 'ubuntu-apt-x11' ? { ...row, receipts: [resoluteReceipt] } : row)),
+    }),
+  /does not observe its declared distribution/u,
+);
 const cli = spawnSync(
   process.execPath,
   ['--import', '@oxc-node/core/register', fileURLToPath(new URL('collect-qualification-rows.mts', import.meta.url))],

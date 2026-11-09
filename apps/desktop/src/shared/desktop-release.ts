@@ -274,6 +274,18 @@ export const linuxStockUsernsRestriction = (id: 'ubuntu' | 'debian'): readonly s
   id === 'ubuntu' ? ['1'] : ['absent', '0'];
 /** Software rasterizers never count as stock GPU graphics. */
 export const linuxSoftwareRendererPattern = /llvmpipe|softpipe|swiftshader|lavapipe|software rasterizer/iu;
+/**
+ * The qualified GPU: the tau-cloud hosts carry an NVIDIA Tesla T4, so a virtual (virgl), layered (zink) or other
+ * renderer is not stock hardware rendering even when it is not a software rasterizer.
+ */
+export const linuxGpuRendererPattern = /NVIDIA|Tesla T4/u;
+/** Paravirtual, layered or translated GL renderers: not the host GPU's own driver even when they name it. */
+const linuxVirtualRendererPattern = /virgl|virtio|zink|d3d12|svga|vmware|parallels|microsoft basic/iu;
+/** A renderer string from the qualified GPU's own driver: the T4, and neither software nor virtual. */
+export const isLinuxStockGpuRenderer = (value: string): boolean =>
+  linuxGpuRendererPattern.test(value) &&
+  !linuxSoftwareRendererPattern.test(value) &&
+  !linuxVirtualRendererPattern.test(value);
 /** The tau-cloud GPU host template family for each qualified distribution release. */
 const linuxCleanHostTemplates = {
   ubuntu: { '24.04': 'ubuntu2404', '26.04': 'ubuntu2604' },
@@ -377,7 +389,8 @@ const assertLinuxCleanHostReceipt = (receipt: DesktopAcceptanceReceipt, host: Li
     host.desktopEntry !== `/usr/share/applications/${name}.desktop` ||
     !linuxStockUsernsRestriction(host.distribution.id).includes(host.usernsRestriction) ||
     !host.host.template.startsWith(`ci-gpu-${templates[host.distribution.versionId] ?? 'unqualified'}-`) ||
-    [host.graphics.glRenderer, host.graphics.webglRenderer].some((value) => linuxSoftwareRendererPattern.test(value)) ||
+    ![host.graphics.glRenderer, host.graphics.webglRenderer].every((value) => isLinuxStockGpuRenderer(value)) ||
+    !host.graphics.webglRenderer.includes(host.graphics.glRenderer.split('/')[0]!.trim()) ||
     host.account.name === host.consent.account ||
     downloads('initial').length !== kinds.length ||
     downloads('reinstall').length !== kinds.length ||

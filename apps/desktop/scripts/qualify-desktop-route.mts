@@ -5,7 +5,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, stat, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, writeFile, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -49,27 +49,16 @@ import type {
   QualificationStageEvidence,
 } from './qualification-evidence.mjs';
 import type { QualificationCandidate, QualificationPlatformDriver } from './qualification-platform-types.mjs';
+import { consumerProfile, localProfile } from './qualification-profile-access.mjs';
 
 const execFileAsync = promisify(execFile);
 const required = (name: string): string => z.string().min(1).parse(process.env[name]);
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, 'utf8'));
-const digest = async (path: string): Promise<string> =>
-  createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex');
 const absentOnEnoent = (error: unknown): false => {
   if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
     return false;
   }
   throw error;
-};
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 };
 /**
  * What a process that ignored an ordinary quit was doing, for the job log of a disposable Linux guest: the app's own
@@ -192,86 +181,6 @@ async function waitFor<T>(read: () => Promise<T | undefined>, message: string, t
   }
   throw new Error(message);
 }
-const atomicJson = async (path: string, value: unknown): Promise<void> => {
-  await writeFile(`${path}.tmp`, JSON.stringify(value), { mode: 0o600 });
-  await rename(`${path}.tmp`, path);
-};
-/**
- * Everything the orchestrator reads or writes in the app's profile, and the app's process liveness. On a Linux clean
- * host the profile and processes belong to the consumer account, so they are reached through its agent.
- */
-type ProfileAccess = {
-  mkdir(path: string, recursive: boolean): Promise<void>;
-  /** Throws when the file is absent, like `readFile`. */
-  read(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  writeJson(path: string, value: unknown): Promise<void>;
-  /** `undefined` when the file is absent. */
-  size(path: string): Promise<number | undefined>;
-  readdir(path: string): Promise<string[]>;
-  realpath(path: string): Promise<string>;
-  rm(path: string): Promise<void>;
-  sha256(path: string): Promise<string>;
-  alive(pid: number): Promise<boolean>;
-  terminate(pid: number): Promise<void>;
-};
-const localProfile: ProfileAccess = {
-  mkdir: async (path, recursive) => {
-    await mkdir(path, { recursive });
-  },
-  read: async (path) => {
-    const bytes = await readFile(path);
-    return new Uint8Array(bytes);
-  },
-  writeJson: atomicJson,
-  size: async (path) => {
-    try {
-      const info = await stat(path);
-      return info.size;
-    } catch (error) {
-      absentOnEnoent(error);
-      return undefined;
-    }
-  },
-  readdir: async (path) => {
-    try {
-      return await readdir(path);
-    } catch (error) {
-      absentOnEnoent(error);
-      return [];
-    }
-  },
-  realpath: async (path) => realpath(path),
-  rm: async (path) => rm(path, { force: true }),
-  sha256: digest,
-  alive: async (pid) => alive(pid),
-  terminate: async (pid) => {
-    process.kill(pid, 'SIGTERM');
-  },
-};
-const consumerProfile = (consumer: LinuxConsumer): ProfileAccess => ({
-  mkdir: async (path, recursive) => (recursive ? consumer.mkdir(path) : consumer.mkdirOne(path)),
-  read: async (path) => {
-    const bytes = await consumer.readFile(path);
-    if (!bytes) {
-      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
-    }
-    return bytes;
-  },
-  writeJson: async (path, value) => consumer.writeFile(path, JSON.stringify(value)),
-  size: async (path) => {
-    const info = await consumer.stat(path);
-    return info?.size;
-  },
-  readdir: async (path) => {
-    const entries = await consumer.readdir(path);
-    return entries ?? [];
-  },
-  realpath: async (path) => consumer.realpath(path),
-  rm: async (path) => consumer.rm(path),
-  sha256: async (path) => consumer.sha256(path),
-  alive: async (pid) => consumer.alive(pid),
-  terminate: async (pid) => consumer.signal(pid, 'SIGTERM'),
-});
 const snapshotObjects = async (root: string, prefix = ''): Promise<Map<string, QualificationMirrorObject>> => {
   const result = new Map<string, QualificationMirrorObject>();
   for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
@@ -367,7 +276,8 @@ const main = async (): Promise<void> => {
   // Linux clean host: the consumer account owns the profile and the app; this administrator process never runs it.
   let linuxConsumer: LinuxConsumer | undefined;
   let linuxHost: LinuxCleanHost | undefined;
-  const linuxHostRequest =
+  // Trusted identity: the runner's Compute API description of the host it created (`instances describe`).
+  const linuxHostIdentity =
     acceptanceKind === 'vm' && route.startsWith('linux-')
       ? {
           template: required('TAU_GCP_HOST_TEMPLATE'),
@@ -375,7 +285,7 @@ const main = async (): Promise<void> => {
           zone: required('TAU_GCP_HOST_ZONE'),
         }
       : undefined;
-  if (linuxHostRequest) {
+  if (linuxHostIdentity) {
     if (
       process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'linux' ||
       process.env['TAU_QUALIFICATION_DISPOSABLE_VM'] !== '1' ||
@@ -389,7 +299,7 @@ const main = async (): Promise<void> => {
     });
     try {
       // Observed before this run creates its profile or installs anything, so prior Tau state stops the row here.
-      linuxHost = await observeLinuxCleanHost(linuxConsumer, linuxHostRequest);
+      linuxHost = await observeLinuxCleanHost(linuxConsumer, linuxHostIdentity);
       assertLinuxCleanHost(linuxHost);
     } catch (error) {
       await linuxConsumer.close();
@@ -499,6 +409,7 @@ const main = async (): Promise<void> => {
   const snapshots: Array<Map<string, QualificationMirrorObject>> = [];
   const stages: QualificationStageEvidence[] = [];
   let ordinaryQuit: QualificationEvidence['lifecycle']['ordinaryQuit'];
+  let offlinePid: number | undefined;
   let projectUrl: string | undefined;
   let offset = 0;
   let currentPid: number | undefined;
@@ -608,7 +519,7 @@ const main = async (): Promise<void> => {
     await files.writeJson(join(profile, 'route-qualification.request.json'), {
       schemaVersion: 1,
       nonce,
-      profile: await realpath(profile),
+      profile: await files.realpath(profile),
       route,
       target,
       channel,
@@ -737,6 +648,7 @@ const main = async (): Promise<void> => {
         }
       }, 'Offline baseline did not become ready');
       currentPid = offlineReady.pid;
+      offlinePid = offlineReady.pid;
       const rendered = await render('a', offlineReady.pid);
       if (!rendered) {
         throw new Error('Initial renderer evidence missing');
@@ -1052,11 +964,11 @@ const main = async (): Promise<void> => {
     await transport.flush();
     // Observed again once Tau is removed: the stock security policy and the consumer must not have changed.
     const linuxAcceptance: LinuxCleanHostAcceptance | undefined =
-      linuxConsumer && linuxHost && linuxHostRequest && aptDriver?.cleanHostRecord
+      linuxConsumer && linuxHost && linuxHostIdentity && aptDriver?.cleanHostRecord
         ? {
             kind: 'vm',
             host: linuxHost,
-            after: await observeLinuxCleanHost(linuxConsumer, linuxHostRequest),
+            after: await observeLinuxCleanHost(linuxConsumer, linuxHostIdentity),
             ...aptDriver.cleanHostRecord(),
             renderers: z.tuple([z.string(), z.string(), z.string()]).parse(linuxRenderers),
           }
@@ -1067,6 +979,7 @@ const main = async (): Promise<void> => {
       target,
       stages: [stages[0]!, stages[1]!, final],
       lifecycle: {
+        ...(offlinePid === undefined ? {} : { offline: { pid: offlinePid } }),
         ...(ordinaryQuit ? { ordinaryQuit } : {}),
         reinstall: {
           installed: reinstalled,

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   desktopAcceptanceRoutes,
-  linuxSoftwareRendererPattern,
+  isLinuxStockGpuRenderer,
   linuxStockUsernsRestriction,
   macosQuarantinePattern,
   parseDesktopAcceptanceReceipt,
@@ -281,12 +281,14 @@ export type QualificationCleanHostAcceptance = {
  */
 export const linuxCleanHostSchema = z.strictObject({
   gcp: z.strictObject({
-    /** Metadata server `instance/name`, `instance/zone` and `instance/attributes/instance-template`. */
+    /** Metadata server `instance/name` and `instance/zone`, read in the guest. */
     instance: z.string(),
     zone: z.string(),
-    template: z.string(),
-    /** What the job asked Compute Engine for (`gcloud` template selfLink, instance name, zone). */
-    requested: z.strictObject({ template: z.string(), instance: z.string(), zone: z.string() }),
+    /**
+     * The trusted host identity: the runner's `gcloud compute instances describe` of the instance this job created
+     * (`sourceInstanceTemplate`, `name`, `zone`), a Compute API fact neither the guest nor its creator can set.
+     */
+    compute: z.strictObject({ template: z.string(), instance: z.string(), zone: z.string() }),
   }),
   /** `/etc/os-release`. */
   osRelease: z.string(),
@@ -331,20 +333,38 @@ export const linuxCleanInstallSchema = z.strictObject({
           path: z.string(),
           sha256: digest,
           size: z.number().int().positive(),
-          /** File mode and owner exactly as the browser wrote it. */
+          /** File mode and owner exactly as the browser wrote it, as the consumer agent reported them. */
           mode: z.number().int().nonnegative(),
           uid: z.number().int(),
+          /** Root's own `stat` of the same path, independent of the agent's reply. */
+          root: z.strictObject({
+            uid: z.number().int(),
+            mode: z.number().int().nonnegative(),
+            size: z.number().int().positive(),
+          }),
         }),
-        /** AppImage only: the consumer's `chmod +x` and the image runtime answering `--appimage-offset` for them. */
-        executable: z.strictObject({ mode: z.number().int().nonnegative(), offset: z.string() }).optional(),
+        /**
+         * AppImage only: the consumer's `chmod +x` (agent reply and root's `stat`) and the image runtime answering
+         * `--appimage-offset` for them.
+         */
+        executable: z
+          .strictObject({
+            mode: z.number().int().nonnegative(),
+            rootMode: z.number().int().nonnegative(),
+            offset: z.string(),
+          })
+          .optional(),
       }),
     )
     .min(1),
   consent: z.strictObject({
     account: z.string(),
     uid: z.number().int(),
-    /** The downloaded Debian packages the administrator installed, hashed by root before and after `apt-get install`. */
-    packages: z.array(z.strictObject({ path: z.string(), before: digest, after: digest })),
+    /**
+     * The downloaded Debian packages the administrator installed: each copied by root out of the consumer's home into a
+     * root-owned directory (`copy`), hashed there, installed from there and hashed again after `apt-get install`.
+     */
+    packages: z.array(z.strictObject({ path: z.string(), copy: z.string(), before: digest, after: digest })),
   }),
   installedPath: z.string(),
   desktopEntry: z.string(),
@@ -363,6 +383,8 @@ export const linuxCleanLaunchSchema = z.strictObject({
   pid: z.number().int().positive(),
   processUid: z.number().int(),
   executable: z.string(),
+  /** The kernel's `/proc/<pid>/status` owner and root's `readlink /proc/<pid>/exe`, independent of the agent. */
+  root: z.strictObject({ uid: z.number().int(), executable: z.string() }),
 });
 export type LinuxCleanLaunch = z.infer<typeof linuxCleanLaunchSchema>;
 export type LinuxCleanHostAcceptance = {
@@ -387,6 +409,8 @@ export type QualificationEvidence = {
   target: 'darwin-arm64' | 'darwin-x64' | 'win32-x64' | 'linux-x64';
   stages: readonly [QualificationStageEvidence, QualificationStageEvidence, QualificationStageEvidence];
   lifecycle: {
+    /** The offline baseline's main process, as its ready file named it (non-Mac routes). */
+    offline?: { pid: number };
     ordinaryQuit?: {
       probe: QualificationProbeObservation;
       before: QualificationInstallation;
@@ -617,10 +641,25 @@ const windowsConsumerReceiptFacts = (
   };
 };
 const lastSegment = (value: string): string => value.trim().split('/').at(-1) ?? '';
+/** A package copy in the root-owned consent directory the driver creates with `mktemp -d`. */
+const rootConsentCopy = /^\/var\/lib\/tau-qualification-consent\.[A-Za-z\d]{8}\/[^/]+\.deb$/u;
 /** Whether any of the POSIX permission `bits` is set in `mode`. */
 // oxlint-disable-next-line no-bitwise -- POSIX permission bits.
 const hasModeBits = (mode: number, bits: number): boolean => (mode & bits) !== 0;
-const linuxAdministratorGroups = new Set(['root', 'sudo', 'admin', 'wheel', 'google-sudoers', 'adm']);
+/** Groups that grant root or its equivalent (container, VM or raw-disk access) to their members. */
+const linuxAdministratorGroups = new Set([
+  'root',
+  'sudo',
+  'admin',
+  'wheel',
+  'google-sudoers',
+  'adm',
+  'lxd',
+  'incus-admin',
+  'docker',
+  'libvirt',
+  'disk',
+]);
 /** The facts a qualifying Linux clean host derives from its raw observations. */
 type LinuxCleanHostFacts = {
   host: LinuxCleanHost;
@@ -660,19 +699,16 @@ export const assertLinuxCleanHost = (input: LinuxCleanHost, requireClean = true)
     linuxStockUsernsRestriction(id === 'ubuntu' ? 'ubuntu' : 'debian').includes(usernsRestriction),
     'Linux user-namespace restriction differs from the distribution stock value',
   );
-  const template = lastSegment(host.gcp.template);
+  const template = lastSegment(host.gcp.compute.template);
   requireEvidence(
     template.startsWith(`ci-gpu-${family}-`) &&
-      template === lastSegment(host.gcp.requested.template) &&
-      host.gcp.instance.trim() === host.gcp.requested.instance &&
-      lastSegment(host.gcp.zone) === host.gcp.requested.zone,
+      host.gcp.instance.trim() === host.gcp.compute.instance &&
+      lastSegment(host.gcp.zone) === lastSegment(host.gcp.compute.zone),
     'Linux clean host is not the GPU host this job created from its distribution template',
   );
   const glRenderer = /^OpenGL renderer string: (.+)$/mu.exec(host.glxinfo)?.[1]?.trim() ?? '';
   requireEvidence(
-    /^direct rendering: Yes$/mu.test(host.glxinfo) &&
-      glRenderer.length > 0 &&
-      !linuxSoftwareRendererPattern.test(glRenderer),
+    /^direct rendering: Yes$/mu.test(host.glxinfo) && isLinuxStockGpuRenderer(glRenderer),
     'Linux clean host has no hardware GL renderer',
   );
   const { consumer, administrator } = host;
@@ -715,7 +751,9 @@ const linuxCleanHostReceiptFacts = (
   requireEvidence(
     after.usernsRestriction === facts.usernsRestriction &&
       after.host.kernel === facts.host.kernel &&
-      after.host.osRelease === facts.host.osRelease &&
+      // Unattended upgrades may rewrite base-files during a run; the distribution and release must stay the same.
+      after.distribution.id === facts.distribution.id &&
+      after.distribution.versionId === facts.distribution.versionId &&
       after.gcp.instance === facts.gcp.instance &&
       after.host.consumer.uid === consumer.uid &&
       after.host.consumer.name === consumer.name,
@@ -754,7 +792,10 @@ const linuxCleanHostReceiptFacts = (
           url.pathname === `/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}` &&
           entry.download.path.startsWith(`${consumer.home}/`) &&
           entry.download.path.endsWith(`/${artifact.name}`) &&
-          entry.download.uid === consumer.uid,
+          entry.download.uid === consumer.uid &&
+          entry.download.root.uid === consumer.uid &&
+          entry.download.root.mode === entry.download.mode &&
+          entry.download.root.size === artifact.size,
         'browser download is not the exact candidate artifact',
       );
       requireEvidence(!hasModeBits(entry.download.mode, 0o111), 'browser download is already executable');
@@ -762,6 +803,7 @@ const linuxCleanHostReceiptFacts = (
         requireEvidence(
           entry.executable !== undefined &&
             hasModeBits(entry.executable.mode, 0o100) &&
+            entry.executable.rootMode === entry.executable.mode &&
             /^[1-9]\d*$/u.test(entry.executable.offset),
           'consumer did not make the downloaded AppImage executable',
         );
@@ -778,6 +820,8 @@ const linuxCleanHostReceiptFacts = (
           install.consent.packages.some(
             (item) =>
               item.path === entry.download.path &&
+              rootConsentCopy.test(item.copy) &&
+              item.copy.endsWith(`/${entry.artifact.name}`) &&
               item.before === entry.artifact.sha256 &&
               item.after === entry.artifact.sha256,
           ),
@@ -804,15 +848,22 @@ const linuxCleanHostReceiptFacts = (
       reinstall?.via === 'launcher' &&
       reinstall.command[0] === launcher &&
       reinstall.pid === input.lifecycle.reinstall.mainPid &&
+      launch('offline')[0]!.pid === input.lifecycle.offline?.pid &&
       (!input.lifecycle.ordinaryQuit || launch('offline')[0]!.pid === input.lifecycle.ordinaryQuit.exitedPid) &&
-      launches.every((entry) => entry.account === consumer.name && entry.processUid === consumer.uid),
+      launches.every(
+        (entry) =>
+          entry.account === consumer.name &&
+          entry.processUid === consumer.uid &&
+          entry.root.uid === consumer.uid &&
+          entry.root.executable === entry.executable,
+      ),
     'installed app was not launched by the consumer from its desktop entry',
   );
   const gpu = facts.glRenderer.split('/')[0]!.trim();
   for (const [index, stage] of input.stages.entries()) {
     const renderer = acceptance.renderers[index] ?? '';
     requireEvidence(
-      renderer.includes(gpu) && !linuxSoftwareRendererPattern.test(renderer),
+      renderer.includes(gpu) && isLinuxStockGpuRenderer(renderer),
       'viewer did not render on the host GPU',
     );
     requireEvidence(

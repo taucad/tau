@@ -31,19 +31,21 @@ A write whose reply is lost (`LoseReply`, bounded by `MaxLost`) may have been ap
 
 An own write is **outstanding** while its reply is pending or lost. An acknowledged write stays outstanding until the store reads other bytes in a read that started after the acknowledgement, or acknowledges a later write. This is the store's knowledge, not the file's truth: the store cannot tell a foreign write of identical bytes from its own echo before it has seen the file move on. The ghost variable `superseded` records it independently of the map the store keeps (`kept`).
 
+A lost write stays outstanding for good, and that is a limit of the model. No modelled rule ends the entry of a write whose reply was lost, so the model excuses a foreign write of a lost write's bytes without bound: `ForeignStaysForeign` holds for lost writes by definition, not because the store learns anything. In the implementation the own-write time to live is the only thing that ends such an entry, and expiring it reopens I5 for a lost write that lands later.
+
 ## Target rules
 
-These are the rules the `target` configurations check. `recordSync` implements them. Each rule that goes beyond the record-sync blueprint has a witness that fails without it.
+These are the rules the `target` configurations check. `recordSync` implements them. Rules 1, 3, 4, 5 and 7 have witnesses that fail without them, and `no-digest` removes the map that rule 2 looks up. Rule 6 guards no safety property. It keeps the writer from spending attempts on a base it already knows is stale, and without it `EditEventuallySettled` holds only with a larger write bound.
 
-1. Every write adds an entry to the map when it is issued. A conflict reply removes the entry. A lost reply keeps it.
+1. Every write adds an entry to the map when it is issued. Entries are per write and never merged by digest: two writes of the same bytes hold two entries, and a conflict reply removes only its own write's entry. A lost reply keeps the entry. Witness: `digest-keyed-entries` (a write lands and its reply is lost, the retry of the same bytes conflicts, and removing every entry with those bytes leaves the conflict read to publish the store's own bytes as foreign).
 2. A read is attributed own when its bytes match an entry, in any state.
 3. A completed read drops every acknowledged entry whose bytes differ from the bytes it read, whether the read was attributed own or foreign. It never drops an entry whose reply is pending or lost. Witnesses: `issued-before-read` (dropping entries by issue time loses the echo of a write in flight), `drop-on-foreign-only` and `foreign-identical-bytes`.
 4. An acknowledged write drops the earlier acknowledged entries. Witness: `keep-earlier-acknowledged`.
-5. A read overlaps a write when it starts or completes while the write is in flight. The reply of a write that no read overlapped publishes the write as own and supersedes any read still in flight. The reply of an overlapped write publishes nothing and starts a refresh read, which the map attributes. Witnesses: `publish-on-overlap`, `no-refresh`.
+5. A read overlaps a write when it starts or completes while the write is in flight. The reply of a write that no read overlapped publishes the write as own and supersedes any read still in flight. The reply of an overlapped write publishes nothing and starts a refresh read, which the map attributes. Witnesses: `publish-on-overlap`, `no-refresh` and `overlap-on-start-only` (a read that started before the write was issued and completes while it is in flight publishes a newer foreign version, and the reply then publishes the older own version over it).
 6. After a conflict or an overlapped reply the writer waits for the latest read, including a watch read that superseded the one its reply started.
 7. The close fence stops new writes. Witness: `no-fence`.
 
-Rules 3 and 4 refine the blueprint's "drops every entry older than the read's start". Rule 5 refines "published once as `origin: 'own'`" for the overlapped case. With rule 5, every read that completes started after the last acknowledgement, which is why rule 3 needs no timestamps.
+Rule 1 refines the blueprint's `Map<digest, ...>`: the map is looked up by digest, but its entries belong to writes. Rules 3 and 4 refine the blueprint's "drops every entry older than the read's start". Rule 5 refines "published once as `origin: 'own'`" for the overlapped case. With rule 5, every read that completes started after the last acknowledgement, which is why rule 3 needs no timestamps.
 
 ## Configurations
 
@@ -65,11 +67,13 @@ All configurations run in the pull-request tier. Each violating configuration ch
 | `drop-on-foreign-only`            | violates `ForeignStaysForeign` | Witness. Only a foreign read drops acknowledged entries                       |
 | `foreign-identical-bytes`         | violates `ForeignStaysForeign` | Witness. A read never drops an entry                                          |
 | `keep-earlier-acknowledged`       | violates `ForeignStaysForeign` | Witness. A later acknowledgement drops nothing                                |
+| `digest-keyed-entries`            | violates `OwnWriteAttributed`  | Witness. A conflict removes every entry with its bytes                        |
 | `publish-on-overlap`              | violates `SnapshotMonotone`    | Witness. Every applied reply publishes at once                                |
+| `overlap-on-start-only`           | violates `SnapshotMonotone`    | Witness. Only a read's start overlaps a write                                 |
 | `no-refresh`                      | violates `EventuallyCurrent`   | Witness. No refresh read after an overlapped write                            |
 | `no-fence`                        | violates `FenceStopsWrites`    | Witness. The fence does not stop writes                                       |
 
-The widest target scope tried, three writes with one lost reply, two foreign writes and two repeated change events, passes in about five minutes. That is over the pull-request watchdog, and `apps/ui` has no `formal:nightly` target yet, so it is not committed.
+`target-lost-reply` runs at the scope of `target` and the witnesses (three writes, three edits, two foreign writes and two repeated change events) with one lost reply, and passes in about a minute on two workers.
 
 ## What the as-built configurations show
 
@@ -107,7 +111,7 @@ In the slot modes a read that returns the bytes already shown publishes nothing,
 - Refusals (`INVALID_RECORD`, `NEWER_RECORD`), `ensure`, `reset`, health reporting and read failures. They do not take part in attribution.
 - The patch algebra (`diff`, `combine`, `merge`). The record-sync blueprint covers it with property tests.
 - A `known-not-applied` write failure. Nothing reached the authority, so it is a write that was never issued.
-- The own-write time to live. It is a leak guard; the target properties hold without it.
+- The own-write time to live. It is the only thing in the implementation that ends the entry of a lost write, and the model has no rule that does, so the model excuses a foreign write of a lost write's bytes without bound. Expiring an entry reopens I5 for a lost write that lands later. See the paragraph on outstanding writes.
 - `invalidateRead`. It is a read that never completes.
 - The file's absence. A missing file is one more byte value.
 
@@ -121,4 +125,4 @@ This change is the spec only. G1 adds the conformance side against this module: 
 pnpm nx run ui:formal
 ```
 
-The record-sync configurations take about a minute in total on two workers.
+The record-sync configurations take about 75 seconds in total on two workers, most of it `target-lost-reply`. The whole `apps/ui` run takes about 85 seconds.

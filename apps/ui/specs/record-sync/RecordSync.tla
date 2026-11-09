@@ -18,8 +18,17 @@
 (*                                                                         *)
 (* The model is untimed. The edit debounce, the retry backoff and a flush  *)
 (* are the one step `IssueWrite`. Bytes are opaque values and a digest is  *)
-(* its bytes: the model assumes no hash collision. The own-write time to   *)
-(* live is a leak guard and is not modelled.                               *)
+(* its bytes: the model assumes no hash collision.                         *)
+(*                                                                         *)
+(* Entries are per write, never merged by digest: two writes of the same   *)
+(* bytes hold two entries, and a conflict removes only its own write's     *)
+(* entry (`EntryKey`).                                                     *)
+(*                                                                         *)
+(* Limit. No modelled rule ends the entry of a write whose reply was lost, *)
+(* so the model excuses a foreign write of a lost write's bytes without    *)
+(* bound. In the implementation the own-write time to live, which is not   *)
+(* modelled, is the only thing that ends such an entry, and expiring it    *)
+(* reopens I5 for a lost write that lands later.                           *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                        *)
 (*   Attribution   "digest": the map of the store's own writes.            *)
@@ -39,11 +48,20 @@
 (*                 "never": a read drops nothing.                          *)
 (*   DropOnAck     TRUE: an acknowledged write drops the earlier           *)
 (*                 acknowledged entries ("digest" only).                   *)
+(*   EntryKey      "write": one entry per write; a conflict removes only   *)
+(*                   its own write's entry.                                *)
+(*                 "digest": entries keyed by bytes; a conflict removes    *)
+(*                   every entry with the conflicted write's bytes         *)
+(*                   ("digest" only).                                      *)
 (*   ReplyPublish  "quiet": the reply of a write that a read overlapped    *)
 (*                   publishes nothing; its refresh read does.             *)
 (*                 "always": every applied reply publishes at once.        *)
 (*   Refresh       TRUE: a write that a read overlapped is followed by a   *)
 (*                 refresh read. As built it always is.                    *)
+(*   OverlapOnComplete  TRUE: a read that completes while a write is in   *)
+(*                 flight overlaps it, as a read that starts then does.    *)
+(*                 FALSE: only a read's start overlaps. The slot modes are *)
+(*                 start only, as built, and ignore it.                    *)
 (*   Fence         TRUE: the close fence stops new writes.                 *)
 (*   MaxLost       how many write replies may be lost; 0 is a reliable     *)
 (*                 channel. A write whose reply was lost may still be      *)
@@ -72,7 +90,7 @@ CONSTANTS Bytes,         \* the contents the file can hold
           MaxForeign,    \* writes by another party
           MaxEcho,       \* reads started with no new change: an event delivered again, or late
           MaxLost,       \* write replies that may be lost
-          Attribution, DropOnRead, DropOnAck, ReplyPublish, Refresh, Fence
+          Attribution, DropOnRead, DropOnAck, ReplyPublish, Refresh, Fence, EntryKey, OverlapOnComplete
 
 ASSUME /\ InitialBytes \in Bytes
        /\ MaxWrites \in Nat /\ MaxEdits \in Nat /\ MaxForeign \in Nat
@@ -83,6 +101,8 @@ ASSUME /\ InitialBytes \in Bytes
        /\ ReplyPublish \in {"quiet", "always"}
        /\ Refresh \in BOOLEAN
        /\ Fence \in BOOLEAN
+       /\ EntryKey \in {"write", "digest"}
+       /\ OverlapOnComplete \in BOOLEAN
 
 VARIABLES
   file,        \* the record file: its bytes; ghost: its version and who wrote that version
@@ -263,12 +283,15 @@ ReplyApplied(w) ==
   /\ UNCHANGED <<file, nextId, watch, echoes, overlap, dirty, readBack, phase, edits, foreign, lost>>
 
 \* The conflict reply arrives: nothing was written, so the entry goes and the store reads again.
+\* Keyed by digest, the entries of other writes of the same bytes go with it.
 ReplyConflict(w) ==
   /\ phase = "open"
   /\ wr[w].status = "inFlight"
   /\ wr[w].fs = "refused"
   /\ wr' = [wr EXCEPT ![w].status = "conflict"]
-  /\ kept' = kept \ {w}
+  /\ kept' = IF Attribution = "digest" /\ EntryKey = "digest"
+               THEN kept \ {x \in kept : wr[x].bytes = wr[w].bytes}
+               ELSE kept \ {w}
   /\ dirty' = TRUE
   /\ rd' = Capture("conflict", w)
   /\ UNCHANGED <<file, nextId, watch, echoes, st, overlap, readBack, phase, edits, foreign, lost, superseded>>
@@ -346,7 +369,7 @@ CompleteRead ==
   /\ readBack' = (Slots /\ rd.purpose = "resolve")
   /\ rd' = NoRead
   \* Target: a read that completes while a write is in flight overlaps it too. As built, only a read's start does.
-  /\ overlap' = (overlap \/ (~Slots /\ InFlight # {}))
+  /\ overlap' = (overlap \/ (~Slots /\ OverlapOnComplete /\ InFlight # {}))
   /\ UNCHANGED <<file, wr, nextId, watch, echoes, dirty, phase, edits, foreign, lost>>
 
 \* The view closes: the store publishes nothing more and, with the fence, writes nothing more.

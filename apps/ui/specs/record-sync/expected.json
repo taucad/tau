@@ -8,7 +8,7 @@
     "RecordSync.target-lost-reply.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "The same properties when one write reply is lost and the write may land at any later step"
+      "ref": "The same properties when one write reply is lost and the write may land at any later step: 3 writes, 3 edits, 2 foreign writes, 2 repeated change events"
     },
     "RecordSync.liveness-flush.cfg": {
       "tier": "pr",
@@ -101,6 +101,14 @@
       "kind": "witness",
       "ref": "DropOnAck off: an entry that a later own write replaced claims a foreign write of its bytes"
     },
+    "RecordSync.digest-keyed-entries.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "witness",
+      "ref": "EntryKey digest: a write lands and its reply is lost, the retry of the same bytes conflicts and removes the entry of both, and the conflict read publishes the store's own bytes as foreign"
+    },
     "RecordSync.publish-on-overlap.cfg": {
       "tier": "pr",
       "expect": {
@@ -108,6 +116,14 @@
       },
       "kind": "witness",
       "ref": "ReplyPublish always: the reply of an overlapped write publishes its version over a newer foreign version a read already published"
+    },
+    "RecordSync.overlap-on-start-only.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SnapshotMonotone"
+      },
+      "kind": "witness",
+      "ref": "OverlapOnComplete off: a read that started before the write was issued and completes while it is in flight publishes a newer foreign version, and the reply then publishes the older own version over it"
     },
     "RecordSync.no-refresh.cfg": {
       "tier": "pr",

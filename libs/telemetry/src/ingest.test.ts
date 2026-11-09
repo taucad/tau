@@ -218,6 +218,37 @@ describe('agent usage entries', () => {
     ).toThrow();
   });
 
+  it('should accept safeguard interventions and compaction decisions in bounded vocabularies (R9)', () => {
+    const entry = {
+      name: IngestEntryName.AGENT_TURN,
+      duration: 4000,
+      detail: {
+        agentId: 'tau',
+        placement: 'browser',
+        outcome: 'completed',
+        safeguards: [{ pattern: 'identical_call', action: 'nudge', count: 2 }],
+        compactions: [{ lane: 'overflow', tier: 'summarization', outcome: 'generated', count: 1 }],
+      },
+    };
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+  });
+
+  it.each([
+    ['an unknown safeguard pattern', { safeguards: [{ pattern: 'doom_loop', action: 'nudge', count: 1 }] }],
+    [
+      'an unknown compaction lane',
+      { compactions: [{ lane: 'nightly', tier: 'summarization', outcome: 'generated', count: 1 }] },
+    ],
+  ])('should reject a turn with %s', (_label, extra) => {
+    expect(() =>
+      clientMetricEntrySchema.parse({
+        name: IngestEntryName.AGENT_TURN,
+        duration: 1,
+        detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...extra },
+      }),
+    ).toThrow();
+  });
+
   it('should clamp a turn longer than a day instead of dropping it', () => {
     const parsed = clientMetricEntrySchema.parse({
       name: IngestEntryName.AGENT_TURN,

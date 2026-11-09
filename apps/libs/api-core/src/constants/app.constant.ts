@@ -46,9 +46,12 @@ export const loggingRedactPaths = [
 ];
 export const redactionCensor = '**REDACTED**';
 
-// OAuth callbacks carry a single-use `code` and `state` in the query; request logs keep only these paths.
+// OAuth callbacks carry a single-use `code` and `state` in the query, and email verification and magic-link
+// verification carry their token there; request logs keep only these paths.
 export const loggingRedactQueryPaths: readonly RegExp[] = [
   /^\/v1\/auth\/device\/?$/iu,
+  /^\/v1\/auth\/verify-email\/?$/iu,
+  /^\/v1\/auth\/magic-link\/verify\/?$/iu,
   /^\/v1\/github\/callback\/?$/iu,
   /^\/v1\/auth\/callback\/[^/]+\/?$/iu,
 ];

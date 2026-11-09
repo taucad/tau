@@ -855,6 +855,73 @@ describe('workbench layout checked store', () => {
     expect(memory.writes).toHaveBeenCalledTimes(1);
   });
 
+  /* Red first (graphics event-driven state charter G0.2, incident 2026-11-06-viewer-orbit-snap-back): the layout
+   * store carries the own-write attribution race that taucad/tau#1602 fixed only in the view store. This is the
+   * view-store row "attributes its own write to a watch read that starts after the write reply and supersedes the
+   * refresh", ported. It fails today: once the reply clears the in-flight bytes, the superseding read publishes
+   * this store's own write as a foreign `read`. G2 moves the store onto `recordSync`, which attributes by digest
+   * (charter I5), and removes `.fails`; the row is never deleted. */
+  it.fails('attributes its own write to a watch read that starts after the write reply and supersedes the refresh', async () => {
+    const memory = memoryFiles();
+    const acknowledgement = Promise.withResolvers<void>();
+    const heldReads = Promise.withResolvers<void>();
+    let hold = false;
+    let held = 0;
+    const onChange = vi.fn<(state: { layout?: WorkbenchLayout }, source: 'read' | 'write', patch?: unknown) => void>();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: {
+        ...memory.files,
+        readFile: async () => {
+          const captured = await memory.files.readFile();
+          if (hold) {
+            held++;
+            await heldReads.promise;
+          }
+          return captured;
+        },
+        writeFileChecked: async ({ data: text }: { data: string }): Promise<CheckedFileWriteResult> => {
+          const content = encoder.encode(text);
+          memory.setBytes(content);
+          await acknowledgement.promise;
+          return { status: 'applied', content };
+        },
+      },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await store.read();
+      const own = { ...layout(), lanes: { chat: false, workbench: true } };
+      const saving = store.edit(own);
+      await vi.waitFor(() => {
+        expect(workbenchRecords.layout.read(memory.get()!)).toEqual({ status: 'current', record: own });
+      });
+      hold = true;
+      const inFlightWatch = store.read();
+      await vi.waitFor(() => {
+        expect(held).toBe(1);
+      });
+      acknowledgement.resolve();
+      await vi.waitFor(() => {
+        expect(held).toBe(2);
+      });
+      hold = false;
+      await store.read();
+      expect(onChange.mock.lastCall?.[0].layout).toEqual(own);
+      expect(onChange.mock.lastCall?.[1]).toBe('write');
+      expect(onChange.mock.lastCall?.[2]).toEqual({ lanes: { chat: false } });
+      heldReads.resolve();
+      await inFlightWatch;
+      expect(await saving).toBe(true);
+    } finally {
+      heldReads.resolve();
+      store.dispose();
+    }
+  });
+
   it('captures Reset bytes before a queued write and rejects a later watch version', async () => {
     const memory = memoryFiles();
     const store = createWorkbenchLayoutStore({

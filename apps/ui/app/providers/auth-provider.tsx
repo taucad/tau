@@ -165,7 +165,10 @@ export function AuthConfigLink({
   onClick,
   children,
   ...rest
-}: React.ComponentProps<'a'> & { readonly href: string; readonly to?: string }): React.JSX.Element {
+}: React.ComponentProps<'a'> & {
+  readonly href: string;
+  readonly to?: string;
+}): React.JSX.Element {
   if (desktopAuthAction(href) === undefined) {
     return (
       <Link {...rest} to={href}>
@@ -294,6 +297,9 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       localization={authLocalization}
       plugins={[magicLinkPlugin(), apiKeyPlugin()]}
       socialProviders={['github', 'google']}
+      // Mirrors the API's `requireEmailVerification`: a sign-up answers with no session, so the form shows
+      // "Check your email" instead of navigating home signed out.
+      emailAndPassword={{ requireEmailVerification: true }}
       redirectTo='/'
       baseURL={authReturnOrigin()}
     >

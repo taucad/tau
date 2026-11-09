@@ -416,6 +416,72 @@ describe('workbench entries checked store', () => {
       expect(data.writes).toHaveBeenCalledOnce();
     }
   });
+  /* Red first (graphics event-driven state charter G0.2, incident 2026-11-06-viewer-orbit-snap-back): the
+   * entries store carries the own-write attribution race that taucad/tau#1602 fixed only in the view store. This
+   * is the view-store row "attributes its own write to a watch read that starts after the write reply and
+   * supersedes the refresh", ported. It fails today: once the reply clears the in-flight bytes, the superseding
+   * read publishes this store's own write as a foreign `read`. G2 moves the store onto `recordSync`, which
+   * attributes by digest (charter I5), and removes `.fails`; the row is never deleted. */
+  it.fails('attributes its own write to a watch read that starts after the write reply and supersedes the refresh', async () => {
+    const data = memory();
+    const acknowledgement = Promise.withResolvers<void>();
+    const heldReads = Promise.withResolvers<void>();
+    let hold = false;
+    let held = 0;
+    const onChange = vi.fn<(state: { record?: WorkbenchEntries }, source: 'read' | 'write', patch?: unknown) => void>();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          const captured = await data.files.readFile();
+          if (hold) {
+            held++;
+            await heldReads.promise;
+          }
+          return captured;
+        },
+        writeFileChecked: async ({ data: text }: { data: string }): Promise<CheckedFileWriteResult> => {
+          const content = encoder.encode(text);
+          data.setBytes(content);
+          await acknowledgement.promise;
+          return { status: 'applied', content };
+        },
+      },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await entries.read();
+      const saving = entries.edit('a.ts', { renderTimeout: 240_000 });
+      await vi.waitFor(() => {
+        expect(data.get() && new TextDecoder().decode(data.get()!)).toContain('240000');
+      });
+      hold = true;
+      const inFlightWatch = entries.read();
+      await vi.waitFor(() => {
+        expect(held).toBe(1);
+      });
+      acknowledgement.resolve();
+      await vi.waitFor(() => {
+        expect(held).toBe(2);
+      });
+      hold = false;
+      await entries.read();
+      expect(onChange.mock.lastCall?.[0].record?.entries['a.ts']?.renderTimeout).toBe(240_000);
+      expect(onChange.mock.lastCall?.[1]).toBe('write');
+      expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+      heldReads.resolve();
+      await inFlightWatch;
+      expect(await saving).toBe(true);
+    } finally {
+      heldReads.resolve();
+      entries.dispose();
+    }
+  });
+
   it('merges concurrent timeout and component changes over 100 interleavings', async () => {
     for (let i = 0; i < 100; i++) {
       const m = memory();

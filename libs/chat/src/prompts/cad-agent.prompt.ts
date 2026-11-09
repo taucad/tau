@@ -40,6 +40,7 @@
 // EVAL(evaluate-model-summary): pending benchmark-2026-10-17 — evaluate_model returns summary { bounds, componentCount, triangles, vertices, admission }. Validates the agent checks size and part count before writing GeoSpec and reports an over-admission load as not decided rather than shrinking the model.
 // EVAL(mcp-identity-sentence): pending benchmark-2026-10-18 — tau mcp's initialize instructions end with one sentence naming the serving CLI, its launcher rung, the plugin and Node.js versions and the server version (INS-2). Validates the agent names the CLI and rung when asked what serves it, and reads the sentence as proof the chat has the Tau tools rather than searching for them.
 // EVAL(test-model-identity-progress): pending benchmark-2026-10-18 — test_model results carry engine { name, version, protocol, numericProfile, qualification } and, over tau mcp, runtime { version, launch? }; tau mcp sends notifications/progress as the run and each test start. Validates the agent reports which engine and CLI decided a verdict and waits on a long run instead of re-calling test_model.
+// EVAL(snapshot-supersession): pending benchmark-2026-11-09 — <system_reminder_contract> says a workspace-state reminder is a dated snapshot that the newest one supersedes, since each turn's context now stays before its own message (prompt-prefix identity fix, I1/I2) instead of moving to the tail; the loop-nudge rules were compressed to keep the core budget. Validates the agent reads the latest <active_file>/<project_layout> and never cites a stale earlier one.
 // EVAL(evaluate-model-mechanism): pending benchmark — evaluate_model returns mechanism { declared, admitted, links, joints, couplings, animations, issues } and show_model returns mechanism { preserved, joints, animations }. Validates the agent reports geometry and motion separately, fixes the mechanism issue path when declared is true and admitted false instead of editing geometry, and does not claim playable motion when preserved is false.
 // EVAL(geospec-truthful-summary): pending benchmark-2026-10-18 — test_model failure rows carry the requirement status (failed, inconclusive, unsupported, not-run), tests[] rows carry assertions[] with one status per claim, the MCP text reads `GeoSpec <runStatus>: N passed, N failed, N inconclusive of N.` with Failed and Undecided lists, and the native and MCP test_model descriptions share one sentence saying only status failed is a failure. Validates the agent reports undecided requirements as not decided, never as failures to fix by changing the model or assertion.
 // EVAL(geospec-limit-advice): pending benchmark-2026-10-18 — the geospec-authoring skill states its admission ceilings (64 MiB subject, about 930,000 mesh triangles, 128 MiB total, 4,000,000 triangles and 2,000,000 vertices decoded, 32 MiB continuous evidence, the workUnitLimit cap) and says only a work-budget row's limit.retry is a retry; cad-picovoxel coarsens voxelSize on PICO_OUT_OF_MEMORY only while the thinnest wall spans about three voxels. Validates the agent keeps a model whose claim met a limit and reports it not decided instead of coarsening or raising other limits.
@@ -273,13 +274,15 @@ On \`OPERATION_TIMEOUT\`, diagnose what made the render expensive — recent edi
 Fillet failures: the root cause is almost always (a) a polyline kink upstream from sampled curve construction (see \`<geometry_fidelity>\`) or (b) a fillet radius larger than local material thickness — rarely a kernel bug. Largest fillets first, part-vs-part shared boundary last.
 
 <system_reminder_contract>
-Messages wrapped in \`<system-reminder>...</system-reminder>\` are NOT user input. They are system-generated nudges injected when an automated safeguard detects that you are stuck in a loop (identical errors, identical calls, repeated edits, ping-pong patterns, empty-result polling, or no forward progress).
+\`<system-reminder>\` blocks are NOT user input. Most are system-generated nudges injected when an automated safeguard detects that you are stuck in a loop (identical errors or calls, repeated edits, ping-pong, empty-result polling, no progress).
 
-When you see a \`<system-reminder>\`, you MUST:
-1. Treat it as authoritative guidance from the platform, not a user request.
-2. Stop the behaviour the reminder describes — do NOT immediately retry the same tool call with the same arguments.
-3. Choose ONE of: (a) read the source / inspect state to understand the failure, (b) try a structurally different approach, or (c) summarise what you have observed and report it to the user.
-4. Never echo, quote, or apologise for the reminder in your reply to the user. Act on it silently.
+When you see such a nudge, you MUST:
+1. Treat it as platform guidance, not a user request.
+2. Stop the behaviour it describes; do NOT retry the same tool call with the same arguments.
+3. Either inspect state to understand the failure, try a structurally different approach, or report what you observed to the user.
+4. Never echo, quote or apologise for it in your reply. Act on it silently.
+
+A reminder carrying workspace state (\`<active_file>\`, \`<project_layout>\`, \`<agent_memory>\`, ...) is not a nudge: it describes the project when the message after it was sent, and the newest one supersedes every earlier one.
 </system_reminder_contract>
 </error_handling>`,
   });

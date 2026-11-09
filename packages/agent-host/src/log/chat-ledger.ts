@@ -6,6 +6,8 @@
  * `undefined`, so a ledger survives `JSON.parse(JSON.stringify(ledger))` unchanged and its canonical form is what the
  * Lean oracle and the traces exchange.
  */
+import { safeguardPatternOf } from '#harness/safeguard-pattern.js';
+import type { SafeguardPattern } from '#harness/safeguard-pattern.js';
 import { canonicalJson } from '#log/canonical-json.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
 import type { ClassifiedRow } from '#log/event-schema.js';
@@ -61,6 +63,20 @@ export type LedgerInterruptResolution = Readonly<{
 /** One of the three rows that settle a turn attempt (D10). @internal */
 export type TurnSettlementEvent = TurnFinalizedLogEvent | TurnConflictedLogEvent | TurnFailedLogEvent;
 
+/** One safeguard intervention a run's rows recorded, for agent-loop telemetry (R9). @public */
+export type LedgerSafeguard = Readonly<{ pattern: SafeguardPattern; action: 'nudge' | 'terminate' }>;
+
+/**
+ * One compaction decision a run's rows recorded (R9): a `history.compacted` row, or the first replacement row of a
+ * tool-result clearing, the one that carries the trace. A row without a trace is not a decision.
+ * @public
+ */
+export type LedgerCompaction = Readonly<{
+  lane: 'start_of_turn' | 'between_turn' | 'overflow';
+  tier: 'tool_result_clearing' | 'summarization';
+  outcome: 'cleared' | 'generated' | 'placeholder';
+}>;
+
 /** @public */
 export type RunEntry = Readonly<{
   kind: 'tau' | 'external';
@@ -91,6 +107,10 @@ export type RunEntry = Readonly<{
   openInvocation?: string;
   /** A newer build's row belongs to this run: commands on it are refused `RUN_UNREADABLE`. */
   opaque: boolean;
+  /** Safeguard interventions across the run's attempts, in log order; absent until one fires. */
+  safeguards?: readonly LedgerSafeguard[];
+  /** Compaction decisions across the run's attempts, in log order; absent until one is taken. */
+  compactions?: readonly LedgerCompaction[];
 }>;
 
 /** @public */
@@ -421,6 +441,24 @@ const createFold = (ledger: ChatLedger) => {
       invocation.runId === runId && invocation.purpose === purpose ? [attemptId] : [],
     );
 
+  const noteCompaction = (
+    event: Extract<AgentLogEvent | KnownProjectionEvent, { type: 'history.compacted' | 'message.envelope-replaced' }>,
+  ): void => {
+    const { details } = event;
+    if (details === undefined) {
+      return;
+    }
+    const entry = entryOf(event.runId);
+    entry.compactions = [
+      ...(entry.compactions ?? []),
+      {
+        lane: details.lane,
+        tier: details.tier,
+        outcome: details.tier === 'tool_result_clearing' ? 'cleared' : (details.summary ?? 'generated'),
+      },
+    ];
+  };
+
   const known = (event: AgentLogEvent | KnownProjectionEvent, key: RowKey): void => {
     switch (event.type) {
       case 'run.lifecycle': {
@@ -501,6 +539,9 @@ const createFold = (ledger: ChatLedger) => {
       }
       case 'message.appended':
       case 'message.envelope-replaced': {
+        if (event.type === 'message.envelope-replaced') {
+          noteCompaction(event);
+        }
         const message = event.type === 'message.appended' ? event.message : event.replacement;
         if (message.role === 'user') {
           noteTurn(entryOf(event.runId), message, event.runId);
@@ -526,6 +567,15 @@ const createFold = (ledger: ChatLedger) => {
             markShown(attemptId);
           }
         }
+        noteCompaction(event);
+        return;
+      }
+      case 'safeguard.recorded': {
+        const entry = entryOf(event.runId);
+        entry.safeguards = [
+          ...(entry.safeguards ?? []),
+          { pattern: safeguardPatternOf(event.safeguardId), action: event.action },
+        ];
         return;
       }
       case 'turn.history-projection-committed': {

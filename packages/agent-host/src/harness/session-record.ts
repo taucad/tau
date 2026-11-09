@@ -176,6 +176,8 @@ export type SessionRecord = {
   readonly messages: MessageIdentities;
   append(event: SessionLogEvent): Promise<void>;
   events(): Promise<readonly AgentLogEvent[]>;
+  /** The chat's rows across every device, in the order the history folds them (XD1); `events` is this device's. */
+  rows(): Promise<readonly AgentLogEvent[]>;
   history(): Promise<readonly ProviderMessage[]>;
 };
 
@@ -335,6 +337,10 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
     events: async () => {
       await pending;
       return options.log.read();
+    },
+    rows: async () => {
+      await pending;
+      return options.log.rows === undefined ? options.log.read() : options.log.rows();
     },
     /* RA-S10: the appender's incremental reduction, not a re-read of the file. It reads tolerantly; a run executes
      * strictly, so a history the open flagged broken is refused (D16). */

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": {
     "dashboards/agent-latency.json": "73c8f54eefc5580c1b4c097847ff107ea6c890c425a8a1757c40a5c5485e69c2",
-    "dashboards/agents.json": "1f4ff0f653774c503a9ac115a33cbe422d50033b2730058aff49e43616bf63ed",
+    "dashboards/agents.json": "7bee464552ed3aa7d88cd2add736896deb6cc31a1f7c6c990c513059c63a6285",
     "dashboards/ai-agent.json": "748ebd42e9192b1c22852191f8dee5a1e5646adf78f2ea44c31ca84ecc5770c8",
     "dashboards/api-overview.json": "c7f62b6475ea6b93c26be58a8f3d337583222afda58f88fe8bb650c410c73a69",
     "dashboards/billing.json": "192f50af50d97a21c9aa32b2ecf328481f41311bf80e9ac343e948c6fb70bad5",

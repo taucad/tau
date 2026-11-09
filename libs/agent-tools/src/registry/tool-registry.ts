@@ -53,6 +53,8 @@ import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-
 import { createRuntimeWorkbenchClient } from '#registry/workbench-client.js';
 import { createShellSource, invokeShell } from '#registry/shell-tool.js';
 import type { ShellSource } from '#registry/shell-tool.js';
+import { invokeWebTool, webToolDefinitions, webToolNames } from '#registry/web-tools.js';
+import type { WebResearchClient } from '#registry/web-tools.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
 type ToolClientKey =
@@ -105,6 +107,13 @@ const rpcForTool: Readonly<
   /* Writes package.json, package-lock.json and node_modules in one call. */
   [toolName.installPackages]: { rpc: rpcName.installPackages, sequential: true },
 };
+
+/**
+ * Every tool name this registry can serve when its host supplies the clients each needs: the RPC tools plus the web
+ * tools. The machine tools and `shell` have their own registries. A provider-facing name outside all of these is
+ * advertised but never servable (regression review R1). @internal
+ */
+export const servedToolNames: ReadonlySet<string> = new Set([...Object.keys(rpcForTool), ...webToolNames]);
 
 const geospecAuthoringRecipe =
   "Selected GeoSpec API: canonical. Import describe, it, and expectGeo from 'geospec'; import loadModel from 'geospec/model'. Load with await loadModel({ file: 'main.ts' }) and assert with expectGeo(model). Assertions complete before returning.";
@@ -324,6 +333,11 @@ export type ChatToolRegistryOptions = {
    * listing and call, so a host whose probe settles later offers `shell` from then on and never before.
    */
   readonly shell?: ShellSource | undefined;
+  /**
+   * Backs `web_search` and `web_browser`, which run on Tau's API so the search key never reaches a device. Both are
+   * listed iff one is supplied.
+   */
+  readonly web?: WebResearchClient | undefined;
 };
 
 /**
@@ -667,6 +681,10 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
       })
     : undefined;
   definitions.push(...(machineRegistry?.list() ?? []));
+  const { web } = options;
+  if (web !== undefined) {
+    definitions.push(...webToolDefinitions);
+  }
   const shellOf = createShellSource(options.shell);
 
   return {
@@ -686,6 +704,14 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
               isError: true,
             }
           : invokeShell(shell.client, invocation);
+      }
+      if (webToolNames.has(invocation.toolName)) {
+        return web === undefined
+          ? {
+              content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+              isError: true,
+            }
+          : invokeWebTool(web, invocation);
       }
       if (isMachineToolName(invocation.toolName)) {
         return (

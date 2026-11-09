@@ -61,7 +61,9 @@ export type {
   ChatLedger,
   InvocationEntry,
   LedgerAnomaly,
+  LedgerCompaction,
   LedgerPosition,
+  LedgerSafeguard,
   ReadFold,
   ReplayedStartOutcome,
   RunEntry,
@@ -173,8 +175,8 @@ export type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
 export type { ModelCallMiddleware, ModelCallRequest } from '#harness/model-call-middleware.js';
 export type { ClientContext, ClientSkill, RecentSkill, RecentSkillsPort } from '#harness/cad-middleware.js';
 export type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
+export type { AnomalyPattern, SafeguardPattern } from '#harness/safeguard-pattern.js';
 export type {
-  AnomalyPattern,
   SafeguardDetection,
   SafeguardOutcome,
   SafeguardThresholds,

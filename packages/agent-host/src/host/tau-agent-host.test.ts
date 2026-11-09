@@ -837,6 +837,58 @@ describe('createTauAgentHost', () => {
     ).toEqual(ruled.filter(([, resumable]) => resumable).map(([code]) => code));
   });
 
+  it('pins the skills catalog a chat began with and carries a later catalog as a tail note', async () => {
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            yield { type: 'text-delta', text: 'ok' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'pin',
+      }),
+    );
+    const blocks = [
+      { type: 'text', text: 'static' },
+      { type: 'text', text: 'dynamic' },
+    ] as const;
+
+    /* The first turn ran before the page had read its catalog. */
+    await host.admit({
+      chatId: 'chat-pin',
+      runId: 'run-pin-1',
+      trigger: 'submit',
+      message: { id: 'turn-pin-1', role: 'user', content: 'Start.' },
+      config: { systemPrompt: 'static\n\ndynamic', systemPromptBlocks: blocks, toolChoice: 'auto' },
+    });
+    await host.admit({
+      chatId: 'chat-pin',
+      runId: 'run-pin-2',
+      trigger: 'submit',
+      message: { id: 'turn-pin-2', role: 'user', content: 'Continue.' },
+      config: {
+        systemPrompt: 'static\n\ndynamic',
+        systemPromptBlocks: blocks,
+        toolChoice: 'auto',
+        clientContext: { skills: [{ name: 'brep', description: 'Build native BRep geometry' }] },
+      },
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.systemPrompt).toBe(requests[0]?.systemPrompt);
+    expect(requests[1]?.systemPromptBlocks).toEqual(requests[0]?.systemPromptBlocks);
+    const note = requests[1]?.messages.find((message) => message.id === 'tau:skills-update');
+    expect(note?.content).toContain('**brep**');
+    await host.close();
+  });
+
   it('executes tool and steady-state turns, then cold-rebuilds the completed transcript', async () => {
     const file = createMemoryLogFile();
     const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));

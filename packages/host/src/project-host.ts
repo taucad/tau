@@ -24,7 +24,7 @@ import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 
 import { createAcpExternalAgentPort } from '#acp/index.js';
 import type { AcpAdapter } from '#acp/index.js';
-import { createHostToolRegistry } from '#agent-tools.js';
+import { createHostToolRegistry, createHostWebResearchClient } from '#agent-tools.js';
 import type { HostRuntimeClient, HostToolFileSystem, HostToolRegistryOptions } from '#agent-tools.js';
 import { projectHostMachine } from '#project-host.machine.js';
 import type { ProjectHostQueued } from '#project-host.schemas.js';
@@ -460,6 +460,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
     ...(options.preparableKernels === undefined ? {} : { preparableKernels: options.preparableKernels }),
     ...(shell === undefined ? {} : { shell }),
+    /* Web research runs on Tau's API under this host's account (R1); a host with no Tau credential offers none. */
+    ...(options.tauCredential === undefined ? {} : { web: createHostWebResearchClient(options.tauCredential) }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>

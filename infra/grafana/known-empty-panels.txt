@@ -229,3 +229,7 @@ SLO / Executive › B2 Copy Freshness, SLO-6 (30d)
 AI Agent › Evidence Admissions by Outcome
 AI Agent › Evidence Deliveries by Outcome
 AI Agent › Langfuse Erasure Steps by Outcome
+
+# Agent loop (R9): these fill only when a safeguard fires or a compaction runs in a funded chat.
+Agents & Codex Usage › Safeguard Interventions by Pattern
+Agents & Codex Usage › Compaction Decisions by Lane and Tier

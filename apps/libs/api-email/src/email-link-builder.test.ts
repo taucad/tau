@@ -63,6 +63,27 @@ describe('email link builder', () => {
     ).toBe('/');
   });
 
+  it.each([String.raw`/\evil.example`, '//evil.example', String.raw`/\/evil.example`, 'https://tau.new@evil.example/'])(
+    'rejects %s, which a browser would leave the origin for',
+    (callbackURL) => {
+      expect(
+        sanitizeFrontendRedirectPath({
+          callbackURL,
+          frontendURL: 'https://tau.new',
+        }),
+      ).toBe('/');
+    },
+  );
+
+  it('keeps a path that merely contains an at sign', () => {
+    expect(
+      sanitizeFrontendRedirectPath({
+        callbackURL: '/@evil.example',
+        frontendURL: 'https://tau.new',
+      }),
+    ).toBe('/@evil.example');
+  });
+
   it('rejects outbound auth email URLs that point at the API origin', () => {
     expect(() => {
       assertEmailTemplateUrlAllowed({

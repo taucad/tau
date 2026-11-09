@@ -18,10 +18,10 @@ import {
 } from '@taucad/ui/components/drawer';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Button } from '@taucad/ui/components/button';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
-import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 
 type FileSelectorProps = {
   readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;

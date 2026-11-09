@@ -2,7 +2,7 @@
 
 SVG icons are packed into a single sprite (`generated/sprite.svg`), served as a
 hashed asset and injected once per document by `<SvgSpriteMount />` (mounted in
-[`apps/ui/app/root-layout.tsx`](../../root-layout.tsx)). Every `<SvgIcon id="...">` then renders
+[`apps/ui/app/root-layout.tsx`](../../../../ui/app/root-layout.tsx)). Every `<SvgIcon id="...">` then renders
 a same-document `<use href="#id">` reference, so all browsers — including Safari —
 correctly materialise the symbol's `<filter>`, `<mask>`, and `<linearGradient>`
 definitions.
@@ -36,7 +36,7 @@ These files are checked into source control. Refresh them after editing or addin
 a raw icon, then commit the regenerated artefacts:
 
 ```bash
-pnpm nx run ui:generate-svg-sprite
+pnpm nx run ui-kit:generate-svg-sprite
 ```
 
 ## Notes

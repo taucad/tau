@@ -1,5 +1,5 @@
 import type { DockviewPanelApi } from 'dockview-react';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /**
  * Close all panels in the same group except the given one.

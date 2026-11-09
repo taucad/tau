@@ -11,7 +11,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     success: (...args: unknown[]) => {
       toastSuccessMock(...args);

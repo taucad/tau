@@ -7,7 +7,7 @@ import { useCad } from '#hooks/use-cad.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';

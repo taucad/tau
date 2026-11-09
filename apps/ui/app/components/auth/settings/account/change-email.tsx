@@ -11,7 +11,7 @@ import { Field, FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type ChangeEmailProps = {

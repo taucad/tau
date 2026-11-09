@@ -5,7 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
+import { Tags, TagsTrigger } from '#components/input-tags.js';
 
 type TagsHarnessProps = {
   readonly initialTags?: string[];

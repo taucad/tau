@@ -128,7 +128,7 @@ vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ),
 }));
 
-vi.mock('#components/ui/color-picker.js', () => ({
+vi.mock('@taucad/ui-kit/components/color-picker', () => ({
   ColorPicker: ({ children }: { children: ReactNode }): ReactElement => <div>{children}</div>,
 }));
 

@@ -15,7 +15,7 @@ import {
 
 Element.prototype.scrollIntoView = vi.fn();
 
-vi.mock('#components/icons/file-extension-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({
   FileExtensionIcon: ({ className }: { filename: string; className?: string }) => (
     <span data-testid='file-ext-icon' className={className} />
   ),

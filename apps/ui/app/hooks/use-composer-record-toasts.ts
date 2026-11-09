@@ -11,7 +11,7 @@
  */
 
 import { useEffect } from 'react';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 
 export function useComposerRecordToasts(recordRef: ComposerRecordRef): void {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Box } from 'lucide-react';
 import { WorkbenchTab } from '@taucad/workbench-panes/components/workbench-tab';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**

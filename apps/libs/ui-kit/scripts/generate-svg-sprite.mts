@@ -5,8 +5,8 @@ import process from 'node:process';
 import SVGSprite from 'svg-sprite';
 
 const uiDirectory = join(import.meta.dirname, '..');
-const rawDirectory = join(uiDirectory, 'app', 'components', 'icons', 'raw');
-const generatedDirectory = join(uiDirectory, 'app', 'components', 'icons', 'generated');
+const rawDirectory = join(uiDirectory, 'src', 'icons', 'raw');
+const generatedDirectory = join(uiDirectory, 'src', 'icons', 'generated');
 const paymentIconIds = new Set([
   'amazon-pay',
   'amex',

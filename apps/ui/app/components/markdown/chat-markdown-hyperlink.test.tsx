@@ -31,7 +31,7 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
 vi.mock('#filesystem/handle-store.js', () => ({
   getProjectFileSystemConfig: async () => ({ backend: 'node', providerBasePath: 'project-1' }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: mocks.error } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mocks.error } }));
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ isHighContrast: false }) }));
 
 beforeEach(() => {

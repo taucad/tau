@@ -139,7 +139,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     error: harness.toastError,
     success: vi.fn(),

@@ -5,7 +5,7 @@ import { Pencil, FilePlus, Trash2, ChevronDown } from 'lucide-react';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { DiffViewer, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { FileLink } from '#components/files/file-link.js';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import {

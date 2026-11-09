@@ -46,7 +46,7 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { When } from '#components/ui/utils/when.js';
+import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';

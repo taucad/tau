@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { Dialog, DialogContent } from '@taucad/ui/components/dialog';
-import { ViewerLayer } from '#components/ui/viewer-layer.js';
+import { ViewerLayer } from '#components/viewer-layer.js';
 
 type ImagePreviewContextValue = {
   src: string;

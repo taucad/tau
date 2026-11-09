@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { CollectionEmptyState } from '#components/collection-empty-state.js';
 
 describe('CollectionEmptyState', () => {
   it('renders children and forwards caller-owned attributes', () => {

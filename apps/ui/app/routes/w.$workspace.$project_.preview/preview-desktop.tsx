@@ -8,7 +8,7 @@ import { Separator } from '@taucad/ui/components/separator';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';

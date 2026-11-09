@@ -80,7 +80,7 @@ vi.mock('#components/chat/chat-kernel-selector.js', () => ({
   }) => <div>{children({ selectedKernel: manifoldKernel })}</div>,
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 

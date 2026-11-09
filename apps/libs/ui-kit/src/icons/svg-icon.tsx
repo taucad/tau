@@ -1,6 +1,6 @@
 import type { KernelId } from '@taucad/types/constants';
 import type { ModelFamily } from '@taucad/chat';
-import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
+import type { SvgIcons } from '#icons/generated/svg-icons.js';
 
 const iconAliases = {
   llama: 'meta',

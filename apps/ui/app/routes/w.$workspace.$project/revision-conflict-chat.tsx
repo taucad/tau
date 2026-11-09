@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { useChats } from '#hooks/use-chats.js';

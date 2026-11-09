@@ -7,8 +7,8 @@ import { Link, useLocation } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { Spinner } from '#components/ui/spinner.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
 import {

@@ -3,8 +3,8 @@
  *
  * Each row locks the ordered events the viewer sends to graphics for one path through the pipeline
  * (full parse, in-place update, superseded revisions, failure, the section-analysis barrier,
- * teardown), plus the performance-visible seams: first-frame telemetry, capture admission and which
- * inputs restart preparation. The `presentation` actor (G11b) moves this pipeline out of React; it
+ * teardown), plus the performance-visible seams: first-frame telemetry, capture admission, where the
+ * pipeline yields the main thread and which inputs restart preparation. The `presentation` actor (G11b) moves this pipeline out of React; it
  * must reproduce these traces, or change one deliberately and say so in its PR (charter D14).
  */
 import { useLayoutEffect } from 'react';
@@ -20,6 +20,7 @@ import * as sectionTopology from '#graphics/three/utils/section-surface-topology
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
+import type { GeometryComponentManifest } from '@taucad/types';
 
 const mocks = vi.hoisted(() => ({
   noHoveredComponentIds: [] as readonly string[],
@@ -145,6 +146,58 @@ function buildGlb({ lift = 0, indices = [0, 1, 2], name = 'Part' } = {}): Uint8A
   });
 }
 
+/** The glTF extension that carries a kernel's component topology in the BIN chunk. */
+const topologyExtension = 'TAU_cad_topology';
+
+/**
+ * The same part, owned by `componentId` through a `TAU_cad_topology` payload in the BIN chunk, as kernel
+ * GLBs carry it. Only a buffer-view index reaches the glTF JSON, so a change of owner leaves the JSON alone.
+ */
+function buildOwnedGlb(componentId: string, { lift = 0 } = {}): Uint8Array<ArrayBuffer> {
+  const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]);
+  return writeGlb({
+    nodes: [
+      {
+        name: 'Part',
+        primitives: [
+          {
+            mode: 4,
+            positions,
+            normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            indices: Uint32Array.from([0, 1, 2]),
+            material: surfaceMaterial,
+          },
+        ],
+      },
+    ],
+    extensionsUsed: [topologyExtension],
+    extraBufferViews: [
+      {
+        key: 'topology',
+        data: new TextEncoder().encode(JSON.stringify({ components: [{ id: componentId, nodeIndex: 0 }] })),
+      },
+    ],
+    extensions: (views) => ({ [topologyExtension]: { schemaVersion: 1, topologyBufferView: views['topology']! } }),
+  });
+}
+
+/** Hold every `requestAnimationFrame` callback until the test runs it, so jsdom's frame clock cannot. */
+function captureAnimationFrames(): { run: () => void; readonly pending: () => number } {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  return {
+    run: () => {
+      for (const callback of frames.splice(0)) {
+        callback(performance.now());
+      }
+    },
+    pending: () => frames.length,
+  };
+}
+
 function findSurface(scene: Object3D): Mesh {
   let found: Mesh | undefined;
   scene.traverse((object) => {
@@ -190,6 +243,7 @@ type SentEvent = {
   barrier?: string;
   unitId?: string;
   componentId?: string;
+  manifest?: GeometryComponentManifest;
   telemetry?: GltfPresentationTelemetry;
 };
 
@@ -202,7 +256,7 @@ const describeEvent = (event: SentEvent): string => {
       return `${event.type} ${event.revision}:${event.key} ${event.barrier}`;
     }
     case 'gltfPresentationCommitted': {
-      return `${event.type} ${event.revision}:${event.key} ${event.unitId}`;
+      return `${event.type} ${event.revision}:${event.key} ${event.unitId} manifest=${event.manifest?.geometryHash}`;
     }
     case 'gltfPresentationMeasured': {
       return `${event.type} ${event.telemetry?.revision}:${event.telemetry?.key} ${event.telemetry?.outcome}`;
@@ -269,7 +323,7 @@ describe('GltfMesh presentation protocol', () => {
       expect(trace()).toEqual([
         'gltfPreparationStarted 1:a',
         'gltfDisplayReady 1:a display-ready',
-        'gltfPresentationCommitted 1:a unit:a',
+        'gltfPresentationCommitted 1:a unit:a manifest=a',
       ]);
 
       renderFrame();
@@ -334,7 +388,7 @@ describe('GltfMesh presentation protocol', () => {
       expect(trace()).toEqual([
         'gltfPreparationStarted 0:',
         'gltfDisplayReady 0: display-ready',
-        'gltfPresentationCommitted 0: unit:',
+        'gltfPresentationCommitted 0: unit: manifest=undefined',
       ]);
     });
   });
@@ -352,6 +406,14 @@ describe('GltfMesh presentation protocol', () => {
       view.rerender(
         <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
       );
+
+      // In place, the whole update lands inside the render that requested it: no task, no microtask.
+      expect(trace(before)).toEqual([
+        'setHoveredModelComponent unit:a none',
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b display-ready',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
+      ]);
       await waitForCommits(['a', 'b']);
       renderFrame();
 
@@ -359,9 +421,12 @@ describe('GltfMesh presentation protocol', () => {
         'setHoveredModelComponent unit:a none',
         'gltfPreparationStarted 2:b',
         'gltfDisplayReady 2:b display-ready',
-        'gltfPresentationCommitted 2:b unit:b',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
         'gltfPresentationMeasured 2:b presented',
       ]);
+      // The commit carries the new result's manifest, bounds included, though the scene was reused.
+      const manifest = sentEvents().findLast((event) => event.type === 'gltfPresentationCommitted')?.manifest;
+      expect(manifest?.nodesById['component:node-0']?.bounds?.max).toEqual([1, 1, 5]);
       expect(parseAsync).toHaveBeenCalledOnce();
       const telemetry = measuredTelemetry().at(-1);
       expect(telemetry).toMatchObject({ parsesStarted: 1, committedBundleHighWaterMark: 1 });
@@ -391,7 +456,7 @@ describe('GltfMesh presentation protocol', () => {
         'setHoveredModelComponent unit:a none',
         'gltfPreparationStarted 2:a',
         'gltfDisplayReady 2:a display-ready',
-        'gltfPresentationCommitted 2:a unit:a',
+        'gltfPresentationCommitted 2:a unit:a manifest=a',
       ]);
       expect(parseAsync).toHaveBeenCalledOnce();
     });
@@ -419,7 +484,7 @@ describe('GltfMesh presentation protocol', () => {
         'setHoveredModelComponent unit:a none',
         'gltfPreparationStarted 2:b',
         'gltfDisplayReady 2:b display-ready',
-        'gltfPresentationCommitted 2:b unit:b',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
         'gltfPresentationMeasured 2:b presented',
       ]);
       expect(parseAsync).toHaveBeenCalledTimes(2);
@@ -430,6 +495,61 @@ describe('GltfMesh presentation protocol', () => {
 
   describe('in-place eligibility', () => {
     it('should parse again when the same geometry belongs to a different component', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh
+          gltfFile={buildOwnedGlb('component:alpha')}
+          geometryHash='a'
+          presentationRevision={1}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a']);
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildOwnedGlb('component:bravo')}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+      renderFrame();
+
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      expect(measuredTelemetry().at(-1)?.durations).toHaveProperty('parse');
+      expect(measuredTelemetry().at(-1)?.durations).not.toHaveProperty('inPlace');
+    });
+
+    it('should update in place when the same component owns moved geometry', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh
+          gltfFile={buildOwnedGlb('component:alpha')}
+          geometryHash='a'
+          presentationRevision={1}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a']);
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildOwnedGlb('component:alpha', { lift: 5 })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+      renderFrame();
+
+      expect(parseAsync).toHaveBeenCalledOnce();
+      expect(measuredTelemetry().at(-1)?.durations).toHaveProperty('inPlace');
+    });
+
+    it('should parse again when a renamed part changes the glTF scene', async () => {
       const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
       const view = render(
         <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
@@ -484,7 +604,7 @@ describe('GltfMesh presentation protocol', () => {
         'setHoveredModelComponent unit:b none',
         'gltfPreparationStarted 3:c',
         'gltfDisplayReady 3:c display-ready',
-        'gltfPresentationCommitted 3:c unit:c',
+        'gltfPresentationCommitted 3:c unit:c manifest=c',
         'gltfPresentationMeasured 3:c presented',
       ]);
       expect(measuredTelemetry()).toEqual([
@@ -563,7 +683,7 @@ describe('GltfMesh presentation protocol', () => {
         'gltfPreparationStarted 1:a',
         'gltfDisplayReady 1:a analysis-ready',
         'gltfAnalysisReady 1:a',
-        'gltfPresentationCommitted 1:a unit:a',
+        'gltfPresentationCommitted 1:a unit:a manifest=a',
         'gltfPresentationMeasured 1:a presented',
       ]);
       expect(measuredTelemetry()).toEqual([
@@ -586,12 +706,15 @@ describe('GltfMesh presentation protocol', () => {
       const before = trace().length;
 
       // An armed section view refuses the in-place path, so equal topology still parses.
-      view.rerender(
-        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
-      );
+      const replacement = buildGlb({ lift: 5 });
+      view.rerender(<GltfMesh gltfFile={replacement} geometryHash='b' presentationRevision={2} enableMatcap={false} />);
+      const admission = trackAdmission(replacement);
       await waitFor(() => {
         expect(trace(before)).toContain('gltfPresentationMeasured 2:b failed');
       });
+      await act(async () => undefined);
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
 
       expect(trace(before)).toEqual([
         'setHoveredModelComponent unit:a none',
@@ -638,7 +761,7 @@ describe('GltfMesh presentation protocol', () => {
         'setHoveredModelComponent unit:a none',
         'gltfPreparationStarted 2:b',
         'gltfDisplayReady 2:b display-ready',
-        'gltfPresentationCommitted 2:b unit:b',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
         'gltfPresentationMeasured 2:b presented',
       ]);
       expect(parseAsync).toHaveBeenCalledTimes(2);
@@ -681,13 +804,13 @@ describe('GltfMesh presentation protocol', () => {
 
       expect(parseAsync).toHaveBeenCalledTimes(2);
       // The queued analysis of `a` still lands, and is reported, after `b` has been prepared.
-      expect(trace(before).slice(0, 6)).toEqual([
+      expect(trace(before)).toEqual([
         'setHoveredModelComponent unit:a none',
         'gltfPreparationStarted 2:b',
         'gltfDisplayReady 2:b analysis-ready',
         'gltfAnalysisReady 1:a',
         'gltfAnalysisReady 2:b',
-        'gltfPresentationCommitted 2:b unit:b',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
       ]);
     });
 
@@ -722,32 +845,53 @@ describe('GltfMesh presentation protocol', () => {
     it('should admit capture of the bytes on the animation frame after the first presented frame', async () => {
       const source = buildGlb();
       render(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
-      let admitted = false;
-      const admission = (async (): Promise<void> => {
-        await awaitGeometryPresentation(source, new AbortController().signal);
-        admitted = true;
-      })();
+      const admission = trackAdmission(source);
       await waitForCommits(['a']);
-      expect(admitted).toBe(false);
+      expect(admission.state.admitted).toBe(false);
 
+      const frames = captureAnimationFrames();
       renderFrame();
       await act(async () => undefined);
-      expect(admitted).toBe(false);
+      expect(frames.pending()).toBe(1);
+      expect(admission.state.admitted).toBe(false);
       expect(rendererSpans().filter((span) => span.name === 'renderer.presentation-opportunity')).toEqual([]);
 
-      await act(
-        async () =>
-          new Promise<void>((resolve) => {
-            requestAnimationFrame(() => {
-              resolve();
-            });
-          }),
-      );
-      expect(admitted).toBe(true);
-      await admission;
+      frames.run();
+      await act(async () => undefined);
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
       const opportunities = rendererSpans().filter((span) => span.name === 'renderer.presentation-opportunity');
       expect(opportunities).toHaveLength(1);
       expect(opportunities[0]?.detail).toMatchObject({ key: 'a', revision: 1, backend: 'webgl' });
+    });
+
+    it('should admit in-place bytes on the animation frame after their own first frame', async () => {
+      const frames = captureAnimationFrames();
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      renderFrame();
+      frames.run();
+      clearRendererSpans();
+
+      const replacement = buildGlb({ lift: 5 });
+      view.rerender(<GltfMesh gltfFile={replacement} geometryHash='b' presentationRevision={2} enableMatcap={false} />);
+      const admission = trackAdmission(replacement);
+      await waitForCommits(['a', 'b']);
+      expect(admission.state.admitted).toBe(false);
+
+      renderFrame();
+      await act(async () => undefined);
+      expect(admission.state.admitted).toBe(false);
+
+      frames.run();
+      await act(async () => undefined);
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
+      const opportunities = rendererSpans().filter((span) => span.name === 'renderer.presentation-opportunity');
+      expect(opportunities).toHaveLength(1);
+      expect(opportunities[0]?.detail).toMatchObject({ key: 'b', revision: 2 });
     });
   });
 
@@ -807,6 +951,46 @@ describe('GltfMesh presentation protocol', () => {
 
       expect(admission.state.admitted).toBe(true);
       await admission.done;
+    });
+  });
+
+  describe('main-thread yields', () => {
+    /** Parse on a clock that advances `parseMilliseconds`, and mark the next task boundary with an event. */
+    const parseTaking = (parseMilliseconds: number): void => {
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const original = GLTFLoader.prototype.parseAsync;
+      vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async (data, path) => {
+        const gltf = await original.call(new GLTFLoader(), data, path);
+        now += parseMilliseconds;
+        setTimeout(() => {
+          mocks.graphicsActor.send({ type: 'taskBoundary' });
+        }, 0);
+        return gltf;
+      });
+    };
+
+    it('should yield one task between a parse of 50 ms and its display-ready', async () => {
+      parseTaking(50);
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+
+      expect(trace().slice(0, 3)).toEqual([
+        'gltfPreparationStarted 1:a',
+        'taskBoundary undefined:undefined',
+        'gltfDisplayReady 1:a display-ready',
+      ]);
+    });
+
+    it('should not yield between a parse under 50 ms and its display-ready', async () => {
+      parseTaking(49);
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+      await waitFor(() => {
+        expect(trace()).toContain('taskBoundary undefined:undefined');
+      });
+
+      expect(trace().slice(0, 2)).toEqual(['gltfPreparationStarted 1:a', 'gltfDisplayReady 1:a display-ready']);
     });
   });
 

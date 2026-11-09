@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       release_run_id:
-        description: Exact-tag release-build.yml run; scoped staging verifies only its own prerequisite jobs
+        description: Exact-tag release-build.yml run; scoped staging verifies only its own prerequisite jobs (Linux may start before the run finishes)
         required: true
         type: string
 
@@ -22,8 +22,10 @@ permissions:
   contents: read
   actions: read
 
+# Keyed by scope as well as tag: candidate runs write only their own run's artifacts (no release, R2 or shared state), so
+# a Linux-only candidate never queues behind a Mac-only or full candidate for the same tag.
 concurrency:
-  group: desktop-installer-candidate-${{ inputs.tag }}
+  group: desktop-installer-candidate-${{ inputs.tag }}-${{ inputs.scope }}
   cancel-in-progress: false
 
 env:
@@ -54,13 +56,17 @@ jobs:
           DESKTOP_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         run: pnpm nx run desktop:installer-candidate --args=resolve
 
+      # A Linux-only candidate never reads release metadata: it exists only after every platform (including macOS
+      # signing and notarization) is attached. The Linux job binds the release run's archive artifact instead.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: inputs.scope != 'linux'
         with:
           name: release-metadata
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
           path: out/installer-preflight
       - name: Require the selected scope's archive coverage without changing staging defaults
+        if: inputs.scope != 'linux'
         env:
           DESKTOP_RELEASE_TAG: ${{ steps.identity.outputs.tag }}
           TAU_DESKTOP_SOURCE_SHA: ${{ steps.identity.outputs.source }}
@@ -288,13 +294,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
+      # Full candidates bind the archive to the attached release metadata. A Linux-only staging candidate instead has
+      # the stage step fetch the exact release run's archive artifact and check its GitHub digest itself.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: inputs.scope != 'linux'
         with:
           name: desktop-linux-x64
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
           path: out/installer-input
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: inputs.scope != 'linux'
         with:
           name: release-metadata
           run-id: ${{ inputs.release_run_id }}
@@ -309,6 +319,9 @@ jobs:
           echo "TAU_APPIMAGE_PUBLIC_KEYS_FILE=$RUNNER_TEMP/appimage-public-keys.json" >> "$GITHUB_ENV"
       - name: Verify and extract the finalized application
         id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         run: pnpm nx run desktop:installer-candidate --args=stage
       - name: Make immutable runtime and selector packages
         env:

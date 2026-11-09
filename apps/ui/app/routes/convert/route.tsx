@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import type { Handle } from '#types/matches.types.js';
@@ -538,7 +539,9 @@ function ConverterContentInner(): React.JSX.Element {
           ) : (
             <div className='grid items-start gap-8 border-t pt-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
               <div className='min-w-0 space-y-4'>
-                <h2 className='text-sm font-medium'>Source model</h2>
+                <Heading level={2} variant='label'>
+                  Source model
+                </Heading>
                 <Dropzone
                   className='min-h-72 rounded-lg border-dashed p-6 text-wrap'
                   maxFiles={100}

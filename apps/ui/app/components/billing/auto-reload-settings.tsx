@@ -142,7 +142,7 @@ export function AutoReloadSettings({
   return (
     <SettingsSectionCard>
       <CardHeader>
-        <CardTitle className='text-base'>Automatic reload</CardTitle>
+        <CardTitle>Automatic reload</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-3 text-sm'>
         {load === 'loading' ? (

@@ -6,6 +6,7 @@
  * opens the drawer with Parameters, Files, Export and Details, and one More menu for the rest. Each destination is
  * here once (I4): Export lives in the Workbench, and the crumb is the way to the editor, so More holds no Edit.
  */
+import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useRef, useState } from 'react';
 import { Download, Ellipsis, PanelBottom, PanelLeft, Settings } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -72,10 +73,10 @@ export function PreviewPhoneTopBar({
       {/* The shell's back-to-parent crumb; here it shrinks first, so the title stays. */}
       <PageParentCrumb to={editorUrl} label={parent} className='shrink' />
       {/* oxlint-disable-next-line tau-lint/no-raw-page-heading -- The route draws its own 48px bar (`enablePageHeader: false`); `PageHeader` is the 36px page title row, so this bar title is the page's one heading. */}
-      <h1 className='min-w-fit flex-1 truncate px-1 text-sm font-medium'>
+      <Heading level={1} variant='label' className='min-w-fit flex-1 truncate px-1'>
         <span className='sr-only'>{parent} </span>
         Preview
-      </h1>
+      </Heading>
       <Tooltip {...workbenchTooltip}>
         <DrawerTrigger asChild>
           <TooltipTrigger asChild>

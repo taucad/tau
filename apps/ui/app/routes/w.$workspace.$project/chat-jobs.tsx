@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import type { ReactNode } from 'react';
@@ -230,7 +231,9 @@ const JobCard = ({
       <div className='flex min-w-0 items-start gap-2'>
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{titleForJob(job)}</h3>
+            <Heading level={3} variant='label' className='min-w-0 flex-1 truncate text-foreground'>
+              {titleForJob(job)}
+            </Heading>
             <Badge role='status' variant='outline' className={cn('h-5 gap-1 px-1.5 text-[10px]', state.tone)}>
               <StateIcon
                 aria-hidden
@@ -271,10 +274,10 @@ const JobCard = ({
 
       {snapshot.artifacts && snapshot.artifacts.length > 0 ? (
         <section aria-label='Artifact manifest' className='mt-3 border-t border-border/70 pt-2.5'>
-          <h4 className='mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground'>
+          <Heading level={4} variant='overline' className='mb-2 flex items-center gap-1.5 text-foreground'>
             <FileOutput aria-hidden className='size-3.5' />
             Artifacts
-          </h4>
+          </Heading>
           <ul className='flex flex-col gap-2'>
             {snapshot.artifacts.map((artifact) => (
               <li key={artifact.artifactId}>

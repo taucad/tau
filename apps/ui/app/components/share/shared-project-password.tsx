@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useId } from 'react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { Button } from '@taucad/ui/components/button';
@@ -35,7 +36,9 @@ export function SharedProjectPassword({
           }
         }}
       >
-        <h1 className='text-lg font-semibold'>Password required</h1>
+        <Heading level={1} variant='title'>
+          Password required
+        </Heading>
         <p className='mt-2 text-sm text-muted-foreground'>Enter the password shared by the project author.</p>
         <div className='mt-5 flex flex-col gap-2'>
           <Label htmlFor={inputId}>Password</Label>

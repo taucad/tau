@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { getRandomExamples } from '#constants/chat-prompt-examples.js';
@@ -27,7 +28,9 @@ export const ChatExamples = memo(function () {
   return (
     <CollectionEmptyState>
       <div className='mb-2 flex items-center justify-between'>
-        <h3 className='text-sm font-medium'>Get started with 3D model examples</h3>
+        <Heading level={3} variant='label'>
+          Get started with 3D model examples
+        </Heading>
         <Button variant='ghost' size='icon' className='size-7' onClick={handleRefreshExamples}>
           <RefreshCw className='size-4' />
         </Button>

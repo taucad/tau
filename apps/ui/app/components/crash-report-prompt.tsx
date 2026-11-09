@@ -12,6 +12,7 @@
  * the error page and toasts.
  */
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useId, useState, useSyncExternalStore } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
@@ -70,9 +71,9 @@ export function CrashReportPrompt(): React.JSX.Element | undefined {
       aria-labelledby={headingId}
       className='fixed inset-x-4 top-auto bottom-4 z-50 mx-auto my-0 flex h-auto w-auto max-w-md flex-col gap-3 overflow-visible rounded-md border bg-background p-4 text-foreground shadow-lg'
     >
-      <h2 id={headingId} className='text-sm font-medium'>
+      <Heading level={2} variant='label' id={headingId}>
         Tau reloaded after the page stopped unexpectedly
-      </h2>
+      </Heading>
       <p className='text-sm text-muted-foreground'>Telling us what you were doing helps us fix it. This is optional.</p>
       <Label htmlFor={messageId} className='text-sm'>
         What were you doing?

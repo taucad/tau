@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState, useCallback } from 'react';
 import type { RefCallback } from 'react';
 import type { MetaFunction } from 'react-router';
@@ -57,7 +58,9 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
         </Badge>
 
         <div className='space-y-2'>
-          <h4 className='text-sm font-medium'>Tags:</h4>
+          <Heading level={4} variant='label'>
+            Tags:
+          </Heading>
           <div className='flex flex-wrap gap-1'>
             {selectedOption.tags.map((tag) => (
               <Badge key={tag} variant='secondary' className='text-xs'>
@@ -68,7 +71,9 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
         </div>
 
         <div className='space-y-2'>
-          <h4 className='text-sm font-medium'>Key Features:</h4>
+          <Heading level={4} variant='label'>
+            Key Features:
+          </Heading>
           <ul className='space-y-1 text-sm text-muted-foreground'>
             {selectedOption.features.map((feature) => (
               <li key={feature} className='flex items-center gap-2'>
@@ -257,7 +262,7 @@ export default function ProjectsNew(): React.JSX.Element {
           </CardContent>
 
           <CardHeader className='shrink-0 text-sm'>
-            <CardTitle className='font-medium'>Choose CAD Kernel *</CardTitle>
+            <CardTitle variant='label'>Choose CAD Kernel *</CardTitle>
             <CardDescription>Select the technology that best fits your project needs</CardDescription>
           </CardHeader>
           <CardContent className='md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden'>

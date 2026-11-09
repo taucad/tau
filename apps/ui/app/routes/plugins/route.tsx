@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { z } from 'zod';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -232,7 +233,9 @@ function StoreSection({
   return (
     <section className='space-y-3'>
       <div>
-        <h2 className='text-sm font-medium'>{title}</h2>
+        <Heading level={2} variant='label'>
+          {title}
+        </Heading>
         <Separator className='mt-2' />
       </div>
       <ul className={cn('grid gap-x-10', columns === 2 ? 'md:grid-cols-2' : 'md:grid-cols-1')}>

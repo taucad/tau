@@ -240,6 +240,7 @@ export type PreviewFilesClient = Pick<RootedContentClient, 'writeFiles'>;
 export type FileSystemClientFacade = Pick<
   FileSystemClient,
   | 'listProjectManifests'
+  | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'
@@ -1361,6 +1362,7 @@ function FileManagerProviderCore({
 
     return {
       listProjectManifests: gated('listProjectManifests'),
+      verifyProjectRoute: gated('verifyProjectRoute'),
       commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
       permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
       adoptProjectDirectory: gated('adoptProjectDirectory'),

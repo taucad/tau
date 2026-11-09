@@ -11,7 +11,7 @@ import { maxAge, scheduledWorkflows } from '#nightly-watchdog.js';
 /*
  * `docs-links.yml` (CI throughput program, DL-1): lychee checks the changed docs pages on pull requests
  * and in the merge queue, every page on a `main` push and on a daily sweep that the nightly watchdog
- * watches, and accepts 403 for www.npmjs.com alone.
+ * watches, accepts no 403, and checks npm package pages through the registry, which answers 404.
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -46,16 +46,10 @@ const steps = workflow.jobs['links']?.steps ?? [];
 const select = steps.find((step) => step.id === 'select');
 const lychee = steps.filter((step) => step.uses?.startsWith('lycheeverse/lychee-action@'));
 const mainConfig = read('apps/docs/lychee.toml');
-const npmConfig = read('apps/docs/lychee.npmjs.toml');
 
-const npmHost = String.raw`^https://www\.npmjs\.com/`;
+const npmRemap = String.raw`^https://www\.npmjs\.com/package/(.+)$ https://registry.npmjs.org/$1`;
 
-const paths = [
-  'apps/docs/content/**',
-  'apps/docs/lychee.toml',
-  'apps/docs/lychee.npmjs.toml',
-  '.github/workflows/docs-links.yml',
-];
+const paths = ['apps/docs/content/**', 'apps/docs/lychee.toml', '.github/workflows/docs-links.yml'];
 
 /** A TOML array of single-quoted literal strings, as the lychee configs write them. */
 const tomlArray = (text: string, key: string): readonly string[] | undefined => {
@@ -89,37 +83,34 @@ describe('docs-links.yml triggers', () => {
 });
 
 describe('docs-links.yml lychee passes', () => {
-  it('should run two passes over the selected pages, through --files-from rather than evaluated args', () => {
-    expect(lychee.map((step) => /--config (\S+)/u.exec(String(step.with?.['args']))?.[1])).toEqual([
-      'apps/docs/lychee.toml',
-      'apps/docs/lychee.npmjs.toml',
-    ]);
-    for (const step of lychee) {
-      const args = String(step.with?.['args']);
-      expect(args).toContain(`--files-from "${expression('runner.temp')}/docs-links-pages.txt"`);
-      expect(args).not.toMatch(/--accept|\s-a\s|\.mdx/u);
-      expect(step.if).toBe("steps.select.outputs.mode != 'none'");
-      expect(String(step.with?.['fail'])).toBe('true');
-    }
+  it('should run one pass over the selected pages, through --files-from rather than evaluated args', () => {
+    expect(lychee).toHaveLength(1);
+    const [step] = lychee;
+    const args = String(step?.with?.['args']);
+    expect(/--config (\S+)/u.exec(args)?.[1]).toBe('apps/docs/lychee.toml');
+    expect(args).toContain(`--files-from "${expression('runner.temp')}/docs-links-pages.txt"`);
+    expect(args).not.toMatch(/--accept|\s-a\s|--remap|--exclude|--include|\.mdx/u);
+    expect(step?.if).toBe("steps.select.outputs.mode != 'none'");
+    expect(String(step?.with?.['fail'])).toBe('true');
   });
 
-  it('should accept 403 only in the www.npmjs.com pass, and only for www.npmjs.com', () => {
+  it('should check npm package pages through the registry, which answers 404 for a missing package', () => {
+    expect(tomlArray(mainConfig, 'remap')).toEqual([npmRemap]);
+  });
+
+  it('should accept no 403 anywhere', () => {
     expect(mainConfig).not.toMatch(/^accept\b/mu);
-    expect(tomlArray(mainConfig, 'exclude')).toEqual([npmHost]);
-    expect(mainConfig).not.toMatch(/^include\b/mu);
-
-    expect(tomlArray(npmConfig, 'accept')).toEqual(['200..=299', '403']);
-    expect(tomlArray(npmConfig, 'include')).toEqual([npmHost]);
-    expect(tomlArray(npmConfig, 'exclude')).toEqual(['.*']);
+    expect(source).not.toMatch(/--accept\b|\s-a\s/u);
+    expect(existsSync(resolve(root, 'apps/docs/lychee.npmjs.toml'))).toBe(false);
   });
 
-  it('should exclude no other host and keep no ignore file', () => {
+  it('should exclude no host and keep no ignore file', () => {
     for (const ignore of ['.lycheeignore', 'apps/docs/.lycheeignore', 'lychee.toml']) {
       expect(existsSync(resolve(root, ignore)), ignore).toBe(false);
     }
-    for (const config of [mainConfig, npmConfig]) {
-      expect(config).not.toMatch(/^(?:exclude_path|exclude_all_private|accept_timeouts|insecure)\b/mu);
-    }
+    expect(mainConfig).not.toMatch(
+      /^(?:exclude|include|exclude_path|exclude_all_private|accept_timeouts|insecure)\b/mu,
+    );
   });
 });
 
@@ -227,7 +218,7 @@ describe('docs-links.yml page selection', () => {
     expect(result.output).toBe('mode=none\n');
   });
 
-  it.each(['apps/docs/lychee.toml', 'apps/docs/lychee.npmjs.toml', '.github/workflows/docs-links.yml'])(
+  it.each(['apps/docs/lychee.toml', '.github/workflows/docs-links.yml'])(
     'should check every page when %s changes',
     (path) => {
       const result = selectFor('merge_group', { add: { [path]: 'changed' } });

@@ -1,11 +1,13 @@
-# External links of the published docs (`.github/workflows/docs-links.yml`). Every https/http
-# link is checked with lychee's default accepted statuses, except www.npmjs.com, which
-# `lychee.npmjs.toml` checks in a second pass: npm answers automated clients with 403, so that
-# pass alone accepts 403, for that host alone. This config never accepts 403.
+# External links of the published docs (`.github/workflows/docs-links.yml`), checked with
+# lychee's default accepted statuses (2xx); no 403 or other error status is accepted.
 scheme = ["https", "http"]
 no_progress = true
 # The cache is shared with the daily sweep; 12 h keeps a cached success younger than the gap
 # between two sweeps, so every link is fetched again at least once a day.
 cache = true
 max_cache_age = "12h"
-exclude = ['^https://www\.npmjs\.com/']
+# npm's website answers automated clients with 403 whatever the page (run 41444006152 got 403
+# for the published `@taucad/image` and `@taucad/camera`; a missing package gets the same 403),
+# so a package page is checked through the registry, which answers 200 for a published package
+# and 404 for a missing one. The docs keep linking the human-readable page.
+remap = ['^https://www\.npmjs\.com/package/(.+)$ https://registry.npmjs.org/$1']

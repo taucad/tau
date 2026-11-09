@@ -13,10 +13,10 @@
 # while this checks changed files over the network uncached; and `ci.yml` is in `sharedGlobals`.
 # It is not a required check. Read-only: no deployment credentials, no Nx.
 #
-# www.npmjs.com answers automated clients with 403, so the second lychee pass checks those links
-# alone with 403 accepted (`apps/docs/lychee.npmjs.toml`); the first pass checks every other link
-# and accepts no 403 (`apps/docs/lychee.toml`). Page lists reach lychee through `--files-from`,
-# never through `args`, which the action evaluates as shell.
+# `apps/docs/lychee.toml` accepts no 403: npm's website answers automated clients with 403, so it
+# remaps www.npmjs.com package pages to the registry, which answers 404 for a missing package.
+# Page lists reach lychee through `--files-from`, never through `args`, which the action
+# evaluates as shell.
 name: Docs external links
 
 on:
@@ -24,7 +24,6 @@ on:
     paths:
       - 'apps/docs/content/**'
       - 'apps/docs/lychee.toml'
-      - 'apps/docs/lychee.npmjs.toml'
       - '.github/workflows/docs-links.yml'
   merge_group:
     types: [checks_requested]
@@ -33,7 +32,6 @@ on:
     paths:
       - 'apps/docs/content/**'
       - 'apps/docs/lychee.toml'
-      - 'apps/docs/lychee.npmjs.toml'
       - '.github/workflows/docs-links.yml'
   schedule:
     - cron: '17 4 * * *' # daily 04:17 UTC
@@ -78,7 +76,7 @@ jobs:
           fi
           git fetch --no-tags --depth=1 origin "$BASE"
           changed=$(git diff --name-only --diff-filter=d "$BASE" HEAD)
-          if grep -qxE 'apps/docs/lychee(\.npmjs)?\.toml|\.github/workflows/docs-links\.yml' <<< "$changed"; then
+          if grep -qxE 'apps/docs/lychee\.toml|\.github/workflows/docs-links\.yml' <<< "$changed"; then
             full 'the link config or this workflow changed'
             exit 0
           fi
@@ -117,17 +115,4 @@ jobs:
             --files-from "${{ runner.temp }}/docs-links-pages.txt"
           fail: true
           failIfEmpty: ${{ steps.select.outputs.mode == 'full' }}
-          jobSummary: true
-
-      - name: Check www.npmjs.com links (403 accepted)
-        if: steps.select.outputs.mode != 'none'
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: >-
-            --config apps/docs/lychee.npmjs.toml
-            --root-dir "${{ github.workspace }}"
-            --files-from "${{ runner.temp }}/docs-links-pages.txt"
-          output: lychee/npmjs.md
-          fail: true
-          failIfEmpty: false
           jobSummary: true

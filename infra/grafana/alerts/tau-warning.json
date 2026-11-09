@@ -548,6 +548,75 @@
       }
     },
     {
+      "uid": "billing-owed-stale-2h",
+      "title": "P1: Customer Owed for More Than 2 h",
+      "condition": "owed_stale",
+      "data": [
+        {
+          "refId": "owed_stale",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max by (app, kind) (tau_billing_open_financial_case_age_seconds{app=~\".*\",service_name=\"tau-api\",attributed=\"true\",kind=~\"missing_local_payment|paid_unfulfilled_recovery|unfulfilled_purchase_obligation\"}) > 7200",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "owed_stale"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
+        "summary": "Tier T2: Tau has owed a named customer for more than 2 h: the oldest open missing_local_payment, paid_unfulfilled_recovery or unfulfilled_purchase_obligation case (paid, not yet credited or fulfilled) is older than 2 h. Nothing is refused; the customer is waiting for what they paid for. Start with the billing lifecycle `list-cases` with `attributed: true`, then follow paid-not-credited. Pages as billing-owed-overdue-24h after 24 h. Reads the oldest-case age gauge, written hourly. Grouped by Fly `app` and case kind."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-books-overdue-24h",
+      "title": "P1: Bookkeeping Case Open for More Than 24 h",
+      "condition": "books_overdue",
+      "data": [
+        {
+          "refId": "books_overdue",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max by (app, kind) (tau_billing_open_financial_case_age_seconds{app=~\".*\",service_name=\"tau-api\",kind=~\"gross_fee_net_mismatch|refund_unresolved|dispute_balance_transaction|tax_registration_review|supplier_.+\"}) > 86400",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "books_overdue"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/operate/refunds-and-financial-cases.md",
+        "summary": "Tier T3, daily digest (repeat_interval 24h): one of Tau's bookkeeping cases (gross_fee_net_mismatch, refund_unresolved, dispute_balance_transaction, tax_registration_review or a supplier_* kind), attributed or not, has been open for more than 24 h. No customer is refused anything. Run the billing lifecycle `list-cases` and work each row by its owner, next step and deadline. An unattributed row also pages as billing-case-unattributed; billing-supplier-invoice-mismatch still warns on its own. Grouped by Fly `app` and case kind."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing",
+        "repeat_interval": "24h"
+      }
+    },
+    {
       "uid": "runtime-implementation-failures",
       "title": "TauRuntimeImplementationFailures",
       "condition": "implementation_failures",

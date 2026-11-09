@@ -3,13 +3,15 @@ import type { AnyActorRef, EnqueueObject } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { listDataTransfer, listFileList } from '#utils/file-reader.utils.js';
 import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
+import type { HostImportGrant } from '@taucad/filesystem/importer';
 import { findMainFile } from '#routes/import.$/import.utils.js';
 
 /**
  * Plans one source in the file-manager worker: paths and sizes come back,
  * never bytes (charter D12). The route supplies it from its import session.
  */
-export type ImportPlanner = (source: ImportSourceDescriptor) => Promise<ImportListing>;
+/** Plans a source in the worker; `signal` aborts when the planning actor stops, so a cancelled plan never becomes the plan. */
+export type ImportPlanner = (source: ImportSourceDescriptor, signal?: AbortSignal) => Promise<ImportListing>;
 
 const emptyListing: ImportListing = {
   name: 'Uploaded Files',
@@ -48,6 +50,8 @@ type ImportDiskEventInternal =
   | { type: 'processFiles'; files: FileList | File[] }
   | { type: 'processDataTransfer'; items: DataTransferItemList }
   | { type: 'processDirectoryHandle'; handle: FileSystemDirectoryHandle }
+  /** A folder or files a person chose on the desktop host: its grants, copied into the staging by the host (W7.4). */
+  | { type: 'processHost'; grants: readonly HostImportGrant[] }
   | { type: 'processZip'; file: File }
   | { type: 'updateProgress'; processed: number; total: number }
   | { type: 'selectMainFile'; file: string }
@@ -68,32 +72,41 @@ type ImportDiskEmitted =
 type FilesReadResult = { type: 'filesRead'; listing: ImportListing; importName: string };
 type ProjectCreatedResult = { type: 'projectCreated'; projectId: string };
 
-const planned = async (plan: ImportPlanner, source: ImportSourceDescriptor): Promise<FilesReadResult> => {
-  const listing = await plan(source);
+const planned = async (
+  plan: ImportPlanner,
+  source: ImportSourceDescriptor,
+  signal: AbortSignal,
+): Promise<FilesReadResult> => {
+  const listing = await plan(source, signal);
   return { type: 'filesRead', listing, importName: listing.name };
 };
 
 /** Picked files (or a folder pick): handed over by reference. */
 const readFilesActor = fromSafeAsync<FilesReadResult, { files: FileList | File[]; plan: ImportPlanner }>(
-  async ({ input }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }),
+  async ({ input, signal }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }, signal),
 );
 
 /** A drop: its items are taken while the event lasts, then handed over as handles or walked for references. */
 const readDataTransferActor = fromSafeAsync<
   FilesReadResult,
   { source: Promise<ImportSourceDescriptor>; plan: ImportPlanner }
->(async ({ input }) => planned(input.plan, await input.source));
+>(async ({ input, signal }) => planned(input.plan, await input.source, signal));
 
 /** A zip: its central directory is read by range in the worker. */
-const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input }) =>
-  planned(input.plan, { kind: 'zip', file: input.file }),
+const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input, signal }) =>
+  planned(input.plan, { kind: 'zip', file: input.file }, signal),
 );
 
 /** A picked folder: the handle crosses to the worker, which walks it. */
 const readDirectoryHandleActor = fromSafeAsync<
   FilesReadResult,
   { handle: FileSystemDirectoryHandle; plan: ImportPlanner }
->(async ({ input }) => planned(input.plan, { kind: 'directory', handle: input.handle }));
+>(async ({ input, signal }) => planned(input.plan, { kind: 'directory', handle: input.handle }, signal));
+
+/** A desktop pick or open-with: the grants cross to the worker, whose host lists and later copies them. */
+const readHostActor = fromSafeAsync<FilesReadResult, { grants: readonly HostImportGrant[]; plan: ImportPlanner }>(
+  async ({ input, signal }) => planned(input.plan, { kind: 'host', grants: input.grants }, signal),
+);
 
 /**
  * Create project actor - placeholder that should be provided by the route:
@@ -115,6 +128,7 @@ const importDiskActors = {
   readFilesActor,
   readDataTransferActor,
   readDirectoryHandleActor,
+  readHostActor,
   extractZipActor,
   createProjectActor,
 } as const;
@@ -161,6 +175,11 @@ const readingHandlers = {
   ) => {
     enq.emit({ type: 'progress', processed: event.processed, total: event.total });
     return { context: { progress: { processed: event.processed, total: event.total } } };
+  },
+  /* Cancel while a source is planned: leaving the state stops its actor, so a late listing never becomes the review. */
+  reset: {
+    target: 'idle',
+    context: reset,
   },
 };
 
@@ -222,6 +241,9 @@ export const importDiskMachine = setup({
         processDirectoryHandle: {
           target: 'readingDirectoryHandle',
         },
+        processHost: {
+          target: 'readingHost',
+        },
         processZip: {
           target: 'extracting',
         },
@@ -271,6 +293,22 @@ export const importDiskMachine = setup({
           assertEvent(event, 'processDirectoryHandle');
 
           return { handle: event.handle, plan: context.plan };
+        },
+        onDone: {
+          target: 'selectingMainFile',
+        },
+        onError: ({ event }, enq) => fail(event.error, enq),
+      },
+      on: readingHandlers,
+    },
+    readingHost: {
+      entry: () => ({ context: { error: undefined } }),
+      invoke: {
+        src: 'readHostActor',
+        input({ event, context }) {
+          assertEvent(event, 'processHost');
+
+          return { grants: event.grants, plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   describeGitHubImport,
+  handOverHostGrants,
   normalizeRepositoryFolder,
   parseGitHubUrl,
   resolveGitHubImportTarget,
@@ -122,5 +123,25 @@ describe('describeGitHubImport', () => {
         mainFile: '',
       }).title,
     ).toBe('Import KittyCAD/modeling-app/public/kcl-samples from GitHub into Tau');
+  });
+});
+
+describe('handOverHostGrants', () => {
+  it('releases the previous hold when the machine starts the new host import', () => {
+    const release = vi.fn();
+    const held = ['folder-a'];
+
+    expect(handOverHostGrants({ accepted: true, incoming: ['file-b'], held, release })).toBe(true);
+    expect(held).toStrictEqual(['file-b']);
+    expect(release).toHaveBeenCalledExactlyOnceWith(['folder-a']);
+  });
+
+  it('keeps the import in progress holding its grants when a new pick is refused', () => {
+    const release = vi.fn();
+    const held = ['folder-a'];
+
+    expect(handOverHostGrants({ accepted: false, incoming: ['file-b'], held, release })).toBe(false);
+    expect(held).toStrictEqual(['folder-a']);
+    expect(release).toHaveBeenCalledExactlyOnceWith(['file-b']);
   });
 });

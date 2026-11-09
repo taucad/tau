@@ -50,7 +50,7 @@ Verified baseline: `faecc9ac8f456b7fa5639fc0eb146012e3e499c8` on remote `geospec
 
 ## Legal documents
 
-This site is the only owner of Tau's legal documents. `content/legal/*.md` holds the Terms, Privacy Policy, Storage and Cookie Policy, Acceptable Use Policy, Sub-processors and Open-Source Notices; `src/legal.ts` lists them and `app/legal.server.ts` renders them on the server at `/legal/<slug>/` with the heading anchors the app, desktop and emails link to (for example `/legal/privacy/#9.2.1-ai-service-improvement`). The Markdown processor never reaches the client bundle. `pnpm update-open-source-notices` regenerates `open-source.md` from the app and desktop dependency closure; the macOS package ships the same file.
+This site is the only owner of Tau's legal documents. `content/legal/*.md` holds the Terms, Privacy Policy, Storage and Cookie Policy, Acceptable Use Policy, Sub-processors and Open-Source Notices; `src/legal.ts` lists them and `app/legal.server.ts` renders them on the server at `/legal/<slug>/` with the heading anchors the app, desktop and emails link to (for example `/legal/privacy/#2-improving-tau-with-your-chats`). The Markdown processor never reaches the client bundle. `pnpm update-open-source-notices` regenerates `open-source.md` from the app and desktop dependency closure; the macOS package ships the same file.
 
 ## Privacy and measurement
 

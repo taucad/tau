@@ -55,6 +55,7 @@ import type {
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
 import type { ImportStagingPort } from '#importer/staging.js';
+import type { HostImportSourcePort } from '#importer/sources.js';
 import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -1154,6 +1155,16 @@ export class WorkspaceFileService {
    */
   public async importStaging(scope: StorageRootConfig): Promise<ImportStagingPort> {
     return this._projectDirectories.importStaging(scope);
+  }
+
+  /**
+   * The sources a person chose on the host for an import (W7.4): on desktop,
+   * the node host's, which list and preview them by grant; elsewhere none.
+   *
+   * @returns The host's import sources, or `undefined`.
+   */
+  public async importSources(): Promise<HostImportSourcePort | undefined> {
+    return this._registry.importSources();
   }
 
   /**

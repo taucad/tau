@@ -35,7 +35,11 @@ import type { BatchEntry, BatchOptions, BatchReceipt, LargeObjectWriteSource } f
 import { isLargeObjectSource, isRefusal } from '#changeset.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
+import { headSniffByteLength, seemsBinary } from '#content-metadata.js';
+import { heldDescriptorPath } from '#backend/node/import-source.js';
+import { importLimits } from '#importer/limits.js';
 import type {
+  ContentFacts,
   DirectoryEntry,
   FileMode,
   FileReadStreamOptions,
@@ -109,6 +113,98 @@ type StagedWrite = {
 };
 
 type BatchWrite = Extract<BatchEntry, { op: 'write' }>;
+
+/** Fill one write's temp sibling some other way than from bytes: what it returns joins the write's receipt. */
+type BatchWriteFill = (staged: StagedWrite) => Promise<Readonly<Record<string, unknown>> | undefined>;
+
+/**
+ * One file a host-side import copies into this root (W7.4). `open` opens the
+ * source the host resolved from a person's grant and proved inside it, when
+ * the copy's turn comes, so a batch holds one source descriptor per write in
+ * flight; no client ever names it (I6).
+ *
+ * @public
+ */
+export type ImportFileCopy = Readonly<{ path: string; size: number; open: () => Promise<FileHandle> }>;
+
+/**
+ * The facts of one copied file, measured from the one read of what landed (EQ6, I2).
+ *
+ * @public
+ */
+export type ImportCopyFacts = ContentFacts & Readonly<{ blobOid: string; sha256: string }>;
+
+/**
+ * One copy's receipt: a batch receipt, and the facts of the bytes it landed when it applied.
+ *
+ * @public
+ */
+export type ImportCopyReceipt = BatchReceipt & Readonly<{ facts?: ImportCopyFacts }>;
+
+const noBytes = new Uint8Array(0);
+
+/* A copy streamed from a held descriptor into a new file: where no path reopens the descriptor's inode. */
+const copyFromDescriptor = async (source: FileHandle, target: string, size: number): Promise<void> => {
+  const out = await fs.open(target, 'wx', 0o600);
+  try {
+    const chunk = new Uint8Array(streamChunkSize);
+    for (let position = 0; position <= size; ) {
+      // oxlint-disable-next-line no-await-in-loop -- a file is copied one chunk after another.
+      const { bytesRead } = await source.read(chunk, 0, chunk.byteLength, position);
+      if (bytesRead === 0) {
+        break;
+      }
+      for (let written = 0; written < bytesRead; ) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const { bytesWritten } = await out.write(chunk, written, bytesRead - written, position + written);
+        written += bytesWritten;
+      }
+      position += bytesRead;
+    }
+  } finally {
+    await out.close();
+  }
+};
+
+/*
+ * The facts of a landed file, read once in bounded chunks: the git blob id and
+ * SHA-256 hashed as it is read, the content kind sniffed from its head as
+ * `getFileContentMetadata` sniffs it, and its lines counted the same way.
+ * `undefined` when it does not hold exactly `size` bytes.
+ */
+const measureLanded = async (handle: FileHandle, size: number): Promise<ImportCopyFacts | undefined> => {
+  const blob = createHash('sha1').update(`blob ${String(size)}\0`);
+  const digest = createHash('sha256');
+  const chunk = new Uint8Array(streamChunkSize);
+  const head = new Uint8Array(Math.min(headSniffByteLength, size));
+  let lines = 1;
+  let position = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
+    if (bytesRead === 0) {
+      break;
+    }
+    const part = chunk.subarray(0, bytesRead);
+    if (position + bytesRead > size) {
+      return undefined;
+    }
+    if (position < head.byteLength) {
+      head.set(part.subarray(0, head.byteLength - position), position);
+    }
+    blob.update(part);
+    digest.update(part);
+    for (let at = part.indexOf(0x0a); at !== -1; at = part.indexOf(0x0a, at + 1)) {
+      lines += 1;
+    }
+    position += bytesRead;
+  }
+  if (position !== size) {
+    return undefined;
+  }
+  const kind: ContentFacts = seemsBinary(head) ? { contentKind: 'binary' } : { contentKind: 'text', lineCount: lines };
+  return { ...kind, blobOid: blob.digest('hex'), sha256: digest.digest('hex') };
+};
 
 /** One native event a watch callback admitted, or a whole-subscription reset, in arrival order. */
 type ObservedEvent = Readonly<{ rootedPath: string; absolute: string; deleted: boolean }> | 'reset';
@@ -585,6 +681,40 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
       }),
     ]);
+    return receipts;
+  }
+
+  /**
+   * Copy files a person chose on this host into the root, host-side (W7.4,
+   * D12): each lands as a batch write does — a temp sibling filled, synced,
+   * renamed, one fsync per directory — but filled by `copyFile` with
+   * `COPYFILE_FICLONE` from its source instead of from bytes that crossed a
+   * port, so the file shares its source's extents where the file system can
+   * clone and is copied once where it cannot. The sibling is then read once,
+   * before its rename, for the git blob id, SHA-256 and content kind the
+   * receipt carries (EQ6, I2): a source that is not a regular file, or whose
+   * size is not the one it was listed at, fails with its target untouched (I1).
+   * Modes are not carried: a browser folder import has none, and the import
+   * is the same tree either way.
+   *
+   * @param copies - The files, each with the source the host resolved for it.
+   * @param options - Stops copies that have not started.
+   * @returns One receipt per copy, in order, with the landed bytes' facts when applied.
+   */
+  public async copyImportFiles(
+    copies: readonly ImportFileCopy[],
+    options?: BatchOptions,
+  ): Promise<ImportCopyReceipt[]> {
+    const receipts = Array.from<ImportCopyReceipt>({ length: copies.length });
+    await this._applyBatchWrites(
+      copies.map((copy, index) => ({
+        index,
+        entry: { op: 'write', path: copy.path, data: noBytes },
+        fill: async (staged) => ({ facts: await this._copyTemporary(staged, copy) }),
+      })),
+      receipts,
+      options?.signal,
+    );
     return receipts;
   }
 
@@ -1425,17 +1555,24 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * @param signal - Stops writes that have not started staging.
    */
   private async _applyBatchWrites(
-    writes: ReadonlyArray<Readonly<{ index: number; entry: BatchWrite }>>,
+    writes: ReadonlyArray<Readonly<{ index: number; entry: BatchWrite; fill?: BatchWriteFill }>>,
     receipts: BatchReceipt[],
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    type Pending = { index: number; entry: BatchWrite; staged: StagedWrite; madeParent: boolean; failure?: unknown };
+    type Pending = {
+      index: number;
+      entry: BatchWrite;
+      staged: StagedWrite;
+      madeParent: boolean;
+      failure?: unknown;
+      extra?: Readonly<Record<string, unknown>>;
+    };
     /* The primitive batch's rule (`batch.ts`): a refusal is `failed`, and so is any failure before anything moved;
      * once a parent was made or a rename attempted, anything else is `uncertain`. */
     const refuse = (index: number, error: unknown, moved: boolean): void => {
       receipts[index] = { outcome: moved && !isRefusal(error) ? 'uncertain' : 'failed', error };
     };
-    const staged = await mapRolling(writes, batchWriteConcurrency, async ({ index, entry }) => {
+    const staged = await mapRolling(writes, batchWriteConcurrency, async ({ index, entry, fill }) => {
       if (signal?.aborted === true) {
         refuse(index, signal.reason, false);
         return undefined;
@@ -1457,13 +1594,24 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
         madeParent = (await fs.mkdir(path.dirname(target), { recursive: true })) !== undefined;
         prepared = await this._prepareWrite(entry.path, target, entry.mode);
-        await (isLargeObjectSource(entry.data)
-          ? this._cloneTemporary(prepared, entry.data)
-          : this._fillTemporary(
-              prepared,
-              entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
-            ));
-        const write: Pending = { index, entry, staged: prepared, madeParent };
+        let extra: Readonly<Record<string, unknown>> | undefined;
+        if (fill !== undefined) {
+          extra = await fill(prepared);
+        } else if (isLargeObjectSource(entry.data)) {
+          await this._cloneTemporary(prepared, entry.data);
+        } else {
+          await this._fillTemporary(
+            prepared,
+            entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
+          );
+        }
+        const write: Pending = {
+          index,
+          entry,
+          staged: prepared,
+          madeParent,
+          ...(extra === undefined ? {} : { extra }),
+        };
         return write;
       } catch (error) {
         let failure = error;
@@ -1525,6 +1673,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           ...(isLargeObjectSource(write.entry.data)
             ? { largeObject: { largeObject: write.entry.data.largeObject, size: write.entry.data.size } }
             : {}),
+          ...write.extra,
         };
       } catch (error) {
         refuse(write.index, error, write.madeParent || write.staged.renaming === true);
@@ -1680,6 +1829,79 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
       const { dev, ino } = await handle.stat({ bigint: true });
       staged.cloned = { dev, ino };
+    } finally {
+      if (staged.retainedHandle === undefined) {
+        await handle.close();
+      }
+    }
+  }
+
+  /**
+   * Fill the temp sibling from an import's source (W7.4), only ever through
+   * the descriptor the host opened and proved inside the person's grant
+   * (`copy.open`): on Linux `copyFile` from `/proc/self/fd/<n>` with
+   * `COPYFILE_FICLONE`, which reopens that very inode and clones where the
+   * file system can; elsewhere a copy streamed from the descriptor. The source
+   * must be a regular file of the listed size within the import file limit,
+   * checked on the descriptor itself, and its size, mtime and ctime must be
+   * unchanged once the copy is done, so a file written to meanwhile is refused
+   * rather than landed torn. The sibling then takes the new-file mode, is
+   * synced, and is read once in bounded chunks for the facts (I2).
+   *
+   * @param staged - The prepared write.
+   * @param copy - How to open the source, and the size it was listed at.
+   * @returns The facts of the bytes that landed.
+   */
+  private async _copyTemporary(staged: StagedWrite, copy: ImportFileCopy): Promise<ImportCopyFacts> {
+    const changed = (): Error =>
+      this._errno('ESTALE', 'the import source changed since it was listed', staged.rootedPath);
+    /* The host holds its own limit: a size a client names is never trusted to bound a copy. */
+    if (!Number.isSafeInteger(copy.size) || copy.size < 0 || copy.size > importLimits.maximumFileBytes) {
+      throw this._errno('EFBIG', 'the import source is larger than an import file may be', staged.rootedPath);
+    }
+    const source = await copy.open();
+    try {
+      const before = await source.stat({ bigint: true });
+      if (!before.isFile()) {
+        throw this._errno('EOPNOTSUPP', 'the import source is not a regular file', staged.rootedPath);
+      }
+      if (before.size !== BigInt(copy.size)) {
+        throw changed();
+      }
+      const permissions = staged.permissions ?? (await this._newFileMode(staged.temporaryPath));
+      const through = heldDescriptorPath(source.fd);
+      /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
+      await (through === undefined
+        ? copyFromDescriptor(source, staged.temporaryPath, copy.size)
+        : // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
+          fs.copyFile(through, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE));
+      const after = await source.stat({ bigint: true });
+      if (
+        after.dev !== before.dev ||
+        after.ino !== before.ino ||
+        after.size !== before.size ||
+        after.mtimeNs !== before.mtimeNs ||
+        after.ctimeNs !== before.ctimeNs
+      ) {
+        throw changed();
+      }
+      await fs.chmod(staged.temporaryPath, permissions);
+    } finally {
+      await source.close();
+    }
+    const handle = await fs.open(staged.temporaryPath, 'r+');
+    if (process.platform === 'win32') {
+      staged.retainedHandle = handle;
+    }
+    try {
+      await handle.sync();
+      const facts = await measureLanded(handle, copy.size);
+      if (facts === undefined) {
+        throw changed();
+      }
+      const { dev, ino } = await handle.stat({ bigint: true });
+      staged.cloned = { dev, ino };
+      return facts;
     } finally {
       if (staged.retainedHandle === undefined) {
         await handle.close();

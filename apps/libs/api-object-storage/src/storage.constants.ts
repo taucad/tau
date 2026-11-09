@@ -9,7 +9,7 @@
  *
  * MUST stay in sync with:
  * - `repos/tau-cloud/modules/cloudflare-r2/main.tf` (buckets + zone cache rules)
- * - `scripts/seed-r2-defaults.sh` (default seed object keys)
+ * - {@link storageSeedKeys} below (the objects the API seeds at boot)
  * - `infra/docker-compose.yml` MinIO bootstrap (local parity, incl. private bucket)
  * - `apps/ui/netlify.toml` CSP `connect-src` (origin only; prefix not referenced)
  * - `libs/file-links/src/path.ts` (the files Worker's two LFS key layouts under `tenants/` and `blobs/`)
@@ -37,3 +37,18 @@ export type StorageNamespace = keyof typeof storageNamespacePrefixes;
  * interfering with namespace paths.
  */
 export const storageHealthProbeKey = '__health/probe.txt';
+
+/**
+ * Bucket-root-relative keys of the objects the API writes into the public
+ * bucket at boot (`StorageSeeder`): the two default images under `defaults/`
+ * and the readiness probe. Each is created only when absent
+ * (`If-None-Match: *`), so a seeded object is never replaced. This closed set
+ * is the only bucket-root write the driver accepts outside a namespace.
+ */
+export const storageSeedKeys = {
+  ogImage: `${storageNamespacePrefixes.defaults}og.png`,
+  thumbnail: `${storageNamespacePrefixes.defaults}thumb.webp`,
+  healthProbe: storageHealthProbeKey,
+} as const;
+
+export type StorageSeedKey = (typeof storageSeedKeys)[keyof typeof storageSeedKeys];

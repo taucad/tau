@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { checkPayloadUrls, isPlaceholderIntegrity, pinnedUrls } from '#check-payload-urls.js';
+import { checkDependencyUrls, isPlaceholderIntegrity, pinnedUrls } from '#check-dependency-urls.js';
 
 const bytes = new TextEncoder().encode('tau layer');
 const integrity = (algorithm: 'sha256' | 'sha512', data: Uint8Array<ArrayBuffer>) =>
@@ -49,10 +49,10 @@ const serve =
     return typeof route === 'number' ? new Response(undefined, { status: route }) : new Response(route);
   };
 
-describe('check-payload-urls', () => {
+describe('check-dependency-urls', () => {
   const roots: string[] = [];
   const write = async (value: unknown): Promise<string> => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-payload-urls-'));
+    const root = await mkdtemp(join(tmpdir(), 'tau-dependency-urls-'));
     roots.push(root);
     const path = join(root, 'tau-plugin.json');
     await writeFile(path, JSON.stringify(value));
@@ -63,7 +63,7 @@ describe('check-payload-urls', () => {
     await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
   });
 
-  it('lists every url origin and skips package-relative payloads', () => {
+  it('lists every url origin and skips package-relative dependency files', () => {
     expect(pinnedUrls(manifest(['https://a.test/x', 'https://b.test/x'])).map(({ url }) => url)).toEqual([
       'https://a.test/x',
       'https://b.test/x',
@@ -76,7 +76,7 @@ describe('check-payload-urls', () => {
     const path = await write(manifest(['https://a.test/x', 'https://b.test/x']));
 
     await expect(
-      checkPayloadUrls([path], serve({ 'https://a.test/x': bytes, 'https://b.test/x': bytes })),
+      checkDependencyUrls([path], serve({ 'https://a.test/x': bytes, 'https://b.test/x': bytes })),
     ).resolves.toEqual([]);
   });
 
@@ -96,7 +96,7 @@ describe('check-payload-urls', () => {
     const notices: string[] = [];
 
     await expect(
-      checkPayloadUrls([path], serve({ 'https://real.test/x': 404 }), (message) => notices.push(message)),
+      checkDependencyUrls([path], serve({ 'https://real.test/x': 404 }), (message) => notices.push(message)),
     ).resolves.toEqual(['runtime/worker: https://real.test/x answered HTTP 404']);
     expect(notices).toEqual([
       '@taucad/example pins runtime/layer to the fail-closed placeholder (the digest of zero bytes); its URLs are not checked until a real pin lands.',
@@ -119,7 +119,7 @@ describe('check-payload-urls', () => {
     );
 
     await expect(
-      checkPayloadUrls(
+      checkDependencyUrls(
         [path],
         serve({
           'https://missing.test/x': 404,

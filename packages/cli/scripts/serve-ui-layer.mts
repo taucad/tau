@@ -229,7 +229,7 @@ const pinnedComment =
 /**
  * The pin a published layer gives `serve-ui-layer.json`.
  * @param record - The layer's record.
- * @returns The pin, CDN blob first, then the release asset.
+ * @returns The pin, the dependency host's blob first, then the release asset.
  */
 export const composePin = (record: LayerRecord): Record<string, unknown> => ({
   '//': pinnedComment,
@@ -238,7 +238,7 @@ export const composePin = (record: LayerRecord): Record<string, unknown> => ({
   byteLength: record.byteLength,
   unpackedByteLength: record.unpackedByteLength,
   urls: [
-    `https://cdn.tau.new/blobs/sha256/${record.sha256}`,
+    `https://dependencies.tau.new/blobs/sha256/${record.sha256}`,
     `https://github.com/taucad/tau/releases/download/${record.tag}/${record.asset}`,
   ],
 });

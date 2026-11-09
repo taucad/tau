@@ -15,7 +15,7 @@ on:
     paths:
       - .github/workflows/pin-freshness.yml
       - scripts/src/check-pin-freshness.ts
-      - scripts/src/check-payload-urls.ts
+      - scripts/src/check-dependency-urls.ts
 
 permissions:
   contents: read

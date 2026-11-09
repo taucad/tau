@@ -121,6 +121,7 @@ import { prepareOtaProbe } from '#main/ota-probe.js';
 import { updaterFailureSignal } from '#main/desktop-signals.js';
 import {
   initializeDesktopErrorReporting,
+  noteRendererGone,
   rendererErrorReportingEnvironment,
   reportDesktopSignal,
 } from '#main/error-reporting.js';
@@ -1847,6 +1848,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     forwardRendererDiagnostics(window.webContents, log, {
       recover: () => {
+        noteRendererGone();
         if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
           window.webContents.reload();
         }

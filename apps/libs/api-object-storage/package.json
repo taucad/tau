@@ -34,6 +34,7 @@
     "./module": "./src/storage.module.ts",
     "./private-storage-probe": "./src/private-storage-probe.ts",
     "./repository-byte-ceiling": "./src/repository-byte-ceiling.ts",
+    "./seed": "./src/storage-seed.ts",
     "./sha256": "./src/sha256.utils.ts",
     "./testing/destructive-test-bucket-guard": "./src/testing/destructive-test-bucket-guard.ts",
     "./package.json": "./package.json"

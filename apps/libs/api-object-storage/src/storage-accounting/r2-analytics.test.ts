@@ -19,6 +19,21 @@ describe('mapR2Analytics (W14 OB3, N50–N53)', () => {
     expect(JSON.stringify(figures)).not.toContain('tau-scratch');
   });
 
+  it('should report the downloads and dependency buckets by their own roles once they are named', () => {
+    const named = mapR2Analytics(r2AnalyticsFixture, {
+      ...buckets,
+      downloads: 'tau-scratch',
+      dependencies: 'tau-content-prod',
+    });
+    const labels = (observations: ReadonlyArray<{ attributes: Readonly<Record<string, string>> }> | undefined) =>
+      new Set((observations ?? []).map((observation) => observation.attributes['tau.r2.bucket']));
+
+    expect(labels(named.r2Requests)).toStrictEqual(new Set(['public', 'private', 'downloads', 'dependencies']));
+    expect(labels(named.r2Objects)).toStrictEqual(new Set(['public', 'private', 'downloads', 'dependencies']));
+    expect(JSON.stringify(named)).not.toContain('tau-content-prod');
+    expect(JSON.stringify(named)).not.toContain('tau-scratch');
+  });
+
   it('should sum the non-allow-listed buckets into one `other` series per class, action and status', () => {
     expect(figures.r2Requests).toContainEqual({
       value: 12,

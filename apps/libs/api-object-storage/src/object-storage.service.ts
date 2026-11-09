@@ -21,7 +21,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ObjectStorageEnvironment } from '@taucad/api-core';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage.constants.js';
-import type { StorageNamespace } from '#storage.constants.js';
+import type { StorageNamespace, StorageSeedKey } from '#storage.constants.js';
 import { instrumentStorageClient } from '#storage-metrics.js';
 import type { StorageMetricTier } from '#storage-metrics.js';
 import { MetricsService } from '@taucad/api-observability/metrics';
@@ -141,6 +141,18 @@ export type CopyObjectArgs = Readonly<{
   sourceIfMatch?: string;
   signal?: AbortSignal;
 }>;
+
+/** One object the API seeds into the public bucket at boot. */
+export type SeedObjectArgs = Readonly<{
+  key: StorageSeedKey;
+  body: Uint8Array<ArrayBuffer>;
+  contentType: string;
+  cacheControl: string;
+  signal?: AbortSignal;
+}>;
+
+/** `created` when this call wrote the object; `present` when the store refused it as already there (412). */
+export type SeedObjectOutcome = 'created' | 'present';
 
 export type ListedObject = { key: string; bytes: number; modifiedAt: Date | undefined };
 
@@ -892,6 +904,35 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         return undefined;
       }
 
+      throw error;
+    }
+  }
+
+  /**
+   * Creates one seed object in the public bucket unless it already exists: the
+   * put carries `If-None-Match: *`, and the store's `412` means another Machine
+   * or an earlier boot seeded it. A seeded object is never replaced. The key is
+   * one of `storageSeedKeys`, the only bucket-root keys this driver writes
+   * outside a namespace. Any other failure throws for the caller to retry.
+   */
+  public async seedObject(args: SeedObjectArgs): Promise<SeedObjectOutcome> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: args.key,
+          Body: args.body,
+          ContentType: args.contentType,
+          CacheControl: args.cacheControl,
+          IfNoneMatch: '*',
+        }),
+        { abortSignal: args.signal },
+      );
+      return 'created';
+    } catch (error) {
+      if (isPreconditionFailed(error)) {
+        return 'present';
+      }
       throw error;
     }
   }

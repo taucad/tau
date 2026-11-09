@@ -87,6 +87,8 @@ LICENSE
 CODEOWNERS
 docker-compose.yml
 infra
+# The API image seeds the public bucket's two default images at boot (`apps/api/vite.config.ts` copies them).
+!infra/seed
 
 # Package builds copy this generated inventory into published distributions.
 !docs/licensing/third-party-licenses.md

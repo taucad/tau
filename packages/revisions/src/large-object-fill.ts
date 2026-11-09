@@ -704,13 +704,13 @@ export const createLargeObjectFill = (
       return;
     }
     clearTimeout(fill.retryTimer);
-    const delay = retryMilliseconds[Math.min(fill.failures, retryMilliseconds.length) - 1] ?? 0;
+    const retryDelay = retryMilliseconds[Math.min(fill.failures, retryMilliseconds.length) - 1] ?? 60_000;
     fill.retryTimer = setTimeout(() => {
       fill.retryTimer = undefined;
       if (isCurrent(fill) && fill.error !== undefined) {
         fill.running = run(fill);
       }
-    }, delay);
+    }, retryDelay);
   };
 
   /**
@@ -815,11 +815,17 @@ export const createLargeObjectFill = (
     if (current === undefined || !current.wanted.has(oid)) {
       return undefined;
     }
+    const state = current.error === undefined ? 'filling' : 'failed';
     const bytes = intactLanded(current, oid);
+    if (bytes === undefined) {
+      return { state };
+    }
     return {
-      state: current.error === undefined ? 'filling' : 'failed',
-      /* A copy: a reader may transfer what it is given (a worker reply), which would empty the fill's own bytes. */
-      ...(bytes === undefined ? {} : { bytes: bytes.slice() }),
+      state,
+      /* A copy, made only when asked for: a reader may transfer what it is given (a worker reply), which would empty the fill's own bytes. */
+      get bytes(): Uint8Array<ArrayBuffer> {
+        return new Uint8Array(bytes);
+      },
     };
   };
 
@@ -850,7 +856,7 @@ export const createLargeObjectFill = (
       { signal },
     );
     /* A copy, as `look` gives: the fill's own bytes are written by its next flush and must stay whole. */
-    return found ? bytes?.slice() : undefined;
+    return found && bytes !== undefined ? new Uint8Array(bytes) : undefined;
   };
 
   /**

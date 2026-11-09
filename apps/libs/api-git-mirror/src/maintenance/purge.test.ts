@@ -334,6 +334,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
     }
   }, 120_000);
 
+  // 70,000 tombstones against the shared Postgres: about 60 s alone, nearly twice that beside the other API projects.
   it('should page more than the SQL parameter limit of live tombstones and reach a later eligible owner', async () => {
     const prefix = `backlog-${randomBytes(6).toString('hex')}`;
     const ids = Array.from({ length: 70_000 }, (_, index) => `${prefix}-${String(index).padStart(5, '0')}`);
@@ -376,7 +377,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
       await database.execute(sql`delete from ${storageTombstone} where owner_id like ${prefix}::text || '-%'`);
       await database.execute(sql`delete from ${user} where id like ${prefix}::text || '-%'`);
     }
-  }, 120_000);
+  }, 300_000);
 
   it('should bound the default plan at the charter constant', () => {
     expect(maxPurgeObjectsWithoutConfirmation).toBe(10_000);

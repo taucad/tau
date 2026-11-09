@@ -1989,9 +1989,6 @@ importers:
       '@taucad/build123d':
         specifier: workspace:*
         version: link:../../packages/plugins/build123d
-      '@taucad/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -2019,9 +2016,6 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.2
-      citty:
-        specifier: 'catalog:'
-        version: 0.2.2
       geospec:
         specifier: 'catalog:'
         version: 0.6.0(vitest@4.1.11)

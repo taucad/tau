@@ -267,6 +267,10 @@ const config: KnipConfig = {
       // bundler-benchmark/bundler.d.ts declares its type.
       ignoreUnresolved: ['#benchmark-bundler'],
     },
+    'apps/cli-e2e': {
+      // The Build123d suites read its `tau-plugin.json` through `createRequire(...).resolve`.
+      ignoreDependencies: ['@taucad/build123d'],
+    },
     'apps/runtime-e2e': {
       entry: [
         // `runner.ts` spawns `run-arm.mts` behind the `hooks.mjs` loader, which registers `hook-impl.mjs`.

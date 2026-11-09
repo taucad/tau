@@ -11,7 +11,6 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/build123d": "workspace:*",
-    "@taucad/cli": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
@@ -21,7 +20,6 @@
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/ws": "^8.18.1",
-    "citty": "catalog:",
     "geospec": "catalog:",
     "ws": "catalog:",
     "zod": "catalog:"

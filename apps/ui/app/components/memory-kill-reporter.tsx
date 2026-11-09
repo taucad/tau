@@ -16,8 +16,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
-import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
+import { getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { installKillWorkReaders } from '#lib/kill-work-context.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
@@ -89,6 +90,9 @@ export function MemoryKillReporter({
     return unsubscribe;
   }, [consent, signal]);
 
+  // SB2's kernel heap and renderer readers, which nothing registered before (crash capture, Finding 2).
+  useEffect(() => installKillWorkReaders(), []);
+
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });
   }, [chatCount, liveProjectCount, signal]);
@@ -134,9 +138,10 @@ export function MemoryKillReporter({
     if (signal === undefined) {
       return undefined;
     }
+    // Every 5 s; the signal writes each time while a model opens or renders, else every 30 s.
     const beat = globalThis.setInterval(() => {
       signal.heartbeat();
-    }, killHeartbeatMilliseconds);
+    }, killBusyHeartbeatMilliseconds);
     return () => {
       globalThis.clearInterval(beat);
     };

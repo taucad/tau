@@ -16,6 +16,9 @@ import type { ParsedPublication } from '#components/share/parsed-publication.js'
 import { useViewPing } from '#components/share/use-view-ping.js';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { recordInteraction } from '#lib/kill-work-context.js';
+import { recordKillWork, recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
+import { parseShareSlug } from '@taucad/share/locator';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
@@ -42,6 +45,30 @@ const rememberSessionRunConsent = (consentKey: string): void => {
  * Shared models are code that runs on this origin's runtime worker, so a viewer opts in before any kernel starts.
  * Interim control until model code runs on a separate sandbox origin.
  */
+/**
+ * What the tab-kill marker may say about a share: the provider, and a builtin's public catalog name. A Gist or a
+ * Tau publication reference identifies someone's share and is never recorded (crash capture blueprint, Finding 7).
+ *
+ * @param slug - The route's share slug, or `undefined` for a publication opened by id.
+ * @returns The closed fields, and a builtin's kernel.
+ */
+export const shareWorkOf = (
+  slug: string | undefined,
+): Readonly<{ shareProvider: string; builtin?: string; kernel?: string }> => {
+  if (slug === undefined) {
+    return { shareProvider: 'tau' };
+  }
+  try {
+    const locator = parseShareSlug(slug);
+    return locator.providerId === 'builtin' && locator.reference !== undefined
+      ? // A builtin locator is `<kernel>.<example>`, so it names its kernel before any kernel starts.
+        { shareProvider: 'builtin', builtin: locator.reference, kernel: locator.reference.split('.', 1)[0] }
+      : { shareProvider: locator.providerId };
+  } catch {
+    return { shareProvider: 'tau' };
+  }
+};
+
 const SharedRunConsent = ({
   title,
   onRun,
@@ -227,6 +254,7 @@ export const SharedProjectWorkbench = ({
   shareUrl,
   sourceLabel,
   managementActions,
+  kernel,
 }: {
   readonly shouldTrackView?: boolean;
   readonly projectId: string;
@@ -236,6 +264,8 @@ export const SharedProjectWorkbench = ({
   readonly shareUrl?: string;
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
+  /** The model's runtime kernel id, from the share manifest, recorded before any kernel starts. */
+  readonly kernel?: string;
 }): React.JSX.Element => {
   const instanceId = useId().replaceAll(':', '');
   const previewInstance = `shared-${instanceId}`;
@@ -257,6 +287,16 @@ export const SharedProjectWorkbench = ({
     rememberSessionRunConsent(consentKey);
     setHasRunConsent(true);
   }, [consentKey]);
+
+  // Opening a shared model is the first step of the crash record: before the kernel, the viewer or any render.
+  useEffect(() => {
+    if (!hasRunConsent) {
+      return;
+    }
+    recordKillWork({ ...shareWorkOf(slug), ...(kernel === undefined ? {} : { kernel }) });
+    recordMemoryBreadcrumb('open');
+    recordInteraction('open');
+  }, [hasRunConsent, kernel, slug]);
 
   if (!hasRunConsent) {
     return <SharedRunConsent title={publication.title} onRun={grantRunConsent} />;

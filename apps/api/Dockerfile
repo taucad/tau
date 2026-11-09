@@ -77,7 +77,9 @@ ENV pnpm_config_verify_deps_before_run=warn
 # in .github/actions/setup-nx.
 ENV NX_NATIVE_COMMAND_RUNNER=false
 # The script builds the API's dependencies, then the API targets, and refuses an API
-# runtime dependency on the GeoSpec engine; its header says why.
+# runtime dependency on the GeoSpec engine; its header says why. Each Nx call runs
+# through CI's Nx guard (`.github/actions/setup-nx/nx-guard.ts`), so a remote cache
+# fault is a miss and only a matched remote cache error reruns a command.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cache_server,env=NX_SELF_HOSTED_REMOTE_CACHE_SERVER \

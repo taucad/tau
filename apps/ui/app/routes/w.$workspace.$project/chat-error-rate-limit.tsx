@@ -24,7 +24,7 @@ const secondsLabel = (seconds: number): string => `${seconds} ${seconds === 1 ? 
  * @param properties - The wait in milliseconds and the resume to call once it ends.
  * @returns The countdown label.
  */
-function ResumeCountdown({
+export function ResumeCountdown({
   resumeAfterMilliseconds,
   onResume,
 }: {

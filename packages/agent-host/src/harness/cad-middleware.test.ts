@@ -150,7 +150,7 @@ describe('ToolResultTrimmer', () => {
     expect(JSON.parse(text)).toMatchObject({ status: 'error', sourceRevision });
   });
 
-  it('keeps the newest capture whole and replaces older image blocks with a placeholder', () => {
+  it('should keep every capture whole, whichever is newest, and send text instead only to a model without images', () => {
     // Built the way the tool records it, so the trimmer sees what pi sees.
     const capture = (toolCallId: string, view: string): AgentMessage => {
       const content = { success: true, images: [{ view, dataUrl: 'data:image/webp;base64,AAAA' }] };
@@ -168,20 +168,21 @@ describe('ToolResultTrimmer', () => {
 
     const [older, newest] = trimToolResultContext(captures);
 
-    expect(older?.role === 'toolResult' ? older.content : undefined).toEqual([
-      captures[0]!.role === 'toolResult' ? captures[0]!.content[0] : undefined,
-      { type: 'text', text: '[screenshot image - previously captured]' },
-    ]);
-    // Untouched: `toPiToolContent` already built the blocks this used to rebuild.
+    // Untouched: `toPiToolContent` already built the blocks, and a newer capture never rewrites an older one (I1).
+    expect(older).toBe(captures[0]);
     expect(newest).toBe(captures[1]);
 
-    // A model that cannot take images loses both, which is the point of the gate.
+    // A model that cannot take images loses both, on every step alike, which is the point of the gate.
     const textOnly = trimToolResultContext(captures, { allowImageBlocks: false });
     expect(
       textOnly.every(
         (message) => message.role === 'toolResult' && message.content.every((block) => block.type === 'text'),
       ),
     ).toBe(true);
+    expect(textOnly[0]?.role === 'toolResult' ? textOnly[0].content.at(-1) : undefined).toEqual({
+      type: 'text',
+      text: '[screenshot image omitted: this model takes no image input]',
+    });
   });
 
   describe('on the wire', () => {
@@ -200,14 +201,10 @@ describe('ToolResultTrimmer', () => {
     const imageCount = (message: AgentMessage | undefined): number =>
       message?.role === 'toolResult' ? message.content.filter((block) => block.type === 'image').length : -1;
 
-    it('should send only the newest capture as image blocks', () => {
+    it('should send every capture as image blocks', () => {
       const [older, newest] = onTheWire([capture('call-1'), capture('call-2')]);
 
-      expect(imageCount(older)).toBe(0);
-      expect(older?.role === 'toolResult' ? older.content.at(-1) : undefined).toEqual({
-        type: 'text',
-        text: '[screenshot image - previously captured]',
-      });
+      expect(imageCount(older)).toBe(1);
       expect(imageCount(newest)).toBe(1);
     });
 

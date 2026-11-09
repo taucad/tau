@@ -546,7 +546,19 @@ const withModelContent = (message: ToolResultMessage, content: ToolResultMessage
     : { ...message, content };
 };
 
-/** Apply Tau's CAD-specific historical tool-result reductions to a provider view. @public */
+/** What a model that takes no image input reads in place of a capture. */
+const imageOmittedText = '[screenshot image omitted: this model takes no image input]';
+
+/**
+ * Apply Tau's CAD-specific historical tool-result reductions to a provider view.
+ *
+ * Every reduction is a function of the message alone, never of its place in the history, so a step's request
+ * reproduces the previous step's bytes (prompt-cache identity I1 within a run): a capture keeps its image blocks
+ * however many newer captures follow, and only a model that takes no images reads text in their place, on every
+ * step alike. Compaction is the one place history is rewritten.
+ *
+ * @public
+ */
 export function trimToolResultContext(
   messages: readonly Message[],
   options?: { readonly allowImageBlocks?: boolean | undefined },
@@ -560,28 +572,18 @@ export function trimToolResultContext(
   messages: readonly AgentMessage[],
   options: { readonly allowImageBlocks?: boolean | undefined } = {},
 ): AgentMessage[] {
-  const lastScreenshot =
-    options.allowImageBlocks === false
-      ? -1
-      : messages.findLastIndex((message) => message.role === 'toolResult' && message.toolName === 'screenshot');
-  return messages.map((message, index) => {
+  return messages.map((message) => {
     if (message.role !== 'toolResult') {
       return message;
     }
-    if (index === lastScreenshot) {
-      // The newest capture is already image blocks: `toPiToolContent` builds
-      // them where the result is recorded, which is the only shape compaction
-      // and the transport's own rehydration ever see. Rebuilding them here was
-      // the request-time half of that job and is now redundant.
-      return message;
-    }
     if (message.content.some((block) => block.type === 'image')) {
-      return withModelContent(
-        message,
-        message.content.map((block) =>
-          block.type === 'image' ? { type: 'text', text: '[screenshot image - previously captured]' } : block,
-        ),
-      );
+      /* `toPiToolContent` built the blocks where the result was recorded; they are sent as they are. */
+      return options.allowImageBlocks === false
+        ? withModelContent(
+            message,
+            message.content.map((block) => (block.type === 'image' ? { type: 'text', text: imageOmittedText } : block)),
+          )
+        : message;
     }
     const structured = toolJson(message);
     const trimmed = trimStructuredResult(message.toolName, structured);

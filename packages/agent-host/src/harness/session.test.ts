@@ -353,14 +353,8 @@ describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
     const log = await file.open();
     expect(JSON.stringify(await log.read())).not.toContain(base64(jpegBytes));
     expect(attachments.read).toHaveBeenCalledWith('chat-1', `attachments/${jpegHash}.jpg`);
-    // Restored, the still reaches the model as an image, exactly as an inline still did (older images are elided).
-    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual([
-      expect.objectContaining({
-        type: 'text',
-        text: expect.stringMatching(/^Captured 1 screenshot\(s\)\./u) as string,
-      }),
-      { type: 'text', text: '[screenshot image - previously captured]' },
-    ]);
+    // Restored, the still reaches the model exactly as an inline still did: the capture keeps its image (I1).
+    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual(still);
   });
 });
 

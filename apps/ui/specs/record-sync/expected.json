@@ -1,0 +1,129 @@
+{
+  "configs": {
+    "RecordSync.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I5, I12 and the snapshot and fence properties over a reliable reply channel: 3 writes, 2 foreign writes, 2 repeated change events"
+    },
+    "RecordSync.target-lost-reply.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The same properties when one write reply is lost and the write may land at any later step"
+    },
+    "RecordSync.liveness-flush.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost"
+    },
+    "RecordSync.today-slots.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "defect",
+      "ref": "The entries and layout stores today, and the view store before taucad/tau#1602: a watch read that starts after the write reply supersedes the refresh read and finds the in-flight set empty, so the store publishes its own bytes as foreign",
+      "fixedBy": "graphics-event-driven-state-charter G2 (the entries and layout stores); taucad/tau#1602 fixed the view store"
+    },
+    "RecordSync.today-slots-ForeignStaysForeign.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The two-slot stores keep I12, also with one lost reply"
+    },
+    "RecordSync.post-1602-slots.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Handoff review R17: over a reliable reply channel the three-slot view store has no OwnWriteAttributed counterexample at 3 writes, 2 foreign writes and 2 repeated change events"
+    },
+    "RecordSync.post-1602-lost-reply.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "defect",
+      "ref": "Handoff review R17: the three-slot view store forgets a write whose reply was lost once the read-back returns, even when a watch read superseded that read-back; the watch read then publishes the lost write's bytes as foreign",
+      "fixedBy": "graphics-event-driven-state-charter G1"
+    },
+    "RecordSync.post-1602-ForeignStaysForeign.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ForeignStaysForeign"
+      },
+      "kind": "defect",
+      "ref": "The three-slot view store keeps the acknowledged slot when a read matches the write in flight; a later foreign write of the acknowledged bytes is attributed own although the store has read other bytes since",
+      "fixedBy": "graphics-event-driven-state-charter G1"
+    },
+    "RecordSync.post-1602-SnapshotMonotone.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SnapshotMonotone"
+      },
+      "kind": "defect",
+      "ref": "As built, a read that started before a write was issued can publish a newer foreign version while the write is in flight; the reply then publishes the older own version over it until the next read",
+      "fixedBy": "graphics-event-driven-state-charter G1"
+    },
+    "RecordSync.no-digest.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "witness",
+      "ref": "Attribution none: without the map a watch read of the store's own bytes is foreign"
+    },
+    "RecordSync.issued-before-read.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "witness",
+      "ref": "DropOnRead issued-before-read: a read that returns the base bytes drops the entry of a write still in flight, so its echo is foreign"
+    },
+    "RecordSync.drop-on-foreign-only.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ForeignStaysForeign"
+      },
+      "kind": "witness",
+      "ref": "DropOnRead foreign-only: a read attributed to the write in flight leaves an older acknowledged entry, which then claims a foreign write of its bytes"
+    },
+    "RecordSync.foreign-identical-bytes.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ForeignStaysForeign"
+      },
+      "kind": "witness",
+      "ref": "DropOnRead never: after the store read a foreign version, a foreign write of bytes identical to an old own write is attributed own"
+    },
+    "RecordSync.keep-earlier-acknowledged.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ForeignStaysForeign"
+      },
+      "kind": "witness",
+      "ref": "DropOnAck off: an entry that a later own write replaced claims a foreign write of its bytes"
+    },
+    "RecordSync.publish-on-overlap.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SnapshotMonotone"
+      },
+      "kind": "witness",
+      "ref": "ReplyPublish always: the reply of an overlapped write publishes its version over a newer foreign version a read already published"
+    },
+    "RecordSync.no-refresh.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EventuallyCurrent"
+      },
+      "kind": "witness",
+      "ref": "Refresh off: an overlapped write is never published and no read follows, so the snapshot stays behind the file"
+    },
+    "RecordSync.no-fence.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FenceStopsWrites"
+      },
+      "kind": "witness",
+      "ref": "Fence off: a pending edit is written after the view closed"
+    }
+  }
+}

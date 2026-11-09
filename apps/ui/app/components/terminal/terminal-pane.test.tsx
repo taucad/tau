@@ -264,19 +264,19 @@ describe('TerminalPane', () => {
   it('should raise the open Terminal to the contrast floor when the contrast preference changes', async () => {
     const { matchMedia } = globalThis;
     let matches = false;
-    const listeners = new Set<() => void>();
+    const listeners = new Set<EventListenerOrEventListenerObject>();
     const spy = vi.spyOn(globalThis, 'matchMedia').mockImplementation((query) => {
       const list: MediaQueryList = {
         ...matchMedia(query),
         get matches() {
           return query === highContrastQuery && matches;
         },
-        addEventListener(_type: string, listener: () => void) {
+        addEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
           if (query === highContrastQuery) {
             listeners.add(listener);
           }
         },
-        removeEventListener(_type: string, listener: () => void) {
+        removeEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
           listeners.delete(listener);
         },
       };
@@ -290,7 +290,9 @@ describe('TerminalPane', () => {
       expect(listeners.size).toBe(1);
       matches = true;
       for (const listener of listeners) {
-        listener();
+        if (typeof listener === 'function') {
+          listener(new Event('change'));
+        }
       }
       expect(harness.view.setTheme).toHaveBeenLastCalledWith(
         expect.anything(),

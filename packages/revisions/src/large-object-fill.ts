@@ -190,6 +190,24 @@ export const createLargeObjectFill = (
   /* Checkouts this fill has given its word on, so a host never reads silence as "nothing to fill" (D10 `filled`). */
   const told = new Set<string>();
   const isCurrent = (fill: Fill): boolean => fills.get(fill.place.id) === fill;
+  /*
+   * An object's landed bytes, only while they are still whole: bytes a reader was once handed and then
+   * transferred elsewhere are detached (empty), and bytes of the wrong size are not the object. Such bytes are
+   * forgotten and the object is owed again, fetched by its oid, so a flush never fails on them and a retry
+   * can always finish.
+   */
+  const intactLanded = (fill: Fill, oid: string): Uint8Array<ArrayBuffer> | undefined => {
+    const bytes = fill.landed.get(oid);
+    if (bytes === undefined || bytes.byteLength === fill.wanted.get(oid)) {
+      return bytes;
+    }
+    fill.landed.delete(oid);
+    if (fill.arrived.delete(oid)) {
+      fill.bytes -= fill.wanted.get(oid) ?? 0;
+    }
+    fill.unstored.add(oid);
+    return undefined;
+  };
 
   const wake = (fill: Fill): void => {
     /* A waiter that settles removes itself; a Set visits each remaining one once. */
@@ -360,7 +378,7 @@ export const createLargeObjectFill = (
         }
         return [path, content, mode];
       }
-      const bytes = fill.landed.get(placeholder.oid);
+      const bytes = intactLanded(fill, placeholder.oid);
       const fromStore = bytes === undefined && fill.fromStore && fill.arrived.has(placeholder.oid);
       if (bytes === undefined && !fromStore) {
         fill.pending.set(path, placeholder);
@@ -797,10 +815,11 @@ export const createLargeObjectFill = (
     if (current === undefined || !current.wanted.has(oid)) {
       return undefined;
     }
-    const bytes = current.landed.get(oid);
+    const bytes = intactLanded(current, oid);
     return {
       state: current.error === undefined ? 'filling' : 'failed',
-      ...(bytes === undefined ? {} : { bytes }),
+      /* A copy: a reader may transfer what it is given (a worker reply), which would empty the fill's own bytes. */
+      ...(bytes === undefined ? {} : { bytes: bytes.slice() }),
     };
   };
 
@@ -825,12 +844,13 @@ export const createLargeObjectFill = (
     const found = await until(
       current,
       () => {
-        bytes = current.landed.get(oid);
+        bytes = intactLanded(current, oid);
         return bytes !== undefined;
       },
       { signal },
     );
-    return found ? bytes : undefined;
+    /* A copy, as `look` gives: the fill's own bytes are written by its next flush and must stay whole. */
+    return found ? bytes?.slice() : undefined;
   };
 
   /**

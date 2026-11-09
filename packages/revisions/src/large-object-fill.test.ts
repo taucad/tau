@@ -518,6 +518,29 @@ describe('large-object fill', () => {
     expect(harness.text('models/b.step')).toBe('solid bb');
   });
 
+  it('hands readers a copy, so a reply that transfers it never empties the bytes the fill still has to write', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const oid = pointerOf(parts['models/a.step']).pointer.oid;
+    const looked = harness.fill.look(place.id, oid)?.bytes;
+    const waited = await harness.fill.arrival(place.id, oid);
+    expect(decoder.decode(looked)).toBe('solid a');
+    /* A worker reply transfers what it returns, detaching it; the other reader's copy is untouched. */
+    structuredClone(looked, { transfer: [looked!.buffer] });
+    expect(looked!.byteLength).toBe(0);
+    expect(decoder.decode(waited)).toBe('solid a');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
   it('stops retrying a failed fill once the checkout is forgotten', async () => {
     const harness = setup({ retryMilliseconds: [20] });
     const done = harness.fill.fill(place, head);

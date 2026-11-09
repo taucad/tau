@@ -2726,6 +2726,9 @@ importers:
       ollama:
         specifier: ^0.5.18
         version: 0.5.18
+      pdf-parse:
+        specifier: 'catalog:'
+        version: 2.4.5
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'

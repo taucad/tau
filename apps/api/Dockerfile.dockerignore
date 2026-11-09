@@ -32,6 +32,8 @@ docs
 # `scripts` stays in the context: it is an Nx project that `runtime-e2e` lists
 # as an implicit dependency, and the project graph fails without it.
 .github
+# `build-image.mts` runs every Nx call through CI's Nx guard and remote cache relay.
+!.github/actions/setup-nx/nx-guard.ts
 .claude/worktrees
 .cursor
 .vscode

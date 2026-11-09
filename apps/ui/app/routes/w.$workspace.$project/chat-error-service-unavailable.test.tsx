@@ -3,7 +3,7 @@
  * Try again explicitly replays an unrecoverable turn.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { errorCategory } from '@taucad/types/constants';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -11,6 +11,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
 import { ChatErrorServiceUnavailable } from '#routes/w.$workspace.$project/chat-error-service-unavailable.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { resetAutoResumes } from '#utils/run-auto-resume.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
@@ -69,5 +70,47 @@ describe('ChatErrorServiceUnavailable', () => {
 
     expect(regenerate).toHaveBeenCalledTimes(1);
     expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  // ── Automatic resume of a transient provider outage (R6) ──────────────
+
+  it('should resume a PROVIDER_UNAVAILABLE pause once on its own after a short wait', () => {
+    resetAutoResumes();
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <ChatErrorServiceUnavailable resumable autoResume={{ runId: 'run-1', attempt: 1 }} />,
+      );
+
+      expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 2 seconds');
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
+
+      rerender(<ChatErrorServiceUnavailable resumable autoResume={{ runId: 'run-1', attempt: 2 }} />);
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not resume on its own without an auto-resume target or when the run is not resumable', () => {
+    resetAutoResumes();
+    vi.useFakeTimers();
+    try {
+      render(<ChatErrorServiceUnavailable resumable={false} autoResume={{ runId: 'run-1', attempt: 1 }} />);
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      expect(continueChat).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

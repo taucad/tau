@@ -13,6 +13,43 @@ const clearedToolResultContent = '[Old tool result content cleared]';
 const oversizedToolResultContent =
   '[Tool result exceeded the context window and was cleared; re-run with a narrower request]';
 const recentToolResultsToKeep = 5;
+/* A result the registry retained names its file (R4); `.tau/artifacts/<call>__tool-result-txt/result.txt`. */
+const retainedResultPathPattern = /\.tau\/artifacts\/[\w.-]+__tool-result-txt\/result\.txt/u;
+const retainedClearedPrefix = `${clearedToolResultContent.slice(0, -1)}; the full result is retained at `;
+
+/**
+ * The text a cleared tool result becomes (PH17 tier one). A result the registry retained keeps its file's path, so
+ * clearing it from context leaves it retrievable with `read_file` (regression review R4).
+ *
+ * @param message - The result being cleared.
+ * @returns The replacement text.
+ * @internal
+ */
+export const clearedToolResultText = (message: Extract<AgentMessage, { role: 'toolResult' }>): string => {
+  const path = retainedResultPathPattern.exec(JSON.stringify([message.content, message.details ?? null]))?.[0];
+  return path === undefined
+    ? clearedToolResultContent
+    : `${retainedClearedPrefix}${path}. Read it with read_file if you need it again.]`;
+};
+
+/**
+ * Whether a tool result is already a clearing marker.
+ *
+ * @param message - A tool result.
+ * @returns `true` for a cleared or oversized-cleared marker.
+ * @internal
+ */
+export const isClearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>): boolean => {
+  const [block] = message.content;
+  if (message.content.length !== 1 || block?.type !== 'text') {
+    return false;
+  }
+  return (
+    block.text === clearedToolResultContent ||
+    block.text === oversizedToolResultContent ||
+    (block.text.startsWith(retainedClearedPrefix) && block.text.endsWith('if you need it again.]'))
+  );
+};
 const compactableTools = new Set([
   'read_file',
   'grep',
@@ -115,11 +152,7 @@ const clearOldToolResults = (
 } => {
   const candidates = messages.flatMap((message, index) =>
     message.role === 'toolResult' &&
-    !(
-      message.content.length === 1 &&
-      message.content[0]?.type === 'text' &&
-      (message.content[0].text === clearedToolResultContent || message.content[0].text === oversizedToolResultContent)
-    ) &&
+    !isClearedToolResult(message) &&
     (forced.has(message) ||
       (compactableTools.has(message.toolName) && message.content.every((block) => block.type !== 'image')))
       ? [{ index, message, forced: forced.has(message) }]
@@ -156,15 +189,14 @@ const compactionSettings = (contextWindow: number) => ({
 const messageTokens = (messages: readonly AgentMessage[]): number =>
   messages.reduce((total, message) => total + estimateTokens(message), 0);
 
-const clearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>, forced = false): typeof message => ({
-  ...message,
-  content: [{ type: 'text', text: forced ? oversizedToolResultContent : clearedToolResultContent }],
-  details: {
-    content: forced ? oversizedToolResultContent : clearedToolResultContent,
-    isError: message.isError,
-    substituted: false,
-  },
-});
+const clearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>, forced = false): typeof message => {
+  const text = forced ? oversizedToolResultContent : clearedToolResultText(message);
+  return {
+    ...message,
+    content: [{ type: 'text', text }],
+    details: { content: text, isError: message.isError, substituted: false },
+  };
+};
 
 const combineUsage = (left: CompactionTrace['summarizerUsage'], right: Usage): Usage => ({
   input: (left?.input ?? 0) + right.input,

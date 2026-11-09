@@ -59,7 +59,7 @@
   "targetDefaults": {
     "typecheck": {
       "executor": "nx:run-commands",
-      "inputs": ["default", "^production"],
+      "inputs": ["default", "^production", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"],
       "options": {
         "forwardAllArgs": false
       }

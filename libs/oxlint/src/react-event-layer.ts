@@ -9,7 +9,8 @@
  *
  * A site is either:
  * - one effect (`useEffect`, `useLayoutEffect`, `useInsertionEffect`) whose
- *   callback lexically calls `.send(`, `.subscribe(`, `.on(`, `setTimeout(`,
+ *   callback lexically calls `.send(`, `.subscribe(`, `.on(` (or a bare `send(` or
+ *   `subscribe(`), `setTimeout(`,
  *   `setInterval(` or `requestAnimationFrame(`, counted once however many
  *   such calls it holds; or
  * - one `getSnapshot()` call that is not inside a `select*` helper.
@@ -45,12 +46,16 @@ export type ReactEventLayerCeiling = Readonly<Record<string, number>>;
 
 const effectHooks = new Set(['useEffect', 'useInsertionEffect', 'useLayoutEffect']);
 const eventMethods = new Set(['on', 'send', 'subscribe']);
+const bareEventFunctions = new Set(['send', 'subscribe']);
 const timerFunctions = new Set(['requestAnimationFrame', 'setInterval', 'setTimeout']);
 const selectHelperPrefix = 'select';
 const sourcePattern = /\.(?:ts|tsx)$/;
-/** Tests, type tests, declarations and test-support modules (`*.test-utils`, `*.test-harness`, `*.fixture(s)`). */
+/**
+ * Tests, type tests, declarations and test-support modules (`*.test-utils`, `*.test-harness`, `*.test-helpers`).
+ * Fixtures are counted: some, such as `printer-manifest.fixture.ts`, are imported by production code.
+ */
 const excludedPattern =
-  /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|\.(?:test-utils|test-harness|test-helpers|fixtures?)\.(?:ts|tsx)|\.d\.ts)$/;
+  /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|\.(?:test-utils|test-harness|test-helpers)\.(?:ts|tsx)|\.d\.ts)$/;
 
 /** Names a function-like node is known by: its own name or the binding it initializes. */
 function functionNames(node: ts.Node): string[] {
@@ -167,7 +172,11 @@ function localFunction(sourceFile: ts.SourceFile, name: string): ts.Node | undef
 function eventLayerCall(node: ts.CallExpression): string | undefined {
   const callee = ts.isNonNullExpression(node.expression) ? node.expression.expression : node.expression;
   if (ts.isIdentifier(callee)) {
-    return timerFunctions.has(callee.text) ? callee.text : undefined;
+    if (timerFunctions.has(callee.text)) {
+      return callee.text;
+    }
+    // A destructured `send` or `subscribe` prop is still the actor or store call; a bare `on` is too generic.
+    return bareEventFunctions.has(callee.text) ? callee.text : undefined;
   }
   if (!ts.isPropertyAccessExpression(callee)) {
     return undefined;

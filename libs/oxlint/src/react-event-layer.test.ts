@@ -28,6 +28,8 @@ useEffect(() => { const id = requestAnimationFrame(run); return () => cancelAnim
 useEffect(() => { const id = setInterval(run, 10); return () => clearInterval(id); }, []);
 useEffect(() => { emitter.on('change', listener); }, []);
 useEffect(() => { actor?.send({ type: 'a' }); setTimeout(run); }, []);
+useEffect(() => subscribe?.(listener), [subscribe]);
+useEffect(() => { send({ type: 'a' }); on('change', listener); }, [send]);
 `),
     ).toEqual([
       '2 effect .send',
@@ -37,6 +39,8 @@ useEffect(() => { actor?.send({ type: 'a' }); setTimeout(run); }, []);
       '6 effect setInterval',
       '7 effect .on',
       '8 effect .send setTimeout',
+      '9 effect subscribe',
+      '10 effect send',
     ]);
   });
 
@@ -163,7 +167,6 @@ describe('checkReactEventLayerCeiling', () => {
     writeFileSync(join(source, 'types.d.ts'), effect);
     writeFileSync(join(source, 'viewer.test-utils.ts'), effect);
     writeFileSync(join(source, 'status.test-harness.ts'), effect);
-    writeFileSync(join(source, 'project.fixture.tsx'), effect);
     writeFileSync(join(source, 'react-event-layer.ceiling.json'), '{}\n');
 
     expect(

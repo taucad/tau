@@ -388,14 +388,16 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
   it('should keep prefix deletion unreachable from application callers', () => {
     // D31: exactly one caller outside the driver that defines it. Test files are
     // excluded because D32 confines them to disposable buckets by the guard.
-    const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-    const listed = execFileSync('grep', ['-rl', 'deleteEntirePrefixForPurgeJob', apiRoot], { encoding: 'utf8' });
+    // The driver lives in the object-storage library, so the search covers it and the API.
+    const appsRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+    const searched = [path.join(appsRoot, 'api'), path.join(appsRoot, 'libs/api-object-storage/src')];
+    const listed = execFileSync('grep', ['-rl', 'deleteEntirePrefixForPurgeJob', ...searched], { encoding: 'utf8' });
     const callers = listed
       .split('\n')
       .filter((file) => file.endsWith('.ts') && !file.includes('.test.') && !file.includes('/conformance/'))
-      .map((file) => path.relative(apiRoot, file))
+      .map((file) => path.relative(appsRoot, file))
       .sort();
 
-    expect(callers).toStrictEqual(['storage/object-storage.service.ts']);
+    expect(callers).toStrictEqual(['libs/api-object-storage/src/object-storage.service.ts']);
   });
 });

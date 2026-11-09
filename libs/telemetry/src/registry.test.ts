@@ -594,7 +594,7 @@ describe('TauMetrics', () => {
     expect(TauMetrics.chatToolResultMediaPreserved.unit).toBe('{preservation}');
   });
 
-  /* R9: the LangChain plane's agent-loop metrics have no emitter on the Pi host. Safeguards and compactions moved to
+  /* R9: the former server-side agent loop's metrics have no emitter on the Pi host. Safeguards and compactions moved to
    * client-reported `tau.agent.*` successors; tool calls are `tau.agent.tool_calls`; the rest had no consumer. */
   it.each([
     'genAiToolInvocations',

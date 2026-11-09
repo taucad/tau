@@ -813,8 +813,9 @@ export class CreditLedgerService {
               // Tau owes the customer, or Tau's own fee accounting, never does.
               inArray(billingFinancialCase.kind, spendBlockingFinancialCaseKinds),
               inArray(billingFinancialCase.state, ['open', 'attention']),
-              // Spending already-collected credit stops only for the account a case names; an
-              // unattributed case pauses new collection instead (`assertNewCollectionCashScope`).
+              // Spending stops only for the account a case names; an unattributed case refuses no one and
+              // pages as operator work. The same cases refuse that account's new collection
+              // (`assertCollectionNotSpendBlocked`).
               eq(billingFinancialCase.accountId, accountId),
             ),
           )

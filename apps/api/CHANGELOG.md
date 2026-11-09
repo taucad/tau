@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 (2026-11-09)
+
+### Features
+
+- feat(agent-host): Ask Anthropic for a one-hour prompt cache and key OpenAI and xAI caches by chat (#1643) (bbcde6478)
+- feat(nx): Add the shell tag, pin the shell import surface, and adopt the package rule (#1644) (a973dfa77)
+- feat(api): Drop the retired supplier budget holds and cost evidence (0067) (#1621) (15d30731a)
+- feat(billing): price Anthropic one-hour cache writes and admit prompt cache keys (#1597) (5213a7c2d)
+- feat(telemetry): Report agent-loop safeguards and compactions from the Pi host (R9) (#1623) (1ab6c548e)
+- feat(agent-tools): Restore web search and web browsing on the Pi agent host (#1605) (79bbd572f)
+- feat(api): refresh Morph catalog to the models Morph serves today (#1631) (9fa28f697)
+
+### Fixes
+
+- fix(agent-host, ui): Restore the LangChain plane's interrupt reminder, recent skills, read dedup, result offloading and outage resume (R2–R6) (#1634) (723bf4c3f)
+- fix(agent-host): unblock Together turns; refresh Together catalog to the cheapest provider per model (#1640) (d143e0d21)
+- fix(agent-host): Keep the prompt prefix identical across turns and steps (#1629) (5fbe770fb)
+
+### Performance
+
+- perf(ui): Verify an installed project route without catalog discovery (#1625) (cea01b6f4)
+
+### Other changes
+
+- ci(cli-e2e): Run the CLI end-to-end suites in their own gated lane (#1670) (1f8e6d7e2)
+- test(telemetry): Stop Grafana and OTel bootstrap edits from selecting telemetry and the native rows (#1662) (569643b0a)
+- refactor(host): Move the X1C qualifier from bambu to host:qualify-x1c (#1651) (8d6c13f46)
+- ci(nx): Harden the remote cache relay, write from main and the merge queue, upload behind Nx (#1645) (302ddc9ff)
+- test(telemetry): Stop kernel-plugin changes from selecting telemetry, host and agent-tools (#1639) (6c5f87c2e)
+
 ## 0.5.0 (2026-11-09)
 
 ### Features

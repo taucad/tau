@@ -1946,7 +1946,17 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     now: () => now().getTime(),
   });
   const continueWithoutPreparation = agent.continue.bind(agent);
-  agent.transformContext = async (messages) => safeguards.transformContext(messages);
+  /* A nudge the safeguards append joins the run's live context, not only the one request that first carried it:
+   * the next request then reproduces this one byte for byte (I1) without waiting for the between-turn projection
+   * to read the nudge back from the log, and pi's own state agrees with that log. */
+  agent.prepareRequest = async ({ context }) => {
+    const messages = await safeguards.transformContext(context.messages);
+    if (messages === context.messages) {
+      return undefined;
+    }
+    agent.state.messages = messages;
+    return { context: { ...context, messages } };
+  };
   agent.streamFunction = composeModelCallMiddleware(base, [
     asMiddleware(compaction.wrapStreamFn),
     createToolResultTrimmerMiddleware({

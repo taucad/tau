@@ -13,20 +13,25 @@ import type { CapturedBody, ScriptedReply } from '#harness/prefix-identity.fixtu
 import { createAgentSession } from '#harness/session.js';
 import type { CreateAgentSessionOptions } from '#harness/session.js';
 import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
-import type { ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
+import type { HostToolResult, ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
 
 /* A small synthetic image payload: identity is about bytes, not pictures. */
 const fakePng = Buffer.from('synthetic-image-bytes-'.repeat(64)).toString('base64');
 
 const toolRegistry: ToolRegistry = {
   list: () => fixtureTools,
-  invoke: async (invocation) =>
-    invocation.toolName === 'screenshot'
-      ? { content: { images: [{ view: 'iso', dataUrl: `data:image/png;base64,${fakePng}` }] }, isError: false }
-      : {
-          content: { success: true, path: 'main.scad', content: 'module nut() {}', lineCount: 1 },
-          isError: false,
-        },
+  invoke: async (invocation): Promise<HostToolResult> => {
+    if (invocation.toolName === 'screenshot') {
+      return { content: { images: [{ view: 'iso', dataUrl: `data:image/png;base64,${fakePng}` }] }, isError: false };
+    }
+    if (invocation.toolName === 'edit_file') {
+      return { content: { errorCode: 'EDIT_TARGET_NOT_FOUND', message: 'oldString not found' }, isError: true };
+    }
+    return {
+      content: { success: true, path: 'main.scad', content: 'module nut() {}', lineCount: 1 },
+      isError: false,
+    };
+  },
 };
 
 const staticPrompt = 'STATIC '.repeat(400).trim();
@@ -34,6 +39,10 @@ const dynamicPrompt = 'Model: anthropic-claude-haiku-4.5';
 const screenshot: ScriptedReply = { tool: 'screenshot', input: {} };
 const readFile: ScriptedReply = { tool: 'read_file', input: { targetFile: 'main.scad' } };
 const done: ScriptedReply = { text: 'Done.' };
+const failingEdit: ScriptedReply = {
+  tool: 'edit_file',
+  input: { targetFile: 'main.scad', oldString: 'cube', newString: 'sphere' },
+};
 
 type Run = Readonly<{ bodies: readonly CapturedBody[]; requests: readonly ModelStreamRequest[] }>;
 
@@ -105,5 +114,18 @@ describe('I1 request prefix identity within one run', () => {
     const broken = brokenSteps(run.bodies);
     expect(broken, JSON.stringify(broken)).toEqual([]);
     expect(imageBlocks(run.bodies.at(-1)!)).toBe(0);
+  });
+
+  it('should keep a safeguard nudge in the run once it fires, so the next step reuses the step that carried it', async () => {
+    /* Two identical failing edits earn a nudge on the third request; the fourth request must still carry it. */
+    const run = await runSteps([failingEdit, failingEdit, failingEdit, done], {
+      safeguardThresholds: { identicalErrorNudge: 2, identicalErrorTerminate: 10 },
+    });
+    const nudged = run.requests.map(
+      (request) => request.messages.filter((message) => message.id.startsWith('tau:safeguard:')).length,
+    );
+    expect(nudged).toEqual([0, 0, 1, 1]);
+    const broken = brokenSteps(run.bodies);
+    expect(broken, JSON.stringify(broken)).toEqual([]);
   });
 });

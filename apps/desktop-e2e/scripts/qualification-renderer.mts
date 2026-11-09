@@ -147,17 +147,16 @@ const main = async (): Promise<void> => {
   // A freshly reinstalled app can publish its debugging port before its browser answers CDP target discovery: run
   // 41745619222 macos-dmg-arm64 connected the reinstall-ui websocket and then hit the default 30s connect timeout.
   // Allow the same two minutes the harness already gives the app renderer to appear; it accepts nothing new.
-  const browser = await chromium
-    .connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 })
-    .catch(async (error: unknown) => {
-      const expectedPid = Number(process.env['TAU_QUALIFICATION_EXPECTED_PID']);
-      await recordCdpAttachFailure({
-        port,
-        pid: Number.isSafeInteger(expectedPid) && expectedPid > 0 ? expectedPid : undefined,
-        output,
-      });
-      throw error;
+  const attach = chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 });
+  const browser = await attach.catch(async (error: unknown) => {
+    const expectedPid = Number(process.env['TAU_QUALIFICATION_EXPECTED_PID']);
+    await recordCdpAttachFailure({
+      port,
+      pid: Number.isSafeInteger(expectedPid) && expectedPid > 0 ? expectedPid : undefined,
+      output,
     });
+    throw error;
+  });
   let page: Page | undefined;
   try {
     const rendererDeadline = Date.now() + 120_000;

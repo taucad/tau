@@ -1232,32 +1232,34 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   morph: {
-    'qwen-3.5-397b': {
-      enabled: false,
-      id: 'morph-qwen-3.5-397b',
+    'kimi-k3.1-pro': {
+      enabled: true,
+      id: 'morph-kimi-k3.1-pro',
       providerKind: 'tau-hosted',
-      name: 'Qwen 3.5 397B',
-      slug: 'qwen-3.5-397b',
+      name: 'Kimi K3.1 Pro',
+      slug: 'kimi-k3.1-pro',
       recommended: true,
-      description: 'Strong long-context capable open coder with vision, good for large multi-file CAD projects.',
+      description:
+        'Strong long-context open reasoning model with vision for complex agentic CAD design and multi-file work.',
       provider: {
         id: 'morph',
         name: 'Morph',
       },
-      model: 'morph-qwen35-397b',
+      model: 'morph-kimik31',
       support: {
+        tools: true,
         toolChoice: false,
         modalities: imageInputModalities,
       },
       details: {
-        family: 'qwen',
-        families: ['qwen'],
-        contextWindow: 200_000,
+        family: 'kimi',
+        families: ['kimi'],
+        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
         maxTokens: 65_536,
         cost: {
-          inputTokens: 0.478,
-          outputTokens: 3.5,
-          cacheReadTokens: 0,
+          inputTokens: 2.5,
+          outputTokens: 14,
+          cacheReadTokens: 0.29,
           cacheWriteTokens: 0,
         },
       },
@@ -1268,66 +1270,107 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
-    'minimax-m2.7': {
-      id: 'morph-minimax-m2.7',
-      providerKind: 'tau-hosted',
-      name: 'MiniMax M2.7',
-      slug: 'minimax-m2.7',
-      recommended: false,
-      description: 'Cost-efficient open coder for everyday design work and long agentic tool loops.',
-      provider: {
-        id: 'morph',
-        name: 'Morph',
-      },
-      model: 'morph-minimax27-230b',
-      support: {
-        toolChoice: false,
-        modalities: imageInputModalities,
-      },
-      details: {
-        family: 'minimax',
-        families: ['minimax'],
-        contextWindow: 200_000,
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 0.279,
-          outputTokens: 1.2,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        reasoning: {
-          effort: 'high',
-        },
-      },
-    },
-    'deepseek-v4-flash': {
+    'glm-5.3': {
       enabled: false,
-      id: 'morph-deepseek-v4-flash',
+      id: 'morph-glm-5.3',
       providerKind: 'tau-hosted',
-      name: 'DeepSeek V4 Flash',
-      slug: 'deepseek-v4-flash',
-      description: 'Long-context capable open coder (beta), capped by Tau for cost and compaction reliability.',
+      name: 'GLM 5.3',
+      slug: 'glm-5.3',
+      recommended: false,
+      description: 'Strong text-only open coder for long-horizon CAD code generation and complex geometry planning.',
       provider: {
         id: 'morph',
         name: 'Morph',
       },
-      model: 'morph-dsv4flash',
+      model: 'morph-glm53-744b',
       support: {
+        tools: true,
         toolChoice: false,
         modalities: textOnlyModalities,
       },
       details: {
-        family: 'deepseek',
-        families: ['deepseek'],
-        contextWindow: 200_000,
+        family: 'glm',
+        families: ['glm'],
+        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
         maxTokens: 65_536,
         cost: {
-          inputTokens: 0.3,
-          outputTokens: 0.4,
-          cacheReadTokens: 0,
+          inputTokens: 1.19,
+          outputTokens: 6,
+          cacheReadTokens: 0.1955,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'high',
+        },
+      },
+    },
+    'glm-5.3-flash': {
+      enabled: true,
+      id: 'morph-glm-5.3-flash',
+      providerKind: 'tau-hosted',
+      name: 'GLM 5.3 Flash',
+      slug: 'glm-5.3-flash',
+      recommended: false,
+      description: 'Fast, low-cost open coder with vision for quick design iterations and small changes.',
+      provider: {
+        id: 'morph',
+        name: 'Morph',
+      },
+      model: 'morph-glm53flash',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'glm',
+        families: ['glm'],
+        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0.2,
+          outputTokens: 0.7,
+          cacheReadTokens: 0.04,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'high',
+        },
+      },
+    },
+    'deepseek-v4.1-flash': {
+      enabled: true,
+      id: 'morph-deepseek-v4.1-flash',
+      providerKind: 'tau-hosted',
+      name: 'DeepSeek V4.1 Flash',
+      slug: 'deepseek-v4.1-flash',
+      recommended: false,
+      description: 'Fast, low-cost open coder with vision for everyday design work and long agentic tool loops.',
+      provider: {
+        id: 'morph',
+        name: 'Morph',
+      },
+      model: 'morph-dsv41flash',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'deepseek',
+        families: ['deepseek'],
+        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0.12,
+          outputTokens: 0.8,
+          cacheReadTokens: 0.008,
           cacheWriteTokens: 0,
         },
       },

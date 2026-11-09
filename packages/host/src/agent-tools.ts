@@ -55,7 +55,7 @@ import {
   createSkillBundleOverlay,
   createSkillBundleRegistry,
 } from '@taucad/agent-tools/registry';
-import type { ReadSkillResource, WebResearchClient } from '@taucad/agent-tools/registry';
+import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
@@ -668,8 +668,25 @@ export type HostToolRegistryOptions = {
    * Backs `web_search` and `web_browser` through Tau's API (regression review R1). A host signed in to Tau passes
    * {@link createHostWebResearchClient} over its credential; one with no Tau account offers neither tool.
    */
-  readonly web?: WebResearchClient | undefined;
+  readonly web?: HostWebResearchClient | undefined;
 };
+
+/**
+ * The web research client a host hands its registry (regression review R1).
+ *
+ * Declared here, structurally equal to the registry's own, so this package's published types name no bundled
+ * workspace package.
+ *
+ * @public
+ */
+export type HostWebResearchClient = Readonly<{
+  search: (
+    request: Readonly<{ query: string; signal: AbortSignal }>,
+  ) => Promise<Array<{ title: string; url: string; content: string }>>;
+  browse: (
+    request: Readonly<{ urls: readonly string[]; query?: string | undefined; signal: AbortSignal }>,
+  ) => Promise<Array<{ url: string; content: string }>>;
+}>;
 
 /**
  * A web research client over the host's Tau credential, read at every call: a sign-in, refresh or sign-out between
@@ -683,8 +700,8 @@ export type HostToolRegistryOptions = {
 export const createHostWebResearchClient = (
   credential: () => Readonly<{ apiBaseUrl: string; authorization: string }> | undefined,
   fetch?: typeof globalThis.fetch,
-): WebResearchClient => {
-  const current = (): WebResearchClient => {
+): HostWebResearchClient => {
+  const current = (): HostWebResearchClient => {
     const signedIn = credential();
     if (signedIn === undefined) {
       throw Object.assign(new Error('Web research needs this host to be signed in to Tau.'), {

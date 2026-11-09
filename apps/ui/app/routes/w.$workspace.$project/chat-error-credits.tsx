@@ -1,12 +1,10 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { CreditCard, Play, Repeat } from 'lucide-react';
+import { CreditCard, Play, Plus, Repeat } from 'lucide-react';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party chat surface owns the direct billing client contract
 import { creditAtomsPerCredit } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
-import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useChatActions } from '#hooks/use-chat.js';
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { useModels } from '#hooks/use-models.js';
@@ -52,61 +50,44 @@ export const ChatErrorCredits = memo(function ({
   details,
 }: ChatErrorCreditsProps): React.JSX.Element {
   const { continueChat } = useChatActions();
-  const entitlements = useEntitlements();
   const { resolveModel } = useModels();
   const [isTopupOpen, setIsTopupOpen] = useState(false);
-  const { open: openSettings } = useSettingsDialog();
   // The denial's `routeId` is the catalogue model id, so the reader sees the
   // model's own name rather than a route slug.
   const shortfall = shortfallCredits(details);
   const routeId = typeof details?.['routeId'] === 'string' ? details['routeId'] : undefined;
   const fallbackDescription = resumable
-    ? 'Your available monthly and purchased credits do not cover this turn. Add credits, then resume this chat.'
-    : 'Your available monthly and purchased credits do not cover this turn.';
+    ? 'You don’t have enough credits for this turn. Add credits, then resume.'
+    : 'You don’t have enough credits for this turn.';
   const resolvedDescription =
     shortfall === undefined || routeId === undefined
       ? (description ?? fallbackDescription)
-      : `${resumable ? 'Tau paused this turn: ' : ''}${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} needed for ${resolveModel(routeId).name}.`;
+      : `This turn needs ${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} on ${resolveModel(routeId).name}.${resumable ? ' Add credits or switch to a cheaper model, then resume.' : ''}`;
 
   return (
     <ChatErrorCard
       tone='warning'
       icon={CreditCard}
       className={className}
-      title='Credit limit reached'
+      title='You’re out of credits'
       description={
         <>
           <p>{resolvedDescription}</p>
-          {resumable ? undefined : <p>Add credits, then send your message.</p>}
+          {resumable ? undefined : <p>Add credits, then send your message again.</p>}
         </>
       }
       actions={
         <>
-          {entitlements.hasPaymentMethod ? (
-            // Flow A (U7): a card is on file — top up in place, no settings detour.
-            <Button
-              variant='outline'
-              size='xs'
-              onClick={() => {
-                setIsTopupOpen(true);
-              }}
-            >
-              <CreditCard className='size-3.5' />
-              Add credits
-            </Button>
-          ) : (
-            // Flow B: no payment method yet — route through the Billing settings tab.
-            <Button
-              variant='outline'
-              size='xs'
-              onClick={() => {
-                openSettings('billing');
-              }}
-            >
-              <CreditCard className='size-3.5' />
-              Billing
-            </Button>
-          )}
+          {/* The Add credits dialog takes a saved card or a new one, so the fix is one click with or without a card on file. */}
+          <Button
+            size='xs'
+            onClick={() => {
+              setIsTopupOpen(true);
+            }}
+          >
+            <Plus className='size-3.5' />
+            Add credits
+          </Button>
           {/* A cheaper tier is the other fix for a shortfall (P4); the composer's
            * picker is the owner, opened here without claiming its shortcut. */}
           <ChatModelSelector popoverProperties={{ align: 'end' }}>
@@ -132,13 +113,7 @@ export const ChatErrorCredits = memo(function ({
         </>
       }
     >
-      {entitlements.hasPaymentMethod ? (
-        <TopupModal
-          isOpen={isTopupOpen}
-          onOpenChange={setIsTopupOpen}
-          defaultAmountCents={chatErrorDefaultTopupCents}
-        />
-      ) : undefined}
+      <TopupModal isOpen={isTopupOpen} onOpenChange={setIsTopupOpen} defaultAmountCents={chatErrorDefaultTopupCents} />
     </ChatErrorCard>
   );
 });

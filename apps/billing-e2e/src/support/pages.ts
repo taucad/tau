@@ -159,18 +159,22 @@ export const billingSettings = (page: Page): BillingSettings => ({
   balance: () => page.getByTestId('credit-balance'),
   addCredits: async () => page.getByRole('button', { name: 'Add credits' }).first().click(),
   manageSubscription: () => page.getByRole('button', { name: /Manage subscription/iu }),
-  subscribe: () => page.getByRole('button', { name: /Subscribe Now/u }),
+  subscribe: () => page.getByRole('button', { name: /Upgrade to Pro/u }),
   cancellationBanner: () => page.getByText(/^Pro until .+ reactivate any time from Manage subscription\.$/u),
   closure: {
     // Closure lives in Settings → Data controls, behind a confirmation dialog.
     async confirm(): Promise<void> {
       await page.goto(`${baseUrl}/?settings=data-controls`);
       await page.getByRole('button', { name: 'Close account' }).click();
-      await page.getByRole('alertdialog').getByLabel('I want to close my account.').check();
+      await page.getByRole('alertdialog').getByLabel('I understand I’ll lose my remaining credits.').check();
     },
     prepare: () => page.getByRole('alertdialog').getByRole('button', { name: 'Close account' }),
-    status: () => page.getByText(/^Closure status: /u),
-    deleteAccount: () => page.getByRole('button', { name: 'Delete my account' }),
+    // The row's title says where the closure stands; the wire state is never printed.
+    status: () =>
+      page.getByText(
+        /^(?:Closing your account|Your plan is canceled|We couldn’t close your account|Your account is closed)$/u,
+      ),
+    deleteAccount: () => page.getByRole('button', { name: 'Delete account' }),
   },
 });
 
@@ -182,23 +186,26 @@ export type TopupModal = {
   /** Review with a new card in Checkout, whichever label the card-on-file state gives that button. */
   readonly reviewInCheckout: () => Promise<ActionAnswer>;
   readonly reviewWithSavedCard: () => Promise<ActionAnswer>;
-  /** "Confirm quote" for a quoted total, "Continue to secure Checkout" when Checkout computes it. */
+  /** "Pay $…" for a known total, "Continue to payment" when the payment page computes it. */
   readonly confirm: () => Promise<ActionSubmission>;
   readonly discardQuote: () => Promise<ActionAnswer>;
   readonly cancelPayment: () => Promise<ActionAnswer>;
   readonly continueInCheckout: () => Promise<ActionSubmission>;
   /** The quote's "Credits" row. */
   readonly quotedCredits: () => Promise<string>;
-  /** "Payment status: <label>" under the title. */
-  readonly status: (label: string) => Locator;
+  /** The dialog heading for a state, such as "Finish your payment". */
+  readonly status: (title: string) => Locator;
   readonly text: () => Promise<string>;
 };
 
 /** The Add credits dialog, found by its title. */
 export const topupModal = (page: Page): TopupModal => {
-  const dialog = page
-    .getByRole('dialog')
-    .filter({ has: page.getByRole('heading', { name: /^(?:Add credits|Credits added)$/u }) });
+  const dialog = page.getByRole('dialog').filter({
+    has: page.getByRole('heading', {
+      // One title per state of the dialog (`actionCopy` in `topup-modal.tsx`).
+      name: /^(?:Add credits|Review your purchase|Finish your payment|Processing payment|Payment received|Confirm with your bank|We’re reviewing this payment|Waiting to hear from your bank|Auto-reload in progress|Credits added|Payment complete|Payment failed|Purchase canceled)$/u,
+    }),
+  });
   const isTopup = (path: string, method: string): boolean =>
     method === 'POST' && path === '/v1/billing/payment-actions/topup';
   const isAction =
@@ -213,46 +220,44 @@ export const topupModal = (page: Page): TopupModal => {
         return;
       }
       await dialog.getByRole('button', { name: 'Other', exact: true }).click();
-      await dialog.getByLabel('Custom amount').fill(String(dollars));
+      await dialog.getByLabel('Amount (USD)').fill(String(dollars));
     },
     reviewInCheckout: async () =>
       actionResponse(page, isTopup, async () => {
         await clickFirstVisible([
-          dialog.getByRole('button', { name: 'Use another card in Checkout' }),
-          dialog.getByRole('button', { name: /^Review .+ purchase$/u }),
+          dialog.getByRole('button', { name: 'Use a different card' }),
+          dialog.getByRole('button', { name: 'Continue to payment' }),
         ]);
       }),
     reviewWithSavedCard: async () =>
       actionResponse(page, isTopup, async () => {
-        await dialog.getByRole('button', { name: 'Review purchase with saved card' }).click();
+        await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
       }),
     confirm: async () =>
       actionSubmission(page, isAction('confirm'), async () => {
         await clickFirstVisible([
-          dialog.getByRole('button', { name: 'Confirm quote' }),
-          dialog.getByRole('button', { name: 'Continue to secure Checkout' }),
+          dialog.getByRole('button', { name: /^Pay \$/u }),
+          dialog.getByRole('button', { name: 'Continue to payment' }),
         ]);
       }),
     discardQuote: async () =>
       actionResponse(page, isAction('cancel'), async () => {
-        await dialog.getByRole('button', { name: 'Discard quote' }).click();
+        await dialog.getByRole('button', { name: 'Back', exact: true }).click();
       }),
     cancelPayment: async () =>
       actionResponse(page, isAction('cancel'), async () => {
-        await dialog.getByRole('button', { name: 'Cancel payment' }).click();
+        await dialog.getByRole('button', { name: 'Cancel purchase' }).click();
       }),
     continueInCheckout: async () =>
       actionSubmission(page, isAction('recover'), async () => {
-        await dialog.getByRole('button', { name: 'Continue in Checkout' }).click();
+        await dialog.getByRole('button', { name: 'Continue to payment' }).click();
       }),
-    quotedCredits: async () =>
-      visibleText(
-        dialog
-          .locator('div')
-          .filter({ has: page.getByText('Credits', { exact: true }) })
-          .locator('dd'),
-      ),
-    status: (label: string) => dialog.getByText(`Payment status: ${label}`, { exact: true }),
+    async quotedCredits(): Promise<string> {
+      // The first summary row is the line item: its label reads "2,500 credits".
+      const lineItem = await visibleText(dialog.locator('[data-slot=summary-row] dt').first());
+      return lineItem.replace(/ credits?$/u, '');
+    },
+    status: (title: string) => dialog.getByRole('heading', { name: title, exact: true }),
     text: async () => visibleText(dialog),
   };
 };
@@ -395,7 +400,7 @@ export type ChatCards = {
 
 /** The card titles a refused or paused turn shows (`chat-error*.tsx`). */
 const cardTitles = [
-  'Credit limit reached',
+  'You’re out of credits',
   'Tau paused this turn',
   'The model refused this request',
   'This model is paused',

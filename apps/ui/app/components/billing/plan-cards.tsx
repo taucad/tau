@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
-import { Check, Sparkles } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { Link } from 'react-router';
 import type { BillingTier, PlanCatalogEntry, WirePaymentAction } from '@taucad/billing';
 import { tauPlanCatalog } from '@taucad/billing';
+import { PlanCards as SharedPlanCards } from '@taucad/ui-kit/components/plan-cards';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {
@@ -14,26 +15,26 @@ import {
   followPaymentRedirect,
 } from '#lib/billing-payment-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { cn } from '@taucad/ui/utils/cn';
+import { BillingInlineError } from '#components/billing/billing-primitives.js';
 
 const enterpriseMailto = 'mailto:enterprise@tau.new';
 
-/** Why a subscription answered without a Checkout to open. */
+const paymentPageNotOpenedMessage = 'Couldn’t open the payment page. Try again.';
+
+/** Why a subscription answered without a payment page to open. */
 const subscriptionNotOpenMessage = (action: WirePaymentAction): string => {
   switch (action.state) {
     case 'processing':
     case 'funds_received':
     case 'fulfilled': {
-      return 'Your payment is being confirmed. Your plan updates in a moment.';
+      return 'We’re confirming your payment. Your plan will update in a moment.';
     }
     case 'attention_required': {
-      return 'Your subscription needs attention. Contact support@tau.new.';
+      return 'We couldn’t start your subscription. Email support@tau.new and we’ll sort it out.';
     }
     default: {
-      return 'Checkout is still being prepared. Try again in a minute.';
+      return 'Couldn’t open the payment page. Try again in a minute.';
     }
   }
 };
@@ -57,10 +58,10 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
   const stateIsCurrent = stateGenerationRef.current === scopeRef.current.value;
   /* oxlint-enable react/refs */
 
-  /** Follows an open Checkout, or says why there is none to follow instead of leaving the button stuck. */
+  /** Follows an open payment page, or says why there is none to follow instead of leaving the button stuck. */
   const settle = (action: WirePaymentAction): void => {
     if (followPaymentRedirect(action)) {
-      // In the desktop app Checkout opens in the browser, so the button stays usable to open it again.
+      // In the desktop app the payment page opens in the browser, so the button stays usable to open it again.
       setIsPending(!isDesktopTarget());
       return;
     }
@@ -72,7 +73,7 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
 
   const start = async (): Promise<void> => {
     if (binding === undefined) {
-      setErrorMessage('Billing checkout is unavailable.');
+      setErrorMessage(paymentPageNotOpenedMessage);
       return;
     }
     setIsStarting(true);
@@ -99,9 +100,7 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
       }
       requestIdRef.current = undefined;
       setErrorMessage(
-        error instanceof BillingCollectionUnavailable
-          ? purchasesUnavailableMessage
-          : 'Could not start checkout. Try again.',
+        error instanceof BillingCollectionUnavailable ? purchasesUnavailableMessage : paymentPageNotOpenedMessage,
       );
     } finally {
       if (scopeRef.current.value === startedGeneration) {
@@ -120,17 +119,14 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
           await start();
         }}
       >
-        <Sparkles className='size-4' />
-        {stateIsCurrent && isStarting ? 'Starting checkout…' : isPending ? 'Checkout pending' : label}
+        {stateIsCurrent && isStarting ? 'Opening payment page…' : isPending ? 'Finish on the payment page' : label}
       </Button>
       {isResolved && !paymentCollectionAvailable && binding !== undefined ? (
         <p className='text-xs text-muted-foreground' role='status'>
           {purchasesUnavailableMessage}
         </p>
       ) : stateIsCurrent && errorMessage ? (
-        <p className='text-xs text-warning' role='alert'>
-          {errorMessage}
-        </p>
+        <BillingInlineError>{errorMessage}</BillingInlineError>
       ) : undefined}
     </div>
   );
@@ -144,10 +140,15 @@ function PlanCta({
   readonly isCurrent: boolean;
 }): React.JSX.Element {
   if (isCurrent) {
+    // A label, not a disabled button: a disabled button reads as broken.
     return (
-      <Button variant='outline' disabled className='w-full'>
-        Current plan
-      </Button>
+      <p
+        data-slot='current-plan'
+        className='flex h-9 items-center justify-center gap-1.5 text-sm font-medium text-muted-foreground'
+      >
+        <Check aria-hidden='true' className='size-3.5' />
+        Your current plan
+      </p>
     );
   }
   switch (entry.cta.kind) {
@@ -172,7 +173,7 @@ function PlanCta({
 }
 
 type PlanCardsProps = {
-  /** Marks the viewer's tier as "Current plan" instead of a CTA (settings grid). */
+  /** Marks the viewer's tier as "Your current plan" instead of a CTA (settings grid). */
   readonly currentTier?: BillingTier;
   readonly className?: string;
   /** Keeps long feature lists bounded inside compact surfaces such as Settings. */
@@ -180,9 +181,9 @@ type PlanCardsProps = {
 };
 
 /**
- * The three-tier plan grid (T6/T7/U1/U6): one `tauPlanCatalog` source feeds
- * both the index pricing section and the BillingSettings free-state grid.
- * Cards stack on mobile (U14).
+ * The app's plan grid: the shared `PlanCards` from `@taucad/ui-kit`, fed by
+ * `tauPlanCatalog`, with the app's own actions under each card. The public
+ * pricing page renders the same component and catalogue with its own links.
  */
 export function PlanCards({
   currentTier,
@@ -190,44 +191,11 @@ export function PlanCards({
   isFeatureListScrollable = false,
 }: PlanCardsProps): React.JSX.Element {
   return (
-    <div className={cn('grid grid-cols-1 gap-4 md:grid-cols-3', className)}>
-      {tauPlanCatalog.map((entry) => (
-        <Card key={entry.id} className={cn('relative flex flex-col', entry.popular && 'border-primary shadow-md')}>
-          {entry.popular ? (
-            <Badge className='absolute -top-2.5 left-1/2 -translate-x-1/2 uppercase'>Popular</Badge>
-          ) : undefined}
-          <CardHeader>
-            <CardTitle className='text-lg'>{entry.name}</CardTitle>
-            <p className='text-sm text-muted-foreground'>{entry.tagline}</p>
-            <p className='pt-2'>
-              <span className='text-3xl font-semibold'>{entry.priceLabel}</span>
-              {entry.priceSubLabel ? (
-                <span className='text-sm text-muted-foreground'>{entry.priceSubLabel}</span>
-              ) : undefined}
-            </p>
-          </CardHeader>
-          <CardContent className='flex flex-1 flex-col gap-4'>
-            <ul
-              aria-label={isFeatureListScrollable ? `${entry.name} features` : undefined}
-              className={cn(
-                'flex flex-1 flex-col gap-1.5 text-sm',
-                isFeatureListScrollable &&
-                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:focus-outline',
-              )}
-              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
-              tabIndex={isFeatureListScrollable ? 0 : undefined}
-            >
-              {entry.features.map((feature) => (
-                <li key={feature} className='flex items-start gap-2'>
-                  <Check className='mt-0.5 size-3.5 shrink-0 text-primary' />
-                  <span className='text-muted-foreground'>{feature}</span>
-                </li>
-              ))}
-            </ul>
-            <PlanCta entry={entry} isCurrent={currentTier === entry.id} />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <SharedPlanCards
+      entries={tauPlanCatalog}
+      className={className}
+      isFeatureListScrollable={isFeatureListScrollable}
+      renderCta={(entry: PlanCatalogEntry) => <PlanCta entry={entry} isCurrent={currentTier === entry.id} />}
+    />
   );
 }

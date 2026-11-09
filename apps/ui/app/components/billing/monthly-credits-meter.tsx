@@ -101,25 +101,25 @@ export function MonthlyCreditsMeter({
             <TooltipContent side='bottom' className='max-w-64 space-y-1 p-3 text-left'>
               {monthly ? (
                 <>
-                  <p className='font-medium'>{formatCredits(monthly.availableCreditAtoms)} available this month</p>
+                  <p className='font-medium'>{formatCredits(monthly.availableCreditAtoms)} left this month</p>
                   <p>
                     {monthly.scaleCreditAtoms > 0n
-                      ? `Your plan includes ${formatCredits(monthly.scaleCreditAtoms)} per month.`
-                      : 'Your monthly allowance is set by your contract.'}
+                      ? `Your plan includes ${formatCredits(monthly.scaleCreditAtoms)} a month.`
+                      : 'Your monthly credits are set by your contract.'}
                   </p>
                   {monthlyHeldCreditAtoms > 0n ? (
-                    <p>{formatCredits(monthlyHeldCreditAtoms)} reserved for active work.</p>
+                    <p>{formatCreditAtomsDisplay(monthlyHeldCreditAtoms)} more on hold for work in progress.</p>
                   ) : undefined}
                   {monthly.scaleCreditAtoms > 0n && monthly.availableCreditAtoms > monthly.scaleCreditAtoms ? (
-                    <p>Includes credits carried over. The bar is capped at 100%.</p>
+                    <p>Includes credits rolled over from last month, so you have more than 100%.</p>
                   ) : undefined}
                   <p>Used before purchased credits.</p>
                 </>
               ) : (
                 <p>
                   {state.status === 'loading'
-                    ? 'Loading monthly credits…'
-                    : 'Monthly credits are unavailable. Try again in Billing.'}
+                    ? 'Loading…'
+                    : 'Couldn’t load monthly credits. Open Billing to try again.'}
                 </p>
               )}
             </TooltipContent>
@@ -128,10 +128,10 @@ export function MonthlyCreditsMeter({
         {state.status === 'loading' ? (
           <Skeleton className='h-3 w-12' />
         ) : state.status === 'unavailable' ? (
-          <span className='text-muted-foreground'>Unavailable</span>
+          <span className='text-muted-foreground'>Couldn’t load</span>
         ) : (
           <span className='text-right font-medium tabular-nums'>
-            {monthly?.scaleCreditAtoms === 0n ? 'Custom allowance' : `${available}% left`}
+            {monthly?.scaleCreditAtoms === 0n ? 'Set by your contract' : `${available}% left`}
           </span>
         )}
       </div>
@@ -151,7 +151,9 @@ export function MonthlyCreditsMeter({
         </div>
       )}
       {purchasedCreditAtoms !== undefined && purchasedHeldCreditAtoms > 0n ? (
-        <p className='text-muted-foreground'>{formatCredits(purchasedHeldCreditAtoms)} reserved for active work</p>
+        <p className='text-muted-foreground'>
+          {formatCreditAtomsDisplay(purchasedHeldCreditAtoms)} more on hold for work in progress
+        </p>
       ) : undefined}
       {isLow ? addCredits : undefined}
     </div>

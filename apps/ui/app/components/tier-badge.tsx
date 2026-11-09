@@ -26,11 +26,11 @@ type TierBadgeProps = {
 const tierTooltipCopy: Record<Exclude<BillingTier, 'free'>, { title: string; description: string }> = {
   pro: {
     title: 'Pro plan required',
-    description: 'This feature requires a Pro subscription for cloud-backed kernels and online access.',
+    description: 'This feature needs a Pro plan.',
   },
   enterprise: {
     title: 'Enterprise plan required',
-    description: 'This feature requires an Enterprise subscription.',
+    description: 'This feature needs an Enterprise plan.',
   },
 };
 

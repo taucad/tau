@@ -168,7 +168,7 @@ describe('marketing copy in the app', () => {
       await settings.addCredits();
       const modal = topupModal(page);
       await modal.chooseAmount(7);
-      const input = modal.dialog.getByLabel('Custom amount');
+      const input = modal.dialog.getByLabel('Amount (USD)');
       const bounds = [await input.getAttribute('min'), await input.getAttribute('max')];
       const www = await pageCopy('/pricing/');
       const appMissing = missing(appText, appExpected);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import { declaresManifest } from '#lib/project-manifest-equivalence.js';
+import { declaresManifest } from '#utils/project-manifest-equivalence.js';
 
 const project = { name: 'Part', description: '', tags: ['a'], assets: { main: { entryPath: 'main.scad' } } };
 const encode = (value: unknown, indent?: number): Uint8Array<ArrayBuffer> =>

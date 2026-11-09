@@ -5,7 +5,7 @@ import {
   getFileTreeParentDirectory,
   joinFileTreePath,
   resolveFileTreeTargetDirectory,
-} from '#routes/w.$workspace.$project/file-tree-targets.js';
+} from '#utils/file-tree-targets.js';
 
 const folderPaths = new Set(['public', 'public/models']);
 

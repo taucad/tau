@@ -12,7 +12,7 @@ import { githubConnections } from '#lib/github-connections.js';
 import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { LinkedImportRequest } from '#machines/import-linked.js';
-import { declaresManifest } from '#lib/project-manifest-equivalence.js';
+import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 
 /* The largest worktree a linked import materializes; the worker's own bound for every answer but the pack. */
 const maximumMaterializedBytes = 256 * 1024 * 1024;

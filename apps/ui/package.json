@@ -75,6 +75,7 @@
     "@taucad/parameters": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
+    "@taucad/project-workspace": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/revisions": "workspace:*",

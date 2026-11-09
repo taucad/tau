@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  copyTextToClipboard,
-  summarizeFileTreeImport,
-} from '#routes/w.$workspace.$project/file-tree-operation-results.js';
+import { copyTextToClipboard, summarizeFileTreeImport } from '#utils/file-tree-operation-results.js';
 
 describe('file-tree-operation-results', () => {
   describe('summarizeFileTreeImport', () => {

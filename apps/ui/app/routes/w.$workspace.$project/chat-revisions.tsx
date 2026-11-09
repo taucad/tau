@@ -72,7 +72,7 @@ import {
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';

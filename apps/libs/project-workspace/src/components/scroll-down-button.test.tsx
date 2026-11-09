@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
+import { ScrollDownButton } from '#components/scroll-down-button.js';
 
 describe('ScrollDownButton', () => {
   it('is reachable only while there is chat content below the reader', async () => {

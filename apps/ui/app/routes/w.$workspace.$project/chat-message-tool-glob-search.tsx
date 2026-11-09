@@ -14,7 +14,7 @@ import {
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { formatToolFileMetadata } from '#routes/w.$workspace.$project/chat-tool-file-metadata.js';
+import { formatToolFileMetadata } from '@taucad/project-workspace/utils/chat-tool-file-metadata';
 
 export function ChatMessageToolGlobSearch({
   part,

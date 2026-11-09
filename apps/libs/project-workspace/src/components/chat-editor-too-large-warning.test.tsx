@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
-import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-editor-too-large-warning.js';
+import { ChatEditorTooLargeWarning } from '#components/chat-editor-too-large-warning.js';
 
 describe('ChatEditorTooLargeWarning', () => {
   it('should render the file size in megabytes when size is over 1 MiB', () => {

@@ -1,0 +1,7 @@
+{
+  "packages/workbench-panes/src/kinematics/kinematics-pane.tsx": 3,
+  "packages/workbench-panes/src/model/model-pane.tsx": 1,
+  "packages/workbench-panes/src/model/part-gallery.tsx": 1,
+  "packages/workbench-panes/src/paneview/use-resize-handles.ts": 1,
+  "packages/workbench-panes/src/shell/viewer-graphics.test-utils.ts": 1
+}

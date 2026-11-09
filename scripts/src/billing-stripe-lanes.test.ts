@@ -10,7 +10,12 @@ type Job = {
   readonly if?: string;
   readonly needs?: readonly string[];
   readonly env?: Record<string, string>;
-  readonly steps?: ReadonlyArray<{ readonly if?: string; readonly id?: string; readonly run?: string }>;
+  readonly steps?: ReadonlyArray<{
+    readonly if?: string;
+    readonly id?: string;
+    readonly run?: string;
+    readonly env?: Record<string, string>;
+  }>;
 };
 
 const job = (path: string, name: string): Job => {
@@ -37,11 +42,11 @@ describe('credential-free billing CI', () => {
   it('should select billing contracts by the billing plan output and gate staging on completed billing tests', () => {
     const path = '.github/workflows/ci.yml';
     // Billing contracts run exactly when a project with the suite (`api-billing`) or one it depends on is affected.
-    const plan = job(path, 'plan').steps?.find((step) => step.id === 'plan')?.run ?? '';
-    expect(plan).toContain(
-      'billing=$(pnpm nx show projects --affected --with-target test:billing-foundation --json | tail -1)',
-    );
-    expect(plan).toContain('"billing=$billing"');
+    const plan = job(path, 'plan').steps?.find((step) => step.id === 'plan');
+    const selectors = JSON.parse(plan?.env?.['LANE_SELECTORS'] ?? '{}') as Record<string, unknown>;
+    expect(selectors['billing']).toEqual({ targets: ['test:billing-foundation'] });
+    expect(plan?.run).toContain('billing=$(flag billing)');
+    expect(plan?.run).toContain('echo "billing=$run_billing"');
     // Assembled so the source holds no template-like string literal.
     expect(job(path, 'billing-e2e').if).toBe(
       ['$', "{{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}"].join(''),
@@ -51,7 +56,7 @@ describe('credential-free billing CI', () => {
     const deployment = job(staging, 'deploy-api-staging');
     expect(deployment.needs).toContain('ci');
     expect(deployment.if).toContain(
-      "(needs.ci.outputs.billing-e2e == 'success' || needs.ci.outputs.billing-e2e == 'not-affected')",
+      "(needs.ci.outputs.billing-e2e == 'success' || needs.ci.outputs.billing-e2e == 'not-affected' || needs.ci.outputs.billing-e2e == 'reused')",
     );
   });
 

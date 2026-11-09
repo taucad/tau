@@ -24,14 +24,14 @@ import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitOperation, GitReceiptOutcome } from '@taucad/api-observability/metrics';
 import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '@taucad/api-database/schema';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { ProjectRole } from '#api/collaboration/project-access.service.js';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
+import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type {
   CommercialEntitlements,
   CommercialEntitlementsService,
-} from '#api/entitlements/commercial-entitlements.js';
-import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
+} from '@taucad/api-projects/entitlements/commercial-entitlements';
+import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
@@ -63,8 +63,12 @@ import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import { decodeManifest, isTombstoned, onlyCompactedSince } from '@taucad/api-git-core/store/manifest';
 import type { Manifest } from '@taucad/api-git-core/store/manifest';
 import type { RepositoryLocator, RepositoryStore } from '@taucad/api-git-core/store/port';
-import { materializePublishedTags } from '#api/publications/publication-materializer.js';
-import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
+import { materializePublishedTags } from '@taucad/api-projects/publications/publication-materializer';
+import type {
+  GitChildRunner,
+  MaterializerDependencies,
+} from '@taucad/api-projects/publications/publication-materializer';
+import type { PublicationRepositoryLeases, ReadLease } from '@taucad/api-projects/publications/repository-leases';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ObjectStorageService } from '@taucad/api-object-storage';
 
@@ -86,15 +90,6 @@ const flushPacketBytes = 4;
 
 /** The caller a derived-state repair is made as: nobody's account, and nobody's hydrate budget. */
 const derivedStateCaller = 'system:derived-state';
-
-/** A read lease the publication materializer holds through tau-storage (until DC3). */
-export type ReadLease = {
-  /** An opaque handle the materializer's git runner ({@link GitRepositoryService.leaseGit}) resolves. */
-  readonly directory: string;
-  readonly locator: RepositoryLocator;
-  /** The manifest the reads are pinned to. `undefined` is generation 0. */
-  readonly manifest: Manifest | undefined;
-};
 
 /** How the API checks receipts: tau-storage's verification keys and the applied-receipt ledger. */
 export type ReceiptVerification = {
@@ -227,7 +222,7 @@ export type GitLfsReservation =
     };
 
 @Injectable()
-export class GitRepositoryService {
+export class GitRepositoryService implements PublicationRepositoryLeases {
   readonly #logger = new Logger(GitRepositoryService.name);
 
   /**

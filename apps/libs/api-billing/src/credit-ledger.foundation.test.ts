@@ -122,7 +122,10 @@ const createFixture = async (
     markupBps: 0,
     fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId] },
     rates: partitionRates.map((partition) => ({
-      rateId: partitionRates.length === 1 ? `rate-${suffix}` : `rate-${partition.dimension}-${suffix}`,
+      rateId:
+        partitionRates.length === 1
+          ? `rate-${suffix}`
+          : `rate-${partition.dimension}${partition.tier === null ? '' : `-${partition.tier}`}-${suffix}`,
       meterContractId,
       dimension: partition.dimension,
       tier: partition.tier,
@@ -137,7 +140,9 @@ const createFixture = async (
         sku,
         meterContractId,
         rateIds: partitionRates.map((partition) =>
-          partitionRates.length === 1 ? `rate-${suffix}` : `rate-${partition.dimension}-${suffix}`,
+          partitionRates.length === 1
+            ? `rate-${suffix}`
+            : `rate-${partition.dimension}${partition.tier === null ? '' : `-${partition.tier}`}-${suffix}`,
         ),
         enabled: true,
       },
@@ -2875,6 +2880,8 @@ describe('post-hoc supplier metering', () => {
       { dimension: 'uncached_input', tier: null, quantity: 1000n },
       { dimension: 'cache_read', tier: null, quantity: 2000n },
       { dimension: 'cache_write', tier: cacheWriteTier, quantity: 300n },
+      // Anthropic settles both write lifetimes; the evidence collector reports a zero 1h tier when none was written.
+      ...(cacheWriteTier === '1h' ? [] : [{ dimension: 'cache_write', tier: '1h', quantity: 0n }]),
       { dimension: 'output', tier: null, quantity: 400n },
     ].filter(({ dimension, tier }) => dimensions.has(`${dimension}:${tier ?? ''}`));
 

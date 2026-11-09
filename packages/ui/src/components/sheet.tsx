@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Dialog as SheetPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
+import { Button } from '#components/button.js';
 
 /**
  * Owns the open state and focus lifecycle for a side sheet.
@@ -111,9 +112,11 @@ function SheetContent({
         {...properties}
       >
         {children}
-        <SheetPrimitive.Close className='absolute top-4 right-4 rounded-xs opacity-70 hover:opacity-100 focus-visible:focus-outline disabled:pointer-events-none data-[state=open]:bg-secondary'>
-          <XIcon className='size-4' />
-          <span className='sr-only'>Close</span>
+        <SheetPrimitive.Close asChild data-slot='sheet-close'>
+          <Button variant='ghost' size='icon-sm' className='absolute top-2.5 right-2.5 text-muted-foreground'>
+            <XIcon />
+            <span className='sr-only'>Close</span>
+          </Button>
         </SheetPrimitive.Close>
       </SheetPrimitive.Content>
     </SheetPortal>

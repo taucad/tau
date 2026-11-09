@@ -40,8 +40,10 @@ allowBuilds:
   '@nestjs/core': true
   nestjs-pino: true
   '@google/genai': false
-  # Downloads the platform vale binary at install time; required for prose linting.
-  '@vvago/vale': true
+  # Its postinstall downloads the platform vale binary from GitHub releases, which answers 504
+  # for minutes at a time and failed whole installs (Intel native-hosts, #1639, #1644). Only
+  # prose linting needs it, so `scripts:validate-prose` fetches it on demand instead (CP-3).
+  '@vvago/vale': false
   '@sentry/cli': true
 catalog:
   # Error tracking (launch gate OBS-7). Exact pins, one @sentry/core across the

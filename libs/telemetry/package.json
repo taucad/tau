@@ -16,7 +16,8 @@
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
     "./node": "./src/node.ts",
-    "./node-host": "./src/node-host.ts"
+    "./node-host": "./src/node-host.ts",
+    "./runtime-vocabulary": "./src/runtime-vocabulary.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",

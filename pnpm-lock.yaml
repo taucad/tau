@@ -6767,6 +6767,9 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../tools/nx
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../libs/telemetry
       '@types/js-yaml':
         specifier: 'catalog:'
         version: 4.0.9

@@ -69,7 +69,7 @@ export const agentToolKinds = [
 
 /**
  * Tau's own tool names, the keys of `tauToolKinds` in `@taucad/agent-host`. Copied rather than imported so this
- * dependency-light library never depends on the agent host; `vocabulary-contract.test.ts` pins the copy to the source.
+ * dependency-light library never depends on the agent host; `scripts/src/telemetry-vocabulary-contract.test.ts` pins the copy to the source.
  * @public
  */
 export const tauToolNames = [

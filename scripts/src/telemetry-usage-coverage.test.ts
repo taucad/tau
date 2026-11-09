@@ -7,24 +7,32 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RuntimeEntryName, capabilityOf, otherValue, usageCoverage } from '#runtime-ingest.js';
-import type { PluginCapability } from '#runtime-ingest.js';
-import { parseRuntimeEntry } from '#runtime-entry.js';
-import { runtimeMetrics } from '#runtime-metrics.js';
+import {
+  RuntimeEntryName,
+  capabilityOf,
+  otherValue,
+  parseRuntimeEntry,
+  runtimeMetrics,
+  usageCoverage,
+} from '@taucad/telemetry';
+import type { PluginCapability } from '@taucad/telemetry';
 
-/** The part of `scripts/runtime-registry.mts` this test reads. */
+/** The part of `libs/telemetry/scripts/runtime-registry.mts` this test reads. */
 type RegistryModule = Readonly<{
   deriveRuntimeVocabulary: () => Promise<
     Readonly<{ transcoderIds: readonly string[]; jobProviderIds: readonly string[] }>
   >;
 }>;
 
-/* The derivation lives in `scripts/` (it imports the plugins, which this library must not depend on). */
-const registryModule = '../scripts/runtime-registry.mts';
+/*
+ * The derivation lives beside the telemetry generator (it imports the plugins, which that library must not depend on);
+ * this test lives here, in the workspace-wide `scripts` project, so the plugin sources are not `telemetry:test` inputs.
+ */
+const registryModule = new URL('../../libs/telemetry/scripts/runtime-registry.mts', import.meta.url).href;
 const registry = (await import(/* @vite-ignore */ registryModule)) as RegistryModule;
 const derived = await registry.deriveRuntimeVocabulary();
 
-const productDashboard = path.resolve(import.meta.dirname, '../../../infra/grafana/dashboards/runtime-product.json');
+const productDashboard = path.resolve(import.meta.dirname, '../../infra/grafana/dashboards/runtime-product.json');
 
 type Panel = Readonly<{ title?: string; targets?: ReadonlyArray<Readonly<{ expr?: string }>>; panels?: Panel[] }>;
 const panelsOf = (panels: readonly Panel[]): Panel[] =>

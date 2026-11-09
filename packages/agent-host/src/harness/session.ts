@@ -2223,6 +2223,16 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           if (!(await prepareStartOfTurn())) {
             return false;
           }
+          /* R3: pi runs `prepareNextTurn` only after a completed turn, never before a run's first call, so a new
+           * prompt after Stop would reach the model with interrupted tool results and no instruction to re-verify.
+           * The reminder follows the stopped history and precedes the new prompt, as the resume path places it. */
+          const reminder = await createInterruptRecoveryMessage({
+            messages: await record.history(),
+            timestamp: now().getTime(),
+          });
+          if (reminder) {
+            await record.append({ type: 'message.appended', message: reminder });
+          }
           const retainedHistory = await record.history();
           await record.append({
             type: 'turn.history-projection-committed',

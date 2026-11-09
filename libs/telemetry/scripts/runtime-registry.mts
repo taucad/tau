@@ -3,7 +3,7 @@
  *
  * `@taucad/telemetry` is dependency-light and cannot import the plugins, so the vocabularies it validates against are
  * GENERATED into `src/runtime-vocabulary.ts` by `generate-runtime-vocabulary.mts`, which calls this module, and the
- * T30 contract test (`src/runtime-vocabulary.test.ts`) calls it again and asserts the generated file still equals the
+ * T30 contract test (`scripts/src/telemetry-runtime-vocabulary.test.ts`) calls it again and asserts the generated file still equals the
  * registry. The derivation imports the real plugin factories and reads their composed capabilities and worker
  * definitions; only facts that exist as types alone (operation kinds, preparation and admission codes) and the job
  * providers (which need deployment options to construct) are read from source text.

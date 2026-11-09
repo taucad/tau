@@ -36,7 +36,9 @@ export const sanitizeFrontendRedirectPath = ({
       return '/';
     }
 
-    return `${callback.pathname}${callback.search}${callback.hash}` || '/';
+    // Dot segments normalise `/.//host` to the path `//host`, which a browser would again read as another origin.
+    const path = `${callback.pathname}${callback.search}${callback.hash}`;
+    return path.startsWith('//') ? '/' : path || '/';
   } catch {
     return '/';
   }

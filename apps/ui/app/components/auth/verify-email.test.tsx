@@ -119,10 +119,13 @@ describe('sanitizeVerifyEmailRedirectTo', () => {
     expect(sanitizeVerifyEmailRedirectTo('//example.com/steal')).toBe('/');
   });
 
-  it.each([String.raw`/\example.com`, String.raw`/\/example.com`, String.raw`\\example.com`])(
-    'rejects %s, which a browser would leave the origin for (assessment F-6)',
-    (value) => {
-      expect(sanitizeVerifyEmailRedirectTo(value)).toBe('/');
-    },
-  );
+  it.each([
+    String.raw`/\example.com`,
+    String.raw`/\/example.com`,
+    String.raw`\\example.com`,
+    '/.//example.com',
+    '/a/..//example.com',
+  ])('rejects %s, which a browser would leave the origin for (assessment F-6)', (value) => {
+    expect(sanitizeVerifyEmailRedirectTo(value)).toBe('/');
+  });
 });

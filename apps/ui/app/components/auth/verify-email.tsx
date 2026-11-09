@@ -36,7 +36,9 @@ export const sanitizeVerifyEmailRedirectTo = (value?: string): string => {
     if (target.origin !== origin) {
       return '/';
     }
-    return `${target.pathname}${target.search}${target.hash}`;
+    // Dot segments normalise `/.//host` to the path `//host`, which would leave the origin once navigated to.
+    const path = `${target.pathname}${target.search}${target.hash}`;
+    return path.startsWith('//') ? '/' : path;
   } catch {
     return '/';
   }

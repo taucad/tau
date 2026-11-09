@@ -893,6 +893,17 @@ describe('getBetterAuthConfig sign-up readiness', () => {
     expect(url.origin + url.pathname).toBe('http://localhost:3000/auth/verify-email');
     expect(url.searchParams.get('token')).toEqual(expect.any(String));
     expect(url.searchParams.get('redirectTo')).toBe('/');
+
+    // A repeat sign-up that names where to go keeps it in the new link.
+    await post(auth, 'sign-up/email', {
+      email,
+      name: 'Again',
+      password: `${password}!`,
+      callbackURL: '/s/tau~pub_2',
+    });
+    expect(emailService.sendVerification).toHaveBeenCalledTimes(3);
+    const withCallback = new URL(emailService.sendVerification.mock.calls[2]?.[0].url ?? '');
+    expect(withCallback.searchParams.get('redirectTo')).toBe('/s/tau~pub_2');
     expect(emailService.sendAccountExists).not.toHaveBeenCalled();
   });
 

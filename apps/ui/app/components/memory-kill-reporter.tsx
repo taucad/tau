@@ -25,17 +25,26 @@ import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-sign
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 
-/** Where the reporter reads the telemetry consent: the page composition's one rule. @public */
+/** Where the reporter reads the telemetry consent (the page composition's one rule) and counts a kill. @public */
 export type KillReportConsent = Readonly<{
   read: () => ReportingConsent;
   /** Listen for each resolved change; returns the unsubscribe. */
   subscribe: (listener: () => void) => () => void;
+  /** Count one consented kill in runtime telemetry (`tau.runtime.page_kills`), by kernel and phase. */
+  count: (kill: DetectedMemoryKill) => void;
 }>;
 
 /** The page composition's consent; `unknown` (wait) where there is none, as during SSR. */
 const pageConsent: KillReportConsent = {
   read: () => pageTelemetry()?.consent() ?? 'unknown',
   subscribe: (listener) => pageTelemetry()?.onConsentChange(listener) ?? (() => undefined),
+  count: (kill) => {
+    pageTelemetry()?.recordKill({
+      ...(kill.work.kernel === undefined ? {} : { kernel: kill.work.kernel }),
+      ...(kill.work.phase === undefined ? {} : { phase: kill.work.phase }),
+      classification: kill.classification,
+    });
+  },
 };
 
 export function MemoryKillReporter({
@@ -75,6 +84,8 @@ export function MemoryKillReporter({
           // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
           if (await reportDetectedKill(kill)) {
             signal.settleKill(kill.id);
+            // Counted once, as it leaves the marker: a kill still pending is counted when it is delivered.
+            consent.count(kill);
           }
         }
       } finally {

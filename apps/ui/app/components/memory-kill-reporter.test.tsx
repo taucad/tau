@@ -12,11 +12,17 @@ vi.mock('#lib/tab-kill-reporting.js', () => ({
 }));
 
 /** A consent source the test moves by hand. */
-const consentSource = (initial: ReportingConsent): KillReportConsent & { set: (next: ReportingConsent) => void } => {
+const consentSource = (
+  initial: ReportingConsent,
+): KillReportConsent & {
+  set: (next: ReportingConsent) => void;
+  count: ReturnType<typeof vi.fn<KillReportConsent['count']>>;
+} => {
   let current = initial;
   const listeners = new Set<() => void>();
   return {
     read: () => current,
+    count: vi.fn<KillReportConsent['count']>(),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
@@ -135,6 +141,30 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
         expect(pendingInMarker()).toEqual([]);
       });
       expect(reportDetectedKill).not.toHaveBeenCalled();
+    });
+
+    it('counts a delivered kill once in runtime telemetry, by kernel and phase, and never on denied', async () => {
+      const storage = globalThis.sessionStorage;
+      const previous = createMemoryKillSignal({ storage, navigationType: 'navigate', deviceClass: 'standard' });
+      previous.takeDetectedKills();
+      previous.work({ kernel: 'replicad', phase: 'mesh' });
+      const signal = createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'standard' });
+      const granted = consentSource('granted');
+      render(<MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={granted} />);
+
+      await vi.waitFor(() => {
+        expect(granted.count).toHaveBeenCalledTimes(1);
+      });
+      const [counted] = granted.count.mock.calls[0] ?? [];
+      expect(counted?.classification).toBe('foreground');
+      expect(counted?.work).toMatchObject({ kernel: 'replicad', phase: 'mesh' });
+
+      const denied = consentSource('denied');
+      render(<MemoryKillReporter signal={killedPage()} liveProjectCount={0} chatCount={0} consent={denied} />);
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+      expect(denied.count).not.toHaveBeenCalled();
     });
 
     it('holds the kill while consent is unknown and sends it once it resolves to granted', async () => {

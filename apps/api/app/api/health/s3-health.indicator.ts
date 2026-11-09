@@ -31,7 +31,10 @@ export class S3HealthIndicator {
       const responseTimeMs = Math.round(performance.now() - start);
 
       if (result === undefined) {
-        return indicator.down({ responseTimeMs, message: 'Probe object missing — run scripts/seed-r2-defaults.sh' });
+        return indicator.down({
+          responseTimeMs,
+          message: 'Probe object missing — the API seeds it at boot; see the StorageSeeder log',
+        });
       }
 
       // The private-publication serving path is gated on this bucket existing;

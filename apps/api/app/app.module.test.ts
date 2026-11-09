@@ -18,6 +18,7 @@ import { ApiModule } from '#api/api.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { DirectModelInvocationService } from '@taucad/api-llm-gateway';
 import { StorageAccountingScheduler } from '@taucad/api-object-storage/accounting/scheduler';
+import { StorageSeeder } from '@taucad/api-object-storage/seed';
 
 /**
  * Whole-graph DI guard. `compile()` instantiates every module, provider and
@@ -43,6 +44,7 @@ describe('AppModule', () => {
     expect(moduleRef.get(ChatController)).toBeInstanceOf(ChatController);
     expect(moduleRef.get(DirectModelInvocationService)).toBeInstanceOf(DirectModelInvocationService);
     expect(moduleRef.get(StorageAccountingScheduler)).toBeInstanceOf(StorageAccountingScheduler);
+    expect(moduleRef.get(StorageSeeder)).toBeInstanceOf(StorageSeeder);
     expect(
       ApiModule.forRoot({ tauCloudEnabled: false }).imports?.map((entry) =>
         typeof entry === 'function' ? entry.name : 'module' in entry ? entry.module.name : '',

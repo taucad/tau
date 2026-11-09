@@ -2,6 +2,7 @@ import { createHash, sign } from 'node:crypto';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { isModelListEntryEnabled, modelList } from '#models/model.constants.js';
 import type { ModelProviderWire } from '#model-invocation.types.js';
+import type { Model } from '@taucad/chat/model-catalog';
 
 export type GatewayProviderId =
   | 'anthropic'
@@ -13,6 +14,13 @@ export type GatewayProviderId =
   | 'vertexai'
   | 'xai';
 export type FundedGatewayProviderId = Exclude<GatewayProviderId, 'cerebras' | 'moonshot'>;
+/**
+ * A provider only the self-host helper reaches: keyless, local, never funded and
+ * never a catalog route, so the gateway surface cannot address it.
+ */
+export type LocalProviderId = 'ollama';
+/** Every provider target the transport can call: the catalog's gateway providers and the local ones. */
+export type ProviderTargetId = GatewayProviderId | LocalProviderId;
 
 const providerTargets = {
   anthropic: { key: 'ANTHROPIC_API_KEY', url: 'https://api.anthropic.com/v1/messages', wire: 'anthropic' },
@@ -43,7 +51,15 @@ const providerTargets = {
     url: 'https://aiplatform.googleapis.com',
     wire: 'openai-completions',
   },
-} as const satisfies Record<GatewayProviderId, { key: string; url: string; wire: ModelProviderWire }>;
+  // Keyless: `key` names the switch that enables it, not a credential.
+  ollama: {
+    key: 'OLLAMA_ENABLED',
+    url: 'http://localhost:11434/v1/chat/completions',
+    wire: 'openai-completions',
+  },
+} as const satisfies Record<ProviderTargetId, { key: string; url: string; wire: ModelProviderWire }>;
+
+const localProviderIds = new Set<string>(['ollama'] satisfies LocalProviderId[]);
 
 export type GatewayModelRoute = {
   readonly routeId: string;
@@ -52,7 +68,7 @@ export type GatewayModelRoute = {
   readonly wire: ModelProviderWire;
 };
 
-const gatewayProviderIds = new Set<string>(Object.keys(providerTargets));
+const gatewayProviderIds = new Set<string>(Object.keys(providerTargets).filter((id) => !localProviderIds.has(id)));
 export const fundedGatewayProviderIds: readonly FundedGatewayProviderId[] = [
   'anthropic',
   'morph',
@@ -244,6 +260,38 @@ const vertexAccessTokens = createVertexAccessTokenCache();
 
 export const gatewayModelRoutes = (): readonly GatewayModelRoute[] => [...routes.values()];
 
+/** Where a self-host helper sends one listed model: a catalog route, or the local Ollama target. */
+export type HelperModelRoute = {
+  readonly modelId: string;
+  readonly providerId: ProviderTargetId;
+  readonly wire: ModelProviderWire;
+};
+
+/**
+ * The route a self-host helper takes for one listed model.
+ *
+ * @param model - A model `ModelService.getModels` listed.
+ * @returns Its catalog route, the local Ollama target for a discovered Ollama
+ * model, or `undefined` when the model has neither.
+ */
+export const helperModelRoute = (model: Pick<Model, 'id' | 'model' | 'provider'>): HelperModelRoute | undefined => {
+  if (model.provider.id === 'ollama') {
+    return { modelId: model.model, providerId: 'ollama', wire: providerTargets.ollama.wire };
+  }
+  const route = routes.get(model.id);
+  return route === undefined ? undefined : { modelId: route.modelId, providerId: route.providerId, wire: route.wire };
+};
+
+/**
+ * The model id the provider itself expects: Vertex's OpenAI-compatible endpoint
+ * names a Google model `google/<id>`.
+ *
+ * @param route - The resolved route.
+ * @returns The provider's model id.
+ */
+export const upstreamModelId = (route: Pick<HelperModelRoute, 'modelId' | 'providerId'>): string =>
+  route.providerId === 'vertexai' ? `google/${route.modelId}` : route.modelId;
+
 export const resolveGatewayModelRoute = (routeId: string, wire: ModelProviderWire): GatewayModelRoute => {
   const route = routes.get(routeId);
   if (!route || route.wire !== wire) {
@@ -336,7 +384,7 @@ export const vertexUpstreamBody = (body: unknown): unknown => {
 
 export const executeGatewayProviderRequest = async (input: {
   readonly config: GatewayConfig;
-  readonly providerId: GatewayProviderId;
+  readonly providerId: ProviderTargetId;
   readonly body: unknown;
   readonly headers: Readonly<Record<string, string>>;
   readonly signal: AbortSignal;
@@ -345,6 +393,19 @@ export const executeGatewayProviderRequest = async (input: {
   const fetchOnce = input.fetch ?? globalThis.fetch.bind(globalThis);
   const target = providerTargets[input.providerId];
   const configured = input.config.get(target.key);
+  if (localProviderIds.has(input.providerId)) {
+    if (configured !== true) {
+      throw new ServiceUnavailableException(`Configured provider ${input.providerId} is unavailable`);
+    }
+    // A local server on the operator's own machine: no credential to send.
+    return fetchOnce(target.url, {
+      method: 'POST',
+      redirect: 'error',
+      signal: input.signal,
+      body: JSON.stringify(input.body),
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   const credentials = input.providerId === 'vertexai' ? vertexCredentials(configured) : undefined;
   const key = typeof configured === 'string' && configured.length > 0 ? configured : undefined;
   const accessToken = credentials ? await vertexAccessTokens.token(credentials, fetchOnce, input.signal) : key;

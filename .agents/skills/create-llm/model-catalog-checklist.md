@@ -16,10 +16,12 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 | Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`     |
 | Vertex response/request shim       | `packages/agent-host/src/transport/vertex-completions-shim.ts`     |
 | UI reasoning derivation            | `apps/ui/app/chat-clients/_internal/turn-body.ts`                  |
-| Self-host helper path (LangChain)  | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`      |
+| Self-host helper codec             | `apps/libs/api-llm-gateway/src/providers/helper-wire.ts`           |
+| Provider metadata (OTel, cache)    | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`      |
 | Helper invocation                  | `apps/libs/api-llm-gateway/src/direct-model-invocation.service.ts` |
 | Environment config                 | `apps/api/app/config/environment.config.ts`                        |
 | Live gateway suite (gateway URL)   | `packages/agent-host/tests/live/provider-streaming.live.test.ts`   |
+| Live helper path (self-host)       | `apps/api/app/api/llm/helper-path.live.test.ts`                    |
 
 ## Research Checklist
 
@@ -125,12 +127,14 @@ Avoid:
 
 `gateway-model-transport.ts` then applies it: Anthropic gets `thinkingEnabled` plus budget/display/effort, the Responses providers get `reasoningEffort`/`reasoningSummary`, and Vertex gets `samplingParams.extra_body.google`.
 
+The self-host helper (`project_name`, `commit_name` with Tau Cloud off) reads the same `configuration` in `helper-wire.ts`: the Responses `reasoning` block, Anthropic `thinking` and `output_config`, Vertex `thinkingLevel` as `extra_body.google.thinking_config.thinking_level`, Moonshot's `reasoning_effort` (with no ceiling or temperature), and `temperature` where the row sets one. The helper's own 64-token ceiling replaces the row's. A new reasoning control a helper must forward is a codec change there, with a `helper-wire.test.ts` case.
+
 ## Vertex Wire Facts
 
 A Vertex row goes through Tau's OpenAI-compatible route, not Gemini's native `generateContent`. Facts a model author must know:
 
 - Thinking levels are per model. Gemini 3.5 Flash and 3.5 Flash-Lite accept `MINIMAL` upstream; Gemini 3.8 Flash and 3.1 Pro accept `LOW`, `MEDIUM`, `HIGH` only. Tau cannot declare `MINIMAL`: the `thinkingLevel` enum in `model.schema.ts` and the gateway transport admit only `LOW`, `MEDIUM`, `HIGH`. Setting a level the model rejects is a request-time refusal, not a downgrade.
-- Streamed tool-call arguments are never requested, on either Vertex wire: `extra_body.google.stream_function_call_arguments` on the OpenAI-compatible route (`billable-model-request.ts` refuses it) and the `streamFunctionCallArguments` client option in `provider.service.ts`, which the Google client turns into `toolConfig.functionCallingConfig.streamFunctionCallArguments` on native `generateContent` — emitted even for a tool-free turn. Vertex sheds requests carrying it with a pre-stream 499 CANCELLED while its shared-quota pool is stressed (near-deterministic inside such a window, 0/120 outside one), and its streamed-arguments serializer also cancels a turn mid-stream — HTTP 200, real deltas, then a bare `[{"error":{"code":499,…"CANCELLED"}}]` tail no pre-stream retry can see — whenever a tool call closes a nested object on a string value. That value shape is why no schema contract test can guarantee it away: `apply_parameter_operation` is 0/9 live with the flag and 9/9 without it across Gemini 3.7 Flash, 3.8 Flash and 3.1 Pro, so the live matrix's `apply_parameter_operation` row is the standing guard for anyone re-enabling the flag once Google fixes the serializer.
+- Streamed tool-call arguments are never requested: `extra_body.google.stream_function_call_arguments` on the OpenAI-compatible route is refused by `billable-model-request.ts` and never sent by the helper codec. Every Vertex call, the self-host helper included, uses that route; none uses native `generateContent`. Vertex sheds requests carrying it with a pre-stream 499 CANCELLED while its shared-quota pool is stressed (near-deterministic inside such a window, 0/120 outside one), and its streamed-arguments serializer also cancels a turn mid-stream — HTTP 200, real deltas, then a bare `[{"error":{"code":499,…"CANCELLED"}}]` tail no pre-stream retry can see — whenever a tool call closes a nested object on a string value. That value shape is why no schema contract test can guarantee it away: `apply_parameter_operation` is 0/9 live with the flag and 9/9 without it across Gemini 3.7 Flash, 3.8 Flash and 3.1 Pro, so the live matrix's `apply_parameter_operation` row is the standing guard for anyone re-enabling the flag once Google fixes the serializer.
 - Thought-signature echo is handled by `vertex-completions-shim.ts`: it captures `extra_content.google.thought_signature` off the response stream and replays it onto outbound tool calls. Do not add a second signature path in a catalog change.
 - Tool schemas must satisfy the contract test. Vertex rejects `$ref`/`definitions` loops and a non-object top-level schema outright.
 - The gateway exchanges the service-account JSON in `GOOGLE_VERTEX_AI_CREDENTIALS` for an OAuth token and prefixes the model id with `google/`; the catalog row carries the bare provider model id.
@@ -170,6 +174,12 @@ Then the live ladder. `api:test:live` runs an in-process live gateway harness (s
 
 ```bash
 pnpm nx run api:test:live
+```
+
+The self-host helper path has its own live harness, skipped unless `TAU_LIVE_PROVIDERS=1`: for each configured provider it streams a helper request, an image helper request, and a tool call through the direct `gateway` surface, printing provider, model id, status, latency and token counts only:
+
+```bash
+TAU_LIVE_PROVIDERS=1 pnpm nx run api:test:live -- app/api/llm/helper-path.live.test.ts
 ```
 
 The gateway-URL variant drives a running gateway from the agent host instead:

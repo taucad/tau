@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Seed default assets and the readiness probe object into the single R2 content bucket.
-# Requires AWS CLI v2 configured with credentials that can write to the bucket.
+# Seed default assets and the readiness probe object into a content bucket by hand.
+# The API seeds the same three objects at boot (`StorageSeeder`, apps/libs/api-object-storage/src/storage-seed.ts),
+# creating each only when absent, so a deployed environment needs no run of this script; it stays for a local or
+# scratch bucket. Unlike the API it overwrites what is there. Requires AWS CLI v2 configured with credentials that
+# can write to the bucket.
 #
 # Namespace prefixes (blobs/, derivatives/, defaults/, __health/) are compile-time
 # constants in apps/libs/api-object-storage/src/storage.constants.ts and mirrored verbatim here.

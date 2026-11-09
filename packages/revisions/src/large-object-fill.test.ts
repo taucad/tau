@@ -22,7 +22,9 @@ const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as con
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
-const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean }> = {}) => {
+const setup = (
+  options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean; retryMilliseconds?: number[] }> = {},
+) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
@@ -96,6 +98,8 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
     report: (report) => reports.push(report),
     flushMilliseconds: options.flushMilliseconds ?? 1,
     reportMilliseconds: 1,
+    /* A failed fill retries on its own; a test that does not drive it waits longer than it runs. */
+    retryMilliseconds: options.retryMilliseconds ?? [60_000],
     ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
   });
   const land = (path: keyof typeof parts): void => {
@@ -486,6 +490,47 @@ describe('large-object fill', () => {
       expect(harness.reports.at(-1)?.facet).toBeUndefined();
     });
     expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('tries a failed fill again on its own, keeping what arrived, until it lands', async () => {
+    const harness = setup({ retryMilliseconds: [1] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.fail(new Error('The remote did not answer in time.'));
+    await done;
+    expect(harness.reports.at(-1)?.facet).toMatchObject({ phase: 'failed' });
+    /* Nobody presses Try again: the fill starts over by itself, and what it wrote stays written. */
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(2);
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    harness.fail(new Error('Still no answer.'));
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(3);
+    });
+    harness.finish(harness.fullTree());
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('stops retrying a failed fill once the checkout is forgotten', async () => {
+    const harness = setup({ retryMilliseconds: [20] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.fail(new Error('The remote did not answer in time.'));
+    await done;
+    harness.fill.forget(place.id);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 60);
+    });
+    expect(harness.readTree).toHaveBeenCalledTimes(1);
   });
 
   it('resumes from the checkout itself, and does nothing when it holds no placeholder', async () => {

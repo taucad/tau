@@ -59,6 +59,10 @@ type Fill = {
   flushing: Promise<void>;
   flushTimer: ReturnType<typeof setTimeout> | undefined;
   reportTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The fill's next automatic attempt after a failure; cleared by a manual retry, a success or retirement. */
+  retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Failed attempts in a row, which space the automatic retries out. */
+  failures: number;
   /** A timed flush is writing; another timer waits for it rather than queueing behind it. */
   flushRunning: boolean;
   /** Objects arrived while a timed flush ran: the next one is scheduled when it ends. */
@@ -100,6 +104,11 @@ const defaultReportMilliseconds = 250;
 const defaultFlushBytes = 32 * 1024 * 1024;
 /** How many times one flush re-sweeps a checkout a writer changed under it before leaving it to the next flush. */
 const conflictSweeps = 3;
+/**
+ * The waits before a failed fill tries again on its own, by failures in a row; the last repeats. A failed fill
+ * is never left for the person to notice: it keeps what arrived and tries again until it lands or is replaced.
+ */
+const defaultRetryMilliseconds: readonly number[] = [2000, 5000, 15_000, 30_000, 60_000];
 
 /** How one wait on a fill ends early: `signal` aborts it, `stall` gives up after that many milliseconds without progress. @internal */
 export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
@@ -153,6 +162,8 @@ export const createLargeObjectFill = (
     reportMilliseconds?: number;
     /** The most bytes one flush writes; see {@link defaultFlushBytes}. */
     flushBytes?: number;
+    /** The waits before a failed fill tries again; see {@link defaultRetryMilliseconds}. */
+    retryMilliseconds?: readonly number[];
   }>,
 ): Readonly<{
   fill: (place: Checkout, head: RevisionId, placeholders?: ReadonlyMap<string, Placeholder>) => Promise<void>;
@@ -173,6 +184,7 @@ export const createLargeObjectFill = (
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
+  const retryMilliseconds = dependencies.retryMilliseconds ?? defaultRetryMilliseconds;
   /* One fill per checkout; a newer one replaces it, and the older one's callbacks go quiet. */
   const fills = new Map<string, Fill>();
   /* Checkouts this fill has given its word on, so a host never reads silence as "nothing to fill" (D10 `filled`). */
@@ -190,8 +202,10 @@ export const createLargeObjectFill = (
   const retire = (fill: Fill): void => {
     clearTimeout(fill.flushTimer);
     clearTimeout(fill.reportTimer);
+    clearTimeout(fill.retryTimer);
     fill.flushTimer = undefined;
     fill.reportTimer = undefined;
+    fill.retryTimer = undefined;
     fill.controller.abort();
     wake(fill);
   };
@@ -261,6 +275,8 @@ export const createLargeObjectFill = (
       facet: done ? undefined : facetOf(fill),
       retry: () => {
         if (isCurrent(fill) && fill.error !== undefined) {
+          clearTimeout(fill.retryTimer);
+          fill.retryTimer = undefined;
           fill.running = run(fill);
         }
       },
@@ -650,6 +666,7 @@ export const createLargeObjectFill = (
       if ([...fill.pending.values()].some(({ oid }) => !fill.arrived.has(oid))) {
         throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds could not be fetched.');
       }
+      fill.failures = 0;
       tell(fill);
     } catch (error) {
       if (!isCurrent(fill)) {
@@ -658,8 +675,24 @@ export const createLargeObjectFill = (
       /* Whatever arrived before the failure is still written, and what changed meanwhile swept. */
       await flushAll(fill).catch(() => undefined);
       fill.error = error instanceof Error ? error.message : String(error);
+      fill.failures += 1;
       tell(fill);
+      retryLater(fill);
     }
+  };
+  /* A failed fill tries again on its own, spaced out by its failures in a row, while it is still the checkout's. */
+  const retryLater = (fill: Fill): void => {
+    if (!isCurrent(fill) || fill.error === undefined) {
+      return;
+    }
+    clearTimeout(fill.retryTimer);
+    const delay = retryMilliseconds[Math.min(fill.failures, retryMilliseconds.length) - 1] ?? 0;
+    fill.retryTimer = setTimeout(() => {
+      fill.retryTimer = undefined;
+      if (isCurrent(fill) && fill.error !== undefined) {
+        fill.running = run(fill);
+      }
+    }, delay);
   };
 
   /**
@@ -713,6 +746,8 @@ export const createLargeObjectFill = (
       flushing: Promise.resolve(),
       flushTimer: undefined,
       reportTimer: undefined,
+      retryTimer: undefined,
+      failures: 0,
       flushRunning: false,
       flushAgain: false,
       unflushedBytes: 0,

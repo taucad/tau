@@ -24,7 +24,7 @@ import {
 } from '#lib/agent-host-placement.js';
 import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
-import { unknownIconId } from '#components/icons/svg-icon.js';
+import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 
 /**
  * Whether this project can host the agent log, as three distinct states.

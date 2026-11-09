@@ -140,12 +140,6 @@ const namingConventionBase = [
   },
   { selector: 'typeLike', format: ['StrictPascalCase'] },
   {
-    selector: 'variable',
-    types: ['boolean'],
-    format: ['StrictPascalCase'],
-    prefix: ['is', 'has', 'can', 'should', 'will', 'did'],
-  },
-  {
     selector: 'interface',
     filter: '^(?!I)[A-Z]',
     format: ['StrictPascalCase'],
@@ -277,10 +271,6 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
 const moduleBoundaryOptions = {
-  // Bambu's unpublished hardware qualifier uses host camera capture; its shipped
-  // plugin and browser-safe settings subpath do not import the host.
-  // ponytail: exclude this development-only edge; split the qualifier project if it gains runtime consumers.
-  ignoredCircularDependencies: [['bambu', 'host']],
   allowCircularSelfDependency: true,
   /*
    * The Quick Look extensions are a nested app project (`desktop-quick-look`,
@@ -643,47 +633,16 @@ const config = [
     ],
   },
 
-  {
-    ...tseslint.configs.base,
-    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-    languageOptions: {
-      ...tseslint.configs.base.languageOptions,
-      // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-      parserOptions: {
-        ...tseslint.configs.base.languageOptions?.parserOptions,
-        projectService: {
-          allowDefaultProject: [
-            'eslint.config.mjs',
-            'examples/electron/electron.vite.config.ts',
-            'apps/api/vitest.config.ts',
-            'packages/runtime/src/nextjs/package-assets-loader.mjs',
-            'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
-          ],
-        },
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
+  /*
+   * Parser only, no type information: every type-aware rule runs once, in oxlint (tsgolint). No ESLint rule
+   * here reads parser services, so a `projectService` program would only repeat that type-check.
+   */
+  tseslint.configs.base,
 
   {
     plugins: { '@nx': nxEslintPlugin },
     rules: {
       '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
-    },
-  },
-
-  {
-    /* The unpublished X1C qualifier imports the host for hardware-only capture. Nx checks the closing
-     * path (host → agent-tools → bambu), not that import edge, so scope the documented exception here. */
-    files: ['packages/plugins/bambu/scripts/qualify-x1c.mts'],
-    rules: {
-      '@nx/enforce-module-boundaries': [
-        'error',
-        {
-          ...moduleBoundaryOptions,
-          ignoredCircularDependencies: [...moduleBoundaryOptions.ignoredCircularDependencies, ['host', 'agent-tools']],
-        },
-      ],
     },
   },
 

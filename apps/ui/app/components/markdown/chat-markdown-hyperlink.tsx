@@ -7,7 +7,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { visit } from 'unist-util-visit';
 import type { Root } from 'hast';
 

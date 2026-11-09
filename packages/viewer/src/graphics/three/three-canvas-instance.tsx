@@ -33,6 +33,8 @@ import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-envi
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 import { viewerContextLost, viewerRendererCreated } from '#lib/viewer-events.js';
+import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
+import type { FinishViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 
 /** The part of a `GPUDevice` that reports its loss; `lib.dom` baselines may predate the WebGPU types. */
@@ -237,7 +239,30 @@ export function ThreeCanvasInstance({
 
   const isCanvasReady = initializedRenderer?.factory === glProperty;
   const isFirstFramePresented = presentedFactory === glProperty;
+  // Load spans for this factory's mount: commit to `onCreated`, then `onCreated` to the first presented frame.
+  const loadSpansRef = useRef<{
+    factory?: TauR3fGlFactory;
+    finishMount?: FinishViewerLoadSpan;
+    finishFirstFrame?: FinishViewerLoadSpan;
+  }>({});
+  useLayoutEffect(() => {
+    if (isContextLost) {
+      return;
+    }
+    const spans: typeof loadSpansRef.current = {
+      factory: glProperty,
+      finishMount: beginViewerLoadSpan('canvas.mount'),
+    };
+    loadSpansRef.current = spans;
+    return () => {
+      spans.finishMount?.('cancelled');
+      spans.finishFirstFrame?.('cancelled');
+    };
+  }, [glProperty, isContextLost]);
   const markPresented = useCallback(() => {
+    if (loadSpansRef.current.factory === glProperty) {
+      loadSpansRef.current.finishFirstFrame?.();
+    }
     // The factory is a function: pass it through an updater so React stores it rather than calling it.
     setPresentedFactory(() => glProperty);
     // The stage reads this to stop being busy (`ViewerStage` sets `aria-busy` on its canvas region).
@@ -298,6 +323,11 @@ export function ThreeCanvasInstance({
         return;
       }
       rootRef.current = state;
+      const loadSpans = loadSpansRef.current;
+      if (loadSpans.factory === glProperty) {
+        loadSpans.finishMount?.();
+        loadSpans.finishFirstFrame ??= beginViewerLoadSpan('frame.first');
+      }
       installTauPointerRays(state);
       // R3F types its renderer as WebGL even when the factory supplies WebGPU.
       const renderer = state.gl as RendererInstance;

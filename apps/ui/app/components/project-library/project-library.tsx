@@ -24,7 +24,7 @@ import {
   DataTablePagination,
   DataTableSortingDropdown,
   DataTableColumnVisibilityDropdown,
-} from '#components/ui/data-table.js';
+} from '@taucad/ui-kit/components/data-table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +38,7 @@ import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectListShape } from '#hooks/use-project-list-shape.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   AlertDialog,
   AlertDialogAction,

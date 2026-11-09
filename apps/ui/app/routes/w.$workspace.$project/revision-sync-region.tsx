@@ -48,7 +48,7 @@ import type { GithubRepository } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
 import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';

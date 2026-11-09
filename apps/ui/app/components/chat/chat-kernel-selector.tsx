@@ -5,7 +5,7 @@ import type { KernelProvider } from '@taucad/runtime';
 import type { KernelConfiguration, kernelConfigurations } from '@taucad/types/constants';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';

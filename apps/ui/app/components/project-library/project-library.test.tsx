@@ -114,7 +114,7 @@ const { mockCloseProject, mockToastSuccess, mockToastError, mockToastWarning } =
 vi.mock('#hooks/use-sidebar-status.js', () => ({
   useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
 }));
 

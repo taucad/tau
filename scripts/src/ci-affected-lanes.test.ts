@@ -101,9 +101,11 @@ const testJobs = Object.entries(ci.jobs)
 describe('ci.yml affected-only lanes', () => {
   it('should find the service lanes that run project test targets', () => {
     expect([...affectedPlanOutputs()]).toEqual(
-      expect.arrayContaining(['api', 'billing', 'size', 'formal', 'browser', 'geospec-examples']),
+      expect.arrayContaining(['api', 'billing', 'cli-e2e', 'size', 'formal', 'browser', 'geospec-examples']),
     );
-    expect(testJobs.map(({ name }) => name)).toEqual(expect.arrayContaining(['affected-lane', 'api', 'billing-e2e']));
+    expect(testJobs.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['affected-lane', 'api', 'billing-e2e', 'cli-e2e']),
+    );
   });
 
   it('should select every lane from one affected list and one graph', () => {
@@ -116,6 +118,7 @@ describe('ci.yml affected-only lanes', () => {
       apps: { type: 'app' },
       api: { tags: ['scope:api'] },
       billing: { targets: ['test:billing-foundation'] },
+      'cli-e2e': { targets: ['test:scenarios'] },
       size: { targets: ['size'] },
       formal: { targets: ['formal'] },
       'geospec-examples': { targets: ['test-geospec'] },
@@ -165,7 +168,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(action).toContain('event=merge_group&status=success');
     // The required gate still waits for the plan and every lane, and passes a skip only on the plan's verdict.
     const gate = ci.jobs['affected'];
-    expect(gate?.needs).toEqual(['plan', 'affected-lane', 'browser', 'geospec-examples']);
+    expect(gate?.needs).toEqual(['plan', 'affected-lane', 'browser', 'geospec-examples', 'cli-e2e']);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
     expect(check).toContain('test "$LANES_RESULT" = success');
@@ -195,6 +198,21 @@ describe('ci.yml affected-only lanes', () => {
     expect(ci.jobs['api']?.if).toBe(
       expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true'"),
     );
+  });
+
+  it('should run the CLI end-to-end suites in their own lane that the required check aggregates', () => {
+    expect(ci.jobs['cli-e2e']?.if).toBe(
+      expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true'"),
+    );
+    const gate = ci.jobs['affected'];
+    expect([gate?.needs ?? []].flat()).toContain('cli-e2e');
+    const require = gate?.steps?.find((step) => step.env?.['CLI_E2E_RESULT'] !== undefined);
+    expect(require?.env?.['CLI_E2E_REQUIRED']).toBe(expression('needs.plan.outputs.cli-e2e'));
+    expect(require?.env?.['CLI_E2E_RESULT']).toBe(expression('needs.cli-e2e.result'));
+    expect(require?.run).toContain('if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi');
+    // A push that reuses the merge-queue verdict skips the lane, as it skips the shards.
+    const planStep = ci.jobs['plan']?.steps?.find((step) => step.id === 'plan')?.run ?? '';
+    expect(planStep).toMatch(/if \[ -n "\$REUSED" \]; then[^]*?cli_e2e=false[^]*?fi/u);
   });
 });
 

@@ -1,7 +1,7 @@
 import type { ColumnDef, Row } from '@tanstack/react-table';
 import type { ReactNode } from 'react';
 import { format } from 'date-fns';
-import { DataTableColumnHeader } from '#components/ui/data-table.js';
+import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';

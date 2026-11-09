@@ -17,7 +17,7 @@ import {
   useReceiptCredits,
 } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import type { AgentProjection, AgentProjectionMetadata, AgentProjectionState } from '#hooks/use-agent-projections.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';

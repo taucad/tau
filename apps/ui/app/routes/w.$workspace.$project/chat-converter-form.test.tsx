@@ -9,11 +9,11 @@ import { toJSONSchema } from 'zod';
 import type { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { ExportSchemaForm } from '#routes/w.$workspace.$project/chat-converter.js';
 import { createConfigurationParameterOwner } from '#routes/w.$workspace.$project/chat-converter.test-utils.js';
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: vi.fn() },
 }));
 

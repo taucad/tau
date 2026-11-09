@@ -1,0 +1,99 @@
+{
+  "name": "@taucad/ui-kit",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app presentational components and icons with no feature dependencies",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/ui-kit"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/ui-kit#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "components",
+    "icons"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./components/collection-empty-state": "./src/components/collection-empty-state.tsx",
+    "./components/color-picker": "./src/components/color-picker.tsx",
+    "./components/combobox": "./src/components/combobox.tsx",
+    "./components/coming-soon": "./src/components/coming-soon.tsx",
+    "./components/data-table": "./src/components/data-table.tsx",
+    "./components/date-picker": "./src/components/date-picker.tsx",
+    "./components/date-range-picker": "./src/components/date-range-picker.tsx",
+    "./components/dropzone": "./src/components/dropzone.tsx",
+    "./components/image-preview": "./src/components/image-preview.tsx",
+    "./components/input-tags": "./src/components/input-tags.tsx",
+    "./components/lazy-section": "./src/components/lazy-section.tsx",
+    "./components/omni-scroller": "./src/components/omni-scroller.tsx",
+    "./components/responsive-tabs": "./src/components/responsive-tabs.tsx",
+    "./components/spinner": "./src/components/spinner.tsx",
+    "./components/viewer-layer": "./src/components/viewer-layer.tsx",
+    "./icons/angle": "./src/icons/angle.tsx",
+    "./icons/box-down": "./src/icons/box-down.tsx",
+    "./icons/file-extension-icon": "./src/icons/file-extension-icon.tsx",
+    "./icons/parts": "./src/icons/parts.tsx",
+    "./icons/svg-icon": "./src/icons/svg-icon.tsx",
+    "./icons/svg-path-icon": "./src/icons/svg-path-icon.tsx",
+    "./icons/svg-sprite-loader": "./src/icons/svg-sprite-loader.tsx",
+    "./icons/tau-text-wordmark": "./src/icons/tau-text-wordmark.tsx",
+    "./icons/tau-wordmark": "./src/icons/tau-wordmark.tsx",
+    "./icons/tau": "./src/icons/tau.tsx",
+    "./icons/thought-bubble": "./src/icons/thought-bubble.tsx",
+    "./utils/compose": "./src/utils/compose.tsx",
+    "./utils/when": "./src/utils/when.tsx",
+    "./icons/generated/svg-icons": "./src/icons/generated/svg-icons.d.ts",
+    "./icons/generated/sprite.svg": "./src/icons/generated/sprite.svg",
+    "./icons/generated/payment-sprite.svg": "./src/icons/generated/payment-sprite.svg",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#components/*.js": "./src/components/*.tsx",
+    "#icons/generated/*.js": "./src/icons/generated/*.d.ts",
+    "#icons/*.js": "./src/icons/*.tsx",
+    "#utils/*.js": "./src/utils/*.tsx",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@base-ui/react": "catalog:",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.14.3",
+    "@taucad/chat": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/workbench-panes": "workspace:*",
+    "class-variance-authority": "catalog:",
+    "date-fns": "catalog:",
+    "lucide-react": "catalog:",
+    "react-colorful": "^5.7.0",
+    "react-day-picker": "^10.0.1",
+    "react-dropzone": "^14.4.1"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "react-router": "catalog:"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:"
+  }
+}

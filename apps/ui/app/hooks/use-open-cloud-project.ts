@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   assertCloudProjectActive,
   CloudProjectUnavailableError,

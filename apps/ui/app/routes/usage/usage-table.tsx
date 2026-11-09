@@ -6,7 +6,7 @@ import {
   DataTableSearch,
   DataTableSortingDropdown,
   DataTableColumnVisibilityDropdown,
-} from '#components/ui/data-table.js';
+} from '@taucad/ui-kit/components/data-table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { formatCredits } from '#utils/credits.utils.js';
 import { formatCreditAtomsDisplay } from '@taucad/billing';

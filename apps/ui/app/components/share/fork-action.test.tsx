@@ -5,7 +5,7 @@ import type * as ReactRouterModule from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CreatedProject, CreateProjectOptions } from '#hooks/use-project-manager.js';
 import { ForkAction, remixProjectName } from '#components/share/fork-action.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 const navigateMock = vi.fn();
 
@@ -41,7 +41,7 @@ vi.mock('#hooks/use-project-creation-location.js', () => ({
   }),
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 

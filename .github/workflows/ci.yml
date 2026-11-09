@@ -61,6 +61,7 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
       billing: ${{ steps.plan.outputs.billing }}
+      cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
@@ -108,10 +109,12 @@ jobs:
           # (`check-standalone-project.ts` runs the CLI from source and imports the UI's project
           # factory); Nx marks each affected when any dependency of it changes. Billing
           # contracts: the project that owns them (`api-billing`) or one it depends on changed.
+          # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"]},
              "billing": {"targets": ["test:billing-foundation"]},
+             "cli-e2e": {"targets": ["test:scenarios"]},
              "size": {"targets": ["size"]},
              "formal": {"targets": ["formal"]},
              "geospec-examples": {"targets": ["test-geospec"]},
@@ -143,10 +146,12 @@ jobs:
           formal=$(flag formal)
           browser=$(flag browser)
           geospec_examples=$(flag geospec-examples)
+          cli_e2e=$(flag cli-e2e)
           browser_projects=$(jq -c '.browser' <<< "$lanes")
           run_api=$api
           run_billing=$billing
-          # The queue run already ran the formal, browser and GeoSpec lanes on this tree, and
+          # The queue run already ran the formal, browser, GeoSpec and CLI end-to-end lanes on
+          # this tree, and
           # the API tests and billing contracts where it concluded them `success`: both run
           # every suite of their target, not an affected subset, so that verdict holds for
           # this commit whatever base this push diffs against. A service lane the queue run
@@ -155,16 +160,18 @@ jobs:
             formal=false
             browser=false
             geospec_examples=false
+            cli_e2e=false
             browser_projects='[]'
             if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi
             if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi
-            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip; queue service lanes: $QUEUE_LANES."
+            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec and CLI end-to-end lanes skip; queue service lanes: $QUEUE_LANES."
           fi
           {
             echo "apps=$(jq -c '.apps' <<< "$lanes")"
             echo "browser-projects=$browser_projects"
             echo "api=$run_api"
             echo "billing=$run_billing"
+            echo "cli-e2e=$cli_e2e"
             echo "size=$(flag size)"
             echo "formal=$formal"
             echo "browser=$browser"
@@ -221,6 +228,25 @@ jobs:
       - name: Run workspace validators
         if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
+
+      # A change to the PicoGK browser host pin merges only once both dependency hosts, production
+      # dependencies.tau.new and staging dependencies.taucad.dev, serve every blob it names with its
+      # pinned digest, so `main` never names a digest either environment does not serve (charter
+      # picogk-interim-digest-consumer, D9 and I2). It runs in this required check, on the pull
+      # request and in the merge queue, only when the pin differs from the base.
+      - name: Prove a changed PicoGK browser host pin is served on both hosts
+        if: steps.queue.outputs.run-id == '' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PIN: packages/plugins/picogk/browser-host.pin.json
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- "$PIN"; then
+            echo "$PIN is unchanged from the base; no blob to prove."
+          else
+            node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
+          fi
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every
@@ -292,9 +318,10 @@ jobs:
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
       # The three test shards split the affected projects with a `test` target by
-      # their test-file counts. The project list comes from the graph at run time,
+      # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
+      # duration snapshot). The project list comes from the graph at run time,
       # never from this file: one `nx affected -t test --graph=<file>` writes the affected
-      # `test` tasks and the project graph (each project's root and tags) without running
+      # `test` tasks and the project graph (each project's tags) without running
       # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
@@ -331,22 +358,13 @@ jobs:
               # The task graph also holds the tasks `test` depends on (builds and the like),
               # so keep the `test` tasks, and drop an excluded tag again in case another
               # project's `test` ever depends on one of theirs.
-              # Weigh each project by its test files, then deal the heaviest first to the
-              # lightest shard, so the slowest suites land in different shards.
-              shard=$(jq -r '
+              projects=$(jq -c '
                 .graph.nodes as $nodes
-                | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique[]
-                | select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not)
-                | "\(.) \($nodes[.].data.root)"' "$RUNNER_TEMP/test-graph.json" | while read -r project root; do
-                weight=1
-                if [ "$root" != . ]; then
-                  weight=$(( $(git ls-files -- "$root" | grep -cE '(\.(test|spec)\.[cm]?[jt]sx?|Tests?\.cs)$') + 1 ))
-                fi
-                echo "$weight $project"
-              done | sort -k1,1nr -k2,2 | awk -v shard="$(( ${LANE#test-} - 1 ))" '
-                { best = 0; for (s = 1; s < 3; s++) if (load[s] < load[best]) best = s
-                  load[best] += $1
-                  if (best == shard) { printf "%s%s", sep, $2; sep = "," } }')
+                | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              # Every lane deals the same list heaviest first to the lightest shard by
+              # duration, so the shards partition it and the slowest suites land apart.
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
@@ -448,10 +466,10 @@ jobs:
     secrets: inherit
 
   # The required check. It passes only when the plan and every affected lane passed, and the
-  # browser and GeoSpec example-contract lanes too when this run needed them.
+  # browser, GeoSpec example-contract and CLI end-to-end lanes too when this run needed them.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane, browser, geospec-examples]
+    needs: [plan, affected-lane, browser, geospec-examples, cli-e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -463,6 +481,8 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
+          CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
           REUSED: ${{ needs.plan.outputs.reused }}
         run: |
           test "$PLAN_RESULT" = success
@@ -473,6 +493,7 @@ jobs:
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
+          if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -976,8 +997,11 @@ jobs:
       # deterministic edit qualification is the Tier-D edit bench.
       # The two billing foundation suites that compose billing with the app's chat and
       # agent-observability code, on the launcher's own disposable PostgreSQL 17.
+      # postgres:17-alpine pinned by digest; the billing-e2e job's step says how to refresh it.
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run the API's billing composition contracts
         run: pnpm nx run-many -t test:billing-composition
@@ -1037,8 +1061,42 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
+      # postgres:17-alpine pinned to the tag's OCI index digest, resolved 2026-11-09 from
+      # registry-1.docker.io (`HEAD /v2/library/postgres/manifests/17-alpine`, Docker-Content-Digest).
+      # The launcher (apps/libs/api-billing/scripts/test-billing-foundation.mts) runs `postgres:17-alpine`
+      # with `pull_policy: never`, so the pinned image is tagged locally under that name. Refresh: resolve
+      # the tag's current digest the same way and replace it in every pull step of ci.yml and
+      # billing-nightly.yml (scripts/src/billing-stripe-lanes.test.ts requires one digest everywhere).
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
+
+  # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
+  # `tau agent` as real child processes against real kernels, 10 to 14 minutes. Their own lane,
+  # out of the test shards, where they were the floor of one shard: it runs when the plan finds
+  # a project with a `test:scenarios` target affected, and `Run affected tasks` requires it then.
+  cli-e2e:
+    name: CLI end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The suites spawn sandboxed kernel workers, as the shards' native suites do.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Run the CLI end-to-end suites
+        run: pnpm nx run-many -t test:scenarios --parallel=1 --outputStyle=static

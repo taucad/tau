@@ -10,10 +10,12 @@
 # - Linux x64 (glibc) also runs the projects with a `test:native-linux` target, as `native-darwin.yml`
 #   runs `test:native-darwin`: PicoGK's pinned closure, prepared from the checked-in manifest's origins,
 #   must equal its golden receipt's `linux-x64-glibc` entry, and the native suites run on it. Selected
-#   through Nx: every such project outside a pull request, the affected ones on a pull request.
+#   through Nx: every such project nightly and on dispatch, the affected ones on a pull request, and
+#   on a push to `main` the ones affected since the last successful push run of this workflow.
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
-#   and a refused `TAU_PAYLOAD_TARGET`. Only on push to `main`, nightly and on dispatch, so a pull
-#   request keeps one macOS job (ruling X40); `macos-26-intel`, GitHub-hosted (ruling X39).
+#   and a refused `TAU_PAYLOAD_TARGET`. Nightly, on dispatch, and on a push to `main` that affects
+#   Build123d, PicoGK or the CLI since the last successful push run of this workflow; never on a pull
+#   request, so it keeps one macOS job (ruling X40); `macos-26-intel`, GitHub-hosted (ruling X39).
 #
 # Not a required check, like `native-darwin.yml`. A pull request run Dependabot triggered selects nothing.
 name: Native hosts
@@ -69,15 +71,56 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
-      # Every row outside a pull request; on a pull request the Linux rows when it affects a project
-      # the rows exercise, and never the Intel row. `native-linux` lists the projects whose
-      # `test:native-linux` target the x64 row runs: all of them outside a pull request, the affected
-      # ones on a pull request. `tail -1` drops Nx's log lines.
+      # The base of a push to `main`: the newest successful push run of this workflow on `main` whose
+      # commit is an ancestor of this one. A failed run, or one a newer push replaced while it waited
+      # for a runner, never becomes the base, so its landings stay in the next push's range. Empty
+      # when none is found or the API is unreachable, and the plan then selects every row.
+      - name: Find the last successful push run of this workflow
+        id: push-base
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: native-hosts.yml
+        run: |
+          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs?branch=main&event=push&status=success&per_page=30" \
+            --jq '.workflow_runs[].head_sha') || shas=''
+          base=''
+          for sha in $shas; do
+            if [ "$sha" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$sha" "$GITHUB_SHA" 2> /dev/null; then
+              base=$sha
+              break
+            fi
+          done
+          echo "Last successful push run of $WORKFLOW on main: ${base:-none}"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+
+      # Nightly and on dispatch, every row. On a push to `main` the Linux rows always run; the Intel
+      # row runs when Build123d, PicoGK or the CLI is affected since the push base, and `native-linux`
+      # lists the `test:native-linux` projects affected since it (every row when there is no base or
+      # the push changes this workflow).
+      # On a pull request the Linux rows when it affects a project the rows exercise, the affected
+      # `native-linux` projects, and never the Intel row. `tail -1` drops Nx's log lines.
       - name: Select the rows
         id: plan
+        env:
+          PUSH_BASE: ${{ steps.push-base.outputs.sha }}
         run: |
           set -o pipefail
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+          every=false
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) ;;
+            push)
+              if [ -z "$PUSH_BASE" ]; then
+                echo '::notice title=native-hosts plan::No earlier successful push run on main; every row runs.'
+                every=true
+              elif ! git diff --quiet "$PUSH_BASE" "$GITHUB_SHA" -- .github/workflows/native-hosts.yml; then
+                echo '::notice title=native-hosts plan::The push changes this workflow; every row runs.'
+                every=true
+              fi
+              ;;
+            *) every=true ;;
+          esac
+          if [ "$every" = true ]; then
             native=$(pnpm nx show projects --with-target test:native-linux --json | tail -1)
             echo "Native linux-x64 rows: $native"
             echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
@@ -85,13 +128,22 @@ jobs:
             echo "intel=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          projects=$(pnpm nx show projects --affected --projects build123d,picogk,cli --json | tail -1)
+          range=()
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            range=(--base="$PUSH_BASE" --head="$GITHUB_SHA")
+          fi
+          projects=$(pnpm nx show projects --affected "${range[@]}" --projects build123d,picogk,cli --json | tail -1)
           echo "Affected native host projects: $projects"
-          native=$(pnpm nx show projects --affected --with-target test:native-linux --json | tail -1)
+          native=$(pnpm nx show projects --affected "${range[@]}" --with-target test:native-linux --json | tail -1)
           echo "Native linux-x64 rows: $native"
           echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
-          echo "linux=$(jq -r --argjson native "$native" 'length > 0 or ($native | length > 0)' <<< "$projects")" >> "$GITHUB_OUTPUT"
-          echo "intel=false" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "linux=true" >> "$GITHUB_OUTPUT"
+            echo "intel=$(jq -r 'length > 0' <<< "$projects")" >> "$GITHUB_OUTPUT"
+          else
+            echo "linux=$(jq -r --argjson native "$native" 'length > 0 or ($native | length > 0)' <<< "$projects")" >> "$GITHUB_OUTPUT"
+            echo "intel=false" >> "$GITHUB_OUTPUT"
+          fi
 
   linux:
     name: Native kernels on ${{ matrix.target }}

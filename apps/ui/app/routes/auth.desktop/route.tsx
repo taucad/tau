@@ -5,7 +5,7 @@ import { useLocation } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
 import { authClient } from '#lib/auth-client.js';
 import type { Handle } from '#types/matches.types.js';

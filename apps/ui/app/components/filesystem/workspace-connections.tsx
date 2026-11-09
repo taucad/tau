@@ -18,7 +18,7 @@ import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';

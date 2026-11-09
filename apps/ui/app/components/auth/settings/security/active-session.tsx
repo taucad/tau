@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@taucad/ui/components/button';
 import { SettingsRow } from '#components/settings/settings-item.js';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 
 function timeAgo(date: Date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);

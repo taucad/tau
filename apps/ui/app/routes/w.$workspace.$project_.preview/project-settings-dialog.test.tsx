@@ -26,7 +26,7 @@ vi.mock('#routes/w.$workspace.$project_.preview/preview-project-context.js', () 
   }),
 }));
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ deleteProject }) }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouterModule>()),
   useNavigate: () => navigate,

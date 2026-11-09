@@ -207,6 +207,10 @@ const config: KnipConfig = {
         'src/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
       ],
     },
+    'apps/libs/ui-kit': {
+      // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
+      entry: ['scripts/svg-sprite.d.ts'],
+    },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
       entry: ['src/graceful-shutdown.signal-fixture.ts'],
@@ -267,6 +271,10 @@ const config: KnipConfig = {
       // bundler-benchmark/bundler.d.ts declares its type.
       ignoreUnresolved: ['#benchmark-bundler'],
     },
+    'apps/cli-e2e': {
+      // The Build123d suites read its `tau-plugin.json` through `createRequire(...).resolve`.
+      ignoreDependencies: ['@taucad/build123d'],
+    },
     'apps/runtime-e2e': {
       entry: [
         // `runner.ts` spawns `run-arm.mts` behind the `hooks.mjs` loader, which registers `hook-impl.mjs`.
@@ -287,8 +295,6 @@ const config: KnipConfig = {
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
-        // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
-        'scripts/svg-sprite.d.ts',
         // `build*` targets run it as a runtime cache input.
         'geospec-mt-assets-cache-key.ts',
         // Script of calibration-preview.html, served by vite.calibration.config.ts.
@@ -376,14 +382,13 @@ const config: KnipConfig = {
       entry: ['src/backend/node/*.fixture.ts'],
     },
     'packages/host': {
-      // `runtime-child-render.integration.test.ts` spawns it by path.
-      entry: ['src/fixtures/render-child-probe.ts'],
+      // `runtime-child-render.integration.test.ts` spawns it by path; the `qualify-x1c` target runs the script
+      // from the workspace root.
+      entry: ['src/fixtures/render-child-probe.ts', 'scripts/qualify-x1c.mts'],
       // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
       ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
-      // The `qualify-x1c` target runs it from the workspace root.
-      entry: ['scripts/qualify-x1c.mts'],
       // Replicad model sources that `render-plates` exports through the Tau CLI.
       ignore: ['models/**'],
     },

@@ -66,7 +66,7 @@ vi.doMock('#components/chat/chat-kernel-selector.js', () => ({
     readonly children: (props: { selectedKernel: (typeof kernelConfigurations)[number] }) => React.ReactNode;
   }): React.ReactNode => children({ selectedKernel: kernelConfigurations.find((kernel) => kernel.id === 'manifold')! }),
 }));
-vi.doMock('#components/icons/svg-icon.js', () => ({ SvgIcon: () => <span className='size-4' /> }));
+vi.doMock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span className='size-4' /> }));
 vi.doMock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));

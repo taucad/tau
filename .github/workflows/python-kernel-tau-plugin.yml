@@ -59,16 +59,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || inputs.test-python
     strategy:
       fail-fast: false
+      # A draft pull request seals the two Linux targets only and requests no macOS runner; the
+      # caller's `ready_for_review` trigger seals all four once it is ready. A dispatch seals all four.
       matrix:
-        include:
-          - target: linux-x64-glibc
-            runner: ubuntu-24.04
-          - target: linux-arm64-glibc
-            runner: ubuntu-24.04-arm
-          - target: darwin-arm64
-            runner: macos-26
-          - target: darwin-x64
-            runner: macos-26-intel
+        include: >-
+          ${{ fromJSON(github.event.pull_request.draft
+          && '[{"target":"linux-x64-glibc","runner":"ubuntu-24.04"},{"target":"linux-arm64-glibc","runner":"ubuntu-24.04-arm"}]'
+          || '[{"target":"linux-x64-glibc","runner":"ubuntu-24.04"},{"target":"linux-arm64-glibc","runner":"ubuntu-24.04-arm"},{"target":"darwin-arm64","runner":"macos-26"},{"target":"darwin-x64","runner":"macos-26-intel"}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:

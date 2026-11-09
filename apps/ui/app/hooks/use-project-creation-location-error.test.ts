@@ -32,7 +32,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   useWorkspaceTelemetry: () => ({ projectCreateWebaccessBlocked: mockBlocked }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: mockToastError, success: mockToastSuccess },
 }));
 

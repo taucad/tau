@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   desktopAcceptanceRoutes,
+  linuxSoftwareRendererPattern,
+  linuxStockUsernsRestriction,
   macosQuarantinePattern,
   parseDesktopAcceptanceReceipt,
   parseDesktopArtifactManifest,
@@ -273,6 +275,105 @@ export type QualificationCleanHostAcceptance = {
   installs: readonly MacosCleanInstall[];
   launches: readonly MacosCleanLaunch[];
 };
+/**
+ * Raw Linux clean-host observations: once before the run installs anything and once after it removed Tau. The host
+ * identity comes from the Compute Engine metadata server, the consumer facts from the consumer account itself.
+ */
+export const linuxCleanHostSchema = z.strictObject({
+  gcp: z.strictObject({
+    /** Metadata server `instance/name`, `instance/zone` and `instance/attributes/instance-template`. */
+    instance: z.string(),
+    zone: z.string(),
+    template: z.string(),
+    /** What the job asked Compute Engine for (`gcloud` template selfLink, instance name, zone). */
+    requested: z.strictObject({ template: z.string(), instance: z.string(), zone: z.string() }),
+  }),
+  /** `/etc/os-release`. */
+  osRelease: z.string(),
+  /** `uname -r` and `uname -m`. */
+  kernel: z.string(),
+  machine: z.string(),
+  /** `/sys/module/apparmor/parameters/enabled`. */
+  appArmorEnabled: z.string(),
+  /** `kernel.apparmor_restrict_unprivileged_userns`, or `absent` when the kernel has no such sysctl. */
+  usernsRestriction: z.string(),
+  /** `glxinfo -B` run by the consumer on the session's display. */
+  glxinfo: z.string(),
+  consumer: z.strictObject({
+    name: z.string(),
+    uid: z.number().int(),
+    home: z.string(),
+    /** `id -Gn`. */
+    groups: z.array(z.string()),
+    /** `sudo -n true` run by the consumer. */
+    sudo: z.enum(['refused', 'allowed']),
+  }),
+  administrator: z.strictObject({ name: z.string(), uid: z.number().int() }),
+  /** Prior Tau packages, trees, repository, AppImages, desktop entries or profiles; a clean host has none. */
+  existing: z.array(z.string()),
+});
+export type LinuxCleanHost = z.infer<typeof linuxCleanHostSchema>;
+/** One stage's real-browser downloads by the consumer and the administrator's package-installation consent. */
+export const linuxCleanInstallSchema = z.strictObject({
+  stage: z.enum(['initial', 'reinstall']),
+  downloads: z
+    .array(
+      z.strictObject({
+        artifact: z.strictObject({
+          kind: z.string(),
+          name: z.string().min(1),
+          sha256: digest,
+          size: z.number().int().positive(),
+        }),
+        download: z.strictObject({
+          browser: z.string().min(1),
+          url: z.url(),
+          path: z.string(),
+          sha256: digest,
+          size: z.number().int().positive(),
+          /** File mode and owner exactly as the browser wrote it. */
+          mode: z.number().int().nonnegative(),
+          uid: z.number().int(),
+        }),
+        /** AppImage only: the consumer's `chmod +x` and the image runtime answering `--appimage-offset` for them. */
+        executable: z.strictObject({ mode: z.number().int().nonnegative(), offset: z.string() }).optional(),
+      }),
+    )
+    .min(1),
+  consent: z.strictObject({
+    account: z.string(),
+    uid: z.number().int(),
+    /** The downloaded Debian packages the administrator installed, hashed by root before and after `apt-get install`. */
+    packages: z.array(z.strictObject({ path: z.string(), before: digest, after: digest })),
+  }),
+  installedPath: z.string(),
+  desktopEntry: z.string(),
+});
+export type LinuxCleanInstall = z.infer<typeof linuxCleanInstallSchema>;
+/**
+ * One consumer launch. The shipping probe admits a run only from its nonce argument, so the first (offline) launch is
+ * the installed launcher; the stage A session starts from the installed desktop entry.
+ */
+export const linuxCleanLaunchSchema = z.strictObject({
+  stage: z.enum(['offline', 'initial', 'reinstall']),
+  via: z.enum(['launcher', 'desktop-entry']),
+  command: z.array(z.string()).min(1),
+  account: z.string(),
+  /** The new main process found independently in `/proc` after the launch, with its owner and executable. */
+  pid: z.number().int().positive(),
+  processUid: z.number().int(),
+  executable: z.string(),
+});
+export type LinuxCleanLaunch = z.infer<typeof linuxCleanLaunchSchema>;
+export type LinuxCleanHostAcceptance = {
+  kind: 'vm';
+  host: LinuxCleanHost;
+  after: LinuxCleanHost;
+  installs: readonly LinuxCleanInstall[];
+  launches: readonly LinuxCleanLaunch[];
+  /** Each stage's WebGL `UNMASKED_RENDERER_WEBGL`, read in the running app's viewer. */
+  renderers: readonly [string, string, string];
+};
 export type QualificationStageEvidence = {
   candidate: DesktopArtifactManifest;
   installed: QualificationInstallation;
@@ -319,6 +420,7 @@ export type QualificationEvidence = {
   /** Present only for a clean-host run; its receipt is `kind: 'vm'` and carries the observed host facts. */
   acceptance?: QualificationCleanHostAcceptance;
   windowsAcceptance?: WindowsConsumerAcceptance;
+  linuxAcceptance?: LinuxCleanHostAcceptance;
 };
 const requireEvidence = (condition: boolean, message: string): void => {
   if (!condition) {
@@ -512,6 +614,242 @@ const windowsConsumerReceiptFacts = (
       smartScreen: z.enum(['not-shown', 'warning-approved']).parse(entry.manual.smartScreen.result),
       screenshots: entry.manual.screenshots,
     })),
+  };
+};
+const lastSegment = (value: string): string => value.trim().split('/').at(-1) ?? '';
+/** Whether any of the POSIX permission `bits` is set in `mode`. */
+// oxlint-disable-next-line no-bitwise -- POSIX permission bits.
+const hasModeBits = (mode: number, bits: number): boolean => (mode & bits) !== 0;
+const linuxAdministratorGroups = new Set(['root', 'sudo', 'admin', 'wheel', 'google-sudoers', 'adm']);
+/** The facts a qualifying Linux clean host derives from its raw observations. */
+type LinuxCleanHostFacts = {
+  host: LinuxCleanHost;
+  distribution: { id: 'ubuntu' | 'debian'; versionId: '24.04' | '26.04' | '13' };
+  usernsRestriction: '1' | '0' | 'absent';
+  glRenderer: string;
+  gcp: { template: string; instance: string; zone: string };
+};
+/**
+ * Shared with the orchestrator's preflight, so a run on an unqualified or dirty host stops before it installs anything:
+ * a stock qualified distribution on native x86_64 with AppArmor and its stock user-namespace policy, a hardware GL
+ * renderer, the tau-cloud GPU host the job created, and a consumer without administrator rights.
+ */
+export const assertLinuxCleanHost = (input: LinuxCleanHost, requireClean = true): LinuxCleanHostFacts => {
+  const host = linuxCleanHostSchema.parse(input);
+  const release = new Map(
+    host.osRelease.split(/\r?\n/u).flatMap((line) => {
+      const match = /^([A-Z_]+)=(.*)$/u.exec(line.trim());
+      return match ? [[match[1]!, match[2]!.replaceAll(/^"|"$/gu, '')] as const] : [];
+    }),
+  );
+  const id = release.get('ID');
+  const versionId = release.get('VERSION_ID');
+  const family =
+    id === 'ubuntu' && versionId === '24.04'
+      ? 'ubuntu2404'
+      : id === 'ubuntu' && versionId === '26.04'
+        ? 'ubuntu2604'
+        : id === 'debian' && versionId === '13'
+          ? 'debian13'
+          : undefined;
+  requireEvidence(family !== undefined, 'Linux clean host is outside the qualified distribution matrix');
+  requireEvidence(host.machine.trim() === 'x86_64' && host.kernel.trim().length > 0, 'Linux host is not native x86_64');
+  requireEvidence(host.appArmorEnabled.trim() === 'Y', 'Linux clean host requires AppArmor enabled');
+  const usernsRestriction = host.usernsRestriction.trim();
+  requireEvidence(
+    linuxStockUsernsRestriction(id === 'ubuntu' ? 'ubuntu' : 'debian').includes(usernsRestriction),
+    'Linux user-namespace restriction differs from the distribution stock value',
+  );
+  const template = lastSegment(host.gcp.template);
+  requireEvidence(
+    template.startsWith(`ci-gpu-${family}-`) &&
+      template === lastSegment(host.gcp.requested.template) &&
+      host.gcp.instance.trim() === host.gcp.requested.instance &&
+      lastSegment(host.gcp.zone) === host.gcp.requested.zone,
+    'Linux clean host is not the GPU host this job created from its distribution template',
+  );
+  const glRenderer = /^OpenGL renderer string: (.+)$/mu.exec(host.glxinfo)?.[1]?.trim() ?? '';
+  requireEvidence(
+    /^direct rendering: Yes$/mu.test(host.glxinfo) &&
+      glRenderer.length > 0 &&
+      !linuxSoftwareRendererPattern.test(glRenderer),
+    'Linux clean host has no hardware GL renderer',
+  );
+  const { consumer, administrator } = host;
+  requireEvidence(
+    consumer.uid >= 1000 &&
+      consumer.name.length > 0 &&
+      consumer.name !== administrator.name &&
+      consumer.uid !== administrator.uid &&
+      consumer.home === `/home/${consumer.name}` &&
+      !consumer.groups.some((group) => linuxAdministratorGroups.has(group)) &&
+      consumer.sudo === 'refused',
+    'Linux consumer account has administrator rights',
+  );
+  requireEvidence(!requireClean || host.existing.length === 0, 'clean host already has a Tau installation or profile');
+  return {
+    host,
+    distribution: { id: id === 'ubuntu' ? 'ubuntu' : 'debian', versionId: versionId as '24.04' | '26.04' | '13' },
+    usernsRestriction: usernsRestriction as '1' | '0' | 'absent',
+    glRenderer,
+    gcp: { template, instance: host.gcp.instance.trim(), zone: lastSegment(host.gcp.zone) },
+  };
+};
+/** A stage's measured restriction in the host's vocabulary: an absent sysctl reads as ENOENT. */
+const measuredUsernsRestriction = (value: string | undefined): string =>
+  value?.startsWith('unavailable:') && value.includes('ENOENT') ? 'absent' : (value ?? '').trim();
+/** Every Linux clean-host fact the receipt claims is re-derived from raw observations; nothing is caller-asserted. */
+const linuxCleanHostReceiptFacts = (
+  input: QualificationEvidence,
+  acceptance: LinuxCleanHostAcceptance,
+): NonNullable<DesktopAcceptanceReceipt['environment']['host']> => {
+  requireEvidence(
+    (input.route === 'linux-apt' || input.route === 'linux-appimage') &&
+      input.target === 'linux-x64' &&
+      input.suite === 'clean-host-route-a-b-c-v1',
+    'Linux clean-host acceptance is defined for Linux routes only',
+  );
+  const facts = assertLinuxCleanHost(acceptance.host);
+  const after = assertLinuxCleanHost(acceptance.after, false);
+  const { consumer, administrator } = facts.host;
+  requireEvidence(
+    after.usernsRestriction === facts.usernsRestriction &&
+      after.host.kernel === facts.host.kernel &&
+      after.host.osRelease === facts.host.osRelease &&
+      after.gcp.instance === facts.gcp.instance &&
+      after.host.consumer.uid === consumer.uid &&
+      after.host.consumer.name === consumer.name,
+    'Linux host security or consumer changed during the run',
+  );
+  const { name, launcher } = linuxInstallation(input.stages[0].candidate.channel, input.route === 'linux-appimage');
+  const desktopEntry = `/usr/share/applications/${name}.desktop`;
+  const kinds: readonly string[] = desktopAcceptanceRoutes[input.route];
+  const installs = acceptance.installs.map((entry) => linuxCleanInstallSchema.parse(entry));
+  requireEvidence(
+    installs.length === 2 && installs[0]?.stage === 'initial' && installs[1]?.stage === 'reinstall',
+    'Linux initial and reinstall downloads required',
+  );
+  const [a, , c] = input.stages;
+  for (const [install, stage] of [
+    [installs[0]!, a],
+    [installs[1]!, c],
+  ] as const) {
+    requireEvidence(
+      install.downloads.length === kinds.length &&
+        kinds.every((kind) => install.downloads.filter((entry) => entry.artifact.kind === kind).length === 1),
+      'Linux browser downloads do not cover the route exactly',
+    );
+    for (const entry of install.downloads) {
+      const artifact = stage.candidate.artifacts.find(
+        (item) => item.target === input.target && item.kind === entry.artifact.kind,
+      );
+      const url = new URL(entry.download.url);
+      requireEvidence(
+        artifact?.name === entry.artifact.name &&
+          entry.artifact.sha256 === artifact.sha256 &&
+          entry.artifact.size === artifact.size &&
+          entry.download.sha256 === artifact.sha256 &&
+          entry.download.size === artifact.size &&
+          url.origin === stage.probe.mirrorOrigin &&
+          url.pathname === `/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}` &&
+          entry.download.path.startsWith(`${consumer.home}/`) &&
+          entry.download.path.endsWith(`/${artifact.name}`) &&
+          entry.download.uid === consumer.uid,
+        'browser download is not the exact candidate artifact',
+      );
+      requireEvidence(!hasModeBits(entry.download.mode, 0o111), 'browser download is already executable');
+      if (entry.artifact.kind === 'linux-appimage') {
+        requireEvidence(
+          entry.executable !== undefined &&
+            hasModeBits(entry.executable.mode, 0o100) &&
+            /^[1-9]\d*$/u.test(entry.executable.offset),
+          'consumer did not make the downloaded AppImage executable',
+        );
+      } else {
+        requireEvidence(entry.executable === undefined, 'a Debian package was executed instead of installed');
+      }
+    }
+    const packages = install.downloads.filter((entry) => entry.artifact.name.endsWith('.deb'));
+    requireEvidence(
+      install.consent.account === administrator.name &&
+        install.consent.uid === administrator.uid &&
+        install.consent.packages.length === packages.length &&
+        packages.every((entry) =>
+          install.consent.packages.some(
+            (item) =>
+              item.path === entry.download.path &&
+              item.before === entry.artifact.sha256 &&
+              item.after === entry.artifact.sha256,
+          ),
+        ),
+      'administrator consent did not install exactly the downloaded packages',
+    );
+    requireEvidence(
+      install.installedPath === launcher && install.desktopEntry === desktopEntry,
+      'Linux installation launcher or desktop entry differs from the route',
+    );
+  }
+  const launches = acceptance.launches.map((entry) => linuxCleanLaunchSchema.parse(entry));
+  const launch = (stage: LinuxCleanLaunch['stage']) => launches.filter((entry) => entry.stage === stage);
+  const [initial] = launch('initial');
+  const [reinstall] = launch('reinstall');
+  requireEvidence(
+    launches.length === 3 &&
+      launch('offline').length === 1 &&
+      launch('offline')[0]!.via === 'launcher' &&
+      launch('offline')[0]!.command[0] === launcher &&
+      initial?.via === 'desktop-entry' &&
+      initial.command.join(' ') === `gio launch ${desktopEntry}` &&
+      initial.pid === a.probe.pid &&
+      reinstall?.via === 'launcher' &&
+      reinstall.command[0] === launcher &&
+      reinstall.pid === input.lifecycle.reinstall.mainPid &&
+      (!input.lifecycle.ordinaryQuit || launch('offline')[0]!.pid === input.lifecycle.ordinaryQuit.exitedPid) &&
+      launches.every((entry) => entry.account === consumer.name && entry.processUid === consumer.uid),
+    'installed app was not launched by the consumer from its desktop entry',
+  );
+  const gpu = facts.glRenderer.split('/')[0]!.trim();
+  for (const [index, stage] of input.stages.entries()) {
+    const renderer = acceptance.renderers[index] ?? '';
+    requireEvidence(
+      renderer.includes(gpu) && !linuxSoftwareRendererPattern.test(renderer),
+      'viewer did not render on the host GPU',
+    );
+    requireEvidence(
+      stage.security.measurements['runnerUid'] === String(consumer.uid) &&
+        stage.security.measurements['appArmorEnabled'] === 'Y' &&
+        measuredUsernsRestriction(stage.security.measurements['appArmorUsernsRestriction']) ===
+          facts.usernsRestriction &&
+        stage.security.osVersion.startsWith(`${facts.host.kernel.trim()} `),
+      'Linux clean-host security defaults changed during the run',
+    );
+  }
+  return {
+    platform: 'linux',
+    runner: facts.gcp.instance,
+    nativeArch: 'x64',
+    host: { provider: 'gcp', ...facts.gcp },
+    distribution: facts.distribution,
+    kernel: facts.host.kernel.trim(),
+    appArmor: 'enabled',
+    usernsRestriction: facts.usernsRestriction,
+    graphics: { mode: 'stock', glRenderer: facts.glRenderer, webglRenderer: acceptance.renderers[2] },
+    account: { name: consumer.name, uid: consumer.uid, administrator: false },
+    consent: { account: administrator.name, step: 'apt-install-browser-downloads' },
+    downloads: installs.flatMap((install) =>
+      install.downloads.map((entry) => ({
+        stage: install.stage,
+        name: entry.artifact.name,
+        sha256: entry.download.sha256,
+        size: entry.download.size,
+        urlPath: new URL(entry.download.url).pathname,
+        browser: entry.download.browser,
+        madeExecutable: entry.executable !== undefined,
+      })),
+    ),
+    installedPath: launcher,
+    desktopEntry,
+    launch: 'desktop-entry',
   };
 };
 const equalInstallation = (left: QualificationInstallation, right: QualificationInstallation): boolean =>
@@ -918,12 +1256,17 @@ const validateQualificationEvidence = (input: QualificationEvidence): DesktopAcc
     (artifact) => artifact.target === input.target && kinds.includes(artifact.kind),
   );
   requireEvidence(baseline !== undefined, 'baseline artifact missing');
-  requireEvidence(!(input.acceptance && input.windowsAcceptance), 'mixed consumer platforms');
+  requireEvidence(
+    [input.acceptance, input.windowsAcceptance, input.linuxAcceptance].filter(Boolean).length <= 1,
+    'mixed consumer platforms',
+  );
   const host = input.windowsAcceptance
     ? windowsConsumerReceiptFacts(input, input.windowsAcceptance)
     : input.acceptance
       ? cleanHostReceiptFacts(input, input.acceptance)
-      : undefined;
+      : input.linuxAcceptance
+        ? linuxCleanHostReceiptFacts(input, input.linuxAcceptance)
+        : undefined;
   return parseDesktopAcceptanceReceipt(
     {
       schemaVersion: 1,
@@ -980,6 +1323,7 @@ export const validateSoftwareCiEvidence = (input: QualificationEvidence): void =
       input.route.startsWith('linux-') &&
       !input.acceptance &&
       !input.windowsAcceptance &&
+      !input.linuxAcceptance &&
       input.stages.every(
         (stage) => stage.candidate.channel === 'staging' && /SwiftShader/iu.test(stage.renderer.softwareRenderer ?? ''),
       ),

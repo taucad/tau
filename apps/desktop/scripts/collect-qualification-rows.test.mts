@@ -414,6 +414,140 @@ for (const index of vm.rows.keys()) {
     environment: { ...receipt.environment, host: { ...receipt.environment.host, gatekeeper: 'disabled' } },
   }));
 }
+// Linux clean-host rows: the Linux-scoped staging producer, one GPU host per distribution and route, each receipt with
+// the facts of the host its OS observation names.
+const linuxCleanHost = (id: string, receipt: DesktopAcceptanceReceipt) => {
+  const appImage = receipt.route === 'linux-appimage';
+  const name = appImage ? 'tau-staging-appimage' : 'tau-staging';
+  const family = id.startsWith('debian') ? 'debian13' : id.startsWith('ubuntu2604') ? 'ubuntu2604' : 'ubuntu2404';
+  const download = (stage: 'initial' | 'reinstall', entry: { name: string; sha256: string }) => ({
+    stage,
+    name: entry.name,
+    sha256: entry.sha256,
+    size: 100,
+    urlPath: `/releases/${encodeURIComponent(receipt.tag)}/${entry.name}`,
+    browser: 'Chromium 140.0.0.0',
+    madeExecutable: entry.name.endsWith('.AppImage'),
+  });
+  return {
+    platform: 'linux',
+    runner: `tau-q-1234-${id}`,
+    nativeArch: 'x64',
+    host: {
+      provider: 'gcp',
+      template: `ci-gpu-${family}-20261101`,
+      instance: `tau-q-1234-${id}`,
+      zone: 'us-central1-a',
+    },
+    distribution:
+      family === 'debian13'
+        ? { id: 'debian', versionId: '13' }
+        : { id: 'ubuntu', versionId: family === 'ubuntu2604' ? '26.04' : '24.04' },
+    kernel: receipt.environment.os.split(' ')[0],
+    appArmor: 'enabled',
+    usernsRestriction: family === 'debian13' ? 'absent' : '1',
+    graphics: {
+      mode: 'stock',
+      glRenderer: 'Tesla T4/PCIe/SSE2',
+      webglRenderer: 'ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)',
+    },
+    account: { name: 'consumer', uid: 1001, administrator: false },
+    consent: { account: 'tau', step: 'apt-install-browser-downloads' },
+    downloads: [
+      ...receipt.artifacts.map((entry, index) =>
+        download('initial', index === 0 ? { ...entry, sha256: receipt.baseline.artifactSha256 } : entry),
+      ),
+      ...receipt.artifacts.map((entry) => download('reinstall', entry)),
+    ],
+    installedPath: `/usr/bin/${name}`,
+    desktopEntry: `/usr/share/applications/${name}.desktop`,
+    launch: 'desktop-entry',
+  };
+};
+const linuxVm = {
+  ...linux,
+  kind: 'vm',
+  rows: linux.rows.map((row) => ({
+    ...row,
+    receipts: row.receipts.map((receipt) => ({
+      ...receipt,
+      suite: 'clean-host-route-a-b-c-v1',
+      environment: {
+        ...receipt.environment,
+        kind: 'vm',
+        host: linuxCleanHost(row.id, receipt as DesktopAcceptanceReceipt),
+      },
+    })),
+  })),
+};
+const linuxVmResult = collectQualificationRows(linuxVm);
+assert.equal(linuxVmResult.hostMatrix.length, 6);
+assert.ok(
+  linuxVmResult.receipts.every(
+    (receipt) => receipt.environment.kind === 'vm' && receipt.environment.host?.platform === 'linux',
+  ),
+);
+const rejectLinuxVm = (change: (value: typeof linuxVm) => unknown): void => {
+  assert.throws(() => collectQualificationRows(change({ ...linuxVm, rows: [...linuxVm.rows] })));
+};
+rejectLinuxVm((value) => ({ ...value, scope: 'all' }));
+rejectLinuxVm((value) => ({ ...value, channel: 'production' }));
+// CI Linux receipts are never clean-host evidence, nor clean-host receipts CI.
+rejectLinuxVm((value) => ({ ...value, rows: linux.rows }));
+rejectLinuxVm((value) => ({ ...value, kind: 'ci' }));
+for (const index of linuxVm.rows.keys()) {
+  const alterLinuxVm = (change: (receipt: DesktopAcceptanceReceipt) => unknown): void => {
+    rejectLinuxVm((value) => ({
+      ...value,
+      rows: value.rows.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, receipts: [change(row.receipts[0] as DesktopAcceptanceReceipt)] } : row,
+      ),
+    }));
+  };
+  // A Linux vm receipt without host facts is refused.
+  alterLinuxVm((receipt) => {
+    const { host: _host, ...environment } = receipt.environment;
+    return { ...receipt, environment };
+  });
+  alterLinuxVm((receipt) => ({ ...receipt, suite: 'installed-route-a-b-c-v1' }));
+  alterLinuxVm((receipt) => ({
+    ...receipt,
+    environment: {
+      ...receipt.environment,
+      host: {
+        ...receipt.environment.host,
+        graphics: { mode: 'stock', glRenderer: 'llvmpipe (LLVM 19.1.1, 256 bits)', webglRenderer: 'llvmpipe' },
+      },
+    },
+  }));
+  alterLinuxVm((receipt) => ({
+    ...receipt,
+    environment: {
+      ...receipt.environment,
+      host: { ...receipt.environment.host, account: { name: 'tau', uid: 1000, administrator: false } },
+    },
+  }));
+}
+// A host's facts cannot stand in for another distribution's row.
+rejectLinuxVm((value) => ({
+  ...value,
+  rows: value.rows.map((row, index) =>
+    index === 0
+      ? {
+          ...row,
+          receipts: [
+            {
+              ...row.receipts[0]!,
+              environment: {
+                ...row.receipts[0]!.environment,
+                host: linuxVm.rows.find((other) => other.id.startsWith('debian'))!.receipts[0]!.environment.host,
+              },
+            },
+          ],
+        }
+      : row,
+  ),
+}));
 const cli = spawnSync(
   process.execPath,
   ['--import', '@oxc-node/core/register', fileURLToPath(new URL('collect-qualification-rows.mts', import.meta.url))],

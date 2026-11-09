@@ -284,6 +284,134 @@ describe('desktop installed acceptance receipt', () => {
     ).toThrow(new TypeError('Clean-host receipt facts disagree with its environment'));
   });
 
+  const linuxArtifacts = [artifact('linux-deb-runtime', 'linux-x64'), artifact('linux-deb-selector', 'linux-x64')];
+  const linuxHost = {
+    platform: 'linux',
+    runner: 'tau-q-1-1-ubuntu2404-apt',
+    nativeArch: 'x64',
+    host: {
+      provider: 'gcp',
+      template: 'ci-gpu-ubuntu2404-20261101',
+      instance: 'tau-q-1-1-ubuntu2404-apt',
+      zone: 'us-central1-a',
+    },
+    distribution: { id: 'ubuntu', versionId: '24.04' },
+    kernel: '6.8.0-1015-gcp',
+    appArmor: 'enabled',
+    usernsRestriction: '1',
+    graphics: {
+      mode: 'stock',
+      glRenderer: 'Tesla T4/PCIe/SSE2',
+      webglRenderer: 'ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)',
+    },
+    account: { name: 'consumer', uid: 1001, administrator: false },
+    consent: { account: 'tau', step: 'apt-install-browser-downloads' },
+    downloads: [
+      ...['tau-staging-runtime-1.1.1_1.1.1_amd64.deb', 'tau-staging_1.1.1_amd64.deb'].map((name, index) => ({
+        stage: 'initial',
+        name,
+        sha256: index === 0 ? 'c'.repeat(64) : 'e'.repeat(64),
+        size: 1024,
+        urlPath: `/releases/desktop-staging%400.1.0-staging.101/${name}`,
+        browser: 'Chromium 140.0.0.0',
+        madeExecutable: false,
+      })),
+      ...linuxArtifacts.map(({ name, sha256: hash }) => ({
+        stage: 'reinstall',
+        name,
+        sha256: hash,
+        size: 1024,
+        urlPath: `/releases/${encodeURIComponent(stagingTag)}/${name}`,
+        browser: 'Chromium 140.0.0.0',
+        madeExecutable: false,
+      })),
+    ],
+    installedPath: '/usr/bin/tau-staging',
+    desktopEntry: '/usr/share/applications/tau-staging.desktop',
+    launch: 'desktop-entry',
+  } as const;
+  const linuxProof = (host: unknown = linuxHost, kind: 'ci' | 'vm' = 'vm') => ({
+    ...receipt(),
+    target: 'linux-x64',
+    route: 'linux-apt',
+    environment: {
+      os: '6.8.0-1015-gcp PRETTY_NAME="Ubuntu 24.04.3 LTS"\nID=ubuntu\nVERSION_ID="24.04"',
+      arch: 'x64',
+      kind,
+      sandbox: 'enabled',
+      ...(host === undefined ? {} : { host }),
+    },
+    artifacts: linuxArtifacts.map(({ name, sha256: hash }) => ({ name, sha256: hash })),
+  });
+
+  it('should admit a Linux clean-host receipt only with its observed host facts', () => {
+    expect(parseDesktopAcceptanceReceipt(linuxProof(), manifest(linuxArtifacts)).environment.host).toEqual(linuxHost);
+    // A Linux `vm` receipt used to parse without host facts; every consumer receipt now requires them.
+    expect(() => parseDesktopAcceptanceReceipt(linuxProof(null), manifest(linuxArtifacts))).toThrow(z.ZodError);
+    const { host: _absent, ...withoutHost } = linuxProof().environment;
+    expect(() =>
+      parseDesktopAcceptanceReceipt({ ...linuxProof(), environment: withoutHost }, manifest(linuxArtifacts)),
+    ).toThrow(new TypeError('Clean-host receipt facts disagree with its environment'));
+    expect(() => parseDesktopAcceptanceReceipt(linuxProof(linuxHost, 'ci'), manifest(linuxArtifacts))).toThrow(
+      new TypeError('Clean-host receipt facts disagree with its environment'),
+    );
+    // Linux facts on a Mac receipt, and Mac facts on a Linux receipt, are another platform's.
+    expect(() =>
+      parseDesktopAcceptanceReceipt({ ...receipt(), environment: { ...vmEnvironment, host: linuxHost } }, manifest()),
+    ).toThrow(new TypeError('Clean-host receipt facts disagree with its environment'));
+    expect(() => parseDesktopAcceptanceReceipt(linuxProof(cleanHost), manifest(linuxArtifacts))).toThrow(
+      new TypeError('Clean-host receipt facts disagree with its environment'),
+    );
+  });
+
+  it.each([
+    ['software renderer', { graphics: { ...linuxHost.graphics, webglRenderer: 'llvmpipe (LLVM 19.1.1, 256 bits)' } }],
+    ['SwiftShader', { graphics: { ...linuxHost.graphics, glRenderer: 'SwiftShader Device (Subzero)' } }],
+    ['Ubuntu userns restriction off', { usernsRestriction: '0' }],
+    ['another distribution template', { host: { ...linuxHost.host, template: 'ci-gpu-debian13-20261101' } }],
+    ['consumer is the administrator', { consent: { ...linuxHost.consent, account: 'consumer' } }],
+    ['another launcher', { installedPath: '/usr/bin/tau-staging-appimage' }],
+    ['another desktop entry', { desktopEntry: '/usr/share/applications/tau.desktop' }],
+    [
+      'other reinstall bytes',
+      { downloads: linuxHost.downloads.map((entry) => ({ ...entry, sha256: 'f'.repeat(64) })) },
+    ],
+    ['executed package', { downloads: linuxHost.downloads.map((entry) => ({ ...entry, madeExecutable: true })) }],
+    [
+      'download path differs',
+      { downloads: linuxHost.downloads.map((entry) => ({ ...entry, urlPath: '/releases/x' })) },
+    ],
+    [
+      'missing reinstall downloads',
+      { downloads: [...linuxHost.downloads.slice(0, 2), ...linuxHost.downloads.slice(0, 2)] },
+    ],
+    ['another kernel than the observed OS', { kernel: '6.17.0-1001-gcp' }],
+    [
+      'another distribution than the observed OS',
+      {
+        distribution: { id: 'debian', versionId: '13' },
+        usernsRestriction: 'absent',
+        host: { ...linuxHost.host, template: 'ci-gpu-debian13-20261101' },
+      },
+    ],
+  ])('should reject Linux clean-host facts with %s', (_name, change) => {
+    expect(() =>
+      parseDesktopAcceptanceReceipt(linuxProof({ ...linuxHost, ...change }), manifest(linuxArtifacts)),
+    ).toThrow(new TypeError('Linux clean-host facts disagree with the receipt route, distribution or downloads'));
+  });
+
+  it.each([
+    { account: { ...linuxHost.account, administrator: true } },
+    { account: { ...linuxHost.account, uid: 0 } },
+    { appArmor: 'disabled' },
+    { launch: 'launcher' },
+    { graphics: { ...linuxHost.graphics, mode: 'software' } },
+  ])('should reject Linux clean-host facts that are not a stock standard-user host: %j', (change) => {
+    expect(() =>
+      parseDesktopAcceptanceReceipt(linuxProof({ ...linuxHost, ...change }), manifest(linuxArtifacts)),
+    ).toThrow(z.ZodError);
+  });
+
   it('should bind both APT packages and reject a selector-only proof', () => {
     const artifacts = [artifact('linux-deb-runtime', 'linux-x64'), artifact('linux-deb-selector', 'linux-x64')];
     const proof = {

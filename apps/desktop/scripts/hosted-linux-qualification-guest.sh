@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the existing authentic installed harness inside a disposable proved Linux guest.
 # Required files: ~/node (verified host runtime), ~/qualification-env.json (explicit job input allowlist).
-# Optional env: none. Usage: invoked over SSH by hosted-linux-vm.sh in qualification mode.
+# Optional env: none. Usage: invoked over SSH by hosted-linux-vm.sh in tooling, qualification or clean-host mode;
+#   clean-host adds the standard `consumer` account that runs the app (qualification-linux-consumer.mts).
 # Exit codes: 0 harness/cleanup passed; nonzero missing prerequisite, qualification or cleanup failure.
 set -euo pipefail
 # The transferred credential file is already 0600; public source/package directories need normal modes.
@@ -45,6 +46,38 @@ fi
 exit "$status"
 SH
 chmod +x "$nx_bin/nx"
+mode="$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/"qualification-env.json").read_text())["TAU_VM_MODE"])')"
+if [[ "$mode" == clean-host ]]; then
+  # A standard consumer account, as on a person's desktop: its own group only (no sudo/adm), locked password, its own
+  # systemd user session and D-Bus, and the session's X display. It downloads, makes the AppImage executable and runs
+  # Tau; this administrator account only installs the downloaded packages and reads system state.
+  consumer=consumer
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends acl libglib2.0-bin dbus-user-session
+  if id "$consumer" >/dev/null 2>&1; then printf 'Consumer account already exists\n' >&2; exit 1; fi
+  sudo useradd --create-home --user-group --shell /bin/bash "$consumer"
+  sudo passwd --lock "$consumer" >/dev/null
+  consumer_uid="$(id -u "$consumer")"
+  sudo loginctl enable-linger "$consumer"
+  for _attempt in $(seq 1 60); do [[ -S "/run/user/$consumer_uid/bus" ]] && break; sleep 1; done
+  [[ -S "/run/user/$consumer_uid/bus" ]] || { printf 'Consumer session bus did not start\n' >&2; exit 1; }
+  # Same rights a desktop user has on their own display, from the session's cookie.
+  xauth -f "$HOME/.Xauthority" nlist :0 |
+    sudo -n -u "$consumer" env -i "HOME=/home/$consumer" xauth -f "/home/$consumer/.Xauthority" nmerge -
+  # Read-only reach to the public harness checkout and the verified Node runtime only. The job's environment file
+  # and run directory keep owner-only modes; nothing grants the consumer any administrator path.
+  sudo setfacl -m "u:$consumer:x" "$HOME"
+  sudo setfacl -R -m "u:$consumer:rX" "$HOME/node"
+  # The consumer's download browser, installed once outside every home and read-only to it.
+  sudo install -d -m 0755 -o "$(id -un)" /usr/local/share/ms-playwright
+  PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright pnpm exec playwright install chromium
+  sudo env "PATH=$PATH" "$PWD/node_modules/.bin/playwright" install-deps chromium
+  # The consumer has no administrator rights (the harness re-observes this as the consumer and records it).
+  if id -nG "$consumer" | grep -qwE 'sudo|admin|adm|wheel|google-sudoers' ||
+    sudo -n -u "$consumer" sudo -n true 2>/dev/null; then
+    printf 'Consumer account has administrator rights\n' >&2
+    exit 1
+  fi
+fi
 python3 - <<'PYRUN'
 import json, os, pathlib, select, subprocess, sys, tempfile, time, zipfile
 root = pathlib.Path.home() / 'tau'
@@ -133,7 +166,10 @@ if mode == 'tooling':
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',
                              'test-qualification-metadata', 'test-qualification-evidence', 'test-qualification-probe-process'], cwd=root, env=env)
     sys.exit(result.returncode)
-if mode != 'qualification':
+if mode == 'clean-host':
+    # The harness reaches the consumer's profile and app only through its unprivileged agent.
+    env['TAU_QUALIFICATION_CONSUMER'] = 'consumer'
+elif mode != 'qualification':
     raise ValueError('Invalid guest mode')
 status = 1
 try:

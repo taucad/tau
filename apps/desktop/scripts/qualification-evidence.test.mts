@@ -10,7 +10,7 @@ import {
   validateSoftwareCiEvidence,
   windowsConsumerHostDigest,
 } from './qualification-evidence.mjs';
-import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
+import type { LinuxCleanHost, QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const hash = (value: number): string => value.toString(16).padStart(64, '0');
 const fixture = (): QualificationEvidence => {
@@ -484,8 +484,417 @@ const cleanHostRefusals = (): void => {
   windows.acceptance = cleanHostFixture('macos-zip').acceptance!;
   assert.throws(() => collectQualificationReceipt(windows), /Mac routes only/u);
 };
+/** A Linux route run by a standard consumer on the tau-cloud T4 host; every fact is a raw observation. */
+const linuxCleanHostFixture = (
+  route: 'linux-apt' | 'linux-appimage',
+  distribution = 'ubuntu2404',
+): QualificationEvidence => {
+  const input = platformFixture(route);
+  input.suite = 'clean-host-route-a-b-c-v1';
+  const appImage = route === 'linux-appimage';
+  const name = appImage ? 'tau-staging-appimage' : 'tau-staging';
+  const launcher = `/usr/bin/${name}`;
+  const desktopEntry = `/usr/share/applications/${name}.desktop`;
+  const kernel = '6.8.0-1015-gcp';
+  const osRelease =
+    distribution === 'debian13'
+      ? 'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nID=debian\nVERSION_ID="13"'
+      : distribution === 'ubuntu2604'
+        ? 'PRETTY_NAME="Ubuntu 26.04 LTS"\nID=ubuntu\nVERSION_ID="26.04"'
+        : 'PRETTY_NAME="Ubuntu 24.04.3 LTS"\nID=ubuntu\nVERSION_ID="24.04"';
+  const restriction = distribution === 'debian13' ? 'absent' : '1';
+  for (const stage of input.stages) {
+    stage.security.osVersion = `${kernel} ${osRelease}`;
+    stage.security.measurements['runnerUid'] = '1001';
+    stage.security.measurements['appArmorUsernsRestriction'] =
+      restriction === 'absent' ? 'unavailable:ENOENT: no such file or directory' : restriction;
+  }
+  const template = `ci-gpu-${distribution}-20261101`;
+  const host: LinuxCleanHost = {
+    gcp: {
+      instance: 'tau-ci-gpu-run-1',
+      zone: 'projects/1234/zones/us-central1-a',
+      template: `projects/1234/global/instanceTemplates/${template}`,
+      requested: {
+        template: `https://www.googleapis.com/compute/v1/projects/tau-ci/global/instanceTemplates/${template}`,
+        instance: 'tau-ci-gpu-run-1',
+        zone: 'us-central1-a',
+      },
+    },
+    osRelease,
+    kernel,
+    machine: 'x86_64',
+    appArmorEnabled: 'Y',
+    usernsRestriction: restriction,
+    glxinfo:
+      'name of display: :0\ndirect rendering: Yes\nOpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: Tesla T4/PCIe/SSE2',
+    consumer: { name: 'consumer', uid: 1001, home: '/home/consumer', groups: ['consumer'], sudo: 'refused' },
+    administrator: { name: 'tau', uid: 1000 },
+    existing: [],
+  };
+  const install = (phase: 'initial' | 'reinstall', evidence: QualificationStageEvidence) => {
+    const downloads = evidence.candidate.artifacts.map((artifact) => ({
+      artifact: { kind: artifact.kind, name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+      download: {
+        browser: 'Chromium 140.0.0.0',
+        url: `${evidence.probe.mirrorOrigin}/releases/${encodeURIComponent(evidence.candidate.tag)}/${artifact.name}`,
+        path: `/home/consumer/Downloads/${phase}/${artifact.name}`,
+        sha256: artifact.sha256,
+        size: artifact.size,
+        mode: 0o644,
+        uid: 1001,
+      },
+      ...(artifact.kind === 'linux-appimage' ? { executable: { mode: 0o755, offset: '193728' } } : {}),
+    }));
+    return {
+      stage: phase,
+      downloads,
+      consent: {
+        account: 'tau',
+        uid: 1000,
+        packages: downloads
+          .filter((entry) => entry.artifact.name.endsWith('.deb'))
+          .map((entry) => ({ path: entry.download.path, before: entry.artifact.sha256, after: entry.artifact.sha256 })),
+      },
+      installedPath: launcher,
+      desktopEntry,
+    };
+  };
+  const offlinePid = input.lifecycle.ordinaryQuit?.exitedPid ?? 40;
+  const renderer = 'ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)';
+  input.linuxAcceptance = {
+    kind: 'vm',
+    host,
+    after: { ...host, existing: [] },
+    installs: [install('initial', input.stages[0]), install('reinstall', input.stages[2])],
+    launches: [
+      {
+        stage: 'offline',
+        via: 'launcher',
+        command: [launcher, '--tau-route-qualification=nonce'],
+        account: 'consumer',
+        pid: offlinePid,
+        processUid: 1001,
+        executable: input.stages[0].installed.executablePath,
+      },
+      {
+        stage: 'initial',
+        via: 'desktop-entry',
+        command: ['gio', 'launch', desktopEntry],
+        account: 'consumer',
+        pid: input.stages[0].probe.pid,
+        processUid: 1001,
+        executable: input.stages[0].installed.executablePath,
+      },
+      {
+        stage: 'reinstall',
+        via: 'launcher',
+        command: [launcher, '--remote-debugging-port=0'],
+        account: 'consumer',
+        pid: input.lifecycle.reinstall.mainPid,
+        processUid: 1001,
+        executable: input.stages[2].installed.executablePath,
+      },
+    ],
+    renderers: [renderer, renderer, renderer],
+  };
+  return input;
+};
+const linuxCleanHostRefusals = (): void => {
+  for (const route of ['linux-apt', 'linux-appimage'] as const) {
+    for (const distribution of ['ubuntu2404', 'ubuntu2604', 'debian13']) {
+      const admitted = collectQualificationReceipt(linuxCleanHostFixture(route, distribution));
+      assert.equal(admitted.environment.kind, 'vm');
+      const { host } = admitted.environment;
+      assert.ok(host?.platform === 'linux');
+      assert.equal(host.account.administrator, false);
+      assert.equal(host.graphics.glRenderer, 'Tesla T4/PCIe/SSE2');
+      assert.equal(host.usernsRestriction, distribution === 'debian13' ? 'absent' : '1');
+      assert.equal(host.launch, 'desktop-entry');
+    }
+  }
+  // Without clean-host observations a Linux run is only ever a CI receipt.
+  const hosted = linuxCleanHostFixture('linux-apt');
+  delete hosted.linuxAcceptance;
+  assert.equal(collectQualificationReceipt(hosted).environment.kind, 'ci');
+  type Acceptance = NonNullable<QualificationEvidence['linuxAcceptance']>;
+  type Downloads = Acceptance['installs'][number]['downloads'];
+  const downloads = (input: QualificationEvidence, index = 0) => input.linuxAcceptance!.installs[index]!.downloads;
+  const refusals: Array<[string, (input: QualificationEvidence) => void, RegExp]> = [
+    [
+      'no host facts',
+      (input) => {
+        (input.linuxAcceptance! as { host?: unknown }).host = undefined;
+      },
+      /expected object/u,
+    ],
+    [
+      'software renderer',
+      (input) => {
+        input.linuxAcceptance!.host.glxinfo =
+          'direct rendering: Yes\nOpenGL renderer string: llvmpipe (LLVM 19.1.1, 256 bits)';
+      },
+      /hardware GL renderer/u,
+    ],
+    [
+      'indirect rendering',
+      (input) => {
+        input.linuxAcceptance!.host.glxinfo = input.linuxAcceptance!.host.glxinfo.replace('Yes', 'No');
+      },
+      /hardware GL renderer/u,
+    ],
+    [
+      'viewer on SwiftShader',
+      (input) => {
+        input.linuxAcceptance!.renderers = [
+          input.linuxAcceptance!.renderers[0],
+          'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)',
+          input.linuxAcceptance!.renderers[2],
+        ];
+      },
+      /host GPU/u,
+    ],
+    [
+      'userns sysctl changed before the run',
+      (input) => {
+        input.linuxAcceptance!.host.usernsRestriction = '0';
+      },
+      /stock value/u,
+    ],
+    [
+      'userns sysctl changed after the run',
+      (input) => {
+        input.linuxAcceptance!.after = { ...input.linuxAcceptance!.after, usernsRestriction: '0' };
+      },
+      /stock value/u,
+    ],
+    [
+      'userns sysctl changed during a stage',
+      (input) => {
+        input.stages[1].security.measurements['appArmorUsernsRestriction'] = '2';
+      },
+      /user namespace restriction is disabled|changed during the run/u,
+    ],
+    [
+      'AppArmor disabled',
+      (input) => {
+        input.linuxAcceptance!.host.appArmorEnabled = 'N';
+      },
+      /AppArmor enabled/u,
+    ],
+    [
+      'consumer with sudo',
+      (input) => {
+        input.linuxAcceptance!.host.consumer.sudo = 'allowed';
+      },
+      /administrator rights/u,
+    ],
+    [
+      'consumer in sudo group',
+      (input) => {
+        input.linuxAcceptance!.host.consumer.groups = ['consumer', 'sudo'];
+      },
+      /administrator rights/u,
+    ],
+    [
+      'consumer is the administrator',
+      (input) => {
+        input.linuxAcceptance!.host.consumer = { ...input.linuxAcceptance!.host.consumer, name: 'tau', uid: 1000 };
+      },
+      /administrator rights/u,
+    ],
+    [
+      'stages observed by another account',
+      (input) => {
+        input.stages[0].security.measurements['runnerUid'] = '1000';
+      },
+      /changed during the run/u,
+    ],
+    [
+      'another GPU host',
+      (input) => {
+        input.linuxAcceptance!.host.gcp = { ...input.linuxAcceptance!.host.gcp, instance: 'tau-ci-gpu-run-2' };
+      },
+      /GPU host this job created/u,
+    ],
+    [
+      'template of another distribution',
+      (input) => {
+        const { gcp } = input.linuxAcceptance!.host;
+        input.linuxAcceptance!.host.gcp = {
+          ...gcp,
+          template: gcp.template.replace('ubuntu2404', 'debian13'),
+          requested: { ...gcp.requested, template: gcp.requested.template.replace('ubuntu2404', 'debian13') },
+        };
+      },
+      /GPU host this job created/u,
+    ],
+    [
+      'prior installation',
+      (input) => {
+        input.linuxAcceptance!.host.existing = ['dpkg:tau-staging'];
+      },
+      /already has a Tau installation/u,
+    ],
+    [
+      'download digest mismatch',
+      (input) => {
+        downloads(input)[0]!.download.sha256 = hash(5);
+      },
+      /exact candidate/u,
+    ],
+    [
+      'download path outside the consumer home',
+      (input) => {
+        downloads(input)[0]!.download.path = `/tmp/${downloads(input)[0]!.artifact.name}`;
+      },
+      /exact candidate/u,
+    ],
+    [
+      'download from another origin',
+      (input) => {
+        const entry = downloads(input)[0]!;
+        entry.download.url = entry.download.url.replace('127.0.0.1:4443', 'example.com');
+      },
+      /exact candidate/u,
+    ],
+    [
+      'download written by another account',
+      (input) => {
+        downloads(input, 1)[0]!.download.uid = 1000;
+      },
+      /exact candidate/u,
+    ],
+    [
+      'download missing a route artifact',
+      (input) => {
+        input.linuxAcceptance!.installs[0]!.downloads.pop();
+      },
+      /cover the route exactly/u,
+    ],
+    [
+      'no reinstall',
+      (input) => {
+        input.linuxAcceptance!.installs = input.linuxAcceptance!.installs.slice(0, 1);
+      },
+      /initial and reinstall/u,
+    ],
+    [
+      'package executed',
+      (input) => {
+        const entry = downloads(input).find((item) => item.artifact.name.endsWith('.deb'))!;
+        entry.executable = { mode: 0o755, offset: '1' };
+      },
+      /Debian package was executed/u,
+    ],
+    [
+      'consent by the consumer',
+      (input) => {
+        input.linuxAcceptance!.installs[0]!.consent.account = 'consumer';
+      },
+      /administrator consent/u,
+    ],
+    [
+      'consent installed other bytes',
+      (input) => {
+        input.linuxAcceptance!.installs[1]!.consent.packages[0]!.after = hash(6);
+      },
+      /administrator consent/u,
+    ],
+    [
+      'launch pid mismatch',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[1] = { ...launches[1]!, pid: 1 };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'stage A not from the desktop entry',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[1] = { ...launches[1]!, via: 'launcher', command: ['/usr/bin/tau-staging'] };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'launched as the administrator',
+      (input) => {
+        const launches = input.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+        launches[2] = { ...launches[2]!, account: 'tau', processUid: 1000 };
+      },
+      /desktop entry/u,
+    ],
+    [
+      'kernel changed during the run',
+      (input) => {
+        input.linuxAcceptance!.after = { ...input.linuxAcceptance!.after, kernel: '6.8.0-1016-gcp' };
+      },
+      /changed during the run/u,
+    ],
+  ];
+  for (const route of ['linux-apt', 'linux-appimage'] as const) {
+    for (const [name, change, message] of refusals) {
+      const input = linuxCleanHostFixture(route);
+      change(input);
+      assert.throws(() => collectQualificationReceipt(input), message, `${route}: ${name}`);
+    }
+  }
+  const appImageRefusals: Array<[string, (entry: Downloads[number]) => void, RegExp]> = [
+    [
+      'AppImage already executable',
+      (entry) => {
+        entry.download.mode = 0o755;
+      },
+      /already executable/u,
+    ],
+    [
+      'AppImage never made executable',
+      (entry) => {
+        delete entry.executable;
+      },
+      /make the downloaded AppImage executable/u,
+    ],
+    [
+      'AppImage runtime did not answer',
+      (entry) => {
+        entry.executable = { mode: 0o755, offset: '' };
+      },
+      /make the downloaded AppImage executable/u,
+    ],
+  ];
+  for (const [name, change, message] of appImageRefusals) {
+    const input = linuxCleanHostFixture('linux-appimage');
+    change(downloads(input).find((entry) => entry.artifact.kind === 'linux-appimage')!);
+    assert.throws(() => collectQualificationReceipt(input), message, name);
+  }
+  // Debian's stock policy is the absent sysctl; a run that later observes a set restriction changed the host.
+  const debianChanged = linuxCleanHostFixture('linux-apt', 'debian13');
+  debianChanged.stages[2].security.measurements['appArmorUsernsRestriction'] = '0';
+  assert.throws(() => collectQualificationReceipt(debianChanged), /changed during the run/u);
+  const debianRestricted = linuxCleanHostFixture('linux-apt', 'debian13');
+  debianRestricted.linuxAcceptance!.host.usernsRestriction = '1';
+  assert.throws(() => collectQualificationReceipt(debianRestricted), /stock value/u);
+  const offline = linuxCleanHostFixture('linux-appimage');
+  const offlineLaunches = offline.linuxAcceptance!.launches as Array<Acceptance['launches'][number]>;
+  offlineLaunches[0] = { ...offlineLaunches[0]!, pid: 7 };
+  assert.throws(() => collectQualificationReceipt(offline), /desktop entry/u);
+  const mixed = linuxCleanHostFixture('linux-apt');
+  mixed.acceptance = cleanHostFixture('macos-zip').acceptance!;
+  assert.throws(() => collectQualificationReceipt(mixed), /mixed consumer platforms/u);
+  const mac = cleanHostFixture('macos-zip');
+  delete mac.acceptance;
+  mac.linuxAcceptance = linuxCleanHostFixture('linux-apt').linuxAcceptance!;
+  assert.throws(() => collectQualificationReceipt(mac), /Linux routes only/u);
+  const software = linuxCleanHostFixture('linux-appimage');
+  software.mode = 'software-ci';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  });
+};
 const main = (): void => {
   cleanHostRefusals();
+  linuxCleanHostRefusals();
   const missingReinstall = fixture();
   missingReinstall.lifecycle.reinstall.projectSha256 = hash(100);
   assert.throws(() => collectQualificationReceipt(missingReinstall), /reinstall/u);
@@ -720,7 +1129,7 @@ const main = (): void => {
   cycle.stages[1].renderer.nativeAncestry[0]!.parent = cycle.stages[1].renderer.nativeAncestry[0]!.pid;
   assert.throws(() => collectQualificationReceipt(cycle), /ancestry cycle/u);
   console.log(
-    'PASS collector synthetic decisions: five route A/B/C receipts, clean-host SIP/Gatekeeper/quarantine/native-host refusals and trust/source/payload/process/security/lifecycle/feed refusals; no native qualification claimed',
+    'PASS collector synthetic decisions: five route A/B/C receipts, clean-host SIP/Gatekeeper/quarantine/native-host refusals, Linux GPU/userns/consumer/download/launch clean-host refusals and trust/source/payload/process/security/lifecycle/feed refusals; no native qualification claimed',
   );
 };
 try {

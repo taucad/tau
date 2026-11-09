@@ -39,7 +39,7 @@ const scopeRows = (scope: QualificationScope) =>
       );
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
-  /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
+  /** `vm` collects clean-host acceptance rows from a Mac-, Windows- or Linux-scoped staging producer; never inferred from receipts. */
   kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
@@ -81,8 +81,11 @@ export const collectQualificationRows = (
   if (request.scope !== 'all' && manifest.channel !== 'staging') {
     throw new Error('Platform-scoped evidence is staging qualification only');
   }
-  if (request.kind === 'vm' && (!['macos', 'windows'].includes(request.scope) || manifest.channel !== 'staging')) {
-    throw new Error('Clean-host receipts come only from a Mac- or Windows-scoped staging producer');
+  if (
+    request.kind === 'vm' &&
+    (!['macos', 'windows', 'linux'].includes(request.scope) || manifest.channel !== 'staging')
+  ) {
+    throw new Error('Clean-host receipts come only from a Mac-, Windows- or Linux-scoped staging producer');
   }
   if (request.scope === 'windows' && request.kind !== 'vm') {
     throw new Error('Windows scope requires consumer VM evidence');

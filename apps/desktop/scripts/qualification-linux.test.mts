@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, realpath, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createPackage } from '@electron/asar';
 import { desktopArtifactName, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Exercise real driver filesystem behavior with explicit diagnostic trust. */
@@ -16,6 +17,7 @@ import {
   isAptLockRefusal,
   waitForScheduledAptCompletion,
 } from './qualification-linux.mjs';
+import { linuxAccount, linuxConsumerEnvironment } from './qualification-linux-consumer.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
@@ -220,7 +222,45 @@ const main = async (): Promise<void> => {
     await rm(root, { recursive: true, force: true });
   }
 };
+/** The clean-host consumer agent's boundary: an allowlisted environment without credentials, and no service elsewhere. */
+const consumerBoundary = (): void => {
+  const environment = linuxConsumerEnvironment({ name: 'consumer', uid: 1001, home: '/home/consumer' });
+  assert.deepEqual(Object.keys(environment).toSorted(), [
+    'DBUS_SESSION_BUS_ADDRESS',
+    'DISPLAY',
+    'HOME',
+    'LANG',
+    'LOGNAME',
+    'PATH',
+    'PLAYWRIGHT_BROWSERS_PATH',
+    'TAU_QUALIFICATION_DISPOSABLE_HOST',
+    'USER',
+    'XAUTHORITY',
+    'XDG_RUNTIME_DIR',
+    'XDG_SESSION_TYPE',
+  ]);
+  assert.equal(environment['XDG_RUNTIME_DIR'], '/run/user/1001');
+  assert.equal(environment['XAUTHORITY'], '/home/consumer/.Xauthority');
+  for (const name of ['root;id', '../consumer', 'Consumer', '', 'a'.repeat(33)]) {
+    assert.throws(() => linuxAccount(name), /Invalid consumer account name/u);
+  }
+  // Outside a disposable host (and never as root) the agent refuses to serve.
+  const agent = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      '@oxc-node/core/register',
+      fileURLToPath(new URL('qualification-linux-consumer.mts', import.meta.url)),
+      '--serve',
+    ],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+    { input: '', encoding: 'utf8', env: { PATH: process.env['PATH'] ?? '' }, timeout: 60_000 },
+  );
+  assert.notEqual(agent.status, 0);
+  console.log('PASS Linux clean-host consumer agent environment allowlist, account-name refusal and serve guard');
+};
 try {
+  consumerBoundary();
   await main();
 } catch (error) {
   console.error(error);

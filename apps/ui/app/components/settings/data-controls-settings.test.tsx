@@ -140,7 +140,7 @@ describe('DataControlsSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1-ai-service-improvement');
+        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#2-improving-tau-with-your-chats');
         expect(link).toHaveAttribute('target', '_blank');
       }
     },
@@ -162,7 +162,7 @@ describe('DataControlsSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement');
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#2-improving-tau-with-your-chats');
       }
     },
   );

@@ -192,8 +192,9 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     expect(await memory.exists('a.bin')).toBe(false);
   });
 
-  it('should carry the source and its verified receipt across the wire at protocol 11', () => {
-    expect(nodeFsProtocolVersion).toBe(11);
+  it('should carry the source and its verified receipt across the wire from protocol 11', () => {
+    /* Introduced at 11; 12 (W7.4) adds host-side import and keeps it. */
+    expect(nodeFsProtocolVersion).toBeGreaterThanOrEqual(11);
     const parsed = nodeFsRequestSchema.safeParse({
       v: nodeFsProtocolVersion,
       id: 1,

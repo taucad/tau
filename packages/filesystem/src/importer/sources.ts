@@ -44,7 +44,17 @@ export type ImportSourcePin = Readonly<{
 }>;
 
 /**
- * One entry as a source lists it, before the path policy.
+ * Where a host-side source's file is (W7.4): the opaque grant the host minted
+ * when a person chose the source, and the file's path inside it. The host
+ * resolves both; neither is a host path (I6).
+ *
+ * @public
+ */
+export type HostImportLocator = Readonly<{ grant: string; from: string }>;
+
+/**
+ * One entry as a source lists it, before the path policy: bytes the decoder
+ * reads, or a file the host copies itself.
  *
  * @public
  */
@@ -55,9 +65,17 @@ export type ImportListedEntry = Readonly<{
   mode?: FileMode;
   /** Its stored size, inside an archive. */
   compressedSize?: number;
-  /** What the decoder reads, less the path. */
-  request: Omit<ImportDecodeRequest, 'path' | 'size'>;
-}>;
+  /** When the source's file was last modified, where the listing says (a host row). */
+  lastModified?: number;
+}> &
+  (
+    | Readonly<{
+        /** What the decoder reads, less the path. */
+        request: Omit<ImportDecodeRequest, 'path' | 'size'>;
+        host?: undefined;
+      }>
+    | Readonly<{ request?: undefined; host: HostImportLocator }>
+  );
 
 /**
  * What a source's listing is given: when a directory's subtree is left
@@ -105,8 +123,12 @@ export type PlannedImportEntry = Readonly<{
   path: string;
   size: number;
   mode?: FileMode;
-  request: ImportDecodeRequest;
-}>;
+}> &
+  (
+    | Readonly<{ request: ImportDecodeRequest; host?: undefined }>
+    /** A file the host copies into the staging itself, never decoded here (W7.4). */
+    | Readonly<{ request?: undefined; host: HostImportLocator }>
+  );
 
 /**
  * A source judged: what will be imported, and what was left behind.
@@ -315,6 +337,150 @@ export const handleListImportSource = (handles: readonly FileSystemHandle[]): Im
 });
 
 /**
+ * One row of a host-side source's directory, as its host lists it: a link or
+ * special file named as such, never followed.
+ *
+ * @public
+ */
+export type HostImportRow = Readonly<{
+  name: string;
+  kind: 'file' | 'dir' | 'symlink' | 'other';
+  size: number;
+  mtimeMs: number;
+}>;
+
+/**
+ * What a host-side source answers: one directory's rows, and a preview of one
+ * file, by grant and path inside it (W7.4). On desktop the node host answers
+ * over its wire; the source's bytes never come here to be imported.
+ *
+ * @public
+ */
+export type HostImportSourcePort = Readonly<{
+  /** One bounded page of a directory, from `offset`, and whether more rows follow. */
+  list: (
+    grant: string,
+    path: string,
+    offset?: number,
+  ) => Promise<Readonly<{ rows: readonly HostImportRow[]; more: boolean }>>;
+  read: (grant: string, path: string, maximumBytes: number) => Promise<Uint8Array<ArrayBuffer>>;
+}>;
+
+/**
+ * A source a person chose on the host, as the grants the host minted: one
+ * folder, or files side by side (W7.4).
+ *
+ * @public
+ */
+export type HostImportGrant = Readonly<{ grant: string; name: string; kind: 'directory' | 'file' }>;
+
+/* One granted folder walked as `walkDirectory` walks a handle: depth first, never entering a pruned subtree. */
+const walkHostDirectory = async function* (
+  walk: Readonly<{ port: HostImportSourcePort; grant: string; control: ImportListControl }>,
+  directory: string,
+  prefix: string,
+): AsyncGenerator<ImportListedEntry> {
+  const { port, grant, control } = walk;
+  /* A page at a time, so a directory of any size is never held whole: the entry limit stops it as it goes. */
+  for (let offset = 0, more = true; more; ) {
+    control.signal?.throwIfAborted();
+    // oxlint-disable-next-line no-await-in-loop -- a directory is read one page after another.
+    const page = await port.list(grant, directory, offset);
+    offset += page.rows.length;
+    more = page.more && page.rows.length > 0;
+    yield* hostRows(walk, page.rows, { directory, prefix });
+  }
+};
+
+/* One page of a granted directory's rows, each counted against the entry limit as it is found. */
+const hostRows = async function* (
+  walk: Readonly<{ port: HostImportSourcePort; grant: string; control: ImportListControl }>,
+  rows: readonly HostImportRow[],
+  at: Readonly<{ directory: string; prefix: string }>,
+): AsyncGenerator<ImportListedEntry> {
+  const { grant, control } = walk;
+  const { directory, prefix } = at;
+  for (const row of rows) {
+    control.signal?.throwIfAborted();
+    const from = directory === '' ? row.name : `${directory}/${row.name}`;
+    const path = prefix === '' ? row.name : `${prefix}/${row.name}`;
+    if (row.kind === 'dir') {
+      if (!control.prunes(path)) {
+        yield* walkHostDirectory(walk, from, path);
+      }
+      continue;
+    }
+    control.listed(path);
+    /* A special file (a socket, a device) is not content: counted, then left, as a picked folder never offers one. */
+    if (row.kind === 'other') {
+      continue;
+    }
+    /* A link is counted as skipped, as an archive's is: it is never followed out of the source. */
+    yield row.kind === 'symlink'
+      ? { source: path, size: -1, host: { grant, from } }
+      : { source: path, size: row.size, lastModified: row.mtimeMs, host: { grant, from } };
+  }
+};
+
+/**
+ * A source a person chose on the host (W7.4): a folder, walked by its host
+ * a directory at a time with the path policy pruning as it goes, or files the
+ * operating system opened with Tau. Its entries are copied into the staging
+ * by the host, never read here: on desktop a folder import costs one copy (a
+ * clone where the file system can) instead of three crossings of every byte.
+ *
+ * @param port - The host that minted the grants.
+ * @param grants - One folder, or several files.
+ * @param options - The name to import under.
+ * @returns The source.
+ * @public
+ */
+export const hostImportSource = (
+  port: HostImportSourcePort,
+  grants: readonly HostImportGrant[],
+  options: Readonly<{ name?: string }> = {},
+): ImportSource => {
+  const [only] = grants;
+  const folder = grants.length === 1 && only?.kind === 'directory' ? only : undefined;
+  return {
+    kind: folder === undefined ? 'files' : 'directory',
+    name: options.name ?? folder?.name ?? '',
+    stripSharedFolders: true,
+    async *list(control) {
+      for (const grant of grants) {
+        control.signal?.throwIfAborted();
+        if (grant.kind === 'directory') {
+          /* A lone folder is the project root, as a picked handle is; beside others, it is walked under its name. */
+          const prefix = folder === undefined ? grant.name : '';
+          if (prefix === '' || !control.prunes(prefix)) {
+            yield* walkHostDirectory({ port, grant: grant.grant, control }, '', prefix);
+          }
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a source's grants are listed in order.
+        const listed = await port.list(grant.grant, '');
+        const [row] = listed.rows;
+        if (row === undefined) {
+          continue;
+        }
+        control.listed(grant.name);
+        if (row.kind === 'other') {
+          continue;
+        }
+        yield row.kind === 'file'
+          ? {
+              source: grant.name,
+              size: row.size,
+              lastModified: row.mtimeMs,
+              host: { grant: grant.grant, from: row.name },
+            }
+          : { source: grant.name, size: -1, host: { grant: grant.grant, from: row.name } };
+      }
+    },
+  };
+};
+
+/**
  * Spool a downloaded archive of declared size into a `Blob`, refusing it as
  * soon as either the declaration or the bytes pass the archive limit. The
  * browser keeps a large `Blob` out of the page's heap, so a zip that cannot be
@@ -474,15 +640,20 @@ export const planImport = async (
       continue;
     }
     meter.declared(verdict.path, entry.size, entry.compressedSize);
-    if (entry.request.blob instanceof File && entry.request.zip === undefined) {
-      lastModified = Math.max(lastModified, entry.request.blob.lastModified);
+    const modified =
+      entry.lastModified ??
+      (entry.request?.blob instanceof File && entry.request.zip === undefined
+        ? entry.request.blob.lastModified
+        : undefined);
+    if (modified !== undefined) {
+      lastModified = Math.max(lastModified, modified);
     }
-    entries.push({
-      path: verdict.path,
-      size: entry.size,
-      ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-      request: { ...entry.request, path: verdict.path, size: entry.size },
-    });
+    const kept = { path: verdict.path, size: entry.size, ...(entry.mode === undefined ? {} : { mode: entry.mode }) };
+    entries.push(
+      entry.host === undefined
+        ? { ...kept, request: { ...entry.request, path: verdict.path, size: entry.size } }
+        : { ...kept, host: entry.host },
+    );
   }
   if (entries.length === 0) {
     throw new ImportRefusedError('empty', { limits });

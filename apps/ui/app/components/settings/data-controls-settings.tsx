@@ -17,7 +17,7 @@ import { legalUrl } from '#lib/legal-url.js';
 function LearnMore(): React.JSX.Element {
   return (
     <a
-      href={legalUrl('privacy#9.2.1-ai-service-improvement')}
+      href={legalUrl('privacy#2-improving-tau-with-your-chats')}
       target='_blank'
       rel='noopener noreferrer'
       className='underline hover:text-foreground'

@@ -770,6 +770,8 @@ self.addEventListener(
         /* Each written file's one hash, from its read-back, on the compute worker (EQ6, I2). */
         measure: async (bytes, expectedSize) => revisionCompute.measureImportBytes(bytes, expectedSize),
         policy: tauPathPolicy,
+        /* What a person chose on the desktop host is listed and copied by that host, by grant (W7.4, I6). */
+        hostSources: async () => fileService.importSources(),
         /* A linked repository is fetched here, into the staging, by the revisions authority: `.git` never reaches the page (I6). */
         stageLinked: async (input) =>
           stageLinkedImport({

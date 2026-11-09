@@ -36,8 +36,8 @@ describe('legalUrl', () => {
   it('should link the page and anchor on the website origin', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
     bind({ TAU_FRONTEND_URL: 'https://taucad.dev' });
-    expect(legalUrl('privacy#9.2.1-ai-service-improvement')).toBe(
-      'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement',
+    expect(legalUrl('privacy#2-improving-tau-with-your-chats')).toBe(
+      'https://taucad.dev/legal/privacy#2-improving-tau-with-your-chats',
     );
   });
 });

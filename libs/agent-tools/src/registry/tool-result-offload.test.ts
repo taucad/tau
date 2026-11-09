@@ -6,7 +6,7 @@ import { createChatToolRegistry } from '#registry/tool-registry.js';
 import { retainedResultPath, toolResultLimit, withToolResultOffload } from '#registry/tool-result-offload.js';
 
 /*
- * Regression review R4: successors to the LangChain plane's `tool-offloading.middleware.test.ts` and
+ * Regression review R4: successors to the server agent plane's `tool-offloading.middleware.test.ts` and
  * `tool-result-budget.middleware.test.ts`. A result too large for context is written whole where `read_file` can page
  * it, and the model gets a preview that keeps the result's shape and names the file.
  */
@@ -59,7 +59,7 @@ describe('withToolResultOffload', () => {
     expect(fileSystem.writeBinaryFile).not.toHaveBeenCalled();
   });
 
-  it('should keep read_file results up to 80,000 characters, as the LangChain plane did', async () => {
+  it('should keep read_file results up to 80,000 characters, as the server agent plane did', async () => {
     const result = readFileResult(lines(500));
     expect(serialized(result.content)).toBeGreaterThan(toolResultLimit('grep'));
     expect(serialized(result.content)).toBeLessThan(toolResultLimit('read_file'));

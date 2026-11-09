@@ -89,9 +89,9 @@ export const recordRateLimitAutoResume = (runId: string, attempt: number): void 
 // ── Provider unavailable ──────────────────────────────────────────────────────────────────────────
 
 /**
- * The provider refusal code that resumes once on its own (LangChain plane regression review R6).
+ * The provider refusal code that resumes once on its own (server agent plane regression review R6).
  *
- * The LangChain plane's provider client retried a transient failure twice before the person saw it. The Pi gateway
+ * The server agent plane's provider client retried a transient failure twice before the person saw it. The Pi gateway
  * transport retries none, because each retry is a billed attempt, so a brief provider 5xx paused the turn for a click.
  * One automatic resume restores the common case without hiding a real outage.
  *

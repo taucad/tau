@@ -55,7 +55,6 @@
     "@sentry/node": "catalog:",
     "@taucad/api-core": "workspace:*",
     "@taucad/telemetry": "workspace:*",
-    "@traceloop/instrumentation-langchain": "catalog:",
     "fastify": "catalog:",
     "nestjs-pino": "^4.6.1",
     "pino-http": "^10.5.0"

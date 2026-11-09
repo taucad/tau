@@ -1,0 +1,97 @@
+# Camera authority
+
+`CameraAuthority.tla` models who may move one view's camera and which of its poses reach the view record. It encodes the graphics event-driven state charter's rulings D2, D15 and D20 and its invariants I2, I3, I6, I7 and I8. It was written before the camera states (G3) and the view-record binding (G6) exist, as formal-verification-policy rule 1 requires.
+
+## Parties and abstraction
+
+| Party               | In the model                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Camera              | `cam = {pose, source, revision, input}`, with `input` one of `idle`, `dragging`, `settling`. A pose is an opaque identifier; geometry is not modelled                                                   |
+| Person              | `PoseObserved` (a drag of the view or the gizmo), `InteractionEnded`, and `Changed` with the sources `fov`, `up`, `fit` and `focus`                                                                     |
+| Automatic changes   | `Changed` with the sources `framing`, `viewport` and `bounds`. Viewport and bounds changes bump the revision and keep the pose                                                                          |
+| Clock               | `SettleElapsed` (`settling` to `idle`). The as-built emission quiet window is `QuietElapsed`                                                                                                            |
+| Record              | `file = {pose, writer, source}`: the camera field on disk, who really wrote it, and the source of the pose a save carried                                                                               |
+| Binding             | `Observe` handles one record publication: it ignores a record labelled `own` and sends `adoptPersistedPose` for a `foreign` one. `intent` is its edit that has not reached the file; `Landed` writes it |
+| Another party       | `ForeignWrite`: a second window, an agent or an earlier session                                                                                                                                         |
+| Driver and controls | `echo` is a controls update the driver caused and that is still in flight; `EchoObserved` delivers it                                                                                                   |
+
+The record store is not modelled. `RecordSync.tla` (`apps/ui/specs/record-sync/`) owns its protocol. This module takes that module's `OwnWriteAttributed` (I5) as an assumption, switched by `AttributionSound`, and `misattributed` shows the assumption is needed.
+
+## Properties
+
+| Property                 | Charter      | Meaning                                                                                                                |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `LocalInputWins`         | I2, D15      | A persisted pose that arrived while the person was dragging or settling never becomes the camera's pose, then or later |
+| `NothingQueued`          | I2, D15      | No persisted pose ever waits; the camera has no pending-adoption state                                                 |
+| `IdleForeignApplies`     | D15          | A persisted pose is dropped or queued only when the camera is not idle, so one that arrives in `idle` applies at once  |
+| `NoEchoLoop`             | I3           | A controls update the driver caused never changes the camera                                                           |
+| `OwnNeverAdopted`        | I6           | The binding never asks the camera to adopt a record this view wrote                                                    |
+| `OnlyPersonPosesWritten` | I7, D20      | Every pose this view writes was produced by `input`, `gizmo`, `fov`, `up`, `fit` or `focus`                            |
+| `AdoptOnlyWhenIdle`      | I8           | A persisted pose applies only in `input.idle`                                                                          |
+| `NoSnapBack`             | the incident | The camera never moves back to a pose this view saved earlier                                                          |
+
+`NoEchoLoop` and `NoSnapBack` compare a step's two states, so they are action properties (`PROPERTIES` in a configuration). The rest are state invariants; three of them read the step label `act`.
+
+## Configurations
+
+| Configuration            | Tier    | Required result                  | What it shows                                                                                                       |
+| ------------------------ | ------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `target`                 | pr      | pass                             | All eight properties and `TypeOK`, at five camera changes and two foreign writes                                    |
+| `target-wide`            | nightly | pass                             | The same at eight camera changes and three foreign writes                                                           |
+| `export`                 | pr      | pass                             | The target at two camera changes and one foreign write, the source of `CameraAuthority/graph.json` and `suite.json` |
+| `today`                  | pr      | `NoSnapBack`, defect             | The orbit snap-back: this view's save is published as foreign, waits for the quiet window and replaces a newer pose |
+| `today-foreign-mid-drag` | pr      | `LocalInputWins`, defect         | As built, a foreign pose that arrives during a drag is applied, not dropped                                         |
+| `today-held-drag`        | pr      | `AdoptOnlyWhenIdle`, defect      | As built, the quiet window counts from the last camera emission, so it opens during a drag that is held still       |
+| `today-refit-saved`      | pr      | `OnlyPersonPosesWritten`, defect | As built, an automatic refit after the first frame is saved                                                         |
+| `queue-until-idle`       | pr      | `LocalInputWins`, witness        | D15's rejected alternative: queue a foreign pose and apply it when the drag has settled                             |
+| `misattributed`          | pr      | `NoSnapBack`, witness            | The target binding and camera still snap back when the store labels an own write `foreign`                          |
+| `no-origin-guard`        | pr      | `OwnNeverAdopted`, witness       | A binding that ignores the origin label                                                                             |
+| `no-echo-stamp`          | pr      | `NoEchoLoop`, witness            | A driver sync whose controls update carries no echo revision                                                        |
+
+Each violating configuration checks exactly one property. The four `today` configurations are the as-built model: `Adoption = "queue"`, `QuietGate = "emission"` and `WriteRule = "value"`. `today` also sets `AttributionSound = FALSE`, the view store before taucad/tau#1602. They stay violated for as long as the switches exist. The package that removes the as-built code (G6b) changes their `kind` from `defect` to `witness` in `expected.json`.
+
+`IdleForeignApplies` and `NothingQueued` have no dedicated witness. `queue-until-idle` violates `NothingQueued` on the way to its `LocalInputWins` counterexample.
+
+## What the as-built switches stand for
+
+| Switch value               | `apps/ui/app/hooks/use-view-settings-sync.ts`                                                                                                         |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Adoption = "queue"`       | `pendingCameraRecordRef` and `cameraAdoptionPendingRef`; an own receipt clears them                                                                   |
+| `QuietGate = "emission"`   | `apply` waits until `poseSettle` passed since `lastCameraEmissionRef`, measured with `Date.now()`                                                     |
+| `WriteRule = "value"`      | `persist` runs when the settle timer fires and skips a pose equal to `previousSettingsRef`, `adoptedPoseRef` or the unconsumed `firstFrameReceiptRef` |
+| `AttributionSound = FALSE` | a read that starts after the write reply publishes the store's own bytes without a local patch (root cause Finding 2)                                 |
+
+## Rules the model fixes for G3, G4 and G6
+
+- **Capture with the change.** Under the `provenance` rule the binding captures a person's pose in the same step as the camera change that produced it (`Touch`). `lastChange` holds only the latest source, so a binding that sampled it later, for example on entering `idle`, would lose a drag that a viewport, bounds or framing change followed inside the settle window.
+- **One handling per publication.** The binding compares a publication with the last pose it handled (`seen`) and requests adoption once. A dropped pose is not requested again when the same record is published a second time, which is what makes `LocalInputWins` hold after the drag.
+- **Drop is the only refusal.** In `dragging` and `settling` the camera answers `adoptPersistedPose` with `adoptionDropped` and keeps no state for it.
+- **Any stamped update is an echo.** `echo` is one slot: a later driver sync replaces the stamp of an earlier one, and the camera ignores the update that carries it.
+
+## Bridge
+
+`CameraAuthority/graph.json` and `suite.json` are generated from `export` with the phase `cam.input` and the step label `act`. The suite holds one shortest behaviour per (input state, action) class. G3 replays it on the live camera actor: `PoseObserved`, `InteractionEnded`, `SettleElapsed`, `Changed`, `AdoptApplied`, `AdoptDropped` and `EchoObserved` are camera events or its `after` transition, and the camera fields of each view are the expected snapshot. `RecordOwn`, `Landed` and `ForeignWrite` do not touch the camera; the G6 binding conformance test replays those. No `drift.json` exists yet, because the machines it would hash do not. G3 adds it with the camera machine and G6 extends it with the binding.
+
+Regenerate after any edit to the module or to `export`:
+
+```bash
+node tools/formal/src/cli.ts update packages/camera
+```
+
+## Bounds and limits
+
+- TLC explores a bounded number of camera changes (`MaxRevision`) and foreign writes (`MaxForeign`). This is exhaustive checking inside that scope, not an unbounded proof. No fairness or liveness is claimed: the model does not assert that a person's pose is eventually saved.
+- One view and one record. A second view of the same entry is another party's `ForeignWrite`.
+- The write is abstracted to a capture and a landing. Debounce, checked-write conflicts, retries and the close fence belong to `RecordSync.tla`.
+- A foreign write always carries a new pose. A foreign write whose bytes equal one of this view's outstanding writes is `RecordSync`'s `foreign-identical-bytes` case.
+- The first read of a record that an earlier session saved is a `ForeignWrite` followed by `Observe`. Framing's hold of that pose until the first frame (G5) is not modelled.
+- Driver, controls adapter and gizmo internals are not modelled (formal methods blueprint, "What is not modelled"). In particular the model does not check that a person's controls update is never taken for an echo; adapter tests cover that.
+- **View and file can disagree after an adoption.** If a foreign pose is adopted in `idle` while this view's own edit is still on its way to the file, the edit lands afterwards and the last writer wins: the camera shows the foreign pose and the file holds the person's earlier one until the next person command. The as-built code behaves the same way, no charter invariant covers it, and the model states no convergence property. It is recorded here so that G6 decides it deliberately.
+
+## Running
+
+```bash
+pnpm nx run formal:setup --tools=tlc
+pnpm nx run camera:formal
+pnpm nx run camera:formal:nightly
+```

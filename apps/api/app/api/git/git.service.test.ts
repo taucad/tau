@@ -77,7 +77,7 @@ import type {
   RepositoryStore,
   StoredObject,
 } from '#api/git/store/port.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';

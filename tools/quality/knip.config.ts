@@ -134,6 +134,9 @@ const config: KnipConfig = {
         // `open-to-frame-observation.test.ts` spawn the other two.
         'apps/ui-e2e/production-server.ts',
         'apps/ui-e2e/src/support/{host-fixture,open-to-frame}.ts',
+        // Serialized into page and worker realms by the project-open measurement harness in Brain
+        // (`installProjectOpenCounters.toString()`), so nothing in the repository imports it.
+        'apps/ui-e2e/src/support/project-open-counters.ts',
         // The isolated deletion race target selects this nested Vitest configuration.
         'apps/api-e2e/src/git/project-deletion-race.vitest.config.ts',
       ],
@@ -172,8 +175,9 @@ const config: KnipConfig = {
         'app/testing/project-deletion-process.ts',
       ],
       ignoreDependencies: [
-        // Imported by the source-consumed `api-observability` and `api-email` libraries the server bundle
-        // inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        // Imported by the source-consumed `api-observability`, `api-email` and `api-object-storage` libraries
+        // the server bundle inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        '@aws-sdk/s3-request-presigner',
         '@pyroscope/nodejs',
         '@sentry/node',
         'react-email',
@@ -203,6 +207,10 @@ const config: KnipConfig = {
         'src/testing/billing-load/{run,driver,cluster}.ts',
         'src/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
       ],
+    },
+    'apps/libs/ui-kit': {
+      // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
+      entry: ['scripts/svg-sprite.d.ts'],
     },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
@@ -264,6 +272,10 @@ const config: KnipConfig = {
       // bundler-benchmark/bundler.d.ts declares its type.
       ignoreUnresolved: ['#benchmark-bundler'],
     },
+    'apps/cli-e2e': {
+      // The Build123d suites read its `tau-plugin.json` through `createRequire(...).resolve`.
+      ignoreDependencies: ['@taucad/build123d'],
+    },
     'apps/runtime-e2e': {
       entry: [
         // `runner.ts` spawns `run-arm.mts` behind the `hooks.mjs` loader, which registers `hook-impl.mjs`.
@@ -284,8 +296,6 @@ const config: KnipConfig = {
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
-        // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
-        'scripts/svg-sprite.d.ts',
         // `build*` targets run it as a runtime cache input.
         'geospec-mt-assets-cache-key.ts',
         // Script of calibration-preview.html, served by vite.calibration.config.ts.
@@ -300,6 +310,8 @@ const config: KnipConfig = {
         'app/lib/browser-stubs/resvg-js.ts',
         // The deletion component browser suite selects this nested config with --config.
         'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
+        // The project-open browser suite selects this nested config with --config.
+        'app/machines/project-open.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,
@@ -371,14 +383,13 @@ const config: KnipConfig = {
       entry: ['src/backend/node/*.fixture.ts'],
     },
     'packages/host': {
-      // `runtime-child-render.integration.test.ts` spawns it by path.
-      entry: ['src/fixtures/render-child-probe.ts'],
+      // `runtime-child-render.integration.test.ts` spawns it by path; the `qualify-x1c` target runs the script
+      // from the workspace root.
+      entry: ['src/fixtures/render-child-probe.ts', 'scripts/qualify-x1c.mts'],
       // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
       ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
-      // The `qualify-x1c` target runs it from the workspace root.
-      entry: ['scripts/qualify-x1c.mts'],
       // Replicad model sources that `render-plates` exports through the Tau CLI.
       ignore: ['models/**'],
     },

@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';

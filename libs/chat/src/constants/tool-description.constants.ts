@@ -221,4 +221,10 @@ your own turn's edits were recorded.
 Revisions are saved by Tau itself, never by you: there is no action here that
 creates a branch, merges, restores, discards or syncs anything. Ask the user to
 do those.`,
+  [toolName.webSearch]: `Search the web and return up to five results, each with its title, URL and a content excerpt. Use it for external facts the project files cannot answer: standards, part dimensions, datasheets, current events. Input is one search query.
+
+To read the full body of a result or a known URL, use \`${toolName.webBrowser}\`.`,
+  [toolName.webBrowser]: `Extract the text content of up to five web pages in one call. Supports HTML pages, PDF documents and plain text. Use it after \`${toolName.webSearch}\` to read promising results in full, or on a URL the user gave. A page that cannot be read returns an "[Extraction failed]" entry while the others still return; long pages are truncated and say so.
+
+To find URLs in the first place, use \`${toolName.webSearch}\`.`,
 } as const;

@@ -14,8 +14,8 @@ import type { DatabaseService } from '@taucad/api-database';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { lockProjectLifecycle, readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node Buffer fixture encodes the WebP envelope.
 const image = (): Buffer<ArrayBuffer> => {

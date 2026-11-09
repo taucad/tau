@@ -22,9 +22,9 @@ import {
   user,
 } from '@taucad/api-database/schema';
 import { installMirrorRole } from '@taucad/api-database/service-roles';
-import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { StorageModule } from '#storage/storage.module.js';
+import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/testing/destructive-test-bucket-guard';
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import { StorageModule } from '@taucad/api-object-storage/module';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest } from '#api/git/store/manifest.js';

@@ -31,6 +31,10 @@ export {
   lookupOutcomes,
   evaluationClasses,
   geospecRunStatuses,
+  agentSafeguardPatterns,
+  agentCompactionLanes,
+  agentCompactionTiers,
+  agentCompactionOutcomes,
   lfsTransports,
   workerTimingSpanNames,
 } from '#ingest.js';

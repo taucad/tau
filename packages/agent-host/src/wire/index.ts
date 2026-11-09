@@ -76,8 +76,14 @@ export type {
   ReadInput,
   ReadRequest,
 } from '#wire/frames.schema.js';
-export { attemptReceiptSchema, gatewayErrorCodes } from '#wire/gateway.js';
-export type { GatewayErrorCode, InvocationResolution } from '#wire/gateway.js';
+export { attemptReceiptSchema, gatewayErrorCodes, gatewayTurnGaps, gatewayTurnSteps } from '#wire/gateway.js';
+export type {
+  GatewayErrorCode,
+  GatewayTurnGap,
+  GatewayTurnLabels,
+  GatewayTurnStep,
+  InvocationResolution,
+} from '#wire/gateway.js';
 export { isResumable, refusalOf, refusals } from '#wire/refusals.js';
 export { turnPlacementSchema, turnSettlementSchema } from '#wire/settlement.schema.js';
 export type { TurnPlacementRecord, TurnSettlementBody } from '#wire/settlement.schema.js';

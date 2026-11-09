@@ -3,7 +3,7 @@ import { Bot, SearchX } from 'lucide-react';
 import type { Model } from '#hooks/use-models.js';
 import { Button } from '@taucad/ui/components/button';
 import { SwitchRow } from '@taucad/ui/components/switch';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { useModels } from '#hooks/use-models.js';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';

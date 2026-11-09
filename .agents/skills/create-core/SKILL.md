@@ -9,6 +9,8 @@ Use a core package only for small dependency-light helpers shared by multiple
 published packages. Prefer the owning domain package when one capability owns
 the code, and `/create-plugin` for runtime capabilities.
 
+Before creating one, apply Rule 0 of `docs/policy/workspace-project-policy.md`; a helper shared by publishables is a core package only under the shared-package or singleton exception, and a `runtime` subpath is preferred when `runtime` can carry it.
+
 ## Create
 
 Inspect `tools/workspace-plugin/src/generators/core/schema.json`, then use the

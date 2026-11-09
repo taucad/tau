@@ -38,6 +38,7 @@
   "devDependencies": {
     "@sentry/cli": "catalog:",
     "@taucad/nx": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@types/js-yaml": "catalog:",
     "@types/jsdom": "catalog:",
     "netlify-cli": "catalog:"

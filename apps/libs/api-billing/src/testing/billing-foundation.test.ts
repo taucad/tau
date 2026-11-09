@@ -574,7 +574,7 @@ describe('billing database protections and real command', () => {
     }
   });
 
-  it('should install the expand-step protections on the fresh schema', async () => {
+  it('should install the contract-step protections on the fresh schema', async () => {
     const [state] = await client`SELECT
       NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
       to_regprocedure('billing.require_operation_holds()') IS NULL AND to_regprocedure('billing.protect_budget_hold()') IS NULL
@@ -585,13 +585,13 @@ describe('billing database protections and real command', () => {
         OR has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'UPDATE')
         OR has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'DELETE') AS "pauseWritable",
       has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable",
-      has_table_privilege('tau_billing_runtime', 'billing.billing_budget_hold', 'INSERT')
-        AND has_table_privilege('tau_billing_runtime', 'billing.supplier_cost_evidence', 'INSERT') AS "supplierEvidenceWritable",
+      to_regclass('billing.billing_budget_hold') IS NULL AND to_regclass('billing.supplier_cost_evidence') IS NULL
+        AS "supplierTablesGone",
       has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_pico_usd', 'UPDATE')
         AND has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_unpriced_reason', 'UPDATE')
         AS "supplierCostWritable",
-      has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_state', 'UPDATE')
-        AS "supplierStateWritable",
+      NOT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'billing' AND table_name = 'credit_operation'
+        AND column_name IN ('supplier_state', 'spend_budget_hold_id', 'risk_budget_hold_id')) AS "supplierColumnsGone",
       has_table_privilege('tau_billing_runtime', 'billing.billing_budget', 'SELECT')
         AND has_column_privilege('tau_billing_runtime', 'billing.billing_budget', 'consumed', 'UPDATE') AS "promotionBudgetUsable"`;
     expect(state).toEqual({
@@ -601,10 +601,10 @@ describe('billing database protections and real command', () => {
       pauseReadable: true,
       pauseWritable: false,
       attemptVoidWritable: true,
-      // Old-image Machines still write holds, evidence and supplier_state during the expand step's rolling deploy.
-      supplierEvidenceWritable: true,
+      // Migration 0067 dropped the supplier holds, evidence, finality state and hold ids; terminal supplier cost stays.
+      supplierTablesGone: true,
       supplierCostWritable: true,
-      supplierStateWritable: true,
+      supplierColumnsGone: true,
       promotionBudgetUsable: true,
     });
     // A pause is resumed once, and nothing else about it ever changes.
@@ -708,7 +708,7 @@ describe('billing database protections and real command', () => {
   });
 });
 
-describe('billing upgrade from migration 0048 under the pre-charter protections', () => {
+describe('billing upgrade from migration 0048 through the supplier expand and contract steps', () => {
   const name = `billing_upgrade_${String(process.pid)}`;
   const target = new URL(databaseUrl);
   target.pathname = `/${name}`;
@@ -717,6 +717,7 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
   const policy = randomUUID();
   const activation = randomUUID();
   const operations = [randomUUID(), randomUUID()] as const;
+  const supplierException = randomUUID();
   const resolvedKinds = [
     'supplier_evidence_missing',
     'supplier_evidence_mismatched',
@@ -826,6 +827,13 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
     });
     await upgraded`INSERT INTO billing.billing_route_pause(environment,sku,operation_id,reason)
       VALUES (${environment},'model:fixture',${operations[0]},'retail_overrun')`;
+    await upgraded`INSERT INTO billing.supplier_cost_evidence(id,operation_id,environment,provider,credential_account,
+      source_object_id,source_revision,payload_digest,numerator,denominator,currency,completeness,finality,received_at)
+      VALUES (${randomUUID()},${operations[0]},${environment},'fixture','fixture',${operations[0]},'1','digest',40,1,'usd',
+        'complete','final',now())`;
+    await upgraded`INSERT INTO billing.billing_operation_exception(id,operation_id,kind,source_identity,quantum,
+      observed_numerator,observed_denominator,maximum)
+      VALUES (${supplierException},${operations[0]},'supplier_bound','fixture','pico_usd','150',1,100)`;
     for (const kind of [...resolvedKinds, ...untouchedKinds]) {
       for (const state of ['open', 'attention']) {
         // oxlint-disable-next-line no-await-in-loop -- one case per kind and state
@@ -840,7 +848,42 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
           'resolved',now(),'2026-01-01T00:00:00Z','{"prior":true}')`;
     }
 
-    // The release command: the whole expand migration, then this build's protections.
+    // The expand step: every migration before the 0067 contract step.
+    const beforeContract = mkdtempSync(join(tmpdir(), 'tau-billing-0066-'));
+    try {
+      cpSync(migrationsFolder, beforeContract, { recursive: true });
+      const contractJournalPath = join(beforeContract, 'meta', '_journal.json');
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- drizzle-kit's journal file
+      const contractJournal = JSON.parse(readFileSync(contractJournalPath, 'utf8')) as {
+        entries: Array<{ tag: string }>;
+      };
+      const contract = contractJournal.entries.findIndex((entry) => entry.tag === '0067_supplier_contract');
+      expect(contract).toBeGreaterThan(expand);
+      contractJournal.entries = contractJournal.entries.slice(0, contract);
+      writeFileSync(contractJournalPath, JSON.stringify(contractJournal));
+      await migrate(drizzle(upgraded), { migrationsFolder: beforeContract });
+    } finally {
+      rmSync(beforeContract, { recursive: true, force: true });
+    }
+
+    // The contract step refuses while the legacy export's --delete has not removed the supplier budgets and holds.
+    const causes = (error: unknown): string[] =>
+      error instanceof Error ? [error.message, ...causes(error.cause)] : [];
+    await expect(migrate(drizzle(upgraded), { migrationsFolder })).rejects.toSatisfy((error: unknown) =>
+      causes(error).some((message) =>
+        message.includes('0067 requires export-supplier-legacy --delete first: billing_budget_hold still has rows'),
+      ),
+    );
+    // What `export-supplier-legacy --delete` removed, in its foreign-key order.
+    await upgraded.begin(async (transaction) => {
+      await transaction`DELETE FROM billing.billing_budget_hold WHERE budget_id IN
+        (SELECT id FROM billing.billing_budget WHERE environment = ${environment} AND kind IN ('spend', 'risk'))`;
+      await transaction`DELETE FROM billing.billing_budget WHERE environment = ${environment} AND kind IN ('spend', 'risk')`;
+      await transaction`DELETE FROM billing.billing_budget_funding
+        WHERE environment = ${environment} AND kind IN ('spend', 'risk')`;
+    });
+
+    // The release command: the contract migration, then this build's protections.
     await migrate(drizzle(upgraded), { migrationsFolder });
     await installBillingProtections(upgraded);
   }, 120_000);
@@ -853,55 +896,52 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
     }
   }, 120_000);
 
-  it('should keep the old image writable, refuse runtime pause writes and drop the hold triggers', async () => {
+  it('should drop the supplier objects and hold triggers and refuse runtime pause writes', async () => {
     const upgraded = database();
     const [state] = await upgraded`SELECT
       NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
       to_regprocedure('billing.require_operation_holds()') IS NULL AND to_regprocedure('billing.protect_budget_hold()') IS NULL
         AS "holdFunctionsGone",
+      to_regclass('billing.billing_budget_hold') IS NULL AND to_regclass('billing.supplier_cost_evidence') IS NULL
+        AS "supplierTablesGone",
+      NOT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'billing' AND table_name = 'credit_operation'
+        AND column_name IN ('supplier_state', 'spend_budget_hold_id', 'risk_budget_hold_id')) AS "supplierColumnsGone",
+      (SELECT convalidated FROM pg_constraint WHERE conname = 'credit_operation_states') AS "statesValidated",
+      (SELECT convalidated FROM pg_constraint WHERE conname = 'billing_operation_exception_kind') AS "exceptionKindValidated",
       EXISTS (SELECT FROM pg_trigger WHERE tgname = 'protect_route_pause') AS "pauseProtected",
-      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable"`;
+      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable",
+      has_column_privilege('tau_billing_runtime', 'billing.billing_budget', 'consumed', 'UPDATE') AS "promotionBudgetUsable"`;
     expect(state).toEqual({
       holdTriggersGone: true,
       holdFunctionsGone: true,
+      supplierTablesGone: true,
+      supplierColumnsGone: true,
+      statesValidated: true,
+      // Deliberately NOT VALID: historical supplier_bound rows stay.
+      exceptionKindValidated: false,
       pauseProtected: true,
       attemptVoidWritable: true,
+      promotionBudgetUsable: true,
     });
+    const budgets = await upgraded`SELECT kind FROM billing.billing_budget WHERE environment = ${environment}`;
+    expect(budgets).toEqual([{ kind: 'promotion_issuance' }]);
     const pauses = await upgraded`SELECT actor, resumed_at IS NOT NULL AS resumed, resumed_by AS "resumedBy",
       resume_reason AS "resumeReason" FROM billing.billing_route_pause WHERE environment = ${environment}`;
     expect(pauses).toEqual([
       { actor: 'automatic', resumed: true, resumedBy: 'migration-0049', resumeReason: 'superseded_by_charter' },
     ]);
+    // The historical supplier_bound exception survives; a new one is refused.
+    const [historical] =
+      await upgraded`SELECT kind FROM billing.billing_operation_exception WHERE id = ${supplierException}`;
+    expect(historical).toEqual({ kind: 'supplier_bound' });
+    await expect(
+      upgraded`INSERT INTO billing.billing_operation_exception(id,operation_id,kind,source_identity,quantum,
+        observed_numerator,observed_denominator,maximum)
+        VALUES (${randomUUID()},${operations[1]},'supplier_bound','fixture','pico_usd','150',1,100)`,
+    ).rejects.toMatchObject({ code: '23514' });
 
     const runtime = postgres(target.toString(), { max: 1, connection: { role: 'tau_billing_runtime' } });
     try {
-      // An old-image Machine mid-rollout: admission inserts its holds, settlement writes evidence, holds and supplier_state.
-      const [first] = operations;
-      const oldOperation = randomUUID();
-      await runtime.begin(async (transaction) => {
-        await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,
-          request_key_version,category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,
-          meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,purchased_held_atoms,due_at,
-          spend_budget_hold_id,risk_budget_hold_id,supplier_state)
-          VALUES (${oldOperation},${account},${environment},'fixture',${oldOperation},'digest',1,'llm','fixture','model:fixture',
-            '[]','[]','test',${policy},${activation},'fixture',0,0,0,0,now(),${`spend-${oldOperation}`},${`risk-${oldOperation}`},
-            'reserved')`;
-        await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
-          VALUES (${`spend-${oldOperation}`},'budget-spend',${oldOperation},100,100),
-            (${`risk-${oldOperation}`},'budget-risk',${oldOperation},100,100)`;
-      });
-      await runtime`INSERT INTO billing.supplier_cost_evidence(id,operation_id,environment,provider,credential_account,
-        source_object_id,source_revision,payload_digest,numerator,denominator,currency,completeness,finality,received_at)
-        VALUES (${randomUUID()},${first},${environment},'fixture','fixture',${first},'1','digest',40,1,'usd','complete','final',now())`;
-      await expect(
-        runtime`UPDATE billing.billing_budget_hold SET remaining_held = 60, consumed = 40, finality_state = 'final'
-          WHERE id = ${`spend-${first}`}`,
-      ).resolves.toHaveProperty('count', 1);
-      await expect(
-        runtime`UPDATE billing.credit_operation SET supplier_state = 'preliminary'
-          WHERE id = ${first} AND supplier_state = 'reserved'`,
-      ).resolves.toHaveProperty('count', 1);
-
       // This build: an operation needs no holds, and route pauses are owner-written only.
       const currentOperation = randomUUID();
       await runtime`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,
@@ -920,11 +960,8 @@ describe('billing upgrade from migration 0048 under the pre-charter protections'
     } finally {
       await runtime.end();
     }
-    const written = await upgraded<Array<{ id: string; supplierState: unknown; holds: boolean }>>`SELECT id,
-      supplier_state AS "supplierState", spend_budget_hold_id IS NOT NULL AS "holds"
-      FROM billing.credit_operation WHERE account_id = ${account}`;
-    expect(written).toHaveLength(4);
-    expect(written.find(({ id }) => id === operations[0])).toMatchObject({ supplierState: 'preliminary', holds: true });
+    const written = await upgraded`SELECT id FROM billing.credit_operation WHERE account_id = ${account}`;
+    expect(written).toHaveLength(3);
   });
 
   it('should resolve exactly the superseded supplier cases and keep every other case and earlier evidence', async () => {
@@ -1125,14 +1162,11 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
         planHeldAtoms: '0',
         purchasedHeldAtoms: '0',
       });
-      // An undispatched operation cost the supplier nothing: a known zero on its receipt, and no evidence row.
+      // An undispatched operation cost the supplier nothing: a known zero on its receipt.
       const [supplierCost] =
-        await client`SELECT supplier_cost_pico_usd AS "picoUsd", supplier_cost_unpriced_reason AS "unpricedReason",
-          supplier_state AS "supplierState" FROM billing.credit_operation WHERE id = ${operation}`;
-      expect(supplierCost).toEqual({ picoUsd: '0', unpricedReason: null, supplierState: null });
-      expect(
-        await client`SELECT id FROM billing.supplier_cost_evidence WHERE operation_id = ${operation}`,
-      ).toHaveLength(0);
+        await client`SELECT supplier_cost_pico_usd AS "picoUsd", supplier_cost_unpriced_reason AS "unpricedReason"
+          FROM billing.credit_operation WHERE id = ${operation}`;
+      expect(supplierCost).toEqual({ picoUsd: '0', unpricedReason: null });
       // The worker prints a pass's batch lines after both pools finish, so the line can trail the committed row.
       await settle('the batch line that reports the resolution', () =>
         batches('stdout').some(({ batch }) => batch['resolved'] === 1),

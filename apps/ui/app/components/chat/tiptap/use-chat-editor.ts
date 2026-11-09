@@ -33,6 +33,7 @@ import {
 } from '#components/chat/tiptap/slash-command-suggestion.js';
 import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { chatComposerPlaceholder } from '#components/chat/chat-input-styles.js';
+import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import type {
   ContextSuggestionItem,
@@ -323,6 +324,8 @@ export function useChatEditor({
   const handleImagePasteRef = useRef(handleImagePaste);
   handleImagePasteRef.current = handleImagePaste;
 
+  // Local measurement only: from this composer's first render to its editor's creation, once per composer instance.
+  const [composerMountSpan] = useState(() => pageProjectOpenPerformance().begin('composer.mount'));
   const editor = useEditor({
     content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
@@ -413,6 +416,9 @@ export function useChatEditor({
         }
         return false;
       },
+    },
+    onCreate: () => {
+      composerMountSpan.finish('ok');
     },
     onUpdate: ({ editor: updatedEditor }) => {
       onUpdateRef.current?.(extractContent(updatedEditor));

@@ -9,7 +9,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
 import { Label } from '@taucad/ui/components/label';

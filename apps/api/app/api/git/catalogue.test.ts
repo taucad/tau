@@ -1,9 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { FileLinksService } from '#storage/file-links.service.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import type { FileLinksService } from '@taucad/api-object-storage/file-links';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import {
   buildCatalogue,
   catalogueSizes,

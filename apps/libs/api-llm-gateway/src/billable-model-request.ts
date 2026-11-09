@@ -15,7 +15,11 @@ const maximumDepth = 64;
 /* Text, signatures and identifiers stay bounded per string; attachment bytes carry their own bounds. */
 const maximumStringLength = 4_000_000;
 const boundedString = z.string().max(maximumStringLength);
-const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() }).strict();
+/* `1h` is priced as its own `cache_write` tier; both lifetimes are Anthropic's documented values. */
+const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.enum(['5m', '1h']).optional() }).strict();
+/* Routes a conversation to one supplier server so its prefix cache is found again. The caller
+ * sends a hash, never a Tau identifier (I4). OpenAI documents at most 64 characters. */
+const promptCacheKeySchema = z.string().min(1).max(64);
 /* Linear on purpose: a backtracking group per quadruple overflows V8's regexp stack
  * on a multi-megabyte attachment. Length and padding position are checked apart. */
 const isBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
@@ -299,6 +303,7 @@ export const billableModelRequestSchema = z
       .strict()
       .optional(),
     store: z.literal(false).optional(),
+    prompt_cache_key: promptCacheKeySchema.optional(),
     input: z.union([contentSchema, responseInputSchema]).optional(),
     messages: z.array(messageSchema).max(512).optional(),
     system: contentSchema.optional(),
@@ -423,6 +428,7 @@ const responsesWireSchema = z
     ]),
     stream: z.literal(true),
     store: z.literal(false).optional(),
+    prompt_cache_key: promptCacheKeySchema.optional(),
     max_output_tokens: z.number(),
     reasoning: z
       .object({

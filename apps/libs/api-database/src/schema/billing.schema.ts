@@ -523,13 +523,8 @@ export const creditOperation = billing.table(
     promoHeldAtoms: bigint('promo_held_atoms', { mode: 'bigint' }).notNull(),
     planHeldAtoms: bigint('plan_held_atoms', { mode: 'bigint' }).notNull(),
     purchasedHeldAtoms: bigint('purchased_held_atoms', { mode: 'bigint' }).notNull(),
-    /** Retired supplier holds: no longer written; legacy rows keep theirs until the columns are dropped. */
-    spendBudgetHoldId: text('spend_budget_hold_id'),
-    riskBudgetHoldId: text('risk_budget_hold_id'),
     dispatchState: text('dispatch_state').notNull().default('admitted'),
     customerState: text('customer_state').notNull().default('pending'),
-    /** Retired supplier finality state: no longer written or read; legacy rows keep theirs until it is dropped. */
-    supplierState: text('supplier_state'),
     generation: bigint('generation', { mode: 'bigint' })
       .notNull()
       .default(sql`1`),
@@ -610,7 +605,7 @@ export const creditOperation = billing.table(
     ),
     check(
       'credit_operation_states',
-      sql`${table.category} IN ('llm','zoo_engine') AND ${table.dispatchState} IN ('admitted','intent_recorded','accepted','recovery_required') AND ${table.customerState} IN ('pending','settled','released','absorbed') AND ${table.supplierState} IN ('reserved','preliminary','unresolved','final','funded_exception') AND ${table.generation} > 0`,
+      sql`${table.category} IN ('llm','zoo_engine') AND ${table.dispatchState} IN ('admitted','intent_recorded','accepted','recovery_required') AND ${table.customerState} IN ('pending','settled','released','absorbed') AND ${table.generation} > 0`,
     ),
     // GI-R2: a row with a reporting history settles only after its dispatch intent; the timestamp is immutable, while
     // a sweep claim overwrites dispatch_state. Rows from before 0021 (history_version NULL) cannot prove it either way.
@@ -708,7 +703,7 @@ export const billingOperationException = billing.table(
     ),
     check(
       'billing_operation_exception_kind',
-      sql`(${table.kind} = 'customer_bound' AND ${table.quantum} = 'credit_atoms') OR (${table.kind} = 'supplier_bound' AND ${table.quantum} = 'pico_usd') OR (${table.kind} = 'input_bound' AND ${table.quantum} = 'input_tokens')`,
+      sql`(${table.kind} = 'customer_bound' AND ${table.quantum} = 'credit_atoms') OR (${table.kind} = 'input_bound' AND ${table.quantum} = 'input_tokens')`,
     ),
   ],
 );
@@ -742,32 +737,6 @@ export const billingRoutePause = billing.table(
       columns: [table.environment, table.operationId],
       foreignColumns: [creditOperation.environment, creditOperation.id],
     }).onDelete('restrict'),
-  ],
-);
-
-export const billingBudgetHold = billing.table(
-  'billing_budget_hold',
-  {
-    id: text('id').primaryKey(),
-    budgetId: text('budget_id')
-      .notNull()
-      .references(() => billingBudget.id, { onDelete: 'restrict' }),
-    operationId: text('operation_id')
-      .notNull()
-      .references(() => creditOperation.id, { onDelete: 'restrict' }),
-    initialBound: numeric('initial_bound', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
-    remainingHeld: numeric('remaining_held', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
-    consumed: numeric('consumed', { precision: 78, scale: 0, mode: 'bigint' })
-      .notNull()
-      .default(sql`0`),
-    finalityState: text('finality_state').notNull().default('reserved'),
-  },
-  (table) => [
-    uniqueIndex('billing_hold_cause').on(table.budgetId, table.operationId),
-    check(
-      'billing_hold_bound',
-      sql`${table.initialBound} >= 0 AND ${table.remainingHeld} >= 0 AND ${table.consumed} >= 0 AND ${table.remainingHeld} + ${table.consumed} <= ${table.initialBound}`,
-    ),
   ],
 );
 
@@ -1302,40 +1271,6 @@ export const creditTransaction = billing.table(
     check(
       'credit_transaction_cause',
       sql`(${table.kind} = 'operation_resolution' AND ${table.operationId} IS NOT NULL AND num_nonnulls(${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'purchase_grant' AND ${table.purchaseId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'period_grant' AND ${table.periodId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'promotion_grant' AND ${table.promotionIssuanceId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.correctionOf}) = 0) OR (${table.kind} = 'reversal' AND ${table.reversalCaseId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.promotionIssuanceId},${table.correctionOf}) = 0) OR (${table.kind} = 'deferred_grant' AND ${table.reversalCaseId} IS NOT NULL AND ${table.correctionOf} IS NOT NULL AND ${table.cashEvidence} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.periodId},${table.promotionIssuanceId}) = 0) OR (${table.kind} = 'compensation' AND ${table.correctionOf} IS NOT NULL AND num_nonnulls(${table.purchaseId},${table.periodId},${table.reversalCaseId},${table.promotionIssuanceId}) = 0) OR (${table.kind} = 'plan_expiry' AND ${table.periodId} IS NOT NULL AND num_nonnulls(${table.operationId},${table.purchaseId},${table.reversalCaseId},${table.promotionIssuanceId},${table.correctionOf}) = 0)`,
-    ),
-  ],
-);
-
-/** Retired supplier store: retained for historical export, never written by current admission. */
-export const supplierCostEvidence = billing.table(
-  'supplier_cost_evidence',
-  {
-    id: text('id').primaryKey(),
-    operationId: text('operation_id').references(() => creditOperation.id, { onDelete: 'restrict' }),
-    environment: text('environment').notNull(),
-    provider: text('provider').notNull(),
-    credentialAccount: text('credential_account').notNull(),
-    sourceObjectId: text('source_object_id').notNull(),
-    sourceRevision: text('source_revision').notNull(),
-    payloadDigest: text('payload_digest').notNull(),
-    numerator: numeric('numerator', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
-    denominator: numeric('denominator', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
-    currency: text('currency').notNull(),
-    completeness: text('completeness').notNull(),
-    finality: text('finality').notNull(),
-    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    uniqueIndex('supplier_evidence_source').on(
-      table.environment,
-      table.provider,
-      table.credentialAccount,
-      table.sourceObjectId,
-      table.sourceRevision,
-    ),
-    check(
-      'supplier_evidence_values',
-      sql`${table.numerator} >= 0 AND ${table.denominator} > 0 AND ${table.completeness} IN ('partial','complete') AND ${table.finality} IN ('preliminary','final')`,
     ),
   ],
 );

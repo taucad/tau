@@ -1,6 +1,6 @@
 {
   "name": "@taucad/app",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@aurigax-ai/ghostty-web": "catalog:",
-    "@base-ui/react": "catalog:",
     "@better-auth-ui/core": "catalog:",
     "@better-auth-ui/react": "catalog:",
     "@better-auth/api-key": "catalog:",
@@ -91,6 +90,7 @@
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
+    "@taucad/ui-kit": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/viewer": "workspace:*",

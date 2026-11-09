@@ -63,7 +63,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
 vi.mock('@taucad/billing/hooks/billing-session', () => ({
   useBillingSession: () => session.current,
 }));
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: Object.assign(vi.fn(), { warning: vi.fn() }),
 }));
 
@@ -359,7 +359,7 @@ describe('TopupModal', () => {
   });
 
   it('shows where a payment stands when the server refuses to cancel its closed Checkout', async () => {
-    const { toast } = await import('#components/ui/sonner.js');
+    const { toast } = await import('@taucad/ui/components/sonner');
     const redirect = { ...wireAction('redirect_required'), redirectUrl: 'https://checkout.example/resume' };
     client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
     client.cancelPaymentAction.mockRejectedValue(
@@ -458,7 +458,7 @@ describe('TopupModal', () => {
   });
 
   it('reports a collection refusal without asking the customer to retry', async () => {
-    const { toast } = await import('#components/ui/sonner.js');
+    const { toast } = await import('@taucad/ui/components/sonner');
     client.prepareTopup.mockRejectedValue(new CollectionUnavailable());
     renderModal();
     const review = screen.getByRole('button', { name: /review purchase with saved card/i });
@@ -472,7 +472,7 @@ describe('TopupModal', () => {
   });
 
   it('points to Checkout when there is no saved card with a billing address', async () => {
-    const { toast } = await import('#components/ui/sonner.js');
+    const { toast } = await import('@taucad/ui/components/sonner');
     const refusal = Object.assign(new PaymentConflict(undefined), { code: 'customer_tax_location_invalid' });
     client.prepareTopup.mockRejectedValue(refusal);
     renderModal();

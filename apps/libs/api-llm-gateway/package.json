@@ -56,7 +56,8 @@
     "ai": "catalog:",
     "better-auth": "catalog:",
     "fastify": "catalog:",
-    "ollama": "^0.5.18"
+    "ollama": "^0.5.18",
+    "pdf-parse": "catalog:"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",

@@ -1,0 +1,406 @@
+{
+  "uid": "tau-agent-prompt-cache",
+  "title": "Agent prompt cache",
+  "description": "Prompt caching program: whether the first step of each user turn reads the prompt cache, by the pause before it and by provider, the first-step token mix and TTFT by cache outcome, 1-hour cache writes and turn-header coverage. Latency phases, payload and admission are on the Agent latency dashboard (tau-agent-latency).",
+  "tags": ["tau", "ai", "llm", "genai", "prompt-cache"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": {
+          "text": "tau-api",
+          "value": "tau-api"
+        },
+        "options": [
+          {
+            "text": "tau-api",
+            "value": "tau-api",
+            "selected": true
+          }
+        ],
+        "includeAll": false
+      },
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(gen_ai_client_time_to_first_token_count{app=~\"$app\",service_name=~\"$service\"}, gen_ai_provider_name)",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "refresh": 2
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Headline (24 h)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "First-Step Cache-Hit Share (24h)",
+      "type": "stat",
+      "description": "Share of settled first steps of a user turn whose cache reads are at least half of their prompt. Steps whose provider reports no cache dimension are left out. Empty until the agent host sends x-tau-turn-step (R1).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\",tau_prompt_cache_outcome=\"hit\"}[24h])) / sum(increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\",tau_prompt_cache_outcome!=\"unreported\"}[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 0.5,
+                "color": "yellow"
+              },
+              {
+                "value": 0.9,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "First-Step TTFT p95 (24h)",
+      "type": "stat",
+      "description": "Supplier time to first token of the first step of each user turn, p95. Empty until the agent host sends x-tau-turn-step (R1).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_llm_turn_step_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\"}[24h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "row",
+      "title": "Prompt cache, first step of each turn",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 5,
+      "title": "First-Step Outcome Share by Gap Bucket",
+      "type": "bargauge",
+      "description": "The acceptance panel of the prompt cache fixes. Gap is the pause from the chat's previous model step: lt_5m and 5m_60m first steps should be hit after the prefix fix and the 1 h cache; gt_60m is expected to miss.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (tau_turn_gap, tau_prompt_cache_outcome) (increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\"}[$__range])) / ignoring (tau_prompt_cache_outcome) group_left sum by (tau_turn_gap) (increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\"}[$__range]))",
+          "legendFormat": "{{tau_turn_gap}} {{tau_prompt_cache_outcome}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "First-Step Hit Share by Provider",
+      "type": "timeseries",
+      "description": "Hourly first-step hit share per provider.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (gen_ai_provider_name) (increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\",tau_prompt_cache_outcome=\"hit\"}[1h])) / sum by (gen_ai_provider_name) (increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\",tau_prompt_cache_outcome!=\"unreported\"}[1h]))",
+          "legendFormat": "{{gen_ai_provider_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "First-Step Token Mix",
+      "type": "timeseries",
+      "description": "Tokens per second of first steps: uncached input, cache read, cache write (5 m Anthropic, 30 m OpenAI) and cache_write_1h (the Anthropic 1-hour tier), and output.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (gen_ai_token_type) (rate(tau_llm_turn_step_cache_tokens_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\"}[1h]))",
+          "legendFormat": "{{gen_ai_token_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 30
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "First-Step TTFT p50 by Cache Outcome",
+      "type": "timeseries",
+      "description": "Median first-step time to first token by cache outcome: the seconds a miss costs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, tau_prompt_cache_outcome) (rate(tau_llm_turn_step_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"first\"}[1h])))",
+          "legendFormat": "{{tau_prompt_cache_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "1-Hour Cache Writes, All Steps",
+      "type": "timeseries",
+      "description": "Tokens per second written at the Anthropic 1-hour cache tier. Empty until the 1-hour cache ships.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",gen_ai_token_type=\"cache_write_1h\"}[1h]))",
+          "legendFormat": "{{gen_ai_provider_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Turn Header Coverage",
+      "type": "stat",
+      "description": "Share of settled steps whose caller sent no or a malformed x-tau-turn-step. Above about 5 % after the agent host sends the headers means old clients or a missing call site.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\",tau_turn_step=\"unknown\"}[24h])) / sum(increase(tau_llm_turn_step_cache_outcomes_total{app=~\"$app\",service_name=~\"$service\",gen_ai_provider_name=~\"$provider\"}[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.05,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

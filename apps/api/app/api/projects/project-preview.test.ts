@@ -5,7 +5,7 @@ import { mock } from 'vitest-mock-extended';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { inspectProjectPreview, ProjectPreviewService } from '#api/projects/project-preview.service.js';

@@ -72,8 +72,10 @@ describe('apiLibraryAppEdges()', () => {
       'api-hosts',
       'api-lifecycle',
       'api-llm-gateway',
+      'api-object-storage',
       'api-observability',
       'api-redis',
+      'api-testing',
     ]);
     expect(apiLibraryAppEdges(graph)).toEqual([]);
     for (const library of apiLibraries) {

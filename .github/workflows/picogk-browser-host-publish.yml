@@ -1,0 +1,346 @@
+# The PicoGK browser host producer (charter picogk-interim-digest-consumer, W2; D1, D7–D9; I2–I4).
+#
+# On `main` (a push that touches the host's inputs, or a dispatch) it computes the inputs key the way
+# `picogk-browser-host.yml` keys its cache and compares it with `packages/plugins/picogk/browser-host.pin.json`:
+#   - Pinned: the run ends green and builds nothing. This is also what ends the loop below: once the pin
+#     pull request lands, a dispatch finds the key pinned and does nothing.
+#   - Already tagged (`dependency@picogk-browser-<16 hex>` exists for this key): nothing is built again. Once
+#     the tag run's production publish has succeeded, the tagged pin is proven on both hosts and carried to
+#     the pin pull request; while that publish still awaits approval the run ends green and says so.
+#   - Otherwise: the host is prepared twice and refused unless both builds are byte-identical (I4); the
+#     tau-release-bot commits the pin on `bot/picogk-browser-host-pin` and tags that commit, and the run
+#     ends green with a summary that production publication needs a reviewer's approval.
+#
+# On a `dependency@picogk-browser-*` tag (created only by the release bot) it takes the bundle of the tagged
+# commit's inputs (the cache the producer saved, or a rebuild), refuses unless the tag, the key and every
+# byte match the tagged pin, and writes every file and then the manifest once under `blobs/sha256/<hex>`
+# with `If-None-Match: *` and immutable caching (D7, I3), first to staging and then to production:
+#   - `publish-staging`, environment `dependencies-staging` (no reviewer): bucket
+#     `tau-staging-au-dependencies`, read back from `https://dependencies.taucad.dev`.
+#   - `publish-production`, environment `dependencies` (a required reviewer): bucket
+#     `tau-prod-dependencies`, read back from `https://dependencies.tau.new`.
+# Both run `.github/actions/picogk-browser-host-publish`. Each bucket is locked, so a blob that already
+# exists is refused; it counts as present only when its bytes, read back through the bucket, hash to its
+# key. When production has published, `dispatch-producer` dispatches this workflow on `main`, whose
+# "already tagged" path opens or updates the pin pull request. CI's "Validate workspace" proves every blob
+# on both hosts again on that pull request and in the merge queue, so `main` never names a digest a host
+# does not serve (D9, I2). Both environments admit `dependency@*` tags and no branch or pull request (I6).
+#
+# This file is not one of the key's inputs: changing how the host is published does not rebuild it.
+name: PicoGK browser host publish
+run-name: ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [main]
+    # Path filters do not apply to tag pushes.
+    tags: ['dependency@picogk-browser-*']
+    paths:
+      - packages/plugins/picogk/dotnet/**
+      - packages/plugins/picogk/scripts/**
+      - packages/plugins/picogk/src/**
+      - packages/plugins/picogk/project.json
+      - packages/plugins/picogk/browser-host.pin.json
+      - pnpm-lock.yaml
+      - scripts/src/picogk-browser-host-pin.ts
+      - .github/workflows/picogk-browser-host.yml
+      - .github/workflows/picogk-browser-host-publish.yml
+      - .github/actions/picogk-browser-host-publish/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: picogk-browser-host-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PIN: packages/plugins/picogk/browser-host.pin.json
+  PIN_BRANCH: bot/picogk-browser-host-pin
+
+jobs:
+  # ---- Producer, on main -------------------------------------------------------------------------
+
+  key:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/picogk-browser-host.yml
+    with:
+      key-only: true
+
+  decide:
+    needs: key
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      pinned: ${{ steps.status.outputs.pinned }}
+      tag: ${{ steps.status.outputs.tag }}
+      tagged: ${{ steps.tagged.outputs.tagged }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Compare the inputs key with the pin
+        id: status
+        env:
+          KEY: ${{ needs.key.outputs.key }}
+        run: |
+          set -euo pipefail
+          node scripts/src/picogk-browser-host-pin.ts status --pin "$PIN" --key "$KEY" | tee -a "$GITHUB_OUTPUT"
+      - name: Look for this key's dependency tag
+        id: tagged
+        if: steps.status.outputs.pinned != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.status.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2> /dev/null; then
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Summarize the decision
+        env:
+          KEY: ${{ needs.key.outputs.key }}
+          PINNED: ${{ steps.status.outputs.pinned }}
+          TAGGED: ${{ steps.tagged.outputs.tagged }}
+          TAG: ${{ steps.status.outputs.tag }}
+        run: |
+          if [ "$PINNED" = true ]; then
+            message="The inputs key is pinned; nothing is built."
+          elif [ "$TAGGED" = true ]; then
+            message="$TAG already exists for this key; once its production publish has succeeded, its pin is carried to the pin pull request without a rebuild."
+          else
+            message="The inputs key is not pinned; the host is built twice, compared and pinned as $TAG."
+          fi
+          echo "::notice title=PicoGK browser host::$message"
+          printf '### PicoGK browser host\n\n- inputs key `%s`\n- %s\n' "$KEY" "$message" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: decide
+    if: needs.decide.outputs.pinned != 'true' && needs.decide.outputs.tagged != 'true'
+    uses: ./.github/workflows/picogk-browser-host.yml
+    with:
+      reproduce: true
+
+  pin:
+    needs: [key, decide, build]
+    if: ${{ !cancelled() && needs.decide.result == 'success' && needs.decide.outputs.pinned != 'true' && (needs.decide.outputs.tagged == 'true' || needs.build.result == 'success') }}
+    name: Pin the published host in a pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: release-pr
+      deployment: false
+    env:
+      KEY: ${{ needs.key.outputs.key }}
+      TAG: ${{ needs.decide.outputs.tag }}
+      TAGGED: ${{ needs.decide.outputs.tagged }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: env.TAGGED != 'true'
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: out/picogk-browser-host
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      # The tag is created with the App token, so its push starts this workflow's publish jobs; a
+      # GITHUB_TOKEN tag would start nothing.
+      - name: Commit the pin and tag it
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config user.name "tau-release-bot[bot]"
+          git config user.email "tau-release-bot[bot]@users.noreply.github.com"
+          if [ "$TAGGED" = true ]; then
+            # An earlier run built, pinned and tagged this key: carry that commit, whose bytes are published.
+            git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+            git checkout --quiet --detach "$TAG^{commit}"
+            node scripts/src/picogk-browser-host-pin.ts status --pin "$PIN" --key "$KEY" | grep -qx 'pinned=true'
+          else
+            node scripts/src/picogk-browser-host-pin.ts write --key "$KEY" --bundle out/picogk-browser-host --out "$PIN"
+            git add -- "$PIN"
+            manifest=$(jq -r .manifest.sha256 "$PIN")
+            # Contributor hooks do not apply to this generated commit.
+            git commit --quiet --no-verify -m "chore(picogk): Pin the PicoGK browser host to manifest ${manifest:0:12}"
+          fi
+          # The bot branch carries only the generated pin commit; it is rewritten for each new key. It is
+          # pushed first, so the tag below names a commit the repository already has.
+          git push --force "$remote" "HEAD:refs/heads/$PIN_BRANCH"
+          if [ "$TAGGED" != true ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$(git rev-parse HEAD)" --silent
+          fi
+      # The tag run publishes to staging at once and to production after a reviewer approves the
+      # `dependencies` environment, so this job never waits for it: a new tag ends here, green, and the
+      # tag run dispatches this workflow on main once production has published.
+      - name: Find the tag's publish run
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          commit=$(git rev-parse HEAD)
+          run_id=""
+          for attempt in $(seq 1 30); do
+            # Only the tag's push runs this workflow on the pin commit: the bot branch's push does not.
+            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow picogk-browser-host-publish.yml --event push \
+              --commit "$commit" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 20
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::No publish run started for $TAG; check that the release-tags ruleset admits dependency@* tags."
+            exit 1
+          fi
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id"
+          echo "Publish run: $url"
+          if [ "$TAGGED" != true ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=PicoGK browser host awaits approval::$TAG is tagged; its publish run must be approved for the dependencies environment before the pin pull request opens: $url"
+            printf -- '- tagged `%s`; publish run %s\n- **Approval needed:** a reviewer of the `dependencies` environment approves `Publish to production` in that run. Once it publishes, the run dispatches this workflow on main, which opens the pin pull request.\n' \
+              "$TAG" "$url" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A conclusion is empty while the job waits for its approval or runs.
+          production=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json jobs \
+            --jq '[.jobs[] | select(.name == "Publish to production")][0].conclusion // ""')
+          case "$production" in
+            success)
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              ;;
+            "")
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              echo "::notice title=PicoGK browser host awaits approval::$TAG has not published to production yet; approve the dependencies environment in $url, which then dispatches this workflow."
+              printf -- '- `%s` has not published to production yet: **approval needed** in %s\n' "$TAG" "$url" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::The production publish of $TAG ended $production ($url). Rerun it; a success dispatches this workflow on main."
+              exit 1
+              ;;
+          esac
+      - name: Prove every pinned blob is served on both hosts
+        if: steps.published.outputs.ready == 'true'
+        run: node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
+      - name: Open or update the pin pull request
+        if: steps.published.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+          manifest=$(jq -r .manifest.sha256 "$PIN")
+          subject="chore(picogk): Pin the PicoGK browser host to manifest ${manifest:0:12}"
+          {
+            echo "Pins the PicoGK browser host the UI loads by digest from \`dependencies.tau.new\` (production) and \`dependencies.taucad.dev\` (staging)."
+            echo
+            echo "- inputs key \`$KEY\`"
+            echo "- manifest \`$manifest\`, $(jq -r .manifest.byteLength "$PIN") bytes"
+            echo "- $(jq -r .files.count "$PIN") files, $(jq -r .files.byteLength "$PIN") bytes"
+            echo "- published from \`$TAG\`; every blob read back with its digest from \`https://dependencies.tau.new/blobs/sha256/<hex>\` and \`https://dependencies.taucad.dev/blobs/sha256/<hex>\`"
+            echo
+            echo "---"
+            echo
+            echo "- This pull request is **bot-managed** by \`picogk-browser-host-publish.yml\`: a new inputs key"
+            echo "  rewrites \`$PIN_BRANCH\`. Do not push to it."
+            echo "- \"Validate workspace\" proves every blob on both hosts again before it can merge."
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh pr list --base main --head "$PIN_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            gh pr create --base main --head "$PIN_BRANCH" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr edit "$number" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+          fi
+          printf -- '- pin pull request: %s\n' "$subject" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- Publish, on a dependency@picogk-browser-* tag ------------------------------------------------
+
+  bundle:
+    if: startsWith(github.ref, 'refs/tags/dependency@picogk-browser-')
+    uses: ./.github/workflows/picogk-browser-host.yml
+
+  # One step implementation, two environments. Staging publishes at once; production waits for a
+  # reviewer of `dependencies` and for staging, so a host reaches production only once staging serves it.
+  publish-staging:
+    needs: bundle
+    name: Publish to staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: dependencies-staging
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/picogk-browser-host-publish
+        with:
+          environment: staging
+          artifact: ${{ needs.bundle.outputs.artifact }}
+          inputs-key: ${{ needs.bundle.outputs.key }}
+          bucket: ${{ vars.DEPENDENCY_R2_BUCKET }}
+          endpoint: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+          access-key-id: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}
+
+  publish-production:
+    needs: [bundle, publish-staging]
+    name: Publish to production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: dependencies
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/picogk-browser-host-publish
+        with:
+          environment: production
+          artifact: ${{ needs.bundle.outputs.artifact }}
+          inputs-key: ${{ needs.bundle.outputs.key }}
+          bucket: ${{ vars.DEPENDENCY_R2_BUCKET }}
+          endpoint: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+          access-key-id: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}
+
+  # The producer on main finds this key tagged and, with production published, opens or updates the pin
+  # pull request. It neither tags nor publishes, so it starts no further tag run; once the pin lands, a
+  # dispatch finds the key pinned and ends. A GITHUB_TOKEN dispatch starts a run, unlike a GITHUB_TOKEN push.
+  dispatch-producer:
+    needs: publish-production
+    name: Hand the published pin to the producer on main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch this workflow on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run picogk-browser-host-publish.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "::notice title=PicoGK browser host published::$GITHUB_REF_NAME serves on both hosts; the producer on main now opens or updates the pin pull request."

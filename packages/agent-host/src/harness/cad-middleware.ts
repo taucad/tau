@@ -249,7 +249,7 @@ const resolveRecentSkills = async (options: {
 const contextMessage = (input: {
   readonly id: string;
   readonly content: string;
-  readonly kind: 'client-memory' | 'recent-skills';
+  readonly kind: 'client-memory' | 'recent-skills' | 'skills-update';
   readonly anchorId?: string | undefined;
 }): UserProviderMessage => ({
   id: input.id,
@@ -264,7 +264,63 @@ const contextMessage = (input: {
   },
 });
 
-/** Resolve the exact browser-safe system/client context committed with one turn. @internal */
+/** The skills catalog block of a system prompt starts here, in block and string form alike. */
+const skillsBlockHead = '\n## Skills System\n';
+
+/**
+ * The skills catalog block a committed context carries in its system prefix, or `undefined` when that turn ran
+ * without one.
+ *
+ * @param context - A turn's committed context.
+ * @returns The block's exact text.
+ * @internal
+ */
+export const pinnedSkillsBlock = (context: TurnContextSnapshot): string | undefined => {
+  if (context.systemPromptBlocks !== undefined) {
+    return context.systemPromptBlocks.find((block) => block.text.startsWith(skillsBlockHead))?.text;
+  }
+  const index = context.systemPrompt.indexOf(`\n\n${skillsBlockHead}`);
+  return index === -1 ? undefined : context.systemPrompt.slice(index + 2);
+};
+
+/** The id of the tail note that carries a catalog the pinned system prefix does not. @internal */
+export const skillsUpdateMessageId = 'tau:skills-update';
+
+const skillsUpdateNote = (skills: readonly ClientSkill[]): string => `<system-reminder>
+The skills catalog changed after this chat began. The listing in the system prompt is kept as it was; the catalog now is:
+${
+  skills.length === 0
+    ? 'empty: no skill can be activated.'
+    : skills
+        .map((skill) => `- **${skill.name}**: ${skill.description} → \`use_skill({ skillName: "${skill.name}" })\``)
+        .join('\n')
+}
+</system-reminder>`;
+
+/**
+ * Whether the chat's request history already tells the model this catalog: by the newest skills note it carries when
+ * it carries one, else by the pinned block. A chat whose first turn had no catalog carries `undefined` for the block.
+ */
+const historyCarriesCatalog = (
+  history: Readonly<{ previous: TurnContextSnapshot; carriedSkillsNote: string | undefined }>,
+  skills: readonly ClientSkill[],
+  currentSkillsBlock: string | undefined,
+): boolean =>
+  history.carriedSkillsNote === undefined
+    ? pinnedSkillsBlock(history.previous) === currentSkillsBlock
+    : history.carriedSkillsNote === skillsUpdateNote(skills);
+
+/**
+ * Resolve the exact browser-safe system/client context committed with one turn.
+ *
+ * The skills catalog is pinned per chat (prompt-cache identity I1): the block the chat's previous turn carried in its
+ * cached system prefix is kept byte for byte, whether or not the catalog has since been read or changed. A catalog
+ * that differs from the one the request history carries, in the newest skills note of an earlier turn's context or
+ * else in the pinned block, rides as a note in this turn's context messages instead, so a change is noted once: the
+ * turns after it add no note, and the history keeps the one note where it was.
+ *
+ * @internal
+ */
 export const createTurnContextSnapshot = async (options: {
   readonly chatId: string;
   readonly systemPrompt: string;
@@ -276,9 +332,28 @@ export const createTurnContextSnapshot = async (options: {
   readonly contextMessages?: readonly UserProviderMessage[] | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
+  /** The chat's last committed context, whose skills block this turn pins; `undefined` on the chat's first turn. */
+  readonly previousContext?: TurnContextSnapshot | undefined;
+  /**
+   * The newest skills note the chat's request history carries before this turn (`carriedSkillsNote`), when an earlier
+   * turn's context noted a catalog change the history still holds.
+   */
+  readonly carriedSkillsNote?: string | undefined;
 }): Promise<TurnContextSnapshot> => {
   const skills = options.clientContext?.skills ?? [];
   const memory = options.clientContext?.memory ?? {};
+  const currentSkillsBlock = skills.length === 0 ? undefined : skillsPrompt(skills);
+  const skillsBlock =
+    options.previousContext === undefined ? currentSkillsBlock : pinnedSkillsBlock(options.previousContext);
+  const skillsNote =
+    options.previousContext === undefined ||
+    historyCarriesCatalog(
+      { previous: options.previousContext, carriedSkillsNote: options.carriedSkillsNote },
+      skills,
+      currentSkillsBlock,
+    )
+      ? undefined
+      : contextMessage({ id: skillsUpdateMessageId, kind: 'skills-update', content: skillsUpdateNote(skills) });
   const recent = await resolveRecentSkills({
     chatId: options.chatId,
     store: options.recentSkills,
@@ -306,9 +381,9 @@ export const createTurnContextSnapshot = async (options: {
   const systemPromptBlocks = options.systemPromptBlocks
     ? [
         ...options.systemPromptBlocks.slice(0, -1),
-        ...(skills.length === 0
+        ...(skillsBlock === undefined
           ? []
-          : ([{ type: 'text', text: skillsPrompt(skills), cacheControl: { type: 'ephemeral' } }] as const)),
+          : ([{ type: 'text', text: skillsBlock, cacheControl: { type: 'ephemeral' } }] as const)),
         ...options.systemPromptBlocks.slice(-1),
       ]
     : undefined;
@@ -316,20 +391,23 @@ export const createTurnContextSnapshot = async (options: {
     version: 1,
     systemPrompt: systemPromptBlocks
       ? systemPromptBlocks.map((block) => block.text).join('\n\n')
-      : skills.length === 0
+      : skillsBlock === undefined
         ? options.systemPrompt
-        : `${options.systemPrompt}\n\n${skillsPrompt(skills)}`,
+        : `${options.systemPrompt}\n\n${skillsBlock}`,
     ...(systemPromptBlocks ? { systemPromptBlocks } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
-    initialMessages: [initialRecent, memoryMessage, ...(options.contextMessages ?? [])].filter(
+    initialMessages: [initialRecent, memoryMessage, skillsNote, ...(options.contextMessages ?? [])].filter(
       (message): message is UserProviderMessage => message !== undefined,
     ),
-    postCompactionMessages: [postCompactionRecent, memoryMessage, ...(options.contextMessages ?? [])].filter(
-      (message): message is UserProviderMessage => message !== undefined,
-    ),
+    postCompactionMessages: [
+      postCompactionRecent,
+      memoryMessage,
+      skillsNote,
+      ...(options.contextMessages ?? []),
+    ].filter((message): message is UserProviderMessage => message !== undefined),
   };
 };
 
@@ -493,7 +571,19 @@ const withModelContent = (message: ToolResultMessage, content: ToolResultMessage
     : { ...message, content };
 };
 
-/** Apply Tau's CAD-specific historical tool-result reductions to a provider view. @public */
+/** What a model that takes no image input reads in place of a capture. */
+const imageOmittedText = '[screenshot image omitted: this model takes no image input]';
+
+/**
+ * Apply Tau's CAD-specific historical tool-result reductions to a provider view.
+ *
+ * Every reduction is a function of the message alone, never of its place in the history, so a step's request
+ * reproduces the previous step's bytes (prompt-cache identity I1 within a run): a capture keeps its image blocks
+ * however many newer captures follow, and only a model that takes no images reads text in their place, on every
+ * step alike. Compaction is the one place history is rewritten.
+ *
+ * @public
+ */
 export function trimToolResultContext(
   messages: readonly Message[],
   options?: { readonly allowImageBlocks?: boolean | undefined },
@@ -507,28 +597,18 @@ export function trimToolResultContext(
   messages: readonly AgentMessage[],
   options: { readonly allowImageBlocks?: boolean | undefined } = {},
 ): AgentMessage[] {
-  const lastScreenshot =
-    options.allowImageBlocks === false
-      ? -1
-      : messages.findLastIndex((message) => message.role === 'toolResult' && message.toolName === 'screenshot');
-  return messages.map((message, index) => {
+  return messages.map((message) => {
     if (message.role !== 'toolResult') {
       return message;
     }
-    if (index === lastScreenshot) {
-      // The newest capture is already image blocks: `toPiToolContent` builds
-      // them where the result is recorded, which is the only shape compaction
-      // and the transport's own rehydration ever see. Rebuilding them here was
-      // the request-time half of that job and is now redundant.
-      return message;
-    }
     if (message.content.some((block) => block.type === 'image')) {
-      return withModelContent(
-        message,
-        message.content.map((block) =>
-          block.type === 'image' ? { type: 'text', text: '[screenshot image - previously captured]' } : block,
-        ),
-      );
+      /* `toPiToolContent` built the blocks where the result was recorded; they are sent as they are. */
+      return options.allowImageBlocks === false
+        ? withModelContent(
+            message,
+            message.content.map((block) => (block.type === 'image' ? { type: 'text', text: imageOmittedText } : block)),
+          )
+        : message;
     }
     const structured = toolJson(message);
     const trimmed = trimStructuredResult(message.toolName, structured);

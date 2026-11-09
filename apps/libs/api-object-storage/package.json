@@ -1,0 +1,71 @@
+{
+  "name": "@taucad/api-object-storage",
+  "version": "0.1.0-beta.0",
+  "description": "API object storage: the S3 driver, signed file links and storage accounting",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-object-storage"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-object-storage#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./accounting": "./src/storage-accounting/storage-accounting.module.ts",
+    "./accounting/scheduler": "./src/storage-accounting/storage-accounting.scheduler.ts",
+    "./concat-uint8-arrays": "./src/concat-uint8-arrays.ts",
+    "./constants": "./src/storage.constants.ts",
+    "./file-links": "./src/file-links.service.ts",
+    "./metrics": "./src/storage-metrics.ts",
+    "./module": "./src/storage.module.ts",
+    "./private-storage-probe": "./src/private-storage-probe.ts",
+    "./repository-byte-ceiling": "./src/repository-byte-ceiling.ts",
+    "./sha256": "./src/sha256.utils.ts",
+    "./testing/destructive-test-bucket-guard": "./src/testing/destructive-test-bucket-guard.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/s3-request-presigner": "catalog:",
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@taucad/api-billing": "workspace:*",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
+    "@taucad/api-redis": "workspace:*",
+    "@taucad/billing": "workspace:*",
+    "@taucad/file-links": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/exporter-prometheus": "catalog:",
+    "@opentelemetry/sdk-node": "catalog:",
+    "dotenv": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

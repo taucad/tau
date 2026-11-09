@@ -1437,20 +1437,8 @@
       }
     },
     {
-      // Current UI primitive/component inversions. -- W2
-      "files": [
-        "apps/ui/app/hooks/active-chat-provider.test.tsx",
-        "apps/ui/app/hooks/use-draft-image-error-toast.ts",
-        "apps/ui/app/hooks/use-favicon.ts",
-        "apps/ui/app/hooks/use-models.tsx",
-        "apps/ui/app/hooks/use-project-creation-location-error.test.ts",
-        "apps/ui/app/hooks/use-project-creation-location-error.ts",
-        "apps/ui/app/hooks/use-project-creation-location.test.ts",
-        "apps/ui/app/hooks/use-project-creation-location.ts",
-        "apps/ui/app/hooks/use-service-worker.tsx",
-        "apps/ui/app/utils/at-reference.utils.ts",
-        "apps/ui/app/utils/magic-link-plugin.ts"
-      ],
+      // Current auth component inversion. -- W5
+      "files": ["apps/ui/app/utils/magic-link-plugin.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {
@@ -1478,6 +1466,7 @@
         "apps/ui/app/lib/skill-resolver.ts",
         "apps/ui/app/lib/system-skills-catalog.test.ts",
         "apps/ui/app/services/chat-session-store.ts",
+        "apps/ui/app/utils/at-reference.utils.ts",
         "apps/ui/app/utils/chat.utils.test.ts",
         "apps/ui/app/utils/chat.utils.ts"
       ],

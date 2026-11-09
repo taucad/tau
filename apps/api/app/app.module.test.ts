@@ -17,7 +17,7 @@ import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
 import { ApiModule } from '#api/api.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { DirectModelInvocationService } from '@taucad/api-llm-gateway';
-import { StorageAccountingScheduler } from '#api/storage-accounting/storage-accounting.scheduler.js';
+import { StorageAccountingScheduler } from '@taucad/api-object-storage/accounting/scheduler';
 
 /**
  * Whole-graph DI guard. `compile()` instantiates every module, provider and

@@ -4,8 +4,8 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { getEnvironment } from '@taucad/api-core';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { StorageModule } from '#storage/storage.module.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import { StorageModule } from '@taucad/api-object-storage/module';
 import {
   conformanceAccountFromEnvironment,
   describeRepositoryStoreConformance,

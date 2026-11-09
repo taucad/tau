@@ -12,8 +12,8 @@ import { releaseDeletedProjectPublicationReferences } from '#api/publications/pu
 import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
-import { createDeletionDatabase, seedDeletionProject } from '#testing/project-deletion.fixture.js';
+import type { ObjectStorageServiceContract } from '@taucad/api-object-storage';
+import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project deletion during account closure', () => {

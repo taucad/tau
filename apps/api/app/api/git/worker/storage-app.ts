@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 import type { StorageEnvironment } from '#config/storage-environment.config.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { storageKeepAliveTimeoutMilliseconds } from '#api/git/forwarding/contract/hop.js';
 import { parsePublicKeys, parseSigningKey } from '#api/git/forwarding/contract/keys.js';

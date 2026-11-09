@@ -1,5 +1,5 @@
-import type { ObjectStorageService, StorageTier } from '#storage/object-storage.service.js';
-import type { StorageNamespace } from '#storage/storage.constants.js';
+import type { ObjectStorageService, StorageTier } from '@taucad/api-object-storage';
+import type { StorageNamespace } from '@taucad/api-object-storage/constants';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 

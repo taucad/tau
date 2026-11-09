@@ -26,7 +26,10 @@ vi.mock('#hooks/use-chat.js', () => ({
 }));
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: vi.fn() }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: vi.fn() }));
-vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: vi.fn() }));
+vi.mock('#hooks/use-context-payload.js', () => ({
+  useContextPayload: vi.fn(),
+  awaitContextPayload: vi.fn(async () => undefined),
+}));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),

@@ -18,7 +18,7 @@ import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '#components/chat/use-composer-exit.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';

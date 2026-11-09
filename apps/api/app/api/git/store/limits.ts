@@ -9,17 +9,12 @@
  * reservation (blueprint OD2; the note after the pack bound).
  */
 
-/**
- * Per-repository ceiling on non-LFS bytes (charter D20, operator ruling O5,
- * 2026-09-18). `pre-receive` enforces it on the incoming quarantine so a push
- * is refused while it arrives; the commit protocol checks the committed total
- * as a backstop, because the hook measures only what this push added.
- *
- * Spelled in the same units as `storageLimitBytesByTier`, which D20 names.
- * Counted over pack bytes only: a stored `.idx` is a derived 0.17 % that the
- * user did not push.
+/*
+ * The per-repository ceiling on non-LFS bytes (charter D20, operator ruling O5,
+ * 1 GiB) is `repositoryByteCeiling` in
+ * `@taucad/api-object-storage/repository-byte-ceiling`: storage accounting
+ * reports quota bands against it and may not import git.
  */
-export const repositoryByteCeiling = 1024 ** 3;
 
 /**
  * How many live packs a repository carries before the committing lease holder

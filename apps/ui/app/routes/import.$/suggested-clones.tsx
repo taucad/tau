@@ -1,8 +1,8 @@
 import { ArrowRight } from 'lucide-react';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import type { SvgIcons } from '@taucad/ui-kit/icons/generated/svg-icons';
 import { cn } from '@taucad/ui/utils/cn';
 
 type SuggestedRepository = {

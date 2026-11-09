@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { DatabaseType } from '@taucad/api-database';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';

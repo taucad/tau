@@ -583,6 +583,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       readBatch: async (input) => log.readBatch(input),
       /* The chat's history over every device's segment; `read` above stays this device's rows (XD1). */
       messages: async () => log.messages(),
+      ...(log.rows === undefined ? {} : { rows: log.rows.bind(log) }),
       historyIntact: async () => log.historyIntact(),
       anomalies: async () => log.anomalies(),
       ...(log.refresh === undefined ? {} : { refresh: log.refresh.bind(log) }),

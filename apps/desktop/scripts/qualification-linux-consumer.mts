@@ -53,7 +53,7 @@ const sha256File = async (path: string): Promise<string> => {
 const run = async (
   file: string,
   args: readonly string[],
-  options: { env: Record<string, string>; /** Milliseconds. */ killAfter: number },
+  options: { env: Record<string, string>; /** Milliseconds. */ killAfter: number; cwd?: string },
 ): Promise<{ status: number; stdout: string; stderr: string }> =>
   new Promise((resolve) => {
     execFile(
@@ -61,6 +61,8 @@ const run = async (
       [...args],
       {
         env: { ...process.env, ...options.env },
+        // The consumer's own home unless the caller names a directory (the renderer resolves its loader from the checkout).
+        cwd: options.cwd ?? homedir(),
         timeout: options.killAfter,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
@@ -237,15 +239,16 @@ const handlers = {
     return null;
   },
   exec: async (params: unknown) => {
-    const { file, args, env, timeout } = z
+    const { file, args, env, timeout, cwd } = z
       .strictObject({
         file: z.string(),
         args: z.array(z.string()),
         env: envSchema,
         timeout: z.number().int().positive().max(1_800_000),
+        cwd: z.string().startsWith('/').optional(),
       })
       .parse(params);
-    return run(file, args, { env, killAfter: timeout });
+    return run(file, args, { env, killAfter: timeout, cwd });
   },
   spawn: async (params: unknown) => {
     const { file, args, env } = z
@@ -253,6 +256,7 @@ const handlers = {
       .parse(params);
     const child = spawn(file, args, {
       env: { ...process.env, ...env },
+      cwd: homedir(),
       detached: true,
       // Keep native loader/FUSE/sandbox startup errors in the disposable job log.
       stdio: ['ignore', 'ignore', 'inherit'],
@@ -480,6 +484,7 @@ export const startLinuxConsumer = async (options: { name: string; repository: st
           args: [...args],
           env: options.env ?? {},
           timeout: options.killAfter ?? 180_000,
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         }),
       ),
     spawn: async (file, args, env) => pidSchema.parse(await call('spawn', { file, args: [...args], env })),
@@ -498,8 +503,9 @@ export const startLinuxConsumer = async (options: { name: string; repository: st
           uid: z.number().int(),
         })
         .parse(await call('download', download)),
-    measureSecurity: async (processes: QualificationProcesses) =>
-      (await call('measureSecurity', processes)) as QualificationSecurity,
+    // The agent accepts exactly these fields; the admin-side nativeAncestry stays on this side.
+    measureSecurity: async ({ mainPid, rendererPids, nativeChildPids }: QualificationProcesses) =>
+      (await call('measureSecurity', { mainPid, rendererPids, nativeChildPids })) as QualificationSecurity,
     discoverProcesses: async (mainPid, rendererPid) =>
       (await call('discoverProcesses', { mainPid, rendererPid })) as ReturnType<typeof discoverQualificationProcesses>,
     runtime: async (pid, resource, image): Promise<LinuxRuntimeFacts> => {

@@ -5,7 +5,7 @@ import { PageContent } from '#components/layout/page-content.js';
 import { Filter, RefreshCw, X } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { DateRangePicker } from '#components/ui/date-range-picker.js';
+import { DateRangePicker } from '@taucad/ui-kit/components/date-range-picker';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,

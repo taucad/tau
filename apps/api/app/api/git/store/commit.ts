@@ -21,9 +21,9 @@ import {
   commitDeadlineMilliseconds,
   deferredCompactionPackLimit,
   livePackBound,
-  repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
+import { repositoryByteCeiling } from '@taucad/api-object-storage/repository-byte-ceiling';
 import {
   listedHeadsOf,
   listingPuts,

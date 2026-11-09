@@ -66,7 +66,7 @@ import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js'
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 
 /**
  * The Tau Hosted Remote's request path in tau-api (charter D1, D3, D4; north

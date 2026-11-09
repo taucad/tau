@@ -33,7 +33,7 @@ import {
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 const chatsPerPage = 5;
 /** Joins chat ids into one effect key; ids never contain it. */

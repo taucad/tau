@@ -18,7 +18,7 @@ import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
 import type { ServerPreferences } from '#hooks/server-preferences.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { Toaster } from '#components/ui/sonner.js';
+import { Toaster } from '@taucad/ui/components/sonner';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { AppViewerEnvironment } from '#components/geometry/app-viewer-environment.js';
 import { useFavicon } from '#hooks/use-favicon.js';
@@ -201,7 +201,7 @@ function LayoutDocument({
   // which allows PreventFlashOnWrongTheme's script to correctly detect and apply the
   // system preference before the page renders (prevents light mode flash on dark systems).
   const location = useLocation();
-  const { ssrTheme: resolvedTheme } = useTheme();
+  const { theme, ssrTheme: resolvedTheme } = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
   const [usePointerCursors] = useCookie(cookieName.pointerCursors, false);
@@ -245,7 +245,7 @@ function LayoutDocument({
         {children}
         <ScrollRestoration />
         <Scripts />
-        <Toaster />
+        <Toaster theme={theme} />
       </body>
     </html>
   );

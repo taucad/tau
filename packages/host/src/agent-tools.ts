@@ -49,6 +49,7 @@ import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 import {
   createChatToolRegistry,
+  createGatewayWebResearchClient,
   createProviderRpcFileSystem,
   createRuntimeWorkbenchClient,
   createSkillBundleOverlay,
@@ -663,6 +664,60 @@ export type HostToolRegistryOptions = {
    * at every listing and call, so the tool appears once the probe settles.
    */
   readonly shell?: HostShell | (() => HostShell | undefined) | undefined;
+  /**
+   * Backs `web_search` and `web_browser` through Tau's API (regression review R1). A host signed in to Tau passes
+   * {@link createHostWebResearchClient} over its credential; one with no Tau account offers neither tool.
+   */
+  readonly web?: HostWebResearchClient | undefined;
+};
+
+/**
+ * The web research client a host hands its registry (regression review R1).
+ *
+ * Declared here, structurally equal to the registry's own, so this package's published types name no bundled
+ * workspace package.
+ *
+ * @public
+ */
+export type HostWebResearchClient = Readonly<{
+  search: (
+    request: Readonly<{ query: string; signal: AbortSignal }>,
+  ) => Promise<Array<{ title: string; url: string; content: string }>>;
+  browse: (
+    request: Readonly<{ urls: readonly string[]; query?: string | undefined; signal: AbortSignal }>,
+  ) => Promise<Array<{ url: string; content: string }>>;
+}>;
+
+/**
+ * A web research client over the host's Tau credential, read at every call: a sign-in, refresh or sign-out between
+ * calls is honoured, and a call while signed out is a coded tool error rather than an unauthenticated request.
+ *
+ * @param credential - The host's current Tau API origin and `Authorization` header value, or `undefined` signed out.
+ * @param fetch - Optional fetch, for tests.
+ * @returns The client.
+ * @public
+ */
+export const createHostWebResearchClient = (
+  credential: () => Readonly<{ apiBaseUrl: string; authorization: string }> | undefined,
+  fetch?: typeof globalThis.fetch,
+): HostWebResearchClient => {
+  const current = (): HostWebResearchClient => {
+    const signedIn = credential();
+    if (signedIn === undefined) {
+      throw Object.assign(new Error('Web research needs this host to be signed in to Tau.'), {
+        code: 'WEB_RESEARCH_SIGNED_OUT',
+      });
+    }
+    return createGatewayWebResearchClient({
+      baseUrl: signedIn.apiBaseUrl,
+      auth: () => signedIn.authorization.replace(/^Bearer\s+/iu, ''),
+      ...(fetch === undefined ? {} : { fetch }),
+    });
+  };
+  return {
+    search: async (request) => current().search(request),
+    browse: async (request) => current().browse(request),
+  };
 };
 
 /**
@@ -1065,6 +1120,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       testingEnabled: geospec !== undefined,
       acquisition,
       ...(options.shell === undefined ? {} : { shell: options.shell }),
+      ...(options.web === undefined ? {} : { web: options.web }),
     });
     return { registry, settingsOwner };
   };

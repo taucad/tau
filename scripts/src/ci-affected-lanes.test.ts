@@ -200,6 +200,24 @@ describe('ci.yml affected-only lanes', () => {
     );
   });
 
+  it('should run the API suites of the affected scope:api projects one at a time', () => {
+    const lane = ci.jobs['api'];
+    const steps = lane?.steps ?? [];
+    const suites = steps.filter((step) => /\bnx\s+(?:run-many|affected)\s+-t\s+test(?:\s|$)/u.test(step.run ?? ''));
+    // One step runs `test`, selected by `nx affected` over the tag: never every API suite with `run-many`.
+    expect(suites.map((step) => step.run?.trim())).toEqual([
+      'pnpm nx affected -t test --projects tag:scope:api --parallel=1',
+    ]);
+    // `nx affected` needs the base `nx-set-shas` finds: two commits in a queue run, full history otherwise.
+    const checkout = steps.find((step) => step.name === 'Checkout');
+    expect(checkout?.with?.['fetch-depth']).toBe(expression("github.event_name == 'merge_group' && 2 || 0"));
+    // The compose services start before the suites, in this same job.
+    const services = steps.findIndex((step) => /\bdocker compose\b[^\n]*\bup\b/u.test(step.run ?? ''));
+    const first = steps.findIndex((step) => suites.includes(step));
+    expect(services).toBeGreaterThanOrEqual(0);
+    expect(services).toBeLessThan(first);
+  });
+
   it('should run the CLI end-to-end suites in their own lane that the required check aggregates', () => {
     expect(ci.jobs['cli-e2e']?.if).toBe(
       expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true'"),

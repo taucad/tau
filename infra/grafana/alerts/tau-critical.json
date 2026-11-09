@@ -320,7 +320,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",attributed=\"false\"}) > 0",
+            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",attributed=\"false\",kind!~\"tax_registration_review|supplier_.+\"}) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "case_unattributed"
@@ -332,7 +332,7 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/refunds-and-financial-cases.md",
-        "summary": "Tier U (billing collection gate blueprint D5): an open financial case of any kind names no Tau account, usually foreign cash (a payment with no Tau customer) or a Stripe read that could not attribute it. No customer is refused anything; it is operator work and pages at the first evaluation after the hourly gauge write. Run the billing lifecycle `list-cases` with `attributed: false`, then close each row with `resolve-case` (`resolved` for foreign cash). Grouped by Fly `app` and case kind."
+        "summary": "Tier U (billing collection gate blueprint D5): an open financial case names no Tau account, usually foreign cash (a payment with no Tau customer) or a Stripe read that could not attribute it. No customer is refused anything; it is operator work and pages at the first evaluation after the hourly gauge write. Run the billing lifecycle `list-cases` with `attributed: false`, then close each row with `resolve-case` (`resolved` for foreign cash). tax_registration_review and supplier_* cases never name an account, so they are left to billing-books-overdue-24h (and billing-supplier-invoice-mismatch) instead of paging here. Grouped by Fly `app` and case kind."
       },
       "labels": {
         "severity": "critical",

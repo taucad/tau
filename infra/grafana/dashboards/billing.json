@@ -240,7 +240,7 @@
     },
     {
       "title": "Unattributed Open Cases by Kind",
-      "description": "Open financial cases that name no Tau account. Each kind above zero pages billing-case-unattributed; list them with the billing lifecycle list-cases and close each with resolve-case. No customer is refused anything because of them.",
+      "description": "Open financial cases that name no Tau account. Each kind above zero pages billing-case-unattributed, except tax_registration_review and supplier_* kinds, which never name an account and arrive in the daily billing-books-overdue-24h digest instead; list them with the billing lifecycle list-cases and close each with resolve-case. No customer is refused anything because of them.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
       "targets": [

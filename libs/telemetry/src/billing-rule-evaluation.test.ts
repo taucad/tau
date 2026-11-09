@@ -53,6 +53,11 @@ const spendBlockingKinds =
 const owedKinds = 'missing_local_payment|paid_unfulfilled_recovery|unfulfilled_purchase_obligation';
 const bookkeepingKinds =
   'gross_fee_net_mismatch|refund_unresolved|dispute_balance_transaction|tax_registration_review|supplier_.+';
+/**
+ * Kinds that never name an account (Tau's own tax registration and supplier cases). Coordinator ruling refining D5:
+ * they would keep U firing for ever, so they are left to T3 (and `billing-supplier-invoice-mismatch`).
+ */
+const neverAttributedKinds = 'tax_registration_review|supplier_.+';
 const cases = 'tau_billing_open_financial_cases';
 const age = 'tau_billing_open_financial_case_age_seconds';
 
@@ -63,7 +68,7 @@ const tiers = {
     severity: 'critical',
     for: '0s',
     runbook: 'docs/handbooks/cloud/operate/refunds-and-financial-cases.md',
-    expr: `max by (app, kind) (${cases}{app=~".*",service_name="tau-api",attributed="false"}) > 0`,
+    expr: `max by (app, kind) (${cases}{app=~".*",service_name="tau-api",attributed="false",kind!~"${neverAttributedKinds}"}) > 0`,
   },
   'billing-account-spend-blocked': {
     group: 'tau-critical',
@@ -252,18 +257,28 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
     expect(changes(transitions)).toEqual([`0s ${instanceOf('missing_local_payment')} Normal→Alerting`]);
   });
 
-  it('should alert for an unattributed case of any kind, one instance per kind', () => {
+  it('should alert for an unattributed case of any kind that can name an account, one instance per kind', () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'tax_registration_review', attributed: 'false' }, { value: 1 }),
+      gauge(cases, { kind: 'refund_unresolved', attributed: 'false' }, { value: 1 }),
       gauge(cases, { kind: 'dispute_unresolved', attributed: 'false' }, { value: 2 }),
     ]);
 
     expect(changes(transitions).toSorted()).toEqual(
       [
-        `0s ${instanceOf('tax_registration_review')} Normal→Alerting`,
+        `0s ${instanceOf('refund_unresolved')} Normal→Alerting`,
         `0s ${instanceOf('dispute_unresolved')} Normal→Alerting`,
       ].toSorted(),
     );
+  });
+
+  it('should leave the kinds that never name an account to the bookkeeping tier and still page foreign cash', () => {
+    const transitions = simulate('billing-case-unattributed', [
+      gauge(cases, { kind: 'tax_registration_review', attributed: 'false' }, { value: 1 }),
+      gauge(cases, { kind: 'supplier_invoice_total_mismatch', attributed: 'false' }, { value: 1 }),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, { value: 1 }),
+    ]);
+
+    expect(changes(transitions)).toEqual([`0s ${instanceOf('missing_local_payment')} Normal→Alerting`]);
   });
 
   it('should stay Normal on a zero unattributed count beside attributed cases', () => {

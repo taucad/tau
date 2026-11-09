@@ -20,7 +20,7 @@ import {
   modelPendingPollMilliseconds,
   recordProviderUnavailableAutoResume,
   resetAutoResumes,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();

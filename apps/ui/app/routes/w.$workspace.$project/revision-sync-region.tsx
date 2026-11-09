@@ -45,7 +45,7 @@ import {
   GithubRequestError,
 } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
@@ -54,7 +54,7 @@ import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-co
 import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import {
   cloudUnavailableSentence,
   asksTauSignIn,

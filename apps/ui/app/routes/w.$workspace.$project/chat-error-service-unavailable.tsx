@@ -9,7 +9,7 @@ import {
   nextProviderUnavailableRetry,
   providerUnavailableRetryDelayMilliseconds,
   recordProviderUnavailableAutoResume,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 
 /**
  * Tau or the model provider could not be reached.

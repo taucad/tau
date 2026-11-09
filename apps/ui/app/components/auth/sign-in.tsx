@@ -13,11 +13,11 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
-import { authErrorMessage, betterFetchErrorBodyCode } from '#utils/auth-error.utils.js';
+import { authErrorMessage, betterFetchErrorBodyCode } from '@taucad/ui-core/utils/auth-error.utils';
 
 export type SignInProps = {
   className?: string;

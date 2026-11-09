@@ -13,9 +13,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { offerCrashFeedback } from '#lib/crash-feedback.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
-import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { setLiveCountsReader } from '@taucad/ui-core/lib/memory-sampler';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { MemoryKillSignal } from '#lib/memory-kill-signal.js';

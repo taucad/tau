@@ -8,7 +8,7 @@ import {
   nextRateLimitRetry,
   rateLimitRetryDelayMilliseconds,
   recordRateLimitAutoResume,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 
 /** How often the countdown redraws; the label shows whole seconds. Milliseconds. */
 const countdownTickMilliseconds = 250;

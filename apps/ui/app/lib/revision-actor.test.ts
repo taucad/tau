@@ -13,8 +13,8 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deviceId } from '#lib/device-id.js';
-import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
+import { deviceId } from '@taucad/ui-core/lib/device-id';
+import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionUserActor, useRevisionSalt } from '#lib/revision-actor.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module

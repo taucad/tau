@@ -20,12 +20,12 @@
  * that (G17). Each report carries how many kills happened in a row.
  */
 
-import { recordActivityBreadcrumb } from '#lib/activity-breadcrumbs.js';
+import { recordActivityBreadcrumb } from '@taucad/ui-core/lib/activity-breadcrumbs';
 import { readBuildId } from '#lib/build-identity.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
-import { readLastMemorySample, readHighWaterWasmBytes, takeMemorySample } from '#lib/memory-sampler.js';
-import { readSessionStorage } from '#lib/session-storage.js';
-import type { MemorySample } from '#lib/memory-sampler.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { readLastMemorySample, readHighWaterWasmBytes, takeMemorySample } from '@taucad/ui-core/lib/memory-sampler';
+import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
+import type { MemorySample } from '@taucad/ui-core/lib/memory-sampler';
 
 /** The marker shape this build writes and reads. An older shape is left alone rather than guessed at. */
 export const killMarkerVersion = 2;

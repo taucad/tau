@@ -51,18 +51,22 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
-import { createResidentPlacement } from '#workers/agent-host-placement.js';
+import { createResidentPlacement } from '@taucad/ui-core/workers/agent-host-placement';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
+import {
+  guardLargeObjectFiles,
+  guardLargeObjectKernel,
+  pendingPathsUnsupportedCode,
+} from '@taucad/ui-core/lib/large-object-guard';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
+import { createWorkerEvidence } from '@taucad/ui-core/workers/agent-host-evidence';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
+import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,

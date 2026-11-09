@@ -30,7 +30,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,

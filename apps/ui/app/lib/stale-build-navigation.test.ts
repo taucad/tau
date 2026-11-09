@@ -17,7 +17,7 @@ vi.mock('#filesystem/build-skew.js', () => ({
     return () => skew.listeners.delete(listener);
   },
 }));
-vi.mock('#lib/page-visibility.js', () => ({ isPageHidden: () => skew.hidden }));
+vi.mock('@taucad/ui-core/lib/page-visibility', () => ({ isPageHidden: () => skew.hidden }));
 
 const { documentHrefFor, hiddenRecheckAfter, installStaleBuildNavigation, visiblePollInterval } =
   await import('#lib/stale-build-navigation.js');

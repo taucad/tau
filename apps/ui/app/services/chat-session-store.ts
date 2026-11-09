@@ -44,9 +44,9 @@ import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
-import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
-import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
+import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {

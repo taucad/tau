@@ -6,8 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/p
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
-import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
-import type { FileProvenanceLabel } from '#lib/file-provenance-labels.js';
+import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
+import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';

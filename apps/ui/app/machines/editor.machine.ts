@@ -3,7 +3,7 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import type { PartialDeep } from 'type-fest';
 import type {
@@ -13,10 +13,10 @@ import type {
   FileOpenSource,
   PanelState,
   PreviousWorkbenchLayout,
-} from '#types/editor.types.js';
+} from '@taucad/ui-core/types/editor.types';
 import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-settings';
-import { defaultPanelState } from '#constants/editor.constants.js';
-import { mergePanelState } from '#utils/panel-state.utils.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
+import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 
 const maxOpenFiles = 200;
 

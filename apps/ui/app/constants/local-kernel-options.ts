@@ -1,7 +1,7 @@
 import { debugKernelOptions, defaultKernelOptions } from '#constants/kernel-options.presets.js';
 import { isFeatureEnabled } from '#flags/feature-flags.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 
 export const localKernelOptions =
   (_projectId: string, _nativeKernelId: string | undefined, computeMode: ComputeReuseMode): LazyKernelOptionsFactory =>

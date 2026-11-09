@@ -1,6 +1,6 @@
 import type { Breadcrumb, Event, SeverityLevel } from '@sentry/react';
 import { apiRequestIdTags } from '#lib/api-request-id.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /*
  * What a reporter knows about an error beyond the error itself (SB4): tags (`worker`, the runtime vocabulary,

@@ -2,7 +2,7 @@ import { render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { createMemoryKillSignal } from '#lib/memory-kill-signal.js';
-import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '#lib/memory-sampler.js';
+import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '@taucad/ui-core/lib/memory-sampler';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 
 vi.mock('#lib/tab-kill-reporting.js', () => ({

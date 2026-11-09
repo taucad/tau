@@ -45,7 +45,7 @@ import type { Chat } from '@ai-sdk/react';
 import { isResumableRun, runHeartbeatMilliseconds } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
-import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import type { ActorRefFrom } from 'xstate';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';

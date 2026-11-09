@@ -20,7 +20,7 @@ import {
   modelPendingResumeBy,
   nextProviderUnavailableRetry,
   recordModelPendingAutoResume,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';

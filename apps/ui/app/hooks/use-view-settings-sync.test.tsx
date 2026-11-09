@@ -12,7 +12,7 @@ import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { cadMachine } from '#machines/cad.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { editorMachine } from '#machines/editor.machine.js';

@@ -42,7 +42,7 @@ import { ViewerTabContextMenu } from '#components/panes/viewer-tab-context-menu.
 import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
-import type { MobilePanelId } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
 import { useFeature } from '#flags/use-feature.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';

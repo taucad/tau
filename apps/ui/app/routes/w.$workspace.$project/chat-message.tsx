@@ -44,7 +44,7 @@ import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
+import { formatAbsoluteTime, formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';

@@ -12,7 +12,7 @@ import {
 import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
 import { pluralize, useSidebarCommands } from '#hooks/use-sidebar-status.js';
-import type { UnsavedParameterDraftsRefusal } from '#services/parameter-set-service.js';
+import type { UnsavedParameterDraftsRefusal } from '@taucad/ui-core/services/parameter-set-service';
 
 /**
  * *Discard n unsaved parameter edits?* — asked when closing the project, or renaming or deleting a

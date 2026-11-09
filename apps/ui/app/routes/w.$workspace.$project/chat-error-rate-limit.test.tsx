@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rate-limit.js';
-import { maximumRateLimitAutoResumes, resetAutoResumes } from '#utils/run-auto-resume.js';
+import { maximumRateLimitAutoResumes, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();

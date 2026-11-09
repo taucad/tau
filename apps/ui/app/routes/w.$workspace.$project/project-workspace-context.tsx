@@ -1,15 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { useProject } from '#hooks/use-project.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import type { MobilePanelId } from '#constants/editor.constants.js';
-import type { PanelState } from '#types/editor.types.js';
+import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
+import type { PanelState } from '@taucad/ui-core/types/editor.types';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { holdUnheardFileReveal, holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 

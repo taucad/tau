@@ -11,7 +11,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
 import { ChatErrorServiceUnavailable } from '#routes/w.$workspace.$project/chat-error-service-unavailable.js';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { resetAutoResumes } from '#utils/run-auto-resume.js';
+import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();

@@ -1,12 +1,12 @@
 import { isObservabilityHarnessDirect } from '#lib/observability-harness-context.js';
 import { ENV } from '#environment.config.js';
-import { drainEarlyErrors } from '#lib/early-error-buffer.js';
+import { drainEarlyErrors } from '@taucad/ui-core/lib/early-error-buffer';
 import { recordErrorDetails } from '#lib/error-details.js';
 import type { ErrorDetails } from '#lib/error-details.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
-import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
+import { hasPageExited, isPageHidden } from '@taucad/ui-core/lib/page-visibility';
 import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /**
  * Browser error reporting (launch gate OBS-7), loaded only when the host injected `SENTRY_DSN`, so a build without

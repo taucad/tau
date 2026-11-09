@@ -1,4 +1,4 @@
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,8 +8,8 @@ import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
-import { createParameterSetService } from '#services/parameter-set-service.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';

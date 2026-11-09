@@ -4,7 +4,7 @@ import { monthlyCreditsFromBalance } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import type { WireBalanceExplanation, WireUsageSnapshot } from '@taucad/billing';
 import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 
 type UsageSummaryCardsProps = {
   readonly snapshot: WireUsageSnapshot;

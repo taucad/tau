@@ -13,7 +13,7 @@
 import { Topic } from '@taucad/events';
 import { reportUiFeedback } from '#lib/error-reporting.js';
 import { killLoopThreshold } from '#lib/memory-kill-signal.js';
-import { readSessionStorage } from '#lib/session-storage.js';
+import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
 import type { DetectedMemoryKill } from '#lib/memory-kill-signal.js';
 
 /** Marks this tab as already asked, so a later load does not ask again. */

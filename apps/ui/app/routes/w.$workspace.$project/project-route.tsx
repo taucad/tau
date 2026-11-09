@@ -21,13 +21,13 @@ import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$proj
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { useMemoryRelease } from '#hooks/use-memory-release.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project

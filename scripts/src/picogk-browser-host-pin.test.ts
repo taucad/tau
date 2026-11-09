@@ -9,11 +9,11 @@ import {
   checkPinnedBlobs,
   compareBundles,
   contentType,
-  defaultBlobBase,
+  blobBases,
   isInputsKey,
   manifestFiles,
   parsePin,
-  payloadTag,
+  dependencyTag,
   pinFor,
   pinStatus,
   publishPlan,
@@ -55,6 +55,7 @@ const pin: PicogkBrowserHostPin = {
   manifest: { sha256: hex(manifestBytes), byteLength: manifestBytes.length },
   files: { count: 6, byteLength: totalBytes },
 };
+const { production, staging } = blobBases;
 const noWait: RetryPolicy = { attempts: 2, wait: async () => undefined };
 
 const serve =
@@ -70,10 +71,16 @@ const serve =
       ? new Response(undefined, { status: route ?? 404 })
       : new Response(route);
   };
-const mirror = (overrides: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error> = new Map()) =>
+// Both environments' hosts, each serving every pinned blob, unless an override replaces a route.
+const mirror = (
+  overrides: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error> = new Map(),
+  bases: readonly string[] = [production, staging],
+) =>
   new Map<string, Uint8Array<ArrayBuffer> | number | Error>([
-    [`${defaultBlobBase}${pin.manifest.sha256}`, manifestBytes],
-    ...Object.values(contents).map((text) => [`${defaultBlobBase}${hex(text)}`, encode(text)] as const),
+    ...bases.flatMap((base) => [
+      [`${base}${pin.manifest.sha256}`, manifestBytes] as const,
+      ...Object.values(contents).map((text) => [`${base}${hex(text)}`, encode(text)] as const),
+    ]),
     ...overrides,
   ]);
 const io = () => {
@@ -131,9 +138,9 @@ describe('picogk-browser-host-pin', () => {
     });
 
     it('should name the tag by the first 16 hex of the key digest', () => {
-      expect(payloadTag(key)).toBe(`payload@picogk-browser-${hex(key).slice(0, 16)}`);
-      expect(payloadTag(key)).toMatch(/^payload@picogk-browser-[\da-f]{16}$/u);
-      expect(payloadTag(otherKey)).not.toBe(payloadTag(key));
+      expect(dependencyTag(key)).toBe(`dependency@picogk-browser-${hex(key).slice(0, 16)}`);
+      expect(dependencyTag(key)).toMatch(/^dependency@picogk-browser-[\da-f]{16}$/u);
+      expect(dependencyTag(otherKey)).not.toBe(dependencyTag(key));
     });
   });
 
@@ -178,9 +185,9 @@ describe('picogk-browser-host-pin', () => {
 
   describe('skip decision', () => {
     it('should skip only when the tree key equals the pinned key', () => {
-      expect(pinStatus(pin, key)).toEqual({ pinned: true, tag: payloadTag(key) });
-      expect(pinStatus(pin, otherKey)).toEqual({ pinned: false, tag: payloadTag(otherKey) });
-      expect(pinStatus(undefined, key)).toEqual({ pinned: false, tag: payloadTag(key) });
+      expect(pinStatus(pin, key)).toEqual({ pinned: true, tag: dependencyTag(key) });
+      expect(pinStatus(pin, otherKey)).toEqual({ pinned: false, tag: dependencyTag(otherKey) });
+      expect(pinStatus(undefined, key)).toEqual({ pinned: false, tag: dependencyTag(key) });
     });
 
     it('should refuse a key that is not an inputs key', () => {
@@ -276,7 +283,7 @@ describe('picogk-browser-host-pin', () => {
     it('should list each distinct blob once, files first and the manifest last', async () => {
       const rows = publishPlan({
         pin,
-        tag: payloadTag(key),
+        tag: dependencyTag(key),
         inputsKey: key,
         bundle: await verifyBundle(await bundle()),
       });
@@ -315,7 +322,7 @@ describe('picogk-browser-host-pin', () => {
       expect(
         publishPlan({
           pin: shared,
-          tag: payloadTag(key),
+          tag: dependencyTag(key),
           inputsKey: key,
           bundle: { manifest: pin.manifest, files },
         })[0],
@@ -328,12 +335,12 @@ describe('picogk-browser-host-pin', () => {
 
     it('should refuse a missing pin, another tag, another key and a bundle that is not the pinned one', async () => {
       const verified = await verifyBundle(await bundle());
-      const tag = payloadTag(key);
+      const tag = dependencyTag(key);
       expect(() => publishPlan({ pin: undefined, tag, inputsKey: key, bundle: verified })).toThrow(
         `${tag} carries no PicoGK browser host pin; nothing is published.`,
       );
-      expect(() => publishPlan({ pin, tag: payloadTag(otherKey), inputsKey: key, bundle: verified })).toThrow(
-        `${payloadTag(otherKey)} is not the tag of the pinned inputs key (${tag}).`,
+      expect(() => publishPlan({ pin, tag: dependencyTag(otherKey), inputsKey: key, bundle: verified })).toThrow(
+        `${dependencyTag(otherKey)} is not the tag of the pinned inputs key (${tag}).`,
       );
       expect(() => publishPlan({ pin, tag, inputsKey: otherKey, bundle: verified })).toThrow(
         `The tree's inputs key ${otherKey} is not the pinned ${key}.`,
@@ -348,19 +355,17 @@ describe('picogk-browser-host-pin', () => {
   describe('pinned blob check', () => {
     it('should pass when the mirror serves the manifest and every distinct blob once', async () => {
       const seen: string[] = [];
-      await expect(checkPinnedBlobs({ pin, base: defaultBlobBase, transport: serve(mirror(), seen) })).resolves.toEqual(
-        [],
-      );
-      expect(seen[0]).toBe(`${defaultBlobBase}${pin.manifest.sha256}`);
+      await expect(checkPinnedBlobs({ pin, base: production, transport: serve(mirror(), seen) })).resolves.toEqual([]);
+      expect(seen[0]).toBe(`${production}${pin.manifest.sha256}`);
       expect(seen).toHaveLength(6);
       expect(new Set(seen).size).toBe(6);
     });
 
     it('should report a missing, changed, oversized or unreachable blob', async () => {
-      const url = (text: string) => `${defaultBlobBase}${hex(text)}`;
+      const url = (text: string) => `${production}${hex(text)}`;
       const failures = await checkPinnedBlobs({
         pin,
-        base: defaultBlobBase,
+        base: production,
         retry: noWait,
         transport: serve(
           mirror(
@@ -399,24 +404,22 @@ describe('picogk-browser-host-pin', () => {
           waits.push(attempt);
         },
       };
-      await expect(checkPinnedBlobs({ pin, base: defaultBlobBase, transport: flaky, retry })).resolves.toEqual([]);
+      await expect(checkPinnedBlobs({ pin, base: production, transport: flaky, retry })).resolves.toEqual([]);
       expect(waits).toEqual([1]);
     });
 
     it('should stop at a missing manifest or a manifest that is not the pinned inventory', async () => {
-      const manifestUrl = `${defaultBlobBase}${pin.manifest.sha256}`;
+      const manifestUrl = `${production}${pin.manifest.sha256}`;
       await expect(
         checkPinnedBlobs({
           pin,
-          base: defaultBlobBase,
+          base: production,
           retry: noWait,
           transport: serve(new Map([[manifestUrl, 404]])),
         }),
       ).resolves.toEqual([`manifest: ${manifestUrl} answered HTTP 404`]);
       const counted = { ...pin, files: { count: 5, byteLength: totalBytes } };
-      await expect(
-        checkPinnedBlobs({ pin: counted, base: defaultBlobBase, transport: serve(mirror()) }),
-      ).resolves.toEqual([
+      await expect(checkPinnedBlobs({ pin: counted, base: production, transport: serve(mirror()) })).resolves.toEqual([
         `manifest lists 6 files of ${String(totalBytes)} bytes, not the pinned 5 of ${String(totalBytes)}`,
       ]);
     });
@@ -429,6 +432,8 @@ describe('picogk-browser-host-pin', () => {
         ['status', '--pin', 'x'],
         ['check', '--nope', 'x'],
         ['check', 'pin', 'x'],
+        ['check', '--pin', 'x', '--environment', 'preview'],
+        ['check', '--pin', 'x', '--environment', 'staging', '--base', 'https://mirror.test/blobs/sha256/'],
         ['compare', 'a'],
       ]) {
         const { errors, io: streams } = io();
@@ -445,7 +450,7 @@ describe('picogk-browser-host-pin', () => {
       const { out, io: streams } = io();
       await expect(run(['status', '--pin', path, '--key', key], streams)).resolves.toBe(0);
       await expect(run(['status', '--pin', join(root, 'absent.json'), '--key', key], streams)).resolves.toBe(0);
-      expect(out).toEqual(['pinned=true', `tag=${payloadTag(key)}`, 'pinned=false', `tag=${payloadTag(key)}`]);
+      expect(out).toEqual(['pinned=true', `tag=${dependencyTag(key)}`, 'pinned=false', `tag=${dependencyTag(key)}`]);
       const { errors, io: failing } = io();
       await expect(run(['status', '--pin', path, '--key', 'nope'], failing)).resolves.toBe(1);
       expect(errors).toEqual(['Not a PicoGK browser host inputs key: "nope".']);
@@ -461,7 +466,10 @@ describe('picogk-browser-host-pin', () => {
       await expect(run(['write', '--key', key, '--bundle', host, '--out', path], streams)).resolves.toBe(0);
       expect(await readPin(path)).toEqual(pin);
       await expect(
-        run(['plan', '--pin', path, '--key', key, '--bundle', host, '--tag', payloadTag(key), '--out', plan], streams),
+        run(
+          ['plan', '--pin', path, '--key', key, '--bundle', host, '--tag', dependencyTag(key), '--out', plan],
+          streams,
+        ),
       ).resolves.toBe(0);
       const text = await readFile(plan, 'utf8');
       const rows = text.trimEnd().split('\n');
@@ -488,7 +496,10 @@ describe('picogk-browser-host-pin', () => {
       await expect(run(['check', '--pin', path], streams, { transport: serve(mirror()), retry: noWait })).resolves.toBe(
         0,
       );
-      expect(out[1]).toBe(`Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${defaultBlobBase}.`);
+      expect(out.slice(1)).toEqual([
+        `Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${production}.`,
+        `Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${staging}.`,
+      ]);
       const base = 'https://mirror.test/blobs/sha256/';
       await expect(
         run(['check', '--pin', path, '--base', base], streams, { transport: serve(new Map()), retry: noWait }),
@@ -496,6 +507,48 @@ describe('picogk-browser-host-pin', () => {
       expect(errors).toEqual([
         `Pinned PicoGK browser host blobs that are not served with their digest:\n  manifest: ${base}${pin.manifest.sha256} answered HTTP 404`,
       ]);
+    });
+
+    it('should prove both hosts by default and fail when either one misses a blob', async () => {
+      const root = await temporary();
+      const path = join(root, 'browser-host.pin.json');
+      await writeFile(path, serializePin(pin));
+      const { out, errors, io: streams } = io();
+      const seen: string[] = [];
+      const productionOnly = serve(mirror(new Map(), [production]), seen);
+      await expect(run(['check', '--pin', path], streams, { transport: productionOnly, retry: noWait })).resolves.toBe(
+        1,
+      );
+      expect(new Set(seen.map((url) => new URL(url).host))).toEqual(
+        new Set(['dependencies.tau.new', 'dependencies.taucad.dev']),
+      );
+      expect(out).toEqual([`Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${production}.`]);
+      expect(errors).toEqual([
+        `Pinned PicoGK browser host blobs that are not served with their digest:\n  manifest: ${staging}${pin.manifest.sha256} answered HTTP 404`,
+      ]);
+      const stagingOnly = serve(mirror(new Map(), [staging]));
+      await expect(
+        run(['check', '--pin', path, '--environment', 'staging'], streams, { transport: stagingOnly, retry: noWait }),
+      ).resolves.toBe(0);
+      await expect(
+        run(['check', '--pin', path, '--environment', 'production'], streams, {
+          transport: stagingOnly,
+          retry: noWait,
+        }),
+      ).resolves.toBe(1);
+      expect(out.at(-1)).toBe(`Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${staging}.`);
+      expect(errors.at(-1)).toBe(
+        `Pinned PicoGK browser host blobs that are not served with their digest:\n  manifest: ${production}${pin.manifest.sha256} answered HTTP 404`,
+      );
+    });
+
+    it('should name each environment by its dependency host', () => {
+      expect(blobBases).toEqual({
+        production: 'https://dependencies.tau.new/blobs/sha256/',
+        staging: 'https://dependencies.taucad.dev/blobs/sha256/',
+      });
+      expect(serializePin(pin)).toContain('https://dependencies.tau.new/blobs/sha256/<hex>');
+      expect(serializePin(pin)).not.toContain('cdn.tau.new');
     });
   });
 });

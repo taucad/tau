@@ -1,7 +1,7 @@
 /**
  * The PicoGK browser host pin: decide whether a tree's host inputs are already pinned, prove two builds of the host are
- * byte-identical, write the pin from a verified bundle, plan the write-once publish of every file to the payload mirror,
- * and prove that every blob a pin names is served with its pinned digest.
+ * byte-identical, write the pin from a verified bundle, plan the write-once publish of every file to the dependency
+ * buckets, and prove that every blob a pin names is served with its pinned digest by each environment's host.
  *
  * The pin is `packages/plugins/picogk/browser-host.pin.json` (charter `picogk-interim-digest-consumer`, D8). Its shape,
  * schema version 1, is stable for the UI that loads the host by digest:
@@ -14,7 +14,10 @@
  *     "files": { "count": <manifest entries>, "byteLength": <sum of their byte lengths> }
  *   }
  *
- * Every manifest entry and the manifest itself is one blob, `blobs/sha256/<hex>` on the mirror (D7). The pin is absent
+ * Every manifest entry and the manifest itself is one blob, `blobs/sha256/<hex>` (D7), in each environment's locked
+ * dependency bucket: `tau-prod-dependencies` behind `dependencies.tau.new` and `tau-staging-au-dependencies` behind
+ * `dependencies.taucad.dev`. A pin is proven on both hosts, since the production and staging UIs each load from their
+ * own. The pin is absent
  * until the release bot's first pin pull request lands; an absent pin pins nothing, so the producer builds and the
  * blob check has nothing to prove.
  *
@@ -24,7 +27,9 @@
  *   write --key <inputsKey> --bundle <dir> --out <pin>    verify a bundle and write its pin
  *   plan --pin <pin.json> --key <inputsKey> --bundle <dir> --tag <tag> --out <tsv>
  *                                                         verify a bundle against its pin and list `sha256 path type` rows
- *   check --pin <pin.json> [--base <url>]                 prove every pinned blob is served with its digest
+ *   check --pin <pin.json> [--environment <name> | --base <url>]
+ *                                                         prove every pinned blob is served with its digest by both
+ *                                                         hosts, or by one environment's (`production`, `staging`)
  * Exit codes: 0 success; 1 a refusal or failed check; 2 usage.
  */
 import { createHash } from 'node:crypto';
@@ -47,8 +52,16 @@ export type ManifestFile = { readonly path: string; readonly sha256: string; rea
 /** One write-once blob of a publish: its digest, the bundle file holding it and the `Content-Type` it is served with. */
 export type PublishRow = { readonly sha256: string; readonly path: string; readonly contentType: string };
 
-/** The mirror's digest-addressed base, which `cdn.tau.new` serves from the payload bucket. */
-export const defaultBlobBase = 'https://cdn.tau.new/blobs/sha256/';
+/** Each environment's digest-addressed base: the public host of its locked dependency bucket. */
+export const blobBases = {
+  production: 'https://dependencies.tau.new/blobs/sha256/',
+  staging: 'https://dependencies.taucad.dev/blobs/sha256/',
+} as const;
+
+/** An environment that serves the host: the key of its blob base. */
+export type BlobEnvironment = keyof typeof blobBases;
+
+const isBlobEnvironment = (name: string): name is BlobEnvironment => Object.hasOwn(blobBases, name);
 
 /** The bundle's manifest file, the one the pin's `manifest` digest names. */
 const manifestName = 'assets-manifest.json';
@@ -56,7 +69,7 @@ const manifestName = 'assets-manifest.json';
 // The build-only receipt `prepare-browser-host.mts` writes beside the manifest; it is never served or published.
 const receiptName = 'assets-receipt.json';
 const pinNote =
-  'Written by the release bot from a verified build (.github/workflows/picogk-browser-host-publish.yml, scripts/src/picogk-browser-host-pin.ts); never edit by hand. Every blob is served write-once at https://cdn.tau.new/blobs/sha256/<hex> before this file lands.';
+  'Written by the release bot from a verified build (.github/workflows/picogk-browser-host-publish.yml, scripts/src/picogk-browser-host-pin.ts); never edit by hand. Every blob is served write-once at https://dependencies.tau.new/blobs/sha256/<hex> and https://dependencies.taucad.dev/blobs/sha256/<hex> before this file lands.';
 const hex64 = /^[\da-f]{64}$/u;
 const inputsKeyPattern = /^picogk-browser-host-v\d+-[\da-f]{40}-[\w.+-]+-[\da-f]{64}-[\da-f]{64}$/u;
 const pathPattern = /^[\w./-]+$/u;
@@ -74,13 +87,13 @@ const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').
 export const isInputsKey = (key: string): boolean => inputsKeyPattern.test(key);
 
 /**
- * The `payload@` tag that publishes the host built from an inputs key (D9): the first 16 hex of the key's sha256, since
+ * The `dependency@` tag that publishes the host built from an inputs key (D9): the first 16 hex of the key's sha256, since
  * the key itself starts with the PicoVoxel ref that many keys share.
  * @param inputsKey - A browser host inputs key.
- * @returns `payload@picogk-browser-<16 hex>`.
+ * @returns `dependency@picogk-browser-<16 hex>`.
  */
-export const payloadTag = (inputsKey: string): string =>
-  `payload@picogk-browser-${sha256(new TextEncoder().encode(inputsKey)).slice(0, 16)}`;
+export const dependencyTag = (inputsKey: string): string =>
+  `dependency@picogk-browser-${sha256(new TextEncoder().encode(inputsKey)).slice(0, 16)}`;
 
 /**
  * Validate a parsed pin.
@@ -139,7 +152,7 @@ export const readPin = async (path: string): Promise<PicogkBrowserHostPin | unde
  * Whether the producer must build: the tree's inputs key is pinned exactly when it equals the pin's.
  * @param pin - The committed pin, or `undefined` when none exists.
  * @param inputsKey - The tree's inputs key.
- * @returns Whether the key is pinned, and the `payload@` tag a build of this key publishes from.
+ * @returns Whether the key is pinned, and the `dependency@` tag a build of this key publishes from.
  * @throws When the key is not an inputs key.
  */
 export const pinStatus = (
@@ -149,7 +162,7 @@ export const pinStatus = (
   if (!isInputsKey(inputsKey)) {
     throw new TypeError(`Not a PicoGK browser host inputs key: ${JSON.stringify(inputsKey)}.`);
   }
-  return { pinned: pin?.inputsKey === inputsKey, tag: payloadTag(inputsKey) };
+  return { pinned: pin?.inputsKey === inputsKey, tag: dependencyTag(inputsKey) };
 };
 
 const manifestEntries = (variant: unknown, name: string): ManifestFile[] => {
@@ -335,10 +348,10 @@ export const compareBundles = async (first: string, second: string): Promise<str
 /**
  * The blobs a tag run writes, after proving the bundle is the pinned one: the tag names the pin's key, the tree's key
  * is the pin's, and the bundle's manifest and files are the pinned ones. One row per distinct digest, files first and
- * the manifest last, so a manifest on the mirror means every file it names is there too.
+ * the manifest last, so a manifest in a bucket means every file it names is there too.
  * @param options - The pin at the tag, the tag, the tree's inputs key and the verified bundle.
  * @param options.pin - The pin the tagged commit carries.
- * @param options.tag - The `payload@` tag of this run.
+ * @param options.tag - The `dependency@` tag of this run.
  * @param options.inputsKey - The inputs key computed at the tag.
  * @param options.bundle - The verified bundle.
  * @returns The rows to publish.
@@ -354,8 +367,8 @@ export const publishPlan = (options: {
   if (pin === undefined) {
     throw new Error(`${tag} carries no PicoGK browser host pin; nothing is published.`);
   }
-  if (payloadTag(pin.inputsKey) !== tag) {
-    throw new Error(`${tag} is not the tag of the pinned inputs key (${payloadTag(pin.inputsKey)}).`);
+  if (dependencyTag(pin.inputsKey) !== tag) {
+    throw new Error(`${tag} is not the tag of the pinned inputs key (${dependencyTag(pin.inputsKey)}).`);
   }
   if (pin.inputsKey !== inputsKey) {
     throw new Error(`The tree's inputs key ${inputsKey} is not the pinned ${pin.inputsKey}.`);
@@ -455,8 +468,9 @@ const fetchBlob = async (request: BlobRequest, retry: RetryPolicy): Promise<Fetc
 };
 
 /**
- * Prove that the mirror serves every blob a pin names (D9, I2): the manifest at its pinned digest and byte length, then
- * every file the manifest lists at its own. A pin pull request may merge only when this returns no failure.
+ * Prove that a host serves every blob a pin names (D9, I2): the manifest at its pinned digest and byte length, then
+ * every file the manifest lists at its own. A pin pull request may merge only when this returns no failure for the
+ * production host and for the staging host.
  * @param options - The pin, the blob base and the transport.
  * @param options.pin - The pin to prove.
  * @param options.base - The digest-addressed base, ending in `/`.
@@ -512,7 +526,7 @@ export const checkPinnedBlobs = async (options: {
 export type Io = { readonly out: (line: string) => void; readonly err: (line: string) => void };
 
 const usage =
-  'Usage: node scripts/src/picogk-browser-host-pin.ts status --pin <pin> --key <key> | compare <bundle> <bundle> | write --key <key> --bundle <dir> --out <pin> | plan --pin <pin> --key <key> --bundle <dir> --tag <tag> --out <tsv> | check --pin <pin> [--base <url>]';
+  'Usage: node scripts/src/picogk-browser-host-pin.ts status --pin <pin> --key <key> | compare <bundle> <bundle> | write --key <key> --bundle <dir> --out <pin> | plan --pin <pin> --key <key> --bundle <dir> --tag <tag> --out <tsv> | check --pin <pin> [--environment production|staging | --base <url>]';
 
 const flags = (args: readonly string[], names: readonly string[], optional: readonly string[] = []) => {
   const values = new Map<string, string>();
@@ -561,9 +575,13 @@ export const run = async (
           : command === 'plan'
             ? flags(args, ['pin', 'key', 'bundle', 'tag', 'out'])
             : command === 'check'
-              ? flags(args, ['pin'], ['base'])
+              ? flags(args, ['pin'], ['environment', 'base'])
               : undefined;
-    if (options === undefined) {
+    const environment = options?.get('environment');
+    // `--environment` names one known host and cannot be combined with an explicit `--base`.
+    const environmentBase =
+      environment === undefined ? undefined : isBlobEnvironment(environment) ? blobBases[environment] : '';
+    if (options === undefined || environmentBase === '' || (environmentBase !== undefined && options.has('base'))) {
       io.err(usage);
       return 2;
     }
@@ -596,13 +614,27 @@ export const run = async (
       io.out(`::notice title=No PicoGK browser host pin::${value('pin')} does not exist yet, so no blob is checked.`);
       return 0;
     }
-    const base = options.get('base') ?? defaultBlobBase;
-    const failures = await checkPinnedBlobs({ pin, base, ...(network ?? { transport: fetch, retry: defaultRetry }) });
+    const base = options.get('base') ?? environmentBase;
+    const bases = base === undefined ? Object.values(blobBases) : [base];
+    const failures: string[] = [];
+    for (const each of bases) {
+      // oxlint-disable-next-line no-await-in-loop -- one host is proven at a time, so its failures stay together
+      const missing = await checkPinnedBlobs({
+        pin,
+        base: each,
+        ...(network ?? { transport: fetch, retry: defaultRetry }),
+      });
+      failures.push(...missing);
+      if (missing.length === 0) {
+        io.out(
+          `Every blob of manifest ${pin.manifest.sha256} (${String(pin.files.count)} files) is served at ${each}.`,
+        );
+      }
+    }
     if (failures.length > 0) {
       io.err(`Pinned PicoGK browser host blobs that are not served with their digest:\n  ${failures.join('\n  ')}`);
       return 1;
     }
-    io.out(`Every blob of manifest ${pin.manifest.sha256} (${String(pin.files.count)} files) is served at ${base}.`);
     return 0;
   } catch (error) {
     io.err(error instanceof Error ? error.message : String(error));

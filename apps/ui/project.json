@@ -108,6 +108,9 @@
           "env": "PICOGK_BROWSER_ASSETS_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_MIRROR_BASE"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {

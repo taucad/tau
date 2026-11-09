@@ -14,7 +14,7 @@ import type {
   TurnFinalizedLogEvent,
   TurnPlacement,
 } from '#log/event-types.js';
-import type { InvocationResolution } from '#wire/gateway.js';
+import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 
 /** W1: ordered, durable event-log port owned by the active host. @public */
 export type DurableEventLog = EventLogAppender;
@@ -158,6 +158,13 @@ export type ModelStreamRequest = {
   readonly chatId?: string | undefined;
   /** Why this distinct provider invocation exists. */
   readonly invocationPurpose: 'generation' | 'compaction';
+  /**
+   * Which step of its user turn a generation is, and the pause before the turn, for the gateway's turn-step series.
+   * Sent as the `x-tau-turn-step` and `x-tau-turn-gap` headers, never in the body, so the prompt bytes and the
+   * billing request digest are the same with or without it. Absent on a compaction and from a caller that does not
+   * track turns; the gateway then records no turn labels for the call.
+   */
+  readonly turn?: GatewayTurnLabels | undefined;
   /** Called after the response header is validated and before its stream is consumed. */
   readonly onInvocationBound?: ((binding: ModelInvocationBinding) => Promise<void>) | undefined;
   /** Gateway or local-provider model identity. */

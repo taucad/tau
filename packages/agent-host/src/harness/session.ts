@@ -87,7 +87,8 @@ import { createToolResultBatchBudget } from '#harness/tool-result-budget.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
-import type { InvocationResolution } from '#wire/gateway.js';
+import { turnLabelsOf } from '#harness/turn-labels.js';
+import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const zeroUsage: Usage = {
@@ -441,6 +442,8 @@ type CreateTransportStreamOptions = {
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
+  /** The next generation step's turn labels (`x-tau-turn-step`, `x-tau-turn-gap`); asked once per generation call. */
+  readonly turnLabels?: (() => Promise<GatewayTurnLabels>) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
 };
@@ -795,6 +798,7 @@ export const createTransportStreamFunction =
         signal.throwIfAborted();
         const committedContext = options.committedContext?.();
         const committedTurns = (await options.committedTurns?.()) ?? [];
+        const turn = invocationPurpose === 'generation' ? await options.turnLabels?.() : undefined;
         signal.throwIfAborted();
         const documents = options.documents?.();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
@@ -807,6 +811,7 @@ export const createTransportStreamFunction =
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose,
+          ...(turn === undefined ? {} : { turn }),
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) => {
@@ -1872,6 +1877,19 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     });
     return attemptId;
   };
+  /*
+   * R1: the run's labels are read from the log once, at this session's first generation step, so a resumed run (on
+   * this device or another) labels its steps the way the run that started them would have. Every later step of the
+   * session is a continuation carrying the same turn gap, so one run's steps never straddle a bucket edge.
+   */
+  let runTurnLabels: GatewayTurnLabels | undefined;
+  const turnLabels = async (): Promise<GatewayTurnLabels> => {
+    if (runTurnLabels !== undefined) {
+      return { ...runTurnLabels, step: 'continuation' };
+    }
+    runTurnLabels = turnLabelsOf({ rows: await record.rows(), runId: options.runId, now: now().getTime() });
+    return runTurnLabels;
+  };
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
     stallBound: {
@@ -1888,6 +1906,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
+    turnLabels,
     systemPromptBlocks: () => options.systemPromptBlocks,
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     prestartTool: async (toolCall, contentIndex, messageId, partial, signal) => {

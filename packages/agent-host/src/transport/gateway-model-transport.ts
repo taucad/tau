@@ -24,7 +24,7 @@ import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMes
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
-import type { GatewayErrorCode } from '#wire/gateway.js';
+import type { GatewayErrorCode, GatewayTurnLabels } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
@@ -708,6 +708,8 @@ const authenticatedFetch =
      * billing wire does not define cannot be put on it.
      */
     readonly activity?: 'compaction' | undefined;
+    /** The step's turn labels, sent as headers only: never in the body, so the digest and prompt bytes ignore them. */
+    readonly turn?: GatewayTurnLabels | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
@@ -743,6 +745,14 @@ const authenticatedFetch =
       }
       if (options.activity !== undefined) {
         headers.set('x-tau-activity', options.activity);
+      }
+      // Telemetry labels for the gateway's turn-step series: enumerated values only (I4), read by
+      // `readTurnTelemetry` in apps/api and listed in its CORS allow-list (`httpHeader.xTauTurnStep`).
+      if (options.turn !== undefined) {
+        headers.set('x-tau-turn-step', options.turn.step);
+        if (options.turn.gap !== undefined) {
+          headers.set('x-tau-turn-gap', options.turn.gap);
+        }
       }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
@@ -1232,6 +1242,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       // A generation is the gateway's default activity and says nothing; a
       // compaction is a kind of its own and says so.
       ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
+      ...(request.turn === undefined ? {} : { turn: request.turn }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }

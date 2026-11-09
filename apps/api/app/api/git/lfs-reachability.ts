@@ -1,4 +1,4 @@
-import { referencedLfsOids } from '#api/git/lfs-references.js';
+import { referencedLfsOids } from '@taucad/api-git-core/lfs-references';
 import { applyLfsReachability } from '#api/git/lfs-reachability-marks.js';
 import type { LfsReachabilityDependencies } from '#api/git/lfs-reachability-marks.js';
 

@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
 import type { Environment } from '@taucad/api-core';
-import { inProcessGitToolchain } from '#api/git/forwarding/in-process-executor.js';
+import { inProcessGitToolchain } from '@taucad/api-git-core/forwarding/in-process-executor';
 
 /**
  * The Tau Hosted Remote is git's own binaries behind HTTP (EQ13). Where those

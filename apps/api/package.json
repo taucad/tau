@@ -18,6 +18,8 @@
     "@taucad/api-database": "workspace:*",
     "@taucad/api-email": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
+    "@taucad/api-git-core": "workspace:*",
+    "@taucad/api-git-mirror": "workspace:*",
     "@taucad/api-hosts": "workspace:*",
     "@taucad/api-lifecycle": "workspace:*",
     "@taucad/api-llm-gateway": "workspace:*",

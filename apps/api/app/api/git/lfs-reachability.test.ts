@@ -6,7 +6,7 @@ import path from 'node:path';
 import { GoneException } from '@nestjs/common';
 import { mock } from 'vitest-mock-extended';
 import type { Database } from '@taucad/api-database/owner-lock';
-import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -20,13 +20,13 @@ import * as schema from '@taucad/api-database/schema';
 import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/testing/destructive-test-bucket-guard';
 import { ObjectStorageService } from '@taucad/api-object-storage';
 import { StorageModule } from '@taucad/api-object-storage/module';
-import { commitLease } from '#api/git/store/commit.js';
-import { hydrateLease } from '#api/git/store/lease.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import type { RepositoryLocator } from '#api/git/store/port.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { commitLease } from '@taucad/api-git-core/store/commit';
+import { hydrateLease } from '@taucad/api-git-core/store/lease';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import type { RepositoryLocator } from '@taucad/api-git-core/store/port';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 import { markLfsReachability } from '#api/git/lfs-reachability.js';
-import { referencedLfsOids } from '#api/git/lfs-references.js';
+import { referencedLfsOids } from '@taucad/api-git-core/lfs-references';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 /**

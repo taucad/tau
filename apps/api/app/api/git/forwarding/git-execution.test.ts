@@ -7,22 +7,22 @@ import type { TestingModule } from '@nestjs/testing';
 import { ObjectStorageService } from '@taucad/api-object-storage';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import { verifyReceipt } from '#api/git/forwarding/contract/receipt.js';
+import { verifyReceipt } from '@taucad/api-git-core/forwarding/contract/receipt';
 import {
   gitExecutionProvider,
   gitExecutorProvider,
   receiptVerificationProvider,
 } from '#api/git/forwarding/forwarding.providers.js';
-import { createGitExecution, gitExecutionKey } from '#api/git/forwarding/git-execution.js';
-import type { GitExecution } from '#api/git/forwarding/git-execution.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { GitExecutor, GrantFacts } from '#api/git/forwarding/git-executor.js';
-import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { createGitExecution, gitExecutionKey } from '@taucad/api-git-core/forwarding/git-execution';
+import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { GitExecutor, GrantFacts } from '@taucad/api-git-core/forwarding/git-executor';
+import { StorageForwarder } from '@taucad/api-git-core/forwarding/storage-forwarder';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitRepositoryService, receiptVerificationKey } from '#api/git/git.service.js';
 import type { ReceiptVerification } from '#api/git/git.service.js';
 import { RedisService } from '@taucad/api-redis';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 
 /**
  * DC1, kept releasable: an API with `TAU_STORAGE_URL` set forwards every git

@@ -50,6 +50,12 @@
       "path": "./apps/libs/api-email"
     },
     {
+      "path": "./apps/libs/api-git-core"
+    },
+    {
+      "path": "./apps/libs/api-git-mirror"
+    },
+    {
       "path": "./apps/libs/api-hosts"
     },
     {

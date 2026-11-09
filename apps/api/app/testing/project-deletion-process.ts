@@ -2,7 +2,7 @@ import process from 'node:process';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
-import { requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
 import { assertDeletionDatabase } from '@taucad/api-testing';
 
 const connection = assertDeletionDatabase(process.env.DATABASE_URL);

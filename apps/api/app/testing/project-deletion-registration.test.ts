@@ -7,9 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
-import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/project-deletion.js';
-import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
+import { registeredProjectLimitPerOwner } from '@taucad/api-git-core/git.constants';
+import { completeProjectDeletion, requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
+import { storeTombstoneFence } from '@taucad/api-git-core/store/tombstone-fence';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import type { Environment } from '@taucad/api-core';
@@ -18,7 +18,7 @@ import type { Database } from '@taucad/api-database/owner-lock';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
 import { createDeletionDatabase, seedDeletionProject } from '@taucad/api-testing';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 
 /** Real controller queries and access authority; billing/rate-limit boundaries are deterministic. */
 const createController = (database: Database) => {

@@ -1,6 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { projectPreviewMaximumBytes } from '#api/projects/project-preview-key.js';
+import { projectPreviewMaximumBytes } from '@taucad/api-git-core/project-preview-key';
 
 export const projectPreviewSchema = z.object({
   image: z

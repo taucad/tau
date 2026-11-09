@@ -7,12 +7,12 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import type { RepositoryLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
 import {
   releaseDeletedProjectPublicationReferences,
   publicationManifestReadTimeout,
 } from '#api/publications/publication-deletion.js';
-import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
+import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import { materializePublication, materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';

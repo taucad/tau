@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { commitTombstone } from '#api/git/store/commit.js';
-import { decodeManifest, encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
-import type { CommitToken, ManifestBytes, RepositoryStore } from '#api/git/store/port.js';
-import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
+import { commitTombstone } from '@taucad/api-git-core/store/commit';
+import { decodeManifest, encodeManifest, succeedManifest } from '@taucad/api-git-core/store/manifest';
+import type { CommitToken, ManifestBytes, RepositoryStore } from '@taucad/api-git-core/store/port';
+import { retentionWindowMilliseconds } from '@taucad/api-git-core/store/limits';
 
 /** Durable manifest state survives replacement of the caller, as in CPD-01 Crash/Recover. */
 const durableStore = () => {

@@ -17,12 +17,12 @@ import { publicationApiCode } from '@taucad/types/constants';
 import type { PublicationApiCode } from '@taucad/types/constants';
 import { publicationRowSchema } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
-import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { hydrateLease } from '#api/git/store/lease.js';
-import { decodeManifest, encodeManifest } from '#api/git/store/manifest.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
+import { createMemoryRepositoryStore, seedLease } from '@taucad/api-git-core/testing/publication-lease.fixture';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { hydrateLease } from '@taucad/api-git-core/store/lease';
+import { decodeManifest, encodeManifest } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import {
   isPublishableTreePath,
   parseLfsPointer,
@@ -30,7 +30,7 @@ import {
 } from '#api/publications/publication-materializer.js';
 import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { resolveLfsObjectLocation, tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import type { ObjectStorageServiceContract, PutBlobResult } from '@taucad/api-object-storage';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import * as schema from '@taucad/api-database/schema';

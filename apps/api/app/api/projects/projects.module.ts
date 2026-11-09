@@ -8,7 +8,7 @@ import { StorageModule } from '@taucad/api-object-storage/module';
 import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import { GitModule } from '#api/git/git.module.js';
-import { previewWriterProvider } from '#api/git/forwarding/preview-writer.js';
+import { previewWriterProvider } from '@taucad/api-git-core/forwarding/preview-writer';
 
 /**
  * The project registry a client claims a project id in (P51).

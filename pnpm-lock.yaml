@@ -1874,6 +1874,12 @@ importers:
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
+      '@taucad/api-git-core':
+        specifier: workspace:*
+        version: link:../libs/api-git-core
+      '@taucad/api-git-mirror':
+        specifier: workspace:*
+        version: link:../libs/api-git-mirror
       '@taucad/api-hosts':
         specifier: workspace:*
         version: link:../libs/api-hosts
@@ -2616,6 +2622,113 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+
+  apps/libs/api-git-core:
+    dependencies:
+      '@nestjs/common':
+        specifier: 'catalog:'
+        version: 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/config':
+        specifier: ^4.0.4
+        version: 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@taucad/api-core':
+        specifier: workspace:*
+        version: link:../api-core
+      '@taucad/api-database':
+        specifier: workspace:*
+        version: link:../api-database
+      '@taucad/api-lifecycle':
+        specifier: workspace:*
+        version: link:../api-lifecycle
+      '@taucad/api-object-storage':
+        specifier: workspace:*
+        version: link:../api-object-storage
+      '@taucad/api-observability':
+        specifier: workspace:*
+        version: link:../api-observability
+      '@taucad/api-redis':
+        specifier: workspace:*
+        version: link:../api-redis
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../billing
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
+    devDependencies:
+      '@nestjs/testing':
+        specifier: 'catalog:'
+        version: 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      dotenv:
+        specifier: 'catalog:'
+        version: 17.4.2
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  apps/libs/api-git-mirror:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 'catalog:'
+        version: 3.1150.0
+      '@opentelemetry/api':
+        specifier: 'catalog:'
+        version: 1.9.1
+      '@taucad/api-database':
+        specifier: workspace:*
+        version: link:../api-database
+      '@taucad/api-git-core':
+        specifier: workspace:*
+        version: link:../api-git-core
+      '@taucad/api-object-storage':
+        specifier: workspace:*
+        version: link:../api-object-storage
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../../libs/telemetry
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)
+    devDependencies:
+      '@nestjs/config':
+        specifier: ^4.0.4
+        version: 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@nestjs/testing':
+        specifier: 'catalog:'
+        version: 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      '@taucad/api-core':
+        specifier: workspace:*
+        version: link:../api-core
+      dotenv:
+        specifier: 'catalog:'
+        version: 17.4.2
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-hosts:
     dependencies:

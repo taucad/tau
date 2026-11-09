@@ -5,16 +5,16 @@ import type { FastifyReply } from 'fastify';
 import { UseAuth, User } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
 import type { Environment } from '@taucad/api-core';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
-import { executorTombstoneFence } from '#api/git/forwarding/tombstone-fence.js';
-import { isProjectRepositoryId } from '#api/git/git.constants.js';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { GitExecutor } from '@taucad/api-git-core/forwarding/git-executor';
+import { executorTombstoneFence } from '@taucad/api-git-core/forwarding/tombstone-fence';
+import { isProjectRepositoryId } from '@taucad/api-git-core/git.constants';
 import {
   completeProjectDeletion,
   readOwnedProjectDeletion,
   requestProjectDeletion,
-} from '#api/projects/project-deletion.js';
-import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
+} from '@taucad/api-git-core/project-deletion';
+import type { ProjectDeletionStatus } from '@taucad/api-git-core/project-deletion';
 
 @Controller({ path: 'projects', version: '1' })
 @UseAuth()

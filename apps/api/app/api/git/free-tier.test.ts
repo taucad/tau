@@ -14,7 +14,7 @@ import type {
 } from '#api/entitlements/commercial-entitlements.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
 import { UsageController } from '#api/git/usage.controller.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 

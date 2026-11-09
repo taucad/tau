@@ -32,6 +32,8 @@ export const projectTagVocabulary = {
     'billing',
     'testing',
     'object-storage',
+    'git-core',
+    'git-mirror',
   ],
   shell: ['sandbox', 'service', 'terminal'],
 } as const;

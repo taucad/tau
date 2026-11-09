@@ -38,11 +38,11 @@ import {
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
-import { decodeManifest } from '#api/git/store/manifest.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
-import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
+import { decodeManifest } from '@taucad/api-git-core/store/manifest';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import { resolveLfsObjectLocation } from '@taucad/api-git-core/lfs-keys';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { ReadLease } from '#api/git/git.service.js';
 import { DatabaseService } from '@taucad/api-database';

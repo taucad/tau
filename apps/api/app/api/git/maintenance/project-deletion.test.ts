@@ -16,17 +16,18 @@ import type { DatabaseService } from '@taucad/api-database';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { ObjectStorageService } from '@taucad/api-object-storage';
-import { requestProjectDeletion, completeProjectDeletion } from '#api/projects/project-deletion.js';
-import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { decodeManifest } from '#api/git/store/manifest.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
-import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import { purgeDeletedProject, projectPurgeObjectBound } from '#api/git/maintenance/project-purge.js';
-import { purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
-import { restoreRepository } from '#api/git/maintenance/restore.js';
+import { requestProjectDeletion, completeProjectDeletion } from '@taucad/api-git-core/project-deletion';
+import { storeTombstoneFence } from '@taucad/api-git-core/store/tombstone-fence';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
+import { decodeManifest } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import { gitLfsObjectKey } from '@taucad/api-git-core/git.constants';
+import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
+import { purgeDeletedProject, projectPurgeObjectBound } from '@taucad/api-git-mirror/maintenance/project-purge';
+import { purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
+import { releaseDeletedProjectPublicationReferences as releasePublicationReferences } from '#api/publications/publication-deletion.js';
+import { restoreRepository } from '@taucad/api-git-mirror/maintenance/restore';
 import { createDeletionDatabase } from '@taucad/api-testing';
 
 const planWrites = vi.hoisted(() => ({ calls: 0, lines: 0, maxLines: 0, maxBytes: 0 }));
@@ -191,9 +192,9 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
     const pendingManifest = await store.readManifest(locator);
     expect(pendingManifest?.manifest).toBeDefined();
     const failedRead = vi.spyOn(driver, 'getBlob').mockRejectedValueOnce(new Error('Fixture manifest unavailable'));
-    await expect(purgeDeletedProject({ database, driver, store, projectId: locator.projectId, at })).rejects.toThrow(
-      'Fixture manifest unavailable',
-    );
+    await expect(
+      purgeDeletedProject({ database, driver, store, releasePublicationReferences, projectId: locator.projectId, at }),
+    ).rejects.toThrow('Fixture manifest unavailable');
     failedRead.mockRestore();
     const unreleased = await database.query.blobRef.findFirst({ where: eq(schema.blobRef.sha256, digest) });
     expect(unreleased?.refcount).toBe(3);
@@ -204,9 +205,9 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
       await new S3RepositoryStore(driver).deleteObjects(location, keys.slice(0, 1));
       throw new Error('Fixture partial object batch failure');
     });
-    await expect(purgeDeletedProject({ database, driver, store, projectId: locator.projectId, at })).rejects.toThrow(
-      'Fixture partial object batch failure',
-    );
+    await expect(
+      purgeDeletedProject({ database, driver, store, releasePublicationReferences, projectId: locator.projectId, at }),
+    ).rejects.toThrow('Fixture partial object batch failure');
     partialDelete.mockRestore();
     expect(await Array.fromAsync(store.listObjects(locator, 'packs/'))).toHaveLength(2);
     const failedReceipt = await receipt(locator.projectId);
@@ -224,6 +225,7 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
           database: drizzle(restartedClient, { schema }),
           driver,
           store: new S3RepositoryStore(driver),
+          releasePublicationReferences,
           projectId: locator.projectId,
           at,
         }),
@@ -250,7 +252,16 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
     await expect(assertProjectActive(database, locator.projectId)).rejects.toBeInstanceOf(GoneException);
     // A URL issued before fencing can finish late. The audit must reopen and drain this identity.
     await putPack(locator, 'packs/late.pack');
-    expect(await purgeDeletedProject({ database, driver, store, projectId: locator.projectId, at })).toMatchObject({
+    expect(
+      await purgeDeletedProject({
+        database,
+        driver,
+        store,
+        releasePublicationReferences,
+        projectId: locator.projectId,
+        at,
+      }),
+    ).toMatchObject({
       status: 'purged',
     });
     expect(await Array.fromAsync(store.listObjects(locator, ''))).toHaveLength(1);
@@ -330,9 +341,25 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
     const listing = vi.spyOn(store, 'listObjects');
     try {
       expect(
-        await purgeDeletedProject({ database, driver, store, projectId: locator.projectId, at: fencedAt }),
+        await purgeDeletedProject({
+          database,
+          driver,
+          store,
+          releasePublicationReferences,
+          projectId: locator.projectId,
+          at: fencedAt,
+        }),
       ).toMatchObject({ status: 'pending' });
-      expect(await purgeDeletedProject({ database, driver, store, projectId: 'unknown-project', at })).toMatchObject({
+      expect(
+        await purgeDeletedProject({
+          database,
+          driver,
+          store,
+          releasePublicationReferences,
+          projectId: 'unknown-project',
+          at,
+        }),
+      ).toMatchObject({
         status: 'pending',
       });
       expect(listing).not.toHaveBeenCalled();
@@ -364,7 +391,14 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
         }
       },
     });
-    const outcome = await purgeDeletedProject({ database, driver, store: streamed, projectId: locator.projectId, at });
+    const outcome = await purgeDeletedProject({
+      database,
+      driver,
+      store: streamed,
+      releasePublicationReferences,
+      projectId: locator.projectId,
+      at,
+    });
     expect(projectPurgeObjectBound).toBe(10_000);
     expect(outcome).toMatchObject({ status: 'refused', plan: { objects: 10_001, bytes: 10_001 } });
     expect(planWrites.lines).toBe(10_001);
@@ -379,7 +413,15 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
     const locator = await seed();
     await putPack(locator);
     await intent(locator);
-    const args = { database, driver, store, projectId: locator.projectId, at, objectBound: 0 };
+    const args = {
+      database,
+      driver,
+      store,
+      releasePublicationReferences,
+      projectId: locator.projectId,
+      at,
+      objectBound: 0,
+    };
     const preview = await purgeDeletedProject({ ...args, dryRun: true });
     const plan = preview.plan!;
     expect(await purgeDeletedProject(args)).toMatchObject({ status: 'refused' });

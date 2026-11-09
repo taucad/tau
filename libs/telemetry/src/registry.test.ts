@@ -87,7 +87,7 @@ describe('TauMetrics', () => {
 
   it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {
     const bucket = TauMetrics.r2StoredBytes.attributes.shape['tau.r2.bucket'];
-    expect(bucket.options).toEqual(['public', 'private', 'other']);
+    expect(bucket.options).toEqual(['public', 'private', 'downloads', 'dependencies', 'other']);
     expect(bucket.safeParse('tau-content-staging').success).toBe(false);
   });
 

@@ -6,6 +6,7 @@ import {
   killTrailLimit,
   markerByteLimit,
   pendingKillLimit,
+  setKillContextSink,
 } from '#lib/memory-kill-signal.js';
 
 const memoryStorage = (): Storage => {
@@ -223,5 +224,39 @@ describe('memory kill signal (B-01, D-UI-25, SB3)', () => {
       page.heartbeat();
       page.finish();
     }).not.toThrow();
+  });
+
+  it('hands the live kill context to the sink as tags, only when it changes (D13)', () => {
+    const published: Array<Readonly<Record<string, string>>> = [];
+    setKillContextSink((tags) => {
+      published.push(tags);
+    });
+    try {
+      const signal = load(memoryStorage(), 'navigate');
+      signal.takeDetectedKills();
+      signal.breadcrumb('open');
+      signal.setCounts({ liveProjectCount: 2, chatCount: 1 });
+      signal.heartbeat();
+      /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names. */
+      expect(published.at(-1)).toStrictEqual({
+        route: 'routes/w.$workspace.$project',
+        last_activity: 'open',
+        live_project_count: '2',
+        chat_count: '1',
+        device_class: 'constrained',
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag names. */
+      const count = published.length;
+      signal.heartbeat();
+      expect(published).toHaveLength(count);
+
+      const late: Array<Readonly<Record<string, string>>> = [];
+      setKillContextSink((tags) => {
+        late.push(tags);
+      });
+      expect(late).toStrictEqual([published.at(-1)]);
+    } finally {
+      setKillContextSink(undefined);
+    }
   });
 });

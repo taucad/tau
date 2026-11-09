@@ -466,7 +466,11 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
-  const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+  // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
+  const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT'], {
+    base: process.env['PICOGK_BROWSER_MIRROR_BASE'],
+    pin: path.resolve(__dirname, '../../packages/plugins/picogk/browser-host.pin.json'),
+  });
   const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
   const csharpAssets = createCsharpLanguageAssets(

@@ -13,7 +13,8 @@ const hour = 60 * minute;
  * The R2 task's source, or `undefined` when either Cloudflare setting is unset: the task then counts a
  * skipped pass and exports no `tau_r2_*` series, and the other tasks run as usual.
  *
- * @param settings - The two Cloudflare settings and the environment's bucket names.
+ * @param settings - The two Cloudflare settings and the environment's bucket names; the downloads and
+ *   dependency buckets are optional, and an unset one counts as `other`.
  * @returns The account, token and bucket roles, or `undefined`.
  */
 export const r2SourceOf = (settings: {
@@ -25,6 +26,10 @@ export const r2SourceOf = (settings: {
   readonly publicBucket: string;
   /** `TAU_S3_PRIVATE_BUCKET`. */
   readonly privateBucket: string;
+  /** `TAU_CLOUDFLARE_DOWNLOADS_BUCKET`. */
+  readonly downloadsBucket?: string | undefined;
+  /** `TAU_CLOUDFLARE_DEPENDENCIES_BUCKET`. */
+  readonly dependenciesBucket?: string | undefined;
 }): R2AnalyticsSource | undefined =>
   settings.accountId === undefined || settings.token === undefined
     ? undefined
@@ -34,6 +39,8 @@ export const r2SourceOf = (settings: {
         buckets: {
           public: settings.publicBucket,
           private: settings.privateBucket,
+          ...(settings.downloadsBucket === undefined ? {} : { downloads: settings.downloadsBucket }),
+          ...(settings.dependenciesBucket === undefined ? {} : { dependencies: settings.dependenciesBucket }),
         },
       };
 

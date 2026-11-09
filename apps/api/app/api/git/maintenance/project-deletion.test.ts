@@ -26,7 +26,7 @@ import { gitLfsObjectKey } from '@taucad/api-git-core/git.constants';
 import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import { purgeDeletedProject, projectPurgeObjectBound } from '@taucad/api-git-mirror/maintenance/project-purge';
 import { purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
-import { releaseDeletedProjectPublicationReferences as releasePublicationReferences } from '#api/publications/publication-deletion.js';
+import { releaseDeletedProjectPublicationReferences as releasePublicationReferences } from '@taucad/api-projects/publications/publication-deletion';
 import { restoreRepository } from '@taucad/api-git-mirror/maintenance/restore';
 import { createDeletionDatabase } from '@taucad/api-testing';
 

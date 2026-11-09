@@ -19,6 +19,21 @@ describe('mapR2Analytics (W14 OB3, N50–N53)', () => {
     expect(JSON.stringify(figures)).not.toContain('tau-scratch');
   });
 
+  it('should report the downloads and dependency buckets by their own roles once they are named', () => {
+    const named = mapR2Analytics(r2AnalyticsFixture, {
+      ...buckets,
+      downloads: 'tau-scratch',
+      dependencies: 'tau-content-prod',
+    });
+    const labels = (observations: ReadonlyArray<{ attributes: Readonly<Record<string, string>> }> | undefined) =>
+      new Set((observations ?? []).map((observation) => observation.attributes['tau.r2.bucket']));
+
+    expect(labels(named.r2Requests)).toStrictEqual(new Set(['public', 'private', 'downloads', 'dependencies']));
+    expect(labels(named.r2Objects)).toStrictEqual(new Set(['public', 'private', 'downloads', 'dependencies']));
+    expect(JSON.stringify(named)).not.toContain('tau-content-prod');
+    expect(JSON.stringify(named)).not.toContain('tau-scratch');
+  });
+
   it('should sum the non-allow-listed buckets into one `other` series per class, action and status', () => {
     expect(figures.r2Requests).toContainEqual({
       value: 12,
@@ -158,6 +173,17 @@ describe('readR2Analytics', () => {
       accountTag: 'acct-1',
       hourStart: '2026-10-28T20:00:00.000Z',
     });
+    expect(figures.r2StoredBytes).toHaveLength(3);
+  });
+
+  it('should accept a successful answer whose `errors` member is null, as Cloudflare sends it', async () => {
+    const fetcher: typeof fetch = async () => Response.json({ ...r2AnalyticsFixture, errors: null });
+
+    const figures = await readR2Analytics(
+      { accountId: 'acct-1', token: 'token-1', buckets, fetch: fetcher },
+      Date.parse('2026-10-28T21:17:05Z'),
+    );
+
     expect(figures.r2StoredBytes).toHaveLength(3);
   });
 

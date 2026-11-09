@@ -2,11 +2,11 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@taucad/api-database';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
 import { PublicationsModule } from '#api/publications/publications.module.js';
-import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
-import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
+import { ProjectPreviewController } from '@taucad/api-projects/projects/project-preview.controller';
+import { ProjectPreviewService } from '@taucad/api-projects/projects/project-preview.service';
 import { StorageModule } from '@taucad/api-object-storage/module';
-import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
-import { ProjectsController } from '#api/projects/projects.controller.js';
+import { ProjectDeletionController } from '@taucad/api-projects/projects/project-deletion.controller';
+import { ProjectsController } from '@taucad/api-projects/projects/projects.controller';
 import { GitModule } from '#api/git/git.module.js';
 import { previewWriterProvider } from '@taucad/api-git-core/forwarding/preview-writer';
 

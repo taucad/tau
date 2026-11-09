@@ -41,6 +41,8 @@ import { StorageAccountingScheduler, redisSnapshotStore } from '#storage-account
             }),
             publicBucket: config.get('TAU_S3_BUCKET', { infer: true }),
             privateBucket: config.get('TAU_S3_PRIVATE_BUCKET', { infer: true }),
+            downloadsBucket: config.get('TAU_CLOUDFLARE_DOWNLOADS_BUCKET', { infer: true }),
+            dependenciesBucket: config.get('TAU_CLOUDFLARE_DEPENDENCIES_BUCKET', { infer: true }),
           }),
         });
         return new StorageAccountingScheduler({

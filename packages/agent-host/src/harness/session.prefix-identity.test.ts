@@ -245,13 +245,23 @@ describe('I1 request prefix identity across consecutive user turns', () => {
   });
 
   it('should note a catalog change once, in the turn it changed, and keep the prefix on every later turn', async () => {
-    const skillsAB = [...skillsA, { name: 'gears', description: 'Involute gears.', fingerprint: 'f2' }];
+    const skillsWithGears = [...skillsA, { name: 'gears', description: 'Involute gears.', fingerprint: 'f2' }];
     const files = ['main.scad', 'README.md'];
     const run = await runChat([
       turnOne,
-      { ...turnTwo, clientContext: { skills: skillsAB } },
-      { ...turnTwo, runId: 'run-3', snapshot: snapshotText('README.md', files), clientContext: { skills: skillsAB } },
-      { ...turnTwo, runId: 'run-4', snapshot: snapshotText('nut.scad', files), clientContext: { skills: skillsAB } },
+      { ...turnTwo, clientContext: { skills: skillsWithGears } },
+      {
+        ...turnTwo,
+        runId: 'run-3',
+        snapshot: snapshotText('README.md', files),
+        clientContext: { skills: skillsWithGears },
+      },
+      {
+        ...turnTwo,
+        runId: 'run-4',
+        snapshot: snapshotText('nut.scad', files),
+        clientContext: { skills: skillsWithGears },
+      },
     ]);
     /* The history keeps turn two's note where it was; no later turn adds one of its own. */
     const notes = run.requests.map(

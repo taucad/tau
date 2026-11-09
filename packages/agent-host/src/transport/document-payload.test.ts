@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
 import { describe, expect, it, vi } from 'vitest';
-import type { Context } from '@earendil-works/pi-ai';
+import type { Context, UserMessage } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 import type { MaterializedDocument, ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
@@ -279,25 +279,71 @@ describe('fitAttachmentBudget', () => {
     expect(fitAttachmentBudget(input, documents, 28)).toEqual({ context: input, omitted: 0 });
   });
 
-  it('should keep the newest attachments and name the ones past the budget', () => {
+  it('should evict the oldest attachments in a batch and name the ones it omits', () => {
     const input = context();
     const before = structuredClone(input);
 
+    /* Sizes 8, 8, 4, 8 against a budget of 12 (floor 8.4): the second overflow evicts both the 8 and the 4. */
     const fitted = fitAttachmentBudget(input, documents, 12);
 
-    expect(fitted.omitted).toBe(2);
+    expect(fitted.omitted).toBe(3);
     expect(fitted.context.messages.map((message) => message.content)).toEqual([
       [
         { type: 'text', text: '[attachment omitted]' },
         { type: 'text', text: '[attachment omitted: old-spec.pdf]' },
       ],
-      [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+      [{ type: 'text', text: '[attachment omitted]' }],
       [
         { type: 'text', text: 'again' },
         { type: 'text', text: sentinel },
       ],
     ]);
     expect(input).toEqual(before);
+  });
+});
+
+describe('fitAttachmentBudget batch eviction (I1)', () => {
+  const attachments = (count: number, size = 10): Context => ({
+    systemPrompt: 'CAD',
+    messages: Array.from(
+      { length: count },
+      (_, index): UserMessage => ({
+        role: 'user',
+        content: [{ type: 'image', mimeType: 'image/png', data: 'A'.repeat(size) }],
+        timestamp: index,
+      }),
+    ),
+    tools: [],
+  });
+  const omittedIndexes = (context: Context): number[] =>
+    context.messages.flatMap((message, index) =>
+      typeof message.content !== 'string' && message.content.some((block) => block.type === 'text') ? [index] : [],
+    );
+
+  it('should rewrite history only when the budget overflows, evicting the oldest down to the floor in one batch', () => {
+    const omitted = Array.from(
+      { length: 15 },
+      (_, index) => fitAttachmentBudget(attachments(index + 1), undefined, 100).omitted,
+    );
+    /* Ten fit; the eleventh overflows and evicts four, which lasts until the fifteenth overflows again. */
+    expect(omitted).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 8]);
+  });
+
+  it('should keep every earlier eviction when a later attachment arrives, so replays agree byte for byte', () => {
+    for (let count = 1; count < 15; count++) {
+      const before = omittedIndexes(fitAttachmentBudget(attachments(count), undefined, 100).context);
+      const after = omittedIndexes(fitAttachmentBudget(attachments(count + 1), undefined, 100).context);
+      expect(after.slice(0, before.length), `count ${String(count)}`).toEqual(before);
+      /* Evictions take the oldest attachments, never one in the middle. */
+      expect(after).toEqual(after.map((_, index) => index));
+    }
+  });
+
+  it('should keep the newest attachment unless it alone exceeds the budget', () => {
+    const pair = fitAttachmentBudget(attachments(2, 80), undefined, 100);
+    expect(pair.omitted).toBe(1);
+    expect(omittedIndexes(pair.context)).toEqual([0]);
+    expect(fitAttachmentBudget(attachments(1, 150), undefined, 100).omitted).toBe(1);
   });
 });
 

@@ -61,14 +61,25 @@ const nativeBlock = ({
 export const attachmentBudgetCharacters = 24_000_000;
 
 /**
- * Keep the newest attachments a request can carry and name the rest (R1).
+ * Once attachments overflow the budget, the oldest are evicted until this share of the budget remains, in one batch.
  *
- * Durable history names every attachment a chat ever held, so a long chat can
- * outgrow any request bound. Messages are walked newest first: each image block,
- * and each document sentinel with a side-table entry, is kept while the budget
- * holds and otherwise becomes the text `[attachment omitted: <name>]` (or
- * `[attachment omitted]`). The model loses sight of old bytes the way it loses
- * old turns to eviction, instead of the whole chat being refused forever.
+ * @internal
+ */
+export const attachmentBudgetFloor = 0.7;
+
+type AttachmentSlot = Readonly<{ messageIndex: number; blockIndex: number; size: number; name: string | undefined }>;
+
+/**
+ * Keep the attachments a request can carry and name the rest (R1), evicting in batches (I1).
+ *
+ * Durable history names every attachment a chat ever held, so a long chat can outgrow any request bound. Attachments
+ * are replayed oldest first: each image block, and each document sentinel with a side-table entry, is admitted, and
+ * the first time the total overflows the budget the oldest admitted attachments are evicted until no more than
+ * {@link attachmentBudgetFloor} of the budget remains. An evicted attachment becomes the text
+ * `[attachment omitted: <name>]` (or `[attachment omitted]`). The decision is a function of the history alone, so a
+ * replay or another device sends the same bytes, and between two overflows no attachment changes: the model loses
+ * sight of old bytes the way it loses old turns to compaction, a batch at a time, instead of one rewrite per new
+ * attachment. The newest attachment is kept unless it alone exceeds the budget.
  *
  * @internal
  * @param context - The request's pi context; it is not mutated.
@@ -81,28 +92,71 @@ export const fitAttachmentBudget = (
   documents: ReadonlyMap<string, MaterializedDocument> | undefined,
   budget: number = attachmentBudgetCharacters,
 ): { readonly context: Context; readonly omitted: number } => {
-  let remaining = budget;
-  let omitted = 0;
-  const fit = (block: TextContent | ImageContent): TextContent | ImageContent => {
-    const hash = block.type === 'text' ? standaloneSentinel.exec(block.text)?.[1] : undefined;
-    const document = hash === undefined ? undefined : documents?.get(hash);
-    const size = block.type === 'image' ? block.data.length : (document?.data.length ?? 0);
-    if (size <= remaining) {
-      remaining -= size;
-      return block;
+  const slots: AttachmentSlot[] = [];
+  for (const [messageIndex, message] of context.messages.entries()) {
+    if ((message.role !== 'user' && message.role !== 'toolResult') || typeof message.content === 'string') {
+      continue;
     }
-    omitted += 1;
-    const name = document?.filename;
-    return { type: 'text', text: name === undefined ? '[attachment omitted]' : `[attachment omitted: ${name}]` };
-  };
-  const newestFirst = [...context.messages]
-    .reverse()
-    .map((message) =>
-      (message.role === 'user' || message.role === 'toolResult') && typeof message.content !== 'string'
-        ? { ...message, content: message.content.map(fit) }
-        : message,
+    for (const [blockIndex, block] of message.content.entries()) {
+      if (block.type === 'image') {
+        slots.push({ messageIndex, blockIndex, size: block.data.length, name: undefined });
+        continue;
+      }
+      const hash = standaloneSentinel.exec(block.text)?.[1];
+      const document = hash === undefined ? undefined : documents?.get(hash);
+      if (document !== undefined) {
+        slots.push({ messageIndex, blockIndex, size: document.data.length, name: document.filename });
+      }
+    }
+  }
+  const evicted = new Set<AttachmentSlot>();
+  const admitted: AttachmentSlot[] = [];
+  let total = 0;
+  const floor = budget * attachmentBudgetFloor;
+  for (const slot of slots) {
+    admitted.push(slot);
+    total += slot.size;
+    if (total <= budget) {
+      continue;
+    }
+    while (total > floor && admitted.length > 1) {
+      const oldest = admitted.shift()!;
+      evicted.add(oldest);
+      total -= oldest.size;
+    }
+    if (total > budget) {
+      evicted.add(admitted.shift()!);
+      total = 0;
+    }
+  }
+  if (evicted.size === 0) {
+    return { context, omitted: 0 };
+  }
+  const byMessage = Map.groupBy(evicted, (slot) => slot.messageIndex);
+  const messages = context.messages.map((message, messageIndex) => {
+    const evictions = byMessage.get(messageIndex);
+    if (
+      evictions === undefined ||
+      (message.role !== 'user' && message.role !== 'toolResult') ||
+      typeof message.content === 'string'
+    ) {
+      return message;
+    }
+    const content = (message.content as ReadonlyArray<TextContent | ImageContent>).map(
+      (block, blockIndex): TextContent | ImageContent => {
+        const slot = evictions.find((candidate) => candidate.blockIndex === blockIndex);
+        if (slot === undefined) {
+          return block;
+        }
+        return {
+          type: 'text',
+          text: slot.name === undefined ? '[attachment omitted]' : `[attachment omitted: ${slot.name}]`,
+        };
+      },
     );
-  return omitted === 0 ? { context, omitted } : { context: { ...context, messages: newestFirst.reverse() }, omitted };
+    return message.role === 'user' ? { ...message, content } : { ...message, content };
+  });
+  return { context: { ...context, messages }, omitted: evicted.size };
 };
 
 /**

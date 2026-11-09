@@ -1,4 +1,4 @@
-import { declaresManifest } from '#lib/project-manifest-equivalence.js';
+import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';

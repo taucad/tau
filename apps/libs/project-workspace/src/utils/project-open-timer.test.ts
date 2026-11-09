@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { createProjectOpenTimer, isHostedCheckoutApplied, markProjectOpen } from '#machines/project-open-timer.js';
-import type { ProjectOpenMark } from '#machines/project-open-timer.js';
+import { createProjectOpenTimer, isHostedCheckoutApplied, markProjectOpen } from '#utils/project-open-timer.js';
+import type { ProjectOpenMark } from '#utils/project-open-timer.js';
 
 type OpenStatus = Pick<RevisionStatusProjection, 'remote' | 'sync'>;
 

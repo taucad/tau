@@ -39,7 +39,7 @@ vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-pane-skeleton.js', () => ({
+vi.mock('@taucad/project-workspace/components/chat-pane-skeleton', () => ({
   ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({

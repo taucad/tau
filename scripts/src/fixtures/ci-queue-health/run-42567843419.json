@@ -1,0 +1,1058 @@
+{
+  "run": {
+    "id": 42567843419,
+    "status": "completed",
+    "conclusion": "cancelled",
+    "created_at": "2026-11-09T05:31:53Z",
+    "updated_at": "2026-11-09T05:48:36Z",
+    "html_url": "https://github.com/taucad/tau/actions/runs/42567843419"
+  },
+  "jobs": [
+    {
+      "id": 128998179552,
+      "name": "Plan affected lanes",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:31:54Z",
+      "started_at": "2026-11-09T05:32:44Z",
+      "completed_at": "2026-11-09T05:35:19Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128998179552",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Find the merge-queue verdict for this commit",
+          "conclusion": "success"
+        },
+        {
+          "name": "Compute affected lanes",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload the lane plan",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128998179903,
+      "name": "Validate workspace",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:31:54Z",
+      "started_at": "2026-11-09T05:34:26Z",
+      "completed_at": "2026-11-09T05:37:41Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128998179903",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Find the merge-queue verdict for this commit",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run workspace validators",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128998181144,
+      "name": "API Docker dependency cache",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-09T05:31:54Z",
+      "started_at": "2026-11-09T05:31:54Z",
+      "completed_at": "2026-11-09T05:31:54Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128998181144",
+      "steps": []
+    },
+    {
+      "id": 128999188327,
+      "name": "API tests (Postgres + MinIO)",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:41:26Z",
+      "completed_at": "2026-11-09T05:46:11Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188327",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prepare API env file",
+          "conclusion": "success"
+        },
+        {
+          "name": "Start Postgres + Redis + MinIO",
+          "conclusion": "success"
+        },
+        {
+          "name": "MinIO smoke (seed + RW)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Apply the protected migration job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run API suites (real PostgreSQL + MinIO)",
+          "conclusion": "failure"
+        },
+        {
+          "name": "Qualify API development and production servers",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Pull the billing foundation PostgreSQL image",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the API's billing composition contracts",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run deterministic file-edit qualification (edit bench)",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the live-harness guards",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the durable-migration failure injection",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the git end-to-end tier (two API processes, two storage workers, one object store)",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the git tier's logs for signed tokens",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188342,
+      "name": "Browser, accessibility and Lighthouse",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:37:39Z",
+      "completed_at": "2026-11-09T05:47:01Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188342",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install Chromium",
+          "conclusion": "success"
+        },
+        {
+          "name": "Use the pinned browser for Lighthouse",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify affected browser applications",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package the marketing SSR function",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload browser and Lighthouse evidence",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188391,
+      "name": "Billing contracts (no Stripe credentials)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:42:12Z",
+      "completed_at": "2026-11-09T05:47:24Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188391",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Pull the billing foundation PostgreSQL image",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run billing database and Stripe adapter contracts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188393,
+      "name": "Affected (pkgcheck)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:36:37Z",
+      "completed_at": "2026-11-09T05:48:34Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188393",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188410,
+      "name": "GeoSpec example contracts",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:45:16Z",
+      "completed_at": "2026-11-09T05:48:32Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188410",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run affected example contracts",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188436,
+      "name": "Affected (test-1)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:43:23Z",
+      "completed_at": "2026-11-09T05:48:31Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188436",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188450,
+      "name": "Affected (test-2)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:44:43Z",
+      "completed_at": "2026-11-09T05:48:30Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188450",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188466,
+      "name": "Formal models",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:45:11Z",
+      "completed_at": "2026-11-09T05:48:36Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188466",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup formal toolchains",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run affected formal tiers",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload formal reports",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup formal toolchains",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188474,
+      "name": "Affected (build)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:42:17Z",
+      "completed_at": "2026-11-09T05:48:34Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188474",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188475,
+      "name": "Affected (lint)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:45:31Z",
+      "completed_at": "2026-11-09T05:48:30Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188475",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188528,
+      "name": "Standalone projects / Standalone projects (npm)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:36:55Z",
+      "completed_at": "2026-11-09T05:40:23Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188528",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install uv",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Install OpenSCAD",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Report Zoo KCL quarantine",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check every template outside Tau",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check package-lock.json parity with npm ci",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188532,
+      "name": "Standalone projects / Standalone projects (none)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:38:28Z",
+      "completed_at": "2026-11-09T05:40:26Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188532",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install uv",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Install OpenSCAD",
+          "conclusion": "success"
+        },
+        {
+          "name": "Report Zoo KCL quarantine",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check every template outside Tau",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check package-lock.json parity with npm ci",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188540,
+      "name": "Affected (typecheck)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:45:36Z",
+      "completed_at": "2026-11-09T05:48:32Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188540",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188558,
+      "name": "Affected (test-3)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:45:40Z",
+      "completed_at": "2026-11-09T05:48:30Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188558",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check version plans",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run the lane's tasks",
+          "conclusion": "cancelled"
+        },
+        {
+          "name": "Summarize failed affected tests",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check the affected GeoSpec consumer",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check workspace root hygiene",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999188654,
+      "name": "Standalone projects / Standalone projects (pypi)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:40:05Z",
+      "completed_at": "2026-11-09T05:42:42Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999188654",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install uv",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install OpenSCAD",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Report Zoo KCL quarantine",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Setup Linux sandbox prerequisites",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check every template outside Tau",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check package-lock.json parity with npm ci",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Setup Nx Environment",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 128999189849,
+      "name": "Runtime observability overhead gates",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:35:19Z",
+      "completed_at": "2026-11-09T05:35:19Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999189849",
+      "steps": []
+    },
+    {
+      "id": 128999190083,
+      "name": "Runtime performance gates",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:35:19Z",
+      "completed_at": "2026-11-09T05:35:19Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999190083",
+      "steps": []
+    },
+    {
+      "id": 128999190207,
+      "name": "API Docker smoke test",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:35:19Z",
+      "completed_at": "2026-11-09T05:35:19Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999190207",
+      "steps": []
+    },
+    {
+      "id": 128999190232,
+      "name": "Bundle size report",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-09T05:35:19Z",
+      "started_at": "2026-11-09T05:35:19Z",
+      "completed_at": "2026-11-09T05:35:19Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/128999190232",
+      "steps": []
+    },
+    {
+      "id": 129003043465,
+      "name": "Run affected tasks",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-09T05:48:35Z",
+      "started_at": "2026-11-09T05:48:35Z",
+      "completed_at": "2026-11-09T05:48:35Z",
+      "html_url": "https://github.com/taucad/tau/actions/runs/42567843419/job/129003043465",
+      "steps": []
+    }
+  ]
+}

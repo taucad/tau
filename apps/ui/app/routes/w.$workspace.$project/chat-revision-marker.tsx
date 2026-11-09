@@ -1,4 +1,4 @@
-import { ChatRevisionSummary } from '#routes/w.$workspace.$project/chat-revision-summary.js';
+import { ChatRevisionSummary } from '@taucad/project-workspace/components/chat-revision-summary';
 import { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { RotateCw } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
@@ -13,7 +13,7 @@ import {
   turnRevisionLabel,
 } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
-import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';

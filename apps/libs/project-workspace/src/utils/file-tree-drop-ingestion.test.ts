@@ -4,14 +4,14 @@ import {
   collectDropDirectoryPaths,
   ingestFileTreeDataTransfer,
   normalizeDroppedRelativePath,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '#utils/file-tree-drop-ingestion.js';
 import type {
   DropFileSystemDirectoryEntry,
   DropFileSystemEntry,
   DropFileSystemFileEntry,
   FileTreeDataTransferItem,
   FileTreeDataTransferItemList,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '#utils/file-tree-drop-ingestion.js';
 
 function createItemList(items: readonly FileTreeDataTransferItem[]): FileTreeDataTransferItemList {
   return {

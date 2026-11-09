@@ -158,7 +158,7 @@ vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
   }) => <div data-testid='turn-revision' data-user-message-id={userMessageId} data-latest={String(isLatestTurn)} />,
 }));
 
-vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
+vi.mock('@taucad/project-workspace/components/scroll-down-button', () => ({
   ScrollDownButton: () => <button type='button' aria-label='Scroll to bottom' />,
 }));
 
@@ -180,7 +180,7 @@ vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
   ),
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
+vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
   ChatHistoryEmpty: () => null,
 }));
 

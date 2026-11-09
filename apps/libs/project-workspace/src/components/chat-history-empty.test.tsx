@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
+import { ChatHistoryEmpty } from '#components/chat-history-empty.js';
 
 describe('ChatHistoryEmpty', () => {
   it('renders one concise CAD invitation without the old tips panel', () => {

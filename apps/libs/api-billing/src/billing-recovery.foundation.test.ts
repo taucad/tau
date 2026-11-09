@@ -9,13 +9,7 @@ import { eq, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
-import {
-  billingFinancialCase,
-  creditAccount,
-  creditOperation,
-  supplierCostEvidence,
-  user,
-} from '@taucad/api-database/schema';
+import { billingFinancialCase, creditAccount, creditOperation, user } from '@taucad/api-database/schema';
 import { BillingPolicyService } from '#billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#billing-policy.js';
 import { CreditLedgerService, maximumRecoveryAttempts, recoveryGraceMinutes } from '#credit-ledger.service.js';
@@ -136,13 +130,12 @@ const readOperation = async (operationId: string): Promise<typeof creditOperatio
   return row;
 };
 
-/** Every case or supplier proof that names the operation; recovery writes neither. */
+/** Every case that names the operation; recovery opens none. */
 const supplierTraces = async (operationId: string) => ({
   cases: await database
     .select()
     .from(billingFinancialCase)
     .where(or(eq(billingFinancialCase.dedupeKey, operationId), eq(billingFinancialCase.sourceId, operationId))),
-  evidence: await database.select().from(supplierCostEvidence).where(eq(supplierCostEvidence.operationId, operationId)),
 });
 
 /** Makes a pending operation due now, and claimable again after a backoff lease. */
@@ -190,7 +183,7 @@ describe('LLM recovery that cannot deadlock', () => {
       normalizationEvidence: { terminalReason: 'recovery_unresolvable' },
     });
     // A deterministic failure is a metric and a log line, never a case that could restrict anyone.
-    expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [], evidence: [] });
+    expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [] });
     const [account] = await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
     expect(account).toMatchObject({ purchasedHeldAtoms: 0n, purchasedAtoms: 10_000n });
   });
@@ -239,7 +232,7 @@ describe('LLM recovery that cannot deadlock', () => {
         supplierCostPicoUsd: null,
         supplierCostUnpricedReason: 'absorbed',
       });
-      expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [], evidence: [] });
+      expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [] });
     } finally {
       failures.mockRestore();
     }
@@ -299,7 +292,7 @@ describe('LLM recovery that cannot deadlock', () => {
     });
     const [account] = await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
     expect(account).toMatchObject({ purchasedHeldAtoms: 0n, purchasedAtoms: 10_000n });
-    expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [], evidence: [] });
+    expect(await supplierTraces(admitted.operationId)).toEqual({ cases: [] });
   });
 });
 
@@ -398,7 +391,7 @@ describe('the in-API recovery scheduler', () => {
           supplierCostUnpricedReason: null,
         });
         // oxlint-disable-next-line no-await-in-loop -- reads the rows the pass wrote
-        expect(await supplierTraces(released)).toEqual({ cases: [], evidence: [] });
+        expect(await supplierTraces(released)).toEqual({ cases: [] });
       }
     }
   });

@@ -146,7 +146,8 @@ const proxy = async (): Promise<{
     key: parseSigningKey(developmentSigningKeyJson('grant'), 'grant'),
     metrics,
     router: new StorageRouter({ urls: [url] }),
-    startWaitMilliseconds: 200,
+    /* No member here hangs, so a stopped one is refused at once; a short wait would only spill a loaded runner's slow probe. */
+    startWaitMilliseconds: 5000,
   });
   forwarders.push(forwarder);
   return { fleet, forwarder, spills, probes };

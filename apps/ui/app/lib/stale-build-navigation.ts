@@ -4,8 +4,9 @@
  * A tab keeps running the build it loaded. Once a deploy replaces that build and its
  * chunks age out of the retained assets (`scripts/retain-previous-assets.mts`), the next
  * client navigation imports a route module the server no longer serves. React Router's own
- * guard (a `/__manifest` version mismatch turns the navigation into a document load) only
- * covers routes not yet discovered, and every linked route is discovered when its link renders.
+ * guard (a `/__manifest` version mismatch turns the navigation into a document load) never
+ * runs here: route discovery is eager (`routeDiscovery: { mode: 'initial' }` in
+ * `react-router.config.ts`), so every route is known on boot and no navigation asks `/__manifest`.
  *
  * So the tab asks the server which build is live before it matters (the SvelteKit
  * `version.pollInterval` pattern), through `build-skew`, the one owner of that answer:

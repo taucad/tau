@@ -9,6 +9,7 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
 import { axesHelperColors } from '#graphics/three/overlay-colors.constants.js';
 import { gizmoBaseDistance } from '#graphics/three/utils/math.utils.js';
+import { timeViewerCanvas2d } from '#lib/viewer-load-timing.js';
 
 export type ViewportGizmoCubeAxesProps = {
   readonly axesSize?: number;
@@ -109,23 +110,26 @@ export const createViewportGizmoCubeAxes = ({
     const endPoint = line.points[1]!;
 
     // Create a canvas for the text
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    const textCanvasSize = 128;
-    canvas.width = textCanvasSize;
-    canvas.height = textCanvasSize;
+    const canvas = timeViewerCanvas2d('gizmo.axis-label', () => {
+      const labelCanvas = document.createElement('canvas');
+      const context = labelCanvas.getContext('2d');
+      const textCanvasSize = 128;
+      labelCanvas.width = textCanvasSize;
+      labelCanvas.height = textCanvasSize;
 
-    if (context) {
-      // Set the entire canvas to transparent
-      context.clearRect(0, 0, canvas.width, canvas.height);
+      if (context) {
+        // Set the entire canvas to transparent
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
 
-      // Draw the text with smaller font size
-      context.fillStyle = line.labelColor;
-      context.font = `500 88px ${fontFamily}`;
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-      context.fillText(line.label, textCanvasSize / 2, textCanvasSize / 2);
-    }
+        // Draw the text with smaller font size
+        context.fillStyle = line.labelColor;
+        context.font = `500 88px ${fontFamily}`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(line.label, textCanvasSize / 2, textCanvasSize / 2);
+      }
+      return labelCanvas;
+    });
 
     // Create texture from canvas
     const texture = new THREE.CanvasTexture(canvas);

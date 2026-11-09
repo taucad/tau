@@ -6,7 +6,9 @@
  * constraints both read. `api:<name>` names each private API server library
  * (`apps/libs/api-<name>`, `scope:api type:app-lib`); `eslint.config.mjs` gives
  * each one the libraries it may depend on, so the dependency direction between
- * them is enforced even where their `layer:` tags are equal.
+ * them is enforced even where their `layer:` tags are equal. `shell:<role>`
+ * names the private libraries the shell split extracts (`sandbox`, `service`,
+ * `terminal`), so their dependency direction can be constrained the same way.
  *
  * @public
  */
@@ -18,4 +20,5 @@ export const projectTagVocabulary = {
   deploy: ['staging'],
   layer: ['feature', 'ui', 'data-access', 'util'],
   api: ['core', 'observability', 'lifecycle', 'database', 'redis', 'email', 'auth', 'hosts', 'llm-gateway', 'billing'],
+  shell: ['sandbox', 'service', 'terminal'],
 } as const;

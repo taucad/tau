@@ -24,12 +24,27 @@ export type ProjectOpenPhase =
   | 'editor.ready'
   | 'runtime.connect'
   | 'model.preview'
-  | 'model.current';
+  | 'model.current'
+  | 'composer.mount'
+  | 'editor.runtime'
+  | 'editor.mount'
+  | 'viewer.mount'
+  | 'viewer.renderer'
+  | 'viewer.firstFrame'
+  | 'viewer.gizmo'
+  | 'canvas.2d'
+  | 'frame.long';
+
+/**
+ * Who acquired a `canvas.2d` context; the viewer tags its own. An untagged context inside `viewer.gizmo` belongs to
+ * the gizmo package.
+ */
+export type ProjectOpenSource = 'gizmo.face' | 'gizmo.axis-label' | 'gizmo.style' | 'section.label';
 
 /** A compact outcome vocabulary; no exception text reaches User Timing detail. */
 export type ProjectOpenOutcome = 'ok' | 'error' | 'cancelled' | 'unavailable' | 'superseded' | 'missing';
 
-/** Only numeric, aggregate counters are admitted. */
+/** Only numeric, aggregate counters are admitted. `blocking` is a long frame's blocking time, in milliseconds. */
 export type ProjectOpenCounterName =
   | 'backendReads'
   | 'idbTransactions'
@@ -44,7 +59,9 @@ export type ProjectOpenCounterName =
   | 'invalidations'
   | 'bytes'
   | 'projectCount'
-  | 'fileCount';
+  | 'fileCount'
+  | 'blocking'
+  | 'scripts';
 
 export type ProjectOpenCounters = Partial<Record<ProjectOpenCounterName, number>>;
 
@@ -68,9 +85,20 @@ export type ProjectOpenSpan = Readonly<{
   finish: (outcome: ProjectOpenOutcome, counters?: ProjectOpenCounters) => void;
 }>;
 
+/** A span another owner already timed, in this realm's `performance.now()` clock. */
+export type ProjectOpenTimedSpan = Readonly<{
+  start: number;
+  end: number;
+  outcome: ProjectOpenOutcome;
+  source?: ProjectOpenSource;
+  counters?: ProjectOpenCounters;
+}>;
+
 /** Internal, inert when no valid local measurement configuration was injected. */
 export type ProjectOpenPerformance = Readonly<{
   begin: (phase: ProjectOpenPhase, parentSpanId?: string) => ProjectOpenSpan;
+  /** Emit a span whose start and end were read by its owner, such as the viewer. */
+  record: (phase: ProjectOpenPhase, span: ProjectOpenTimedSpan) => void;
 }>;
 
 const phaseNames = new Set<ProjectOpenPhase>([
@@ -97,6 +125,21 @@ const phaseNames = new Set<ProjectOpenPhase>([
   'runtime.connect',
   'model.preview',
   'model.current',
+  'composer.mount',
+  'editor.runtime',
+  'editor.mount',
+  'viewer.mount',
+  'viewer.renderer',
+  'viewer.firstFrame',
+  'viewer.gizmo',
+  'canvas.2d',
+  'frame.long',
+]);
+const sources: ReadonlySet<string> = new Set<ProjectOpenSource>([
+  'gizmo.face',
+  'gizmo.axis-label',
+  'gizmo.style',
+  'section.label',
 ]);
 const outcomes: ReadonlySet<string> = new Set<ProjectOpenOutcome>([
   'ok',
@@ -122,6 +165,8 @@ const counterNames = new Set<string>([
   'bytes',
   'projectCount',
   'fileCount',
+  'blocking',
+  'scripts',
 ]);
 
 const uuidPattern = /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/iu;
@@ -129,7 +174,7 @@ const fixturePattern = /^(?:none|root-(?:10|1000|10000)|library-(?:1|20|64|500))
 const routeTemplates = new Set(['/', '/w/:workspace/:project', '/projects', '/projects/new']);
 const localConfigSlot = '__TAU_LOCAL_PROJECT_OPEN_PERFORMANCE__';
 const noopSpan: ProjectOpenSpan = { spanId: '', finish: () => undefined };
-const disabled: ProjectOpenPerformance = { begin: () => noopSpan };
+const disabled: ProjectOpenPerformance = { begin: () => noopSpan, record: () => undefined };
 
 const sanitizedCounters = (counters: ProjectOpenCounters | undefined): ProjectOpenCounters => {
   const result: Record<string, number> = {};
@@ -236,6 +281,47 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
   if (admitted === undefined) {
     return disabled;
   }
+  const emit = (
+    phase: ProjectOpenPhase,
+    identity: Readonly<{ spanId: string; parentSpanId: string | undefined }>,
+    span: ProjectOpenTimedSpan,
+  ): void => {
+    const { spanId, parentSpanId } = identity;
+    try {
+      if (!outcomes.has(span.outcome) || !Number.isFinite(span.start) || !Number.isFinite(span.end)) {
+        return;
+      }
+      const { start } = span;
+      const end = Math.max(start, span.end);
+      performance.measure(`tau.load.${phase}`, {
+        start,
+        end,
+        detail: {
+          schemaVersion: 1,
+          runId: admitted.runId,
+          journeyId: admitted.journeyId,
+          spanId,
+          parentSpanId: parentSpanId ?? null,
+          phase,
+          buildId: admitted.buildId,
+          fixtureId: admitted.fixtureId,
+          routeTemplate: admitted.routeTemplate,
+          environment: 'local',
+          profile: admitted.profile,
+          cacheCohort: admitted.cacheCohort,
+          realm: admitted.realm,
+          timeOrigin: performance.timeOrigin,
+          start,
+          duration: end - start,
+          outcome: span.outcome,
+          source: span.source !== undefined && sources.has(span.source) ? span.source : null,
+          counters: sanitizedCounters(span.counters),
+        },
+      });
+    } catch {
+      // Diagnostic measurement must never affect an owning operation.
+    }
+  };
   return {
     begin: (phase, parentSpanId) => {
       if (!phaseNames.has(phase) || (parentSpanId !== undefined && !uuidPattern.test(parentSpanId))) {
@@ -257,41 +343,27 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
             return;
           }
           finished = true;
+          let end: number;
           try {
-            if (!outcomes.has(outcome)) {
-              return;
-            }
-            const end = performance.now();
-            const duration = Math.max(0, end - start);
-            performance.measure(`tau.load.${phase}`, {
-              start,
-              end,
-              detail: {
-                schemaVersion: 1,
-                runId: admitted.runId,
-                journeyId: admitted.journeyId,
-                spanId,
-                parentSpanId: parentSpanId ?? null,
-                phase,
-                buildId: admitted.buildId,
-                fixtureId: admitted.fixtureId,
-                routeTemplate: admitted.routeTemplate,
-                environment: 'local',
-                profile: admitted.profile,
-                cacheCohort: admitted.cacheCohort,
-                realm: admitted.realm,
-                timeOrigin: performance.timeOrigin,
-                start,
-                duration,
-                outcome,
-                counters: sanitizedCounters(counters),
-              },
-            });
+            end = performance.now();
           } catch {
-            // Diagnostic measurement must never affect an owning operation.
+            return;
           }
+          emit(phase, { spanId, parentSpanId }, { start, end, outcome, counters });
         },
       };
+    },
+    record: (phase, span) => {
+      if (!phaseNames.has(phase)) {
+        return;
+      }
+      let spanId: string;
+      try {
+        spanId = randomUuid();
+      } catch {
+        return;
+      }
+      emit(phase, { spanId, parentSpanId: undefined }, span);
     },
   };
 };
@@ -310,4 +382,22 @@ export const readLocalProjectOpenPerformance = (): ProjectOpenPerformance | unde
   } catch {
     return undefined;
   }
+};
+
+let pageRecorder: ProjectOpenPerformance | undefined;
+
+/**
+ * This page's recorder: the admitted harness injection, read once, or the inert recorder. Owners that are not handed
+ * a recorder, such as the composer and the code editor, time themselves through this.
+ *
+ * @returns The page's recorder; inert unless a valid local injection was present when first read.
+ */
+export const pageProjectOpenPerformance = (): ProjectOpenPerformance => {
+  pageRecorder ??= readLocalProjectOpenPerformance() ?? disabled;
+  return pageRecorder;
+};
+
+/** Test seam: read the injection slot again on the next {@link pageProjectOpenPerformance}. */
+export const resetPageProjectOpenPerformance = (): void => {
+  pageRecorder = undefined;
 };

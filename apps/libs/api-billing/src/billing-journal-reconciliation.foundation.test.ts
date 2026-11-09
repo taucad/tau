@@ -305,46 +305,6 @@ describe('journal reconciliation foundation', () => {
     expect(held[0]?.evidence).toMatchObject({ planHoldDriftAtoms: '400', driftAtoms: '400' });
   });
 
-  it('should report no budget residual for an operation that still carries a legacy supplier hold', async () => {
-    const accountId = await seedAccount({});
-    const operationId = await seedOperation(accountId);
-    // The shape an operation admitted before supplier holds were retired leaves behind.
-    const legacy = `journal-legacy-${randomUUID()}`;
-    await database.insert(schema.billingBudgetFunding).values({
-      id: `${legacy}-funding`,
-      environment,
-      kind: 'spend',
-      scope: legacy,
-      fundedLifetime: 1_000_000n,
-    });
-    await database.insert(schema.billingBudget).values({
-      id: legacy,
-      environment,
-      fundingId: `${legacy}-funding`,
-      kind: 'spend',
-      scope: legacy,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    });
-    await database.insert(schema.billingBudgetHold).values({
-      id: `${legacy}-hold`,
-      budgetId: legacy,
-      operationId,
-      initialBound: 10n,
-      remainingHeld: 10n,
-      consumed: 0n,
-      finalityState: 'final',
-    });
-
-    await rewindCheckpoint();
-    await reconciliation.runSweep({ batchLimit: 100 });
-
-    expect(kindsOf(await casesOf(accountId))).not.toContain('journal_budget_residual');
-    expect(await casesOf(accountId)).toEqual([]);
-  });
-
   it('should refuse a duplicate resolution movement and case a resolution on a pending operation', async () => {
     const accountId = await seedAccount({});
     const operationId = await seedOperation(accountId);

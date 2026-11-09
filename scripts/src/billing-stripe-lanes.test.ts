@@ -18,6 +18,10 @@ const job = (path: string, name: string): Job => {
   return workflow.jobs[name] ?? {};
 };
 
+/** A pull of `postgres:17-alpine` by digest, then the local tag the billing launcher runs (`pull_policy: never`). */
+const pinnedPostgresPull =
+  /^docker pull postgres:17-alpine@(sha256:[0-9a-f]{64})\ndocker tag postgres@\1 postgres:17-alpine\n?$/u;
+
 const lanes = [
   ['.github/workflows/ci.yml', 'billing-e2e'],
   ['.github/workflows/billing-nightly.yml', 'billing-nightly'],
@@ -31,7 +35,44 @@ describe('credential-free billing CI', () => {
     expect(execution?.if).toBeUndefined();
     expect(lane.env).toBeUndefined();
     expect(lane.steps?.some((step) => step.id === 'gate')).toBe(false);
-    expect(lane.steps?.some((step) => step.run === 'docker pull postgres:17-alpine')).toBe(true);
+    expect(lane.steps?.some((step) => pinnedPostgresPull.test(step.run ?? ''))).toBe(true);
+  });
+
+  it('should run every billing PostgreSQL pull on one pinned digest, under the tag the launcher runs', () => {
+    const pulls = [...lanes, ['.github/workflows/ci.yml', 'api'] as const].flatMap(([path, name]) =>
+      (job(path, name).steps ?? [])
+        .map((step) => step.run ?? '')
+        .filter((run) => run.includes('postgres:17-alpine'))
+        .map((run) => ({ lane: `${path}#${name}`, digest: pinnedPostgresPull.exec(run)?.[1] })),
+    );
+
+    expect(pulls.map(({ lane }) => lane)).toEqual([
+      '.github/workflows/ci.yml#billing-e2e',
+      '.github/workflows/billing-nightly.yml#billing-nightly',
+      '.github/workflows/ci.yml#api',
+    ]);
+    expect(pulls.filter(({ digest }) => digest === undefined)).toEqual([]);
+    expect(new Set(pulls.map(({ digest }) => digest)).size).toBe(1);
+    // The launcher never pulls: it runs the image the workflow tagged.
+    const launcher = read('apps/libs/api-billing/scripts/test-billing-foundation.mts');
+    expect(launcher).toContain("image: 'postgres:17-alpine'");
+    expect(launcher).toContain("pull_policy: 'never'");
+  });
+
+  it('should run every target billing-nightly runs in a planned ci.yml lane', () => {
+    const targets = (path: string, name: string): readonly string[] =>
+      (job(path, name).steps ?? []).flatMap(
+        ({ run }) => /^pnpm nx run-many -t (test:billing-[\w-]+)$/u.exec(run ?? '')?.slice(1) ?? [],
+      );
+
+    const nightly = targets('.github/workflows/billing-nightly.yml', 'billing-nightly');
+    expect(nightly).toEqual(['test:billing-foundation', 'test:billing-composition']);
+    expect(targets('.github/workflows/ci.yml', 'billing-e2e')).toContain('test:billing-foundation');
+    expect(targets('.github/workflows/ci.yml', 'api')).toContain('test:billing-composition');
+    // Assembled so the source holds no template-like string literal.
+    expect(job('.github/workflows/ci.yml', 'api').if).toBe(
+      ['$', "{{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}"].join(''),
+    );
   });
 
   it('should select billing contracts by the billing plan output and gate staging on completed billing tests', () => {

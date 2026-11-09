@@ -3,8 +3,9 @@
 # real `.py` and `.cs` model to geometry, with no egress from the workers; Build123d's closure
 # sealed from the digest-keyed seed and PicoGK's pinned closure each equal their golden receipt,
 # and the kernels' native suites run on them. The projects with a `test:native-darwin` target
-# select it through Nx, never a path filter: on every pull request that affects one, and on
-# every push to `main`. A consumer row (charter W22, tier 8) joins by declaring the target.
+# select it through Nx, never a path filter: on every pull request that affects one, on every push
+# to `main` that affects one since the last successful push run of this workflow, and on every
+# dispatch. A consumer row (charter W22, tier 8) joins by declaring the target.
 #
 # The same job then runs the nuget row of the standalone-project oracles (charter W23, D34, I14;
 # go-live row PRJ-1), whose other rows run in `ci.yml`: the PicoGK project Tau creates restores and
@@ -76,17 +77,63 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
-      # Every project with the target on a push to `main` or a dispatch, the affected ones on a
-      # pull request, none on the nightly (it runs only the gates). `pipefail` so a failing
-      # `nx show projects` fails the step; `tail -1` drops Nx's log lines.
+      # The base of a push to `main`: the newest successful push run of this workflow on `main` whose
+      # commit is an ancestor of this one. A failed run, or one a newer push replaced while it waited
+      # for a runner, never becomes the base, so its landings stay in the next push's range. Empty
+      # when none is found or the API is unreachable, and the plan then selects every project.
+      - name: Find the last successful push run of this workflow
+        id: push-base
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: native-darwin.yml
+        run: |
+          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs?branch=main&event=push&status=success&per_page=30" \
+            --jq '.workflow_runs[].head_sha') || shas=''
+          base=''
+          for sha in $shas; do
+            if [ "$sha" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$sha" "$GITHUB_SHA" 2> /dev/null; then
+              base=$sha
+              break
+            fi
+          done
+          echo "Last successful push run of $WORKFLOW on main: ${base:-none}"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+
+      # On a push to `main`, the projects with the target affected since that base, and every one
+      # when there is none or the push changes a path of FULL_ROW_PATHS: this workflow, and the
+      # sources outside the native closure that the nuget standalone oracle (PRJ-1, the job's last
+      # steps) reads. Every project on a dispatch; the affected ones on a pull request; none on the
+      # nightly (it runs only the gates). `pipefail` so a failing `nx show projects` fails the step;
+      # `tail -1` drops Nx's log lines.
       - name: Select the projects with a test:native-darwin target
         id: plan
         env:
           BENCHMARKS: ${{ github.event_name == 'schedule' || inputs.benchmarks == true }}
+          PUSH_BASE: ${{ steps.push-base.outputs.sha }}
+          FULL_ROW_PATHS: >-
+            .github/workflows/native-darwin.yml
+            scripts/src/check-standalone-project.ts
+            scripts/src/standalone-geometry.ts
+            apps/ui/app/constants/project.constants.ts
+            apps/ui/app/utils/kernel-libraries.ts
+            libs/tau-examples/src/standalone/picogk
         run: |
           set -o pipefail
+          read -ra full_row_paths <<< "$FULL_ROW_PATHS"
           case "$GITHUB_EVENT_NAME" in
-            push | workflow_dispatch) projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1) ;;
+            push)
+              if [ -z "$PUSH_BASE" ]; then
+                echo '::notice title=native-darwin plan::No earlier successful push run on main; every row runs.'
+                projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1)
+              elif ! git diff --quiet "$PUSH_BASE" "$GITHUB_SHA" -- "${full_row_paths[@]}"; then
+                echo '::notice title=native-darwin plan::The push changes this workflow or the nuget oracle; every row runs.'
+                projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1)
+              else
+                projects=$(pnpm nx show projects --affected --base="$PUSH_BASE" --head="$GITHUB_SHA" --with-target test:native-darwin --json | tail -1)
+              fi
+              ;;
+            workflow_dispatch) projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1) ;;
             pull_request) projects=$(pnpm nx show projects --affected --with-target test:native-darwin --json | tail -1) ;;
             *) projects='[]' ;;
           esac

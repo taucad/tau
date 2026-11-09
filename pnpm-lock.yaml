@@ -5155,9 +5155,6 @@ importers:
         specifier: 'catalog:'
         version: 5.15.2
     devDependencies:
-      '@taucad/host':
-        specifier: workspace:*
-        version: link:../../host
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime

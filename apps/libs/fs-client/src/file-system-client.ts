@@ -10,6 +10,7 @@ import type {
   WorkspaceScope,
   ProjectRootConfiguration,
   ProjectDiscoveryResult,
+  ProjectRouteVerification,
   ResolvedProjectManifest,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
@@ -78,6 +79,7 @@ export type WorkspaceAuthorityClient = Pick<
   | 'unmount'
   | 'configureProjectRoots'
   | 'listProjectManifests'
+  | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -202,6 +204,8 @@ export type FileSystemClient = {
   configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void>;
   /** Discover content-addressed projects by scanning configured physical roots. */
   listProjectManifests(): Promise<ProjectDiscoveryResult>;
+  /** Verify the exact installed binding without discovery or repair. */
+  verifyProjectRoute(input: { projectId: string }): Promise<ProjectRouteVerification>;
   /** Commit one durable journal snapshot as an identity-safe manifest-last project directory. */
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,

@@ -303,6 +303,8 @@ const config: KnipConfig = {
         'app/lib/browser-stubs/resvg-js.ts',
         // The deletion component browser suite selects this nested config with --config.
         'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
+        // The project-open browser suite selects this nested config with --config.
+        'app/machines/project-open.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,
@@ -374,14 +376,13 @@ const config: KnipConfig = {
       entry: ['src/backend/node/*.fixture.ts'],
     },
     'packages/host': {
-      // `runtime-child-render.integration.test.ts` spawns it by path.
-      entry: ['src/fixtures/render-child-probe.ts'],
+      // `runtime-child-render.integration.test.ts` spawns it by path; the `qualify-x1c` target runs the script
+      // from the workspace root.
+      entry: ['src/fixtures/render-child-probe.ts', 'scripts/qualify-x1c.mts'],
       // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
       ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
-      // The `qualify-x1c` target runs it from the workspace root.
-      entry: ['scripts/qualify-x1c.mts'],
       // Replicad model sources that `render-plates` exports through the Tau CLI.
       ignore: ['models/**'],
     },

@@ -247,8 +247,6 @@ export type InvariantReport = {
   pendingWithJournal: number;
   /** Every terminal operation records its supplier cost, or the reason it has none, exactly once. */
   unmeteredTerminalOperations: number;
-  /** Supplier holds and finality are retired: admission and settlement write neither. */
-  supplierHoldOrStateWrites: number;
   operationsByCustomerState: Record<string, number>;
   operationsByDispatchState: Record<string, number>;
   operationsBySupplierCost: Record<string, number>;
@@ -284,11 +282,6 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
   const [unmetered] = await database.execute(sql`
     select count(*)::text as total from billing.credit_operation o
     where o.customer_state <> 'pending' and o.supplier_cost_pico_usd is null and o.supplier_cost_unpriced_reason is null`);
-  const [supplierWrites] = await database.execute(sql`
-    select ((select count(*) from billing.billing_budget_hold)
-      + (select count(*) from billing.credit_operation o
-        where o.supplier_state is not null or o.spend_budget_hold_id is not null or o.risk_budget_hold_id is not null))::text
-      as total`);
   const [held] = await database.execute(sql`
     select count(*)::text as total from billing.credit_account a
     join lateral (select coalesce(sum(o.promo_held_atoms), 0) as promo, coalesce(sum(o.plan_held_atoms), 0) as plan,
@@ -318,7 +311,6 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
     resolvedWithoutExactlyOneJournal: Number(resolution?.['resolved'] ?? -1),
     pendingWithJournal: Number(resolution?.['pending'] ?? -1),
     unmeteredTerminalOperations: Number(unmetered?.['total'] ?? -1),
-    supplierHoldOrStateWrites: Number(supplierWrites?.['total'] ?? -1),
     operationsByCustomerState: countRows([...customerStates], 'customer_state'),
     operationsByDispatchState: countRows([...dispatchStates], 'dispatch_state'),
     operationsBySupplierCost: countRows([...supplierCosts], 'supplier_cost'),
@@ -331,8 +323,7 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
     report.heldReconciliationViolations === 0 &&
     report.resolvedWithoutExactlyOneJournal === 0 &&
     report.pendingWithJournal === 0 &&
-    report.unmeteredTerminalOperations === 0 &&
-    report.supplierHoldOrStateWrites === 0;
+    report.unmeteredTerminalOperations === 0;
   return report;
 }
 

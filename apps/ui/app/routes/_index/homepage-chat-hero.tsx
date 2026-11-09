@@ -3,6 +3,7 @@ import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { HomeChatComposer } from '#routes/_index/home-chat-composer.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { buttonVariants } from '@taucad/ui/components/button';
+import { Heading } from '@taucad/ui/components/heading';
 import { Loader } from '@taucad/ui/components/loader';
 
 /**
@@ -16,9 +17,9 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
     <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
       <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
         <div className='mb-12 text-center'>
-          <h1 className='mx-auto max-w-[16ch] text-3xl font-medium tracking-tight text-balance md:max-w-[20ch] md:text-5xl'>
+          <Heading level={1} variant='display' className='mx-auto max-w-[16ch] text-balance md:max-w-[20ch]'>
             What do you want to build?
-          </h1>
+          </Heading>
         </div>
 
         <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>

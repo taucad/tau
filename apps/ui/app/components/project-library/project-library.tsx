@@ -70,7 +70,7 @@ import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hoo
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
-import { PageHeader, usePhoneTopBar } from '#components/layout/page-header.js';
+import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -541,13 +541,12 @@ export function ProjectLibrary({
 
   return (
     <PageContent className='flex flex-col gap-4 pb-4'>
-      <PageHeader
-        title='Projects'
-        headingLevel={headingLevel}
-        className='mb-0'
-        // Only the page that owns `/projects` defers to the phone top bar; an embedded library keeps it.
-        action={headingLevel === 1 ? <NewProjectLink isDeferredToPhoneBar /> : undefined}
-      />
+      {/* Only the page that owns `/projects` titles the page and defers to the phone top bar; an embedded library is a section. */}
+      {headingLevel === 1 ? (
+        <PageHeader title='Projects' className='mb-0' action={<NewProjectLink isDeferredToPhoneBar />} />
+      ) : (
+        <SectionHeader level={headingLevel} title='Projects' className='mb-0' />
+      )}
 
       {workspaceBindingRepairs.length > 0 && (
         <div role='group' className='mb-6 space-y-2' aria-label='Workspace link repair'>

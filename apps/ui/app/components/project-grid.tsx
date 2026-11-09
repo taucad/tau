@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '@taucad/ui/components/loader';
@@ -70,7 +71,6 @@ function CommunityProjectCard({
   isPreviewVisible,
   onPreviewLocatorChange,
 }: CommunityProjectCardProperties): React.JSX.Element {
-  const Title = titleLevel === 2 ? 'h2' : 'h3';
   const { id, name, description, thumbnail, featuredThumbnail, kernel, tags, assets, locator } = project;
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
@@ -135,11 +135,13 @@ function CommunityProjectCard({
       >
         <div className='min-w-0 sm:self-start'>
           <div className='flex items-center gap-2'>
-            <Title
-              className={cn('line-clamp-2 font-semibold', isFeatured ? 'text-xl leading-7' : 'text-base leading-6')}
+            <Heading
+              level={titleLevel}
+              variant={isFeatured ? 'title' : 'item'}
+              className={cn('line-clamp-2', isFeatured && 'text-xl')}
             >
               {name}
-            </Title>
+            </Heading>
             {isFeatured ? <Badge variant='secondary'>Featured</Badge> : null}
           </div>
           {isFeatured ? (

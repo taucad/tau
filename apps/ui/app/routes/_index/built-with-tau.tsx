@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { PageHeader } from '#components/layout/page-header.js';
+import { SectionHeader } from '#components/layout/page-header.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { galleryProjects } from '#constants/project-examples.js';
 
@@ -13,8 +13,8 @@ import { galleryProjects } from '#constants/project-examples.js';
 export function BuiltWithTau(): React.JSX.Element {
   return (
     <section>
-      <PageHeader
-        headingLevel={2}
+      <SectionHeader
+        level={2}
         title='Built with Tau'
         className='mb-4'
         action={

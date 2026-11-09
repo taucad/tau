@@ -12,6 +12,7 @@ import {
   attachmentImageLimit,
   fitAttachmentBudget,
   omitAttachments,
+  planAttachmentEvictions,
   planAttachmentOmissions,
   rewriteDocuments,
 } from '#transport/document-payload.js';
@@ -411,6 +412,33 @@ describe('fitAttachmentBudget image count ceiling (I1)', () => {
       tools: [],
     };
     expect(fitAttachmentBudget(context, documents, { imageLimit: 10 }).omitted).toBe(0);
+  });
+});
+
+describe('planAttachmentEvictions: each bound evicts by its own rule', () => {
+  const document = (size: number) => ({ size, image: false });
+  const image = { size: 0, image: true };
+
+  it('should evict down to the byte floor alone when only the bytes overflow, leaving the images under their limit', () => {
+    /* 1,100 characters against 1,000: the first document alone brings the total to the floor of 700. */
+    const measures = [document(600), ...Array.from({ length: 90 }, () => image), document(500)];
+    expect([...planAttachmentEvictions(measures, { budget: 1000, imageLimit: 100 })]).toEqual([0]);
+  });
+
+  it('should evict only the oldest images when only the images overflow, whatever bytes a document weighs', () => {
+    /* 101 images against 100 while the bytes sit between the floor and the budget: the document stays. */
+    const measures = [document(75), ...Array.from({ length: 101 }, () => image)];
+    const evicted = [...planAttachmentEvictions(measures, { budget: 100, imageLimit: 100 })];
+    expect(evicted).not.toContain(0);
+    /* Down to the image floor of 70: the oldest 31 images. */
+    expect(evicted).toEqual(Array.from({ length: 31 }, (_, index) => index + 1));
+  });
+
+  it('should apply both rules when one attachment overflows both bounds', () => {
+    const measures = [...Array.from({ length: 10 }, () => ({ size: 10, image: true })), { size: 100, image: true }];
+    const evicted = [...planAttachmentEvictions(measures, { budget: 100, imageLimit: 10 })];
+    /* Bytes: 200 down to a floor of 70 takes the ten oldest; images were then under their floor of 7 as well. */
+    expect(evicted).toEqual(Array.from({ length: 10 }, (_, index) => index));
   });
 });
 

@@ -86,8 +86,8 @@ export type AttachmentMeasure = Readonly<{ size: number; image: boolean }>;
  * Attachments are admitted oldest first. The first time the admitted total overflows the byte budget, or the admitted
  * images outnumber the image limit, the oldest admitted attachments are evicted until no more than
  * {@link attachmentBudgetFloor} of the budget, and of the limit, remains, so between two overflows no attachment
- * changes. Over the image limit alone, only images are evicted. The newest attachment is kept unless it alone exceeds
- * the byte budget.
+ * changes. Each bound evicts by its own rule to its own floor: over the bytes, the oldest attachments of any kind;
+ * over the images, the oldest images alone. The newest attachment is kept unless it alone exceeds the byte budget.
  *
  * @internal
  * @param measures - The attachments, oldest first.
@@ -115,18 +115,22 @@ export const planAttachmentEvictions = (
     admitted.push(index);
     held.total += measure.size;
     held.images += measure.image ? 1 : 0;
-    if (held.total <= budget && held.images <= imageLimit) {
-      continue;
-    }
-    while ((held.total > floor.total || held.images > floor.images) && admitted.length > 1) {
-      /* Over the bytes, the oldest of any kind goes; over the images alone, the oldest image: a document is not
-       * evicted to make room for captures. */
-      const position =
-        held.total > floor.total ? 0 : admitted.findIndex((admittedIndex) => measures[admittedIndex]!.image);
-      if (position === -1 || position === admitted.length - 1) {
-        break;
+    /* Each bound evicts by its own rule, to its own floor. Over the bytes, the oldest of any kind goes; over the
+     * images, the oldest image: a document is not evicted to make room for captures, and an overflow of one bound
+     * never evicts down to the other's floor. */
+    if (held.total > budget) {
+      while (held.total > floor.total && admitted.length > 1) {
+        evict(0);
       }
-      evict(position);
+    }
+    if (held.images > imageLimit) {
+      while (held.images > floor.images) {
+        const position = admitted.findIndex((admittedIndex) => measures[admittedIndex]!.image);
+        if (position === -1 || position === admitted.length - 1) {
+          break;
+        }
+        evict(position);
+      }
     }
     if (held.total > budget) {
       evict(0);

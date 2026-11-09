@@ -23,6 +23,9 @@ dockerfile = 'Dockerfile'
 # when the content moved, honouring the 30-day notice rule. A commercial-only change is
 # therefore a Terraform apply plus a redeploy of the serving image, with no rebuild.
 release_command = 'node /app/dist/billing-command.js migrate --environment prod-us'
+# A first deploy into a region pulls the image cold (6m09s in sjc, 2026-11-05), past
+# flyctl's default wait, which then aborts the deploy before the migration starts.
+release_command_timeout = '15m'
 # Rolling, not bluegreen (charter W8): with `app` at two or more Machines a rolling
 # deploy replaces them one at a time and the group never reaches zero, and it replaces
 # a single-Machine group in place — so `revisions-maintenance` is never briefly two

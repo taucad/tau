@@ -60,16 +60,16 @@ const requestOf = (deployment: NativeKernelDeployment, kernel: string) => ({
   packageRoot: deployment.packageRoot,
 });
 
-describe('native kernels from the payload store', () => {
+describe('native kernels from the dependency store', () => {
   let configDirectory: string;
 
   beforeEach(async () => {
     configDirectory = await mkdtemp(join(tmpdir(), 'tau-native-kernels-'));
     vi.stubEnv('TAU_CONFIG_DIR', configDirectory);
     vi.stubEnv('TAU_ACQUISITION', '');
-    vi.stubEnv('TAU_PAYLOAD_DIR', '');
-    vi.stubEnv('TAU_PAYLOAD_MIRROR', '');
-    vi.stubEnv('TAU_PAYLOAD_TARGET', '');
+    vi.stubEnv('TAU_DEPENDENCY_DIR', '');
+    vi.stubEnv('TAU_DEPENDENCY_MIRROR', '');
+    vi.stubEnv('TAU_DEPENDENCY_TARGET', '');
   });
 
   afterEach(async () => {
@@ -148,16 +148,19 @@ describe('native kernels from the payload store', () => {
   });
 
   it("should answer a child's closure requests on a cold store with the bytes preparing downloads, downloading nothing", async () => {
-    vi.stubEnv('TAU_PAYLOAD_TARGET', 'linux-x64-glibc');
+    vi.stubEnv('TAU_DEPENDENCY_TARGET', 'linux-x64-glibc');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const variant = parsePluginDeployment(build123dNative.manifest, 'build123d').dependencies['engine']?.find(
       ({ target }) => target.runtime === 'native' && target.os === 'linux' && target.arch === 'x64',
     );
-    const expectedBytes = (variant?.payloads ?? []).reduce((sum, payload) => sum + payload.byteLength, 0);
+    const expectedBytes = (variant?.files ?? []).reduce((sum, dependencyFile) => sum + dependencyFile.byteLength, 0);
     const picogkVariant = parsePluginDeployment(picogkNative.manifest, 'picogk').dependencies['runtime']?.find(
       ({ target }) => target.runtime === 'native' && target.os === 'linux' && target.arch === 'x64',
     );
-    const picogkBytes = (picogkVariant?.payloads ?? []).reduce((sum, payload) => sum + payload.byteLength, 0);
+    const picogkBytes = (picogkVariant?.files ?? []).reduce(
+      (sum, dependencyFile) => sum + dependencyFile.byteLength,
+      0,
+    );
 
     const build123d = await inspectReportedClosure(requestOf(build123dNative, 'build123d'));
     const picogk = await inspectReportedClosure(requestOf(picogkNative, 'picogk'));
@@ -180,7 +183,7 @@ describe('native kernels from the payload store', () => {
   it('should read the store by its real path when it is reached through a link', async () => {
     /* As under macOS's `/tmp` (a link to `/private/tmp`), whose spelling a sandboxed worker cannot start through. */
     const realConfig = join(configDirectory, 'real');
-    await mkdir(join(realConfig, 'payloads'), { recursive: true });
+    await mkdir(join(realConfig, 'dependencies'), { recursive: true });
     const linkedConfig = join(configDirectory, 'linked');
     await symlink(realConfig, linkedConfig);
     vi.stubEnv('TAU_CONFIG_DIR', linkedConfig);
@@ -188,8 +191,8 @@ describe('native kernels from the payload store', () => {
 
     await inspectReportedClosure(requestOf(build123dNative, 'build123d'));
 
-    const realStore = await realpath(join(linkedConfig, 'payloads'));
-    expect(realStore).not.toBe(join(linkedConfig, 'payloads'));
+    const realStore = await realpath(join(linkedConfig, 'dependencies'));
+    expect(realStore).not.toBe(join(linkedConfig, 'dependencies'));
     expect(new Set(opened.stores)).toEqual(new Set([realStore]));
   });
 

@@ -11,7 +11,7 @@
  * has no main entry, or yields an image of the wrong size keeps its current file.
  * Each project renders in its own process, so native kernel memory is reclaimed.
  * Native projects render once `tau prepare <kernel>` has sealed the kernel's
- * closure in this machine's payload store (`TAU_CONFIG_DIR` relocates it).
+ * closure in this machine's dependency store (`TAU_CONFIG_DIR` relocates it).
  */
 
 import { spawnSync } from 'node:child_process';

@@ -6,7 +6,7 @@ import type { DotnetClosure, DotnetClosureOptions, DotnetKernelOptions } from '#
 
 /**
  * Bind a native .NET kernel to its closure in `initialize`: an explicit `options.closure` wins; otherwise the
- * closure resolver a host installed, or the payload store, gives the sealed closure the deployment maps to options.
+ * closure resolver a host installed, or the dependency store, gives the sealed closure the deployment maps to options.
  * @param input - The kernel's deployment and its parsed options.
  * @returns The session options the closure and the host's bounds give.
  * @throws {UnpreparedKernelError} When the closure is not prepared or the host is not a target of the package; the

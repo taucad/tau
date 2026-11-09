@@ -1,4 +1,4 @@
-import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, InstalledFile } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -6,7 +6,7 @@ import { definePythonKernelAdopter } from '#python-kernel-adopter.js';
 import type { PythonClosureOptions } from '#python-closure.js';
 import { pythonKernelModules } from '#python-kernel.js';
 
-const row = (path: string, digit: string): ReceiptFile => ({
+const row = (path: string, digit: string): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digit.repeat(64),

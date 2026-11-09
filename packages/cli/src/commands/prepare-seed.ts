@@ -11,12 +11,12 @@ import { pipeline } from 'node:stream/promises';
 import { computeClosureIntegrity } from '@taucad/runtime/preparation/node';
 import type {
   ClosureReceipt,
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   Integrity,
-  PayloadFormat,
+  DependencyFileFormat,
   PreparationPlugin,
-  ReceiptFile,
+  InstalledFile,
 } from '@taucad/runtime/preparation/node';
 
 /** The bundle index at the root of a seed directory, a `file://` mirror or an `https://` mirror. */
@@ -25,15 +25,15 @@ export const seedIndexName = 'tau-seed.json';
 /** The CycloneDX document a native plugin package ships beside `tau-plugin.json`. */
 export const pluginSbomName = 'tau-plugin.cdx.json';
 
-/** Licence texts a plugin package ships for payloads that carry none of their own: `notices/<payload>/<file>`. */
+/** Licence texts a plugin package ships for dependency files that carry none of their own: `notices/<dependency file>/<file>`. */
 export const pluginNoticesDirectory = 'notices';
 
-/** One payload of a closure in {@link SeedIndex}. */
-export type SeedPayload = {
+/** One dependency file of a closure in {@link SeedIndex}. */
+export type SeedDependencyFile = {
   readonly name: string;
   readonly integrity: Integrity;
   readonly byteLength: number;
-  readonly format: PayloadFormat;
+  readonly format: DependencyFileFormat;
   /** Always the sha256 store key, whatever the pin's algorithm. */
   readonly blob: `blobs/sha256/${string}`;
 };
@@ -48,7 +48,7 @@ export type SeedClosure = {
   readonly closureIntegrity: Integrity;
   /** The receipt's tree identity: a seed preparation must reproduce it (G5). */
   readonly treeIntegrity: Integrity;
-  readonly payloads: readonly SeedPayload[];
+  readonly dependencyFiles: readonly SeedDependencyFile[];
   /** The closure's audit unit in the bundle: `notices/<closure hex>/`. */
   readonly audit: string;
 };
@@ -68,11 +68,11 @@ export type ClosureAudit = {
   readonly closureIntegrity: Integrity;
   /** Every file still matches its receipt row and no other file exists. */
   readonly files: 'intact' | 'stale';
-  /** Payloads the SBOM has no component for, or whose component lacks a purl, a hash or its distribution URL. */
+  /** Dependency files the SBOM has no component for, or whose component lacks a purl, a hash or its distribution URL. */
   readonly sbom: readonly string[];
-  /** Third-party payloads with no licence or notice text in the closure or the plugin package. */
+  /** Third-party dependency files with no licence or notice text in the closure or the plugin package. */
   readonly notices: readonly string[];
-  /** Notice files of the audit unit, closure-relative or `supplemental/<payload>/<file>`. */
+  /** Notice files of the audit unit, closure-relative or `supplemental/<dependency file>/<file>`. */
   readonly noticeFiles: readonly string[];
   readonly ok: boolean;
 };
@@ -204,9 +204,9 @@ export const readPluginSbom = async (plugin: PreparationPlugin): Promise<Sbom | 
 };
 
 /**
- * The supplemental notice files a plugin package ships, by payload name.
- * @param plugin - The plugin; its `directory` may hold `notices/<payload>/<file>`.
- * @returns Payload name to its notice file paths, relative to the package's `notices/`.
+ * The supplemental notice files a plugin package ships, by dependency file name.
+ * @param plugin - The plugin; its `directory` may hold `notices/<dependency file>/<file>`.
+ * @returns Dependency file name to its notice file paths, relative to the package's `notices/`.
  */
 export const readSupplementalNotices = async (
   plugin: PreparationPlugin,
@@ -216,19 +216,19 @@ export const readSupplementalNotices = async (
     return notices;
   }
   const root = join(plugin.directory, pluginNoticesDirectory);
-  let payloads: string[];
+  let dependencyFiles: string[];
   try {
-    payloads = await readdir(root);
+    dependencyFiles = await readdir(root);
   } catch {
     return notices;
   }
-  for (const payload of payloads.toSorted((left, right) => left.localeCompare(right))) {
+  for (const dependencyFile of dependencyFiles.toSorted((left, right) => left.localeCompare(right))) {
     // oxlint-disable-next-line no-await-in-loop -- a handful of directories
-    const files = await readdir(join(root, payload)).catch(() => []);
+    const files = await readdir(join(root, dependencyFile)).catch(() => []);
     if (files.length > 0) {
       notices.set(
-        payload,
-        files.toSorted((left, right) => left.localeCompare(right)).map((file) => `${payload}/${file}`),
+        dependencyFile,
+        files.toSorted((left, right) => left.localeCompare(right)).map((file) => `${dependencyFile}/${file}`),
       );
     }
   }
@@ -236,33 +236,33 @@ export const readSupplementalNotices = async (
 };
 
 /**
- * The manifest payload a receipt's payload row pins: the same name and integrity in any variant of the dependency.
+ * The manifest dependency file a receipt's dependency file row pins: the same name and integrity in any variant of the dependency.
  * @param plugin - The declaring plugin.
  * @param dependency - Dependency name.
- * @param row - The receipt's payload row.
- * @returns The pinned payload, or undefined when the installed manifest no longer pins it.
+ * @param row - The receipt's dependency file row.
+ * @returns The pinned dependency file, or undefined when the installed manifest no longer pins it.
  */
-const pinnedPayload = (
+const pinnedDependencyFile = (
   plugin: PreparationPlugin,
   dependency: string,
   row: { readonly name: string; readonly integrity: Integrity },
-): DependencyPayload | undefined =>
+): DependencyFile | undefined =>
   (plugin.deployment.dependencies[dependency] ?? [])
-    .flatMap((variant) => variant.payloads)
-    .find((payload) => payload.name === row.name && payload.integrity === row.integrity);
+    .flatMap((variant) => variant.files)
+    .find((dependencyFile) => dependencyFile.name === row.name && dependencyFile.integrity === row.integrity);
 
 /**
- * Whether an SBOM component describes a payload: a purl, a hash equal to the pin or to the blob's sha256, and, for a
- * payload fetched from a URL, a `distribution` reference to one of its URLs.
+ * Whether an SBOM component describes a dependency file: a purl, a hash equal to the pin or to the blob's sha256, and, for a
+ * dependency file fetched from a URL, a `distribution` reference to one of its URLs.
  * @param component - One SBOM component.
- * @param row - The receipt's payload row: the pin and the blob's sha256.
- * @param payload - The manifest payload, when the installed manifest still pins it.
+ * @param row - The receipt's dependency file row: the pin and the blob's sha256.
+ * @param dependencyFile - The manifest dependency file, when the installed manifest still pins it.
  * @returns `match`, `incomplete` when the hash matches but the purl or the URL is missing, or `other`.
  */
 const describes = (
   component: SbomComponent,
   row: { readonly integrity: Integrity; readonly sha256: string },
-  payload: DependencyPayload | undefined,
+  dependencyFile: DependencyFile | undefined,
 ): 'match' | 'incomplete' | 'other' => {
   const pin = integrityHex(row.integrity);
   const pinAlgorithm = pin.algorithm.replace(/^sha/u, 'SHA-');
@@ -273,11 +273,11 @@ const describes = (
   if (!hashed) {
     return 'other';
   }
-  if (payload?.origin.kind !== 'url') {
+  if (dependencyFile?.origin.kind !== 'url') {
     // The plugin's own files: a hash is the whole claim.
     return 'match';
   }
-  const urls = new Set<string>(payload.origin.urls);
+  const urls = new Set<string>(dependencyFile.origin.urls);
   const distributed = (component.externalReferences ?? []).some(
     ({ type, url }) => type === 'distribution' && typeof url === 'string' && urls.has(url),
   );
@@ -295,7 +295,7 @@ export const auditClosure = (input: {
   readonly plugin: PreparationPlugin;
   readonly sbom: Sbom | undefined;
   readonly supplemental: ReadonlyMap<string, readonly string[]>;
-  readonly receipt: Pick<ClosureReceipt, 'package' | 'dependency' | 'closureIntegrity' | 'files' | 'payloads'>;
+  readonly receipt: Pick<ClosureReceipt, 'package' | 'dependency' | 'closureIntegrity' | 'files' | 'dependencyFiles'>;
   readonly files: 'intact' | 'stale';
 }): ClosureAudit => {
   const { plugin, sbom, supplemental, receipt } = input;
@@ -304,13 +304,13 @@ export const auditClosure = (input: {
   const sbomGaps: string[] = [];
   const noticeGaps: string[] = [];
   const noticeFiles = new Set<string>();
-  for (const row of receipt.payloads) {
-    const payload = pinnedPayload(plugin, receipt.dependency, row);
-    const verdicts = components.map((component) => describes(component, row, payload));
+  for (const row of receipt.dependencyFiles) {
+    const dependencyFile = pinnedDependencyFile(plugin, receipt.dependency, row);
+    const verdicts = components.map((component) => describes(component, row, dependencyFile));
     if (!verdicts.includes('match')) {
       sbomGaps.push(row.name);
     }
-    const own = receipt.files.filter((file) => file.payload === row.name && isNoticeFile(file.path));
+    const own = receipt.files.filter((file) => file.dependencyFile === row.name && isNoticeFile(file.path));
     for (const file of own) {
       noticeFiles.add(file.path);
     }
@@ -319,7 +319,7 @@ export const auditClosure = (input: {
       noticeFiles.add(`supplemental/${file}`);
     }
     // The plugin's own files are covered by its package licence.
-    if (payload?.origin.kind === 'url' && own.length === 0 && extra.length === 0) {
+    if (dependencyFile?.origin.kind === 'url' && own.length === 0 && extra.length === 0) {
       noticeGaps.push(row.name);
     }
   }
@@ -328,7 +328,7 @@ export const auditClosure = (input: {
     dependency: receipt.dependency,
     closureIntegrity: receipt.closureIntegrity,
     files: input.files,
-    sbom: validSbom ? sbomGaps : receipt.payloads.map(({ name }) => name),
+    sbom: validSbom ? sbomGaps : receipt.dependencyFiles.map(({ name }) => name),
     notices: noticeGaps,
     noticeFiles: [...noticeFiles].toSorted(),
     ok: input.files === 'intact' && validSbom && sbomGaps.length === 0 && noticeGaps.length === 0,
@@ -336,14 +336,14 @@ export const auditClosure = (input: {
 };
 
 /**
- * The SBOM restricted to one closure: the plugin's metadata and the components that describe its payloads.
+ * The SBOM restricted to one closure: the plugin's metadata and the components that describe its dependency files.
  * @param sbom - The plugin's SBOM, metadata and components.
- * @param receipt - The closure's receipt, whose payload hashes select the components.
+ * @param receipt - The closure's receipt, whose dependency file hashes select the components.
  * @returns A CycloneDX 1.6 document.
  */
 const closureSbom = (sbom: Sbom, receipt: ClosureReceipt): Readonly<Record<string, unknown>> => {
   const keys = new Set(
-    receipt.payloads.flatMap((row) => {
+    receipt.dependencyFiles.flatMap((row) => {
       const pin = integrityHex(row.integrity);
       return [`SHA-256:${row.sha256}`, `${pin.algorithm.replace(/^sha/u, 'SHA-')}:${pin.hex}`];
     }),
@@ -411,9 +411,9 @@ export const writeAuditUnit = async (input: {
 };
 
 /**
- * Export one sealed closure's payload blobs from the store into a bundle, each hashed to its name on the way.
+ * Export one sealed closure's dependency file blobs from the store into a bundle, each hashed to its name on the way.
  * @param input - Store, bundle root, plugin and receipt.
- * @returns The index rows of the closure's payloads.
+ * @returns The index rows of the closure's dependency files.
  * @throws When the store no longer holds a blob, or a blob no longer hashes to its name.
  */
 export const exportBlobs = async (input: {
@@ -421,12 +421,12 @@ export const exportBlobs = async (input: {
   readonly directory: string;
   readonly plugin: PreparationPlugin;
   readonly receipt: ClosureReceipt;
-}): Promise<SeedPayload[]> => {
+}): Promise<SeedDependencyFile[]> => {
   const { store, directory, plugin, receipt } = input;
-  const rows: SeedPayload[] = [];
-  for (const row of receipt.payloads) {
-    const payload = pinnedPayload(plugin, receipt.dependency, row);
-    if (payload === undefined || !hexPattern.test(row.sha256)) {
+  const rows: SeedDependencyFile[] = [];
+  for (const row of receipt.dependencyFiles) {
+    const dependencyFile = pinnedDependencyFile(plugin, receipt.dependency, row);
+    if (dependencyFile === undefined || !hexPattern.test(row.sha256)) {
       throw new Error(`${receipt.package} no longer pins ${row.name} ${row.integrity}; prepare it again.`);
     }
     const blob = `blobs/sha256/${row.sha256}` as const;
@@ -443,8 +443,8 @@ export const exportBlobs = async (input: {
     rows.push({
       name: row.name,
       integrity: row.integrity,
-      byteLength: payload.byteLength,
-      format: payload.format,
+      byteLength: dependencyFile.byteLength,
+      format: dependencyFile.format,
       blob,
     });
   }
@@ -525,9 +525,9 @@ export type SeedVerification = {
 const algorithmsOf = (integrity: Integrity): string => integrityHex(integrity).algorithm;
 
 /**
- * Verify a bundle before importing it: every blob hashes to its name, every indexed payload is present with its pinned
+ * Verify a bundle before importing it: every blob hashes to its name, every indexed dependency file is present with its pinned
  * size and integrity, every closure identity recomputes from its pins, and every audit unit names the same closure,
- * describes every payload in its SBOM and carries notice files that hash to their receipt rows.
+ * describes every dependency file in its SBOM and carries notice files that hash to their receipt rows.
  * @param directory - Bundle root.
  * @returns The verification; `problems` is empty when the bundle is complete.
  */
@@ -551,7 +551,7 @@ export const verifySeed = async (directory: string): Promise<SeedVerification> =
   const blobs = new Map<string, { readonly hex: Readonly<Record<string, string>>; readonly byteLength: number }>();
   let byteLength = 0;
   const wanted = new Set(
-    index.closures.flatMap((closure) => closure.payloads.map(({ integrity }) => algorithmsOf(integrity))),
+    index.closures.flatMap((closure) => closure.dependencyFiles.map(({ integrity }) => algorithmsOf(integrity))),
   );
   wanted.add('sha256');
   for (const name of names.toSorted((left, right) => left.localeCompare(right))) {
@@ -571,20 +571,23 @@ export const verifySeed = async (directory: string): Promise<SeedVerification> =
   }
   for (const closure of index.closures) {
     const label = `${closure.package} ${closure.dependency}`;
-    for (const payload of closure.payloads) {
-      const hex = blobPathPattern.exec(payload.blob)?.groups?.['hex'];
+    for (const dependencyFile of closure.dependencyFiles) {
+      const hex = blobPathPattern.exec(dependencyFile.blob)?.groups?.['hex'];
       const digest = hex === undefined ? undefined : blobs.get(hex);
       if (digest === undefined) {
-        problems.push({ path: payload.blob, problem: `${label} ${payload.name} is missing or corrupt` });
+        problems.push({ path: dependencyFile.blob, problem: `${label} ${dependencyFile.name} is missing or corrupt` });
         continue;
       }
-      const pin = integrityHex(payload.integrity);
-      if (digest.byteLength !== payload.byteLength || digest.hex[pin.algorithm] !== pin.hex) {
-        problems.push({ path: payload.blob, problem: `${label} ${payload.name} does not match ${payload.integrity}` });
+      const pin = integrityHex(dependencyFile.integrity);
+      if (digest.byteLength !== dependencyFile.byteLength || digest.hex[pin.algorithm] !== pin.hex) {
+        problems.push({
+          path: dependencyFile.blob,
+          problem: `${label} ${dependencyFile.name} does not match ${dependencyFile.integrity}`,
+        });
       }
     }
     // oxlint-disable-next-line no-await-in-loop -- a few closures
-    const recomputed = await computeClosureIntegrity(closure.payloads);
+    const recomputed = await computeClosureIntegrity(closure.dependencyFiles);
     if (recomputed !== closure.closureIntegrity) {
       problems.push({ path: seedIndexName, problem: `${label} closureIntegrity does not recompute from its pins` });
     }
@@ -621,9 +624,9 @@ const verifyAuditUnit = async (directory: string, closure: SeedClosure): Promise
     problems.push({ path: `${closure.audit}/receipt.json`, problem: `${label} receipt names another closure` });
   }
   const components = sbom.bomFormat === 'CycloneDX' && sbom.specVersion === '1.6' ? (sbom.components ?? []) : [];
-  for (const payload of closure.payloads) {
-    const sha256 = blobPathPattern.exec(payload.blob)?.groups?.['hex'] ?? '';
-    const pin = integrityHex(payload.integrity);
+  for (const dependencyFile of closure.dependencyFiles) {
+    const sha256 = blobPathPattern.exec(dependencyFile.blob)?.groups?.['hex'] ?? '';
+    const pin = integrityHex(dependencyFile.integrity);
     const pinAlgorithm = pin.algorithm.replace(/^sha/u, 'SHA-');
     const described = components.some((component) =>
       (component.hashes ?? []).some(
@@ -632,10 +635,13 @@ const verifyAuditUnit = async (directory: string, closure: SeedClosure): Promise
       ),
     );
     if (!described) {
-      problems.push({ path: `${closure.audit}/sbom.cdx.json`, problem: `${label} ${payload.name} has no component` });
+      problems.push({
+        path: `${closure.audit}/sbom.cdx.json`,
+        problem: `${label} ${dependencyFile.name} has no component`,
+      });
     }
   }
-  const receiptFiles: readonly ReceiptFile[] = Array.isArray(receipt.files) ? receipt.files : [];
+  const receiptFiles: readonly InstalledFile[] = Array.isArray(receipt.files) ? receipt.files : [];
   const rows = new Map(receiptFiles.map((file) => [file.path, file]));
   const noticeRoot = join(root, 'NOTICES');
   const notices = await listFiles(noticeRoot);

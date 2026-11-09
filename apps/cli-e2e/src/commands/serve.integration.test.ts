@@ -327,7 +327,7 @@ const workspaceIn = async (root: string): Promise<string> => {
   return workspace;
 };
 
-/* A gzipped ustar archive of regular files, the shape every PicoGK payload has. */
+/* A gzipped ustar archive of regular files, the shape every PicoGK dependency file has. */
 const tarGz = (
   members: ReadonlyArray<{ name: string; bytes: Uint8Array<ArrayBuffer>; executable?: boolean }>,
 ): Uint8Array<ArrayBuffer> => {
@@ -381,13 +381,13 @@ const syntheticManifest = {
     runtime: [
       {
         target: { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
-        payloads: Object.entries(synthetic).map(([name, bytes]) => ({
+        files: Object.entries(synthetic).map(([name, bytes]) => ({
           name,
           integrity: `sha256-${createHash('sha256').update(bytes).digest('base64')}`,
           byteLength: bytes.byteLength,
           format: 'tar.gz',
-          /* Never fetched: the mirror serves every payload, with no fallback. */
-          origin: { kind: 'url', urls: [`https://payloads.invalid/${name}.tar.gz`] },
+          /* Never fetched: the mirror serves every dependency file, with no fallback. */
+          origin: { kind: 'url', urls: [`https://dependencies.invalid/${name}.tar.gz`] },
           destination: destinations[name as keyof typeof destinations],
         })),
       },
@@ -423,15 +423,15 @@ const seedPresent = (() => {
     indicators === undefined ? undefined : selectVariant(deployment.dependencies['engine'] ?? [], indicators);
   return (
     selection?.status === 'selected' &&
-    selection.variant.payloads.every(
-      (payload) =>
-        payload.origin.kind !== 'url' ||
+    selection.variant.files.every(
+      (dependencyFile) =>
+        dependencyFile.origin.kind !== 'url' ||
         existsSync(
           join(
             seedDirectory,
             'blobs',
             'sha256',
-            Buffer.from(payload.integrity.slice('sha256-'.length), 'base64').toString('hex'),
+            Buffer.from(dependencyFile.integrity.slice('sha256-'.length), 'base64').toString('hex'),
           ),
         ),
     )
@@ -490,11 +490,11 @@ registerHooks({
         imports: [pathToFileURL(rosterHook).href],
         environment: {
           TAU_CONFIG_DIR: await configDirectoryWithCredential(root),
-          TAU_PAYLOAD_MIRROR: await startMirror(),
-          TAU_PAYLOAD_MIRROR_NO_FALLBACK: '1',
-          TAU_PAYLOAD_TARGET: 'darwin-arm64',
+          TAU_DEPENDENCY_MIRROR: await startMirror(),
+          TAU_DEPENDENCY_MIRROR_NO_FALLBACK: '1',
+          TAU_DEPENDENCY_TARGET: 'darwin-arm64',
           TAU_ACQUISITION: '',
-          TAU_PAYLOAD_DIR: '',
+          TAU_DEPENDENCY_DIR: '',
           /* A loopback mirror must bypass any proxy the runner sets (S7). */
           NO_PROXY: '127.0.0.1,localhost',
           no_proxy: '127.0.0.1,localhost',
@@ -539,9 +539,9 @@ registerHooks({
           TAU_CONFIG_DIR: await configDirectoryWithCredential(root),
           /* The store and the seed only: nothing is fetched. */
           TAU_ACQUISITION: 'locked',
-          TAU_PAYLOAD_DIR: seedDirectory,
-          TAU_PAYLOAD_MIRROR: '',
-          TAU_PAYLOAD_TARGET: '',
+          TAU_DEPENDENCY_DIR: seedDirectory,
+          TAU_DEPENDENCY_MIRROR: '',
+          TAU_DEPENDENCY_TARGET: '',
         },
       });
 
@@ -719,10 +719,10 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
           TAU_CONFIG_DIR: await configDirectoryWithCredential(root),
           /* Open acquisition: Build123d's bytes come from the seed when it is present, PicoGK's from its origins. */
           TAU_ACQUISITION: '',
-          TAU_PAYLOAD_DIR: seedPresent ? seedDirectory : '',
-          TAU_PAYLOAD_MIRROR: '',
-          TAU_PAYLOAD_MIRROR_NO_FALLBACK: '',
-          TAU_PAYLOAD_TARGET: '',
+          TAU_DEPENDENCY_DIR: seedPresent ? seedDirectory : '',
+          TAU_DEPENDENCY_MIRROR: '',
+          TAU_DEPENDENCY_MIRROR_NO_FALLBACK: '',
+          TAU_DEPENDENCY_TARGET: '',
         },
       });
 

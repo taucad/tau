@@ -153,12 +153,12 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
         "process.stdin.resume().on('end', () => { process.stdout.write(JSON.stringify({ names: Object.keys(process.env), envProxy: process.env.NODE_USE_ENV_PROXY ?? 'unset' })); process.exit(0); });",
       );
 
-    it('should forward the proxy, CA and payload variables and turn on the environment proxy when one is set', async () => {
+    it('should forward the proxy, CA and dependency variables and turn on the environment proxy when one is set', async () => {
       const environment = baseEnvironment();
       environment['HTTPS_PROXY'] = 'http://127.0.0.1:9';
       environment['NO_PROXY'] = '127.0.0.1';
       environment['NODE_EXTRA_CA_CERTS'] = '/etc/ssl/certs/ca-certificates.crt';
-      environment['TAU_PAYLOAD_MIRROR'] = 'https://mirror.example/';
+      environment['TAU_DEPENDENCY_MIRROR'] = 'https://mirror.example/';
       environment['TAU_CONFIG_DIR'] = directory;
 
       const run = await launch(explicitEnvironment(await environmentProbe(), environment));
@@ -169,7 +169,7 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
           'HTTPS_PROXY',
           'NO_PROXY',
           'NODE_EXTRA_CA_CERTS',
-          'TAU_PAYLOAD_MIRROR',
+          'TAU_DEPENDENCY_MIRROR',
           'TAU_CONFIG_DIR',
         ]),
       );

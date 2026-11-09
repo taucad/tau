@@ -5,7 +5,7 @@ import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
 import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
-import { defaultPayloadStore, inspectNativeKernels, nativeDeploymentsOf } from '@taucad/native-process-core/store';
+import { defaultDependencyStore, inspectNativeKernels, nativeDeploymentsOf } from '@taucad/native-process-core/store';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
@@ -27,7 +27,7 @@ import type { GeoSpecModelExporter } from 'geospec/model';
 const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()];
 
 /*
- * The native kernels are listed like any other: each binds its own sealed closure from this machine's payload store
+ * The native kernels are listed like any other: each binds its own sealed closure from this machine's dependency store
  * when it initialises (`tau prepare <kernel>`) and refuses with `KERNEL_NOT_PREPARED` until then. Per-host omission:
  * Build123d's and SMLibPy's examples ship no checked-in thumbnails yet, so only the workspace runtime lists them.
  */
@@ -72,7 +72,7 @@ export const workspaceRuntime = defineRuntime({
 
 /**
  * The kernels a runtime can evaluate on this machine: every kernel it lists, less each native kernel whose closure the
- * payload store does not hold sealed. Read from launch indexes only: nothing is downloaded.
+ * dependency store does not hold sealed. Read from launch indexes only: nothing is downloaded.
  * @param runtime - The runtime.
  * @returns The runnable kernel ids, in list order.
  */
@@ -80,7 +80,7 @@ const runnableKernelIds = async (runtime: AnyRuntimeDefinition): Promise<Readonl
   const resolved = await resolveRuntimeDefinition(runtime, undefined);
   const inspection = await inspectNativeKernels({
     deployments: nativeDeploymentsOf(resolved).map(({ deployment }) => deployment),
-    store: defaultPayloadStore(),
+    store: defaultDependencyStore(),
     managed: readManagedPreparation(process.env),
   });
   const unprepared = new Set(inspection.filter(({ answer }) => answer.status !== 'ready').map(({ kernel }) => kernel));

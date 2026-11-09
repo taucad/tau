@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Purpose: Spike S29 (native-dependency-resolution charter): a static `python -m http.server` directory is a complete
-#   payload mirror under TAU_PAYLOAD_MIRROR + no-fallback (zero non-mirror requests, G5 receipts), and an image with a
+#   dependency mirror under TAU_DEPENDENCY_MIRROR + no-fallback (zero non-mirror requests, G5 receipts), and an image with a
 #   baked store answers `ready` under `docker run --network none`. Spike code only; nothing ships.
 # Usage:
 #   scripts/spikes/native-deps/linux/s29/run.sh mirror <work-dir> <evidence-dir> <baked-config-dir>
@@ -65,26 +65,26 @@ case "$phase" in
     node "$SPIKE_DIR/receipts.ts" tally "$evidence/a-fetch.jsonl" >"$evidence/a-tally.json"
 
     # The mirror: a plain directory of the URL-origin blobs the online receipts name.
-    node "$SPIKE_DIR/receipts.ts" mirror "$work/a/payloads" "$work/mirror" | tee "$evidence/mirror.json"
+    node "$SPIKE_DIR/receipts.ts" mirror "$work/a/dependencies" "$work/mirror" | tee "$evidence/mirror.json"
     du -sb "$work/mirror" | tee "$evidence/mirror-size.txt"
     serve_mirror "$work/mirror" 8729 "$evidence/mirror-http.log"
 
     # B: no-fallback prepare from the mirror; every other origin throws, and a dead proxy catches anything else.
-    mirror_b=("${offline_proxy[@]}" TAU_CONFIG_DIR="$baked" TAU_PAYLOAD_MIRROR=http://127.0.0.1:8729/
-      TAU_PAYLOAD_MIRROR_NO_FALLBACK=1 SPIKE_ALLOWED_ORIGINS=http://127.0.0.1:8729 SPIKE_FETCH_LOG="$evidence/b-fetch.jsonl")
+    mirror_b=("${offline_proxy[@]}" TAU_CONFIG_DIR="$baked" TAU_DEPENDENCY_MIRROR=http://127.0.0.1:8729/
+      TAU_DEPENDENCY_MIRROR_NO_FALLBACK=1 SPIKE_ALLOWED_ORIGINS=http://127.0.0.1:8729 SPIKE_FETCH_LOG="$evidence/b-fetch.jsonl")
     run_tau b-inspect-before "${mirror_b[@]}" -- prepare --inspect --json
     run_tau b-prepare "${mirror_b[@]}" -- prepare build123d --json
     run_tau b-inspect-after "${mirror_b[@]}" -- prepare --inspect --json
     node "$SPIKE_DIR/receipts.ts" tally "$evidence/b-fetch.jsonl" http://127.0.0.1:8729 >"$evidence/b-tally.json"
-    node "$SPIKE_DIR/receipts.ts" compare "$work/a/payloads" "$baked/payloads" >"$evidence/g5-compare.json"
+    node "$SPIKE_DIR/receipts.ts" compare "$work/a/dependencies" "$baked/dependencies" >"$evidence/g5-compare.json"
     grep -c '"GET ' "$evidence/mirror-http.log" >"$evidence/mirror-http-gets.txt" || true
     grep -c '" 200 ' "$evidence/mirror-http.log" >"$evidence/mirror-http-200.txt" || true
 
     # N: the same with one blob missing from the mirror: a typed refusal, still zero non-mirror requests.
-    node "$SPIKE_DIR/receipts.ts" mirror "$work/a/payloads" "$work/mirror-n" --omit 0 | tee "$evidence/mirror-n.json"
+    node "$SPIKE_DIR/receipts.ts" mirror "$work/a/dependencies" "$work/mirror-n" --omit 0 | tee "$evidence/mirror-n.json"
     serve_mirror "$work/mirror-n" 8730 "$evidence/mirror-n-http.log"
-    run_tau n-prepare "${offline_proxy[@]}" TAU_CONFIG_DIR="$work/n" TAU_PAYLOAD_MIRROR=http://127.0.0.1:8730/ \
-      TAU_PAYLOAD_MIRROR_NO_FALLBACK=1 SPIKE_ALLOWED_ORIGINS=http://127.0.0.1:8730 SPIKE_FETCH_LOG="$evidence/n-fetch.jsonl" \
+    run_tau n-prepare "${offline_proxy[@]}" TAU_CONFIG_DIR="$work/n" TAU_DEPENDENCY_MIRROR=http://127.0.0.1:8730/ \
+      TAU_DEPENDENCY_MIRROR_NO_FALLBACK=1 SPIKE_ALLOWED_ORIGINS=http://127.0.0.1:8730 SPIKE_FETCH_LOG="$evidence/n-fetch.jsonl" \
       -- prepare build123d --json
     node "$SPIKE_DIR/receipts.ts" tally "$evidence/n-fetch.jsonl" http://127.0.0.1:8730 >"$evidence/n-tally.json"
     kill "$(cat "$work/http-8729.pid")" "$(cat "$work/http-8730.pid")" || true
@@ -134,7 +134,7 @@ DOCKER
     build_step "$evidence/image-docker-build.log" docker build -t tau-s29-seed "$work/image"
     docker image inspect tau-s29-seed --format '{{.Size}} {{.Id}}' | tee "$evidence/image-size.txt"
     { docker image inspect node:24-slim --format '{{json .RepoDigests}} {{.Id}}' || true; } | tee "$evidence/image-base.txt"
-    { du -sb "$work/image/app" "$work/image/config" "$work/image/config/payloads" || true; } | tee "$evidence/image-layers.txt"
+    { du -sb "$work/image/app" "$work/image/config" "$work/image/config/dependencies" || true; } | tee "$evidence/image-layers.txt"
     for step in "image-inspect prepare --inspect --json" "image-prepare prepare build123d --json" "image-verify prepare build123d --verify --offline --json"; do
       read -r label args <<<"$step"
       code=0

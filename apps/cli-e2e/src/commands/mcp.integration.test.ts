@@ -1419,17 +1419,17 @@ describe('tau mcp idle release', () => {
 
 /*
  * Native kernels over MCP (charter W5 tier 4a, D7), on any host, with a synthetic PicoGK closure: the checked-in
- * kernel row and payload destinations, two in-test archives shaped like Microsoft's runtime and the Tau layer plus a
+ * kernel row and dependency file destinations, two in-test archives shaped like Microsoft's runtime and the Tau layer plus a
  * notices archive, served by a loopback mirror under no-fallback for a forced darwin-arm64 target. A sync loader hook
  * (`module.registerHooks`) points `@taucad/picogk/tau-plugin.json` at the synthetic manifest in the server's threads
  * only; Build123d keeps its real manifest, so its refusal names the real download. No client cancellation is relied
  * on beyond the SDK's own `notifications/cancelled` (X9: Codex sends none).
  */
 
-/** One regular file of a synthetic payload archive. */
+/** One regular file of a synthetic dependency file archive. */
 type ArchiveMember = { readonly name: string; readonly bytes: Uint8Array<ArrayBuffer>; readonly executable?: boolean };
 
-/** A gzipped ustar archive of regular files, the shape every PicoGK payload has. */
+/** A gzipped ustar archive of regular files, the shape every PicoGK dependency file has. */
 const tarGz = (members: readonly ArchiveMember[]): Uint8Array<ArrayBuffer> => {
   const blocks: Array<Uint8Array<ArrayBuffer>> = [];
   for (const { name, bytes, executable } of members) {
@@ -1451,7 +1451,7 @@ const tarGz = (members: readonly ArchiveMember[]): Uint8Array<ArrayBuffer> => {
 };
 
 const text = (value: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(value, 'utf8'));
-/* Incompressible, so each payload streams long enough to report progress more than once. */
+/* Incompressible, so each dependency file streams long enough to report progress more than once. */
 const filler = (): Uint8Array<ArrayBuffer> => new Uint8Array(randomBytes(384 * 1024));
 
 const runtimeVersion = '10.0.11';
@@ -1487,13 +1487,13 @@ const syntheticManifest = {
     runtime: [
       {
         target: { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' },
-        payloads: Object.entries(synthetic).map(([name, bytes]) => ({
+        files: Object.entries(synthetic).map(([name, bytes]) => ({
           name,
           integrity: `sha256-${createHash('sha256').update(bytes).digest('base64')}`,
           byteLength: bytes.byteLength,
           format: 'tar.gz',
-          /* Never fetched: the mirror serves every payload, with no fallback. */
-          origin: { kind: 'url', urls: [`https://payloads.invalid/${name}.tar.gz`] },
+          /* Never fetched: the mirror serves every dependency file, with no fallback. */
+          origin: { kind: 'url', urls: [`https://dependencies.invalid/${name}.tar.gz`] },
           destination: destinations[name as keyof typeof destinations],
         })),
       },
@@ -1513,7 +1513,7 @@ const build123dBytes = (() => {
       ? undefined
       : selectVariant(deployment.dependencies['engine'] ?? [], indicators, { target: 'darwin-arm64' });
   return selection?.status === 'selected'
-    ? selection.variant.payloads.reduce((sum, payload) => sum + payload.byteLength, 0)
+    ? selection.variant.files.reduce((sum, dependencyFile) => sum + dependencyFile.byteLength, 0)
     : undefined;
 })();
 
@@ -1618,16 +1618,16 @@ describe('tau mcp native kernels (W5 tier 4a)', () => {
   let project = '';
   let rosterHook = '';
 
-  /** The server environment for one payload store: the loopback mirror only, a forced darwin-arm64 target. */
+  /** The server environment for one dependency store: the loopback mirror only, a forced darwin-arm64 target. */
   const nativeEnvironment = (configDirectory: string): Record<string, string> => {
     /* Built by assignment so no environment key is a source literal. */
     const env: Record<string, string> = {};
     env['TAU_CONFIG_DIR'] = configDirectory;
-    env['TAU_PAYLOAD_MIRROR'] = mirror.url;
-    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '1';
-    env['TAU_PAYLOAD_TARGET'] = 'darwin-arm64';
+    env['TAU_DEPENDENCY_MIRROR'] = mirror.url;
+    env['TAU_DEPENDENCY_MIRROR_NO_FALLBACK'] = '1';
+    env['TAU_DEPENDENCY_TARGET'] = 'darwin-arm64';
     env['TAU_ACQUISITION'] = '';
-    env['TAU_PAYLOAD_DIR'] = '';
+    env['TAU_DEPENDENCY_DIR'] = '';
     /* A loopback mirror must bypass any proxy the runner sets (S7). */
     env['NO_PROXY'] = '127.0.0.1,localhost';
     env['no_proxy'] = '127.0.0.1,localhost';
@@ -1759,7 +1759,7 @@ registerHooks({
     });
 
     it(
-      'should keep the verified payloads of a cancelled preparation, so the next call fetches only the rest',
+      'should keep the verified dependency files of a cancelled preparation, so the next call fetches only the rest',
       async () => {
         const worker = hexOf(synthetic.worker);
         const dotnet = hexOf(synthetic.dotnet);
@@ -1772,7 +1772,7 @@ registerHooks({
         );
 
         /* The mirror finishing its response precedes the consumer verifying and atomically publishing the blob. */
-        const runtimeBlob = join('payloads', 'blobs', 'sha256', dotnet);
+        const runtimeBlob = join('dependencies', 'blobs', 'sha256', dotnet);
         await until(async () => {
           const entries = await entriesOf(store);
           if (!entries.includes(runtimeBlob)) {
@@ -1780,7 +1780,7 @@ registerHooks({
           }
           const bytes = await readFile(join(store, runtimeBlob));
           return bytes.equals(synthetic.dotnet);
-        }, 'the verified runtime payload publication');
+        }, 'the verified runtime dependency file publication');
         await until(() => mirror.requests.some((request) => request.hex === worker), 'the layer request');
         controller.abort();
         await expect(pending).rejects.toThrow();
@@ -1820,7 +1820,7 @@ registerHooks({
         for (const [index, report] of progress.entries()) {
           expect(report.progress).toBeGreaterThan(progress[index - 1]?.progress ?? 0);
         }
-        /* The runtime payload was fetched once; only the layer, which was cut off, was fetched again. */
+        /* The runtime dependency file was fetched once; only the layer, which was cut off, was fetched again. */
         expect(mirror.requests.filter(({ hex }) => hex === dotnet)).toHaveLength(1);
         expect(mirror.requests.filter(({ hex }) => hex === worker)).toHaveLength(2);
       },
@@ -2072,10 +2072,10 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
     const env: Record<string, string> = {};
     env['TAU_CONFIG_DIR'] = store;
     env['TAU_ACQUISITION'] = acquisition;
-    env['TAU_PAYLOAD_DIR'] = '';
-    env['TAU_PAYLOAD_MIRROR'] = '';
-    env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '';
-    env['TAU_PAYLOAD_TARGET'] = '';
+    env['TAU_DEPENDENCY_DIR'] = '';
+    env['TAU_DEPENDENCY_MIRROR'] = '';
+    env['TAU_DEPENDENCY_MIRROR_NO_FALLBACK'] = '';
+    env['TAU_DEPENDENCY_TARGET'] = '';
     return env;
   };
 

@@ -2,7 +2,7 @@
 /*
  * The PicoGK closure end to end on any host: the checked-in tau-plugin.json, with its two pins swapped for in-test
  * archives shaped like Microsoft's runtime archive and the Tau layer, prepared offline from a seed by the real
- * preparation host for a darwin-arm64 host, then mapped to kernel options. It proves the payload destinations, the
+ * preparation host for a darwin-arm64 host, then mapped to kernel options. It proves the dependency file destinations, the
  * seed index for a sha512 pin and the launch set without the native engine, which only darwin-arm64 runs (D13).
  */
 import { createHash } from 'node:crypto';
@@ -70,9 +70,9 @@ const darwinArm64: HostIndicators = {
 /** The checked-in manifest with the runtime pin moved to the in-test archive and the layer pin composed. */
 const testManifest = (): Record<string, unknown> => {
   const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../tau-plugin.json'), 'utf8')) as {
-    dependencies: { runtime: Array<{ payloads: Array<Record<string, unknown>> }> };
+    dependencies: { runtime: Array<{ files: Array<Record<string, unknown>> }> };
   };
-  const dotnet = manifest.dependencies.runtime[0]!.payloads.find(({ name }) => name === 'dotnet')!;
+  const dotnet = manifest.dependencies.runtime[0]!.files.find(({ name }) => name === 'dotnet')!;
   dotnet['integrity'] = sha512Integrity;
   dotnet['byteLength'] = runtimeArchive.byteLength;
   return composeManifest(manifest, layerRecord);

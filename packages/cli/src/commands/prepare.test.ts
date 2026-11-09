@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { createNodeHostTelemetry } from '@taucad/host/telemetry';
 import type { NodeHostTelemetry } from '@taucad/host/telemetry';
 import { computeClosureIntegrity, parsePluginDeployment } from '@taucad/runtime/preparation/node';
-import type { DependencyPayload, PreparationPlugin } from '@taucad/runtime/preparation/node';
+import type { DependencyFile, PreparationPlugin } from '@taucad/runtime/preparation/node';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -23,14 +23,14 @@ const { createPrepareCommand } = await import('#commands/prepare.js');
 
 const encoder = new TextEncoder();
 
-const rawPayload = (
+const rawDependencyFile = (
   name: string,
   text: string,
-): { readonly payload: DependencyPayload; readonly bytes: Uint8Array<ArrayBuffer> } => {
+): { readonly dependencyFile: DependencyFile; readonly bytes: Uint8Array<ArrayBuffer> } => {
   const bytes = encoder.encode(text);
   return {
     bytes,
-    payload: {
+    dependencyFile: {
       name,
       integrity: `sha256-${createHash('sha256').update(bytes).digest('base64')}`,
       byteLength: bytes.byteLength,
@@ -41,9 +41,9 @@ const rawPayload = (
   };
 };
 
-const runtime = rawPayload('runtime.py', 'print("runtime")\n');
-const worker = rawPayload('worker.py', 'print("ready")\n');
-const payloads = [runtime.payload, worker.payload] as const;
+const runtime = rawDependencyFile('runtime.py', 'print("runtime")\n');
+const worker = rawDependencyFile('worker.py', 'print("ready")\n');
+const dependencyFiles = [runtime.dependencyFile, worker.dependencyFile] as const;
 
 const plugin: PreparationPlugin = {
   package: '@taucad/demo',
@@ -51,10 +51,10 @@ const plugin: PreparationPlugin = {
     schemaVersion: 1,
     dependencies: {
       engine: [
-        { target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' }, payloads },
-        { target: { runtime: 'native', os: 'linux', arch: 'arm64', libc: 'glibc' }, payloads },
-        { target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, payloads },
-        { target: { runtime: 'native', os: 'darwin', arch: 'x64' }, payloads },
+        { target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' }, files: dependencyFiles },
+        { target: { runtime: 'native', os: 'linux', arch: 'arm64', libc: 'glibc' }, files: dependencyFiles },
+        { target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, files: dependencyFiles },
+        { target: { runtime: 'native', os: 'darwin', arch: 'x64' }, files: dependencyFiles },
       ],
     },
     kernels: { demo: { requires: ['engine'], extensions: ['py'] } },
@@ -101,11 +101,11 @@ describe.runIf(supported)('tau prepare', () => {
     vi.stubEnv('TAU_CONFIG_DIR', join(sandbox, 'config'));
     for (const name of [
       'TAU_ACQUISITION',
-      'TAU_PAYLOAD_MIRROR',
-      'TAU_PAYLOAD_MIRROR_NO_FALLBACK',
-      'TAU_PAYLOAD_DIR',
-      'TAU_PAYLOAD_TARGET',
-      'TAU_PAYLOAD_EMULATION',
+      'TAU_DEPENDENCY_MIRROR',
+      'TAU_DEPENDENCY_MIRROR_NO_FALLBACK',
+      'TAU_DEPENDENCY_DIR',
+      'TAU_DEPENDENCY_TARGET',
+      'TAU_DEPENDENCY_EMULATION',
     ]) {
       vi.stubEnv(name, '');
     }
@@ -147,7 +147,7 @@ describe.runIf(supported)('tau prepare', () => {
       kind: 'prepare',
       status: 'ready',
       kernel: 'demo',
-      closureIntegrity: await computeClosureIntegrity(payloads),
+      closureIntegrity: await computeClosureIntegrity(dependencyFiles),
       treeIntegrity: expect.stringMatching(/^sha256-/u) as unknown,
       byteLength: runtime.bytes.byteLength + worker.bytes.byteLength,
     });
@@ -194,7 +194,7 @@ describe.runIf(supported)('tau prepare', () => {
     });
   });
 
-  it('should exit 3 with DOWNLOAD_FAILED naming the URL when the registry misses a payload', async () => {
+  it('should exit 3 with DOWNLOAD_FAILED naming the URL when the registry misses a dependency file', async () => {
     served.delete('https://registry.example/worker.py');
 
     await expect(runCommand(command(), { rawArgs: ['demo'] })).rejects.toMatchObject({
@@ -214,7 +214,7 @@ describe.runIf(supported)('tau prepare', () => {
       v: 1,
       kind: 'profile',
       profile: 'open',
-      store: join(sandbox, 'config', 'payloads'),
+      store: join(sandbox, 'config', 'dependencies'),
       noFallback: false,
       emulation: true,
       closures: [{ package: '@taucad/demo', dependency: 'engine', state: 'ready' }],
@@ -242,9 +242,9 @@ describe.runIf(supported)('tau prepare', () => {
     /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
     const environment = {
       TAU_ACQUISITION: 'locked',
-      TAU_PAYLOAD_MIRROR: 'https://mirror.corp.example/tau/',
-      TAU_PAYLOAD_DIR: join(sandbox, 'seed'),
-      TAU_PAYLOAD_EMULATION: '0',
+      TAU_DEPENDENCY_MIRROR: 'https://mirror.corp.example/tau/',
+      TAU_DEPENDENCY_DIR: join(sandbox, 'seed'),
+      TAU_DEPENDENCY_EMULATION: '0',
       HTTPS_PROXY: 'http://user:proxy-secret@proxy.corp.example:3128',
       NODE_USE_ENV_PROXY: '1',
       NODE_EXTRA_CA_CERTS: '/etc/corp/ca.pem',
@@ -259,7 +259,7 @@ describe.runIf(supported)('tau prepare', () => {
     expect(records()[0]).toMatchObject({
       kind: 'profile',
       profile: 'locked',
-      store: join(sandbox, 'config', 'payloads'),
+      store: join(sandbox, 'config', 'dependencies'),
       mirror: 'https://mirror.corp.example/tau/',
       noFallback: true,
       seed: join(sandbox, 'seed'),
@@ -275,7 +275,7 @@ describe.runIf(supported)('tau prepare', () => {
 
   it('should repair a tampered closure with --verify and report it', async () => {
     await runCommand(command(), { rawArgs: ['demo', '--json'] });
-    const store = join(sandbox, 'config', 'payloads');
+    const store = join(sandbox, 'config', 'dependencies');
     const [closure] = await readdir(join(store, 'closures', 'sha256'));
     const workerPath = join(store, 'closures', 'sha256', closure ?? '', 'bin', 'worker.py');
     await writeFile(workerPath, 'tampered\n');
@@ -285,7 +285,7 @@ describe.runIf(supported)('tau prepare', () => {
 
     expect(records()[0]).toMatchObject({
       kind: 'verify',
-      closures: [{ package: '@taucad/demo', dependency: 'engine', status: 'repaired', payloads: ['worker.py'] }],
+      closures: [{ package: '@taucad/demo', dependency: 'engine', status: 'repaired', dependencyFiles: ['worker.py'] }],
     });
     expect(await readFile(workerPath, 'utf8')).toBe('print("ready")\n');
   });

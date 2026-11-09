@@ -337,7 +337,7 @@ describe('tau CLI dist (real binary)', () => {
       async (extension) => {
         const outputPath = join(workspace, `picogk-sphere.${extension}`);
         // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
-        const store = { TAU_CONFIG_DIR: join(workspace, 'config'), TAU_PAYLOAD_DIR: picogkSeed };
+        const store = { TAU_CONFIG_DIR: join(workspace, 'config'), TAU_DEPENDENCY_DIR: picogkSeed };
         const prepared = await runCli(['prepare', 'picogk'], store);
         expect(prepared.exitCode, `prepare stderr: ${prepared.stderr}`).toBe(0);
 

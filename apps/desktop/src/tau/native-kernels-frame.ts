@@ -26,7 +26,7 @@ export type NativeKernelSlot = {
 export type NativeKernelsFrame = {
   readonly type: typeof nativeKernelsFrameType;
   /**
-   * The payload store main read, by its real path. The utility's environment names no store (the staging channel
+   * The dependency store main read, by its real path. The utility's environment names no store (the staging channel
    * keeps its own), so a kernel the frame does not name is looked up here.
    */
   readonly store: string;

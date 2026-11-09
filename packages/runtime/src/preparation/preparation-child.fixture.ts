@@ -2,7 +2,7 @@
  * Child process of the preparation kill and contention tests (W2 kill-at-phase, spike S27).
  *
  * `prepare <store> <hostPath> <mirror> [freezePhase]` prepares the fixture plugin through a digest-addressed HTTP
- * mirror with no fallback and prints one `PHASE <phase> <payload>` line per phase change. With `freezePhase`, the
+ * mirror with no fallback and prints one `PHASE <phase> <dependency file>` line per phase change. With `freezePhase`, the
  * process blocks synchronously the first time it enters that phase, so the parent can SIGKILL it in exactly that
  * state. `gc <store> <hostPath>` collects garbage and prints the report. Every result is one `RESULT <json>` line.
  *
@@ -12,15 +12,15 @@ import { writeSync } from 'node:fs';
 
 import { createPreparationHost } from '#preparation/preparation-host.js';
 import type { PreparationPlugin } from '#preparation/preparation-host.types.js';
-import type { DependencyPayload } from '#preparation/preparation.types.js';
+import type { DependencyFile } from '#preparation/preparation.types.js';
 
 import {
   linuxHost,
   linuxTarget,
-  payloadOf,
+  dependencyFileOf,
   pluginOf,
-  pythonPayloadBytes,
-  pythonPayloads,
+  pythonFileBytes,
+  pythonFiles,
 } from '#preparation/preparation.fixture.js';
 
 /** The package the fixture plugin declares. */
@@ -29,32 +29,35 @@ export const childPackage = '@taucad/kill-test';
 const largeByteLength = 1024 * 1024;
 
 /**
- * Payload bytes of the fixture plugin: the three-payload Python closure and a 1 MiB raw file, so a throttled mirror
+ * Dependency file bytes of the fixture plugin: the three-file Python closure and a 1 MiB raw file, so a throttled mirror
  * keeps two racing processes inside the download phase together.
- * @returns Payload name to bytes, deterministic across processes.
+ * @returns Dependency file name to bytes, deterministic across processes.
  */
-export const childPayloadBytes = (): Readonly<Record<string, Uint8Array<ArrayBuffer>>> => {
+export const childFileBytes = (): Readonly<Record<string, Uint8Array<ArrayBuffer>>> => {
   const large = new Uint8Array(largeByteLength);
   for (let index = 0; index < large.length; index += 1) {
     large[index] = (index * 31 + 7) % 251;
   }
-  return { ...pythonPayloadBytes(), 'large.bin': large };
+  return { ...pythonFileBytes(), 'large.bin': large };
 };
 
 /**
  * The fixture plugin; the parent builds the same one to inspect and repair the store.
- * @returns The plugin and its payloads.
+ * @returns The plugin and its dependency files.
  */
 export const childPlugin = (): {
   readonly plugin: PreparationPlugin;
-  readonly payloads: readonly DependencyPayload[];
+  readonly dependencyFiles: readonly DependencyFile[];
 } => {
-  const bytes = childPayloadBytes();
-  const payloads: [DependencyPayload, ...DependencyPayload[]] = [
-    ...pythonPayloads(pythonPayloadBytes()),
-    payloadOf({ name: 'large.bin', bytes: bytes['large.bin']!, format: 'raw', destination: 'data' }),
+  const bytes = childFileBytes();
+  const dependencyFiles: [DependencyFile, ...DependencyFile[]] = [
+    ...pythonFiles(pythonFileBytes()),
+    dependencyFileOf({ name: 'large.bin', bytes: bytes['large.bin']!, format: 'raw', destination: 'data' }),
   ];
-  return { plugin: pluginOf(childPackage, { engine: [{ target: linuxTarget, payloads }] }), payloads };
+  return {
+    plugin: pluginOf(childPackage, { engine: [{ target: linuxTarget, files: dependencyFiles }] }),
+    dependencyFiles,
+  };
 };
 
 // Synchronous, so a line is out before a freeze or a kill, on pipes that Node would otherwise write asynchronously.
@@ -86,7 +89,7 @@ if (process.argv[1]?.endsWith('preparation-child.fixture.ts') === true) {
         return;
       }
       ({ phase } = state);
-      line(`PHASE ${state.phase} ${state.payload}`);
+      line(`PHASE ${state.phase} ${state.dependencyFile}`);
       if (state.phase === freezePhase) {
         line(`FROZEN ${state.phase}`);
         freeze();

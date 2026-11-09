@@ -1,4 +1,4 @@
-# The Tau host image with a baked payload store (charter D37, W19, W22's Docker row): build it with
+# The Tau host image with a baked dependency store (charter D37, W19, W22's Docker row): build it with
 # packages/host/scripts/build-native-image.sh, then prove under `docker run --network none` that the image runs as a
 # non-root user, reports build123d `ready`, evaluates a build123d model to a GLB inside the native sandbox and verifies
 # its store offline. The probe step records which Docker security options the native sandbox needs.
@@ -24,7 +24,9 @@ concurrency:
 jobs:
   native:
     name: Host image with a baked store under --network none
-    runs-on: ubuntu-latest
+    # Pinned: since ubuntu-latest became ubuntu-26.04 (Docker 29), the sandbox's apply-seccomp cannot write
+    # /proc/self/setgroups in the container's nested user namespace, so the baked store's compileall is refused.
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       IMAGE: tau-host:native

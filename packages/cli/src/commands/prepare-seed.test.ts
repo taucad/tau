@@ -33,14 +33,15 @@ const sbomFor = (closure: FixtureClosure, omit?: string): Record<string, unknown
   specVersion: '1.6',
   version: 1,
   metadata: { component: { type: 'application', name: closure.package } },
-  components: closure.payloads
-    .filter(({ payload }) => payload.name !== omit)
-    .map(({ payload, sha256 }) => ({
+  components: closure.dependencyFiles
+    .filter(({ dependencyFile }) => dependencyFile.name !== omit)
+    .map(({ dependencyFile, sha256 }) => ({
       type: 'library',
-      name: payload.name,
-      purl: `pkg:generic/${payload.name}@1.0.0`,
+      name: dependencyFile.name,
+      purl: `pkg:generic/${dependencyFile.name}@1.0.0`,
       hashes: [{ alg: 'SHA-256', content: sha256 }],
-      externalReferences: payload.origin.kind === 'url' ? [{ type: 'distribution', url: payload.origin.urls[0] }] : [],
+      externalReferences:
+        dependencyFile.origin.kind === 'url' ? [{ type: 'distribution', url: dependencyFile.origin.urls[0] }] : [],
     })),
 });
 
@@ -78,7 +79,7 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
   const receiptOf = async (machine: 'a' | 'b'): Promise<Record<string, unknown>> => {
-    const root = join(sandbox, machine, 'config', 'payloads', 'closures', 'sha256');
+    const root = join(sandbox, machine, 'config', 'dependencies', 'closures', 'sha256');
     const [hex] = await readdir(root);
     return JSON.parse(await readFile(join(root, hex ?? '', 'receipt.json'), 'utf8')) as Record<string, unknown>;
   };
@@ -104,9 +105,9 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
     closure = await createFixtureClosure({
       package: '@taucad/demo',
       kernel: { name: 'demo', extensions: ['py'] },
-      payloads: [
+      dependencyFiles: [
         { name: 'runtime.py', bytes: encoder.encode('print("runtime")\n'), format: 'raw', destination: 'bin' },
-        // A payload that carries its own licence text, as a wheel's `dist-info/licenses/` does.
+        // A dependency file that carries its own licence text, as a wheel's `dist-info/licenses/` does.
         { name: 'LICENSE', bytes: encoder.encode('MIT License\n'), format: 'raw', destination: 'licenses/engine' },
         {
           name: 'engine.dat',
@@ -129,11 +130,11 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
     );
     for (const name of [
       'TAU_ACQUISITION',
-      'TAU_PAYLOAD_MIRROR',
-      'TAU_PAYLOAD_MIRROR_NO_FALLBACK',
-      'TAU_PAYLOAD_DIR',
-      'TAU_PAYLOAD_TARGET',
-      'TAU_PAYLOAD_EMULATION',
+      'TAU_DEPENDENCY_MIRROR',
+      'TAU_DEPENDENCY_MIRROR_NO_FALLBACK',
+      'TAU_DEPENDENCY_DIR',
+      'TAU_DEPENDENCY_TARGET',
+      'TAU_DEPENDENCY_EMULATION',
     ]) {
       vi.stubEnv(name, '');
     }
@@ -192,10 +193,10 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
           dependency: 'engine',
           closureIntegrity: closure.closureIntegrity,
           audit: `notices/${integrityHex(closure.closureIntegrity).hex}`,
-          payloads: closure.payloads.map(({ payload, sha256 }) => ({
-            name: payload.name,
-            integrity: payload.integrity,
-            byteLength: payload.byteLength,
+          dependencyFiles: closure.dependencyFiles.map(({ dependencyFile, sha256 }) => ({
+            name: dependencyFile.name,
+            integrity: dependencyFile.integrity,
+            byteLength: dependencyFile.byteLength,
             format: 'raw',
             blob: `blobs/sha256/${sha256}`,
           })),
@@ -232,7 +233,7 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
   it('should refuse a bundle whose blob was altered, naming the blob, before anything is prepared', async () => {
     const bundle = join(sandbox, 'bundle');
     await runCommand(command('a'), { rawArgs: ['--bundle', bundle] });
-    const [runtime] = closure.payloads;
+    const [runtime] = closure.dependencyFiles;
     await writeFile(join(bundle, 'blobs', 'sha256', runtime?.sha256 ?? ''), 'tampered\n');
     on('b');
     stdout = [];
@@ -257,7 +258,9 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
       exit: exitCodes.refused,
       message: expect.stringContaining('runtime.py') as unknown,
     });
-    expect(await readdir(join(sandbox, 'b', 'config', 'payloads', 'closures', 'sha256')).catch(() => [])).toEqual([]);
+    expect(await readdir(join(sandbox, 'b', 'config', 'dependencies', 'closures', 'sha256')).catch(() => [])).toEqual(
+      [],
+    );
   });
 
   it('should fail the audit when a sealed file changed, without a request', async () => {
@@ -275,7 +278,7 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
     expect(fetches).toHaveLength(before);
   });
 
-  it('should refuse to bundle a closure whose SBOM misses a payload, and write no index', async () => {
+  it('should refuse to bundle a closure whose SBOM misses a dependency file, and write no index', async () => {
     await writeFile(join(packageDirectory, 'tau-plugin.cdx.json'), JSON.stringify(sbomFor(closure, 'engine.dat')));
     const bundle = join(sandbox, 'bundle');
 
@@ -289,20 +292,20 @@ describe.runIf(supported)('tau prepare --bundle, --verify-seed, --seed and --aud
 });
 
 describe('auditClosure', () => {
-  it('should require a purl and the distribution URL for a payload fetched from a registry, and a notice', async () => {
+  it('should require a purl and the distribution URL for a dependency file fetched from a registry, and a notice', async () => {
     const closure = await createFixtureClosure({
-      payloads: [{ name: 'wheel', bytes: encoder.encode('wheel\n'), format: 'raw', destination: 'lib' }],
+      dependencyFiles: [{ name: 'wheel', bytes: encoder.encode('wheel\n'), format: 'raw', destination: 'lib' }],
     });
-    const [only] = closure.payloads;
-    const receipt: Pick<ClosureReceipt, 'package' | 'dependency' | 'closureIntegrity' | 'files' | 'payloads'> = {
+    const [only] = closure.dependencyFiles;
+    const receipt: Pick<ClosureReceipt, 'package' | 'dependency' | 'closureIntegrity' | 'files' | 'dependencyFiles'> = {
       package: closure.package,
       dependency: closure.dependency,
       closureIntegrity: closure.closureIntegrity,
-      files: [{ path: 'lib/wheel', byteLength: 6, sha256: only?.sha256 ?? '', mode: 0o644, payload: 'wheel' }],
-      payloads: [
+      files: [{ path: 'lib/wheel', byteLength: 6, sha256: only?.sha256 ?? '', mode: 0o644, dependencyFile: 'wheel' }],
+      dependencyFiles: [
         {
           name: 'wheel',
-          integrity: only?.payload.integrity ?? 'sha256-',
+          integrity: only?.dependencyFile.integrity ?? 'sha256-',
           sha256: only?.sha256 ?? '',
           acquiredFrom: { kind: 'origin', location: 'https://registry.example/payloads/wheel' },
         },

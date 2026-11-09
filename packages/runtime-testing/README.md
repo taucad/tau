@@ -120,14 +120,14 @@ try {
 
 ### Native dependency preparation
 
-The Node-only `@taucad/runtime-testing/preparation` entry is the harness for `tau-plugin.json` preparation tests (native dependency charter D27). `createFixtureClosure` pins in-test payloads (`tarGz`, `storedZip`, `wheel`) by their real digests and returns the manifest, the parsed deployment, the canonical registry routes and a writer for the seed layout (`blobs/sha256/<hex>` plus `tau-seed.json`). The seed directory is the fixture registry of every child-process tier: `startPayloadMirror` serves it on `127.0.0.1:0` and records each request, so a surface proves mirror order, no-fallback and redirect refusal from outside the process. `createFakeRegistry` is the in-process transport, `installFetchTripwire` fails any stray global `fetch`, and `readGoldenReceipts`, `compareWithGolden` and `appendGoldenSummary` compare a sealed receipt with the producer's `tau-plugin.golden.json` and write the comparison to `TAU_GOLDEN_SUMMARY_FILE` for a CI summary.
+The Node-only `@taucad/runtime-testing/preparation` entry is the harness for `tau-plugin.json` preparation tests (native dependency charter D27). `createFixtureClosure` pins in-test dependency files (`tarGz`, `storedZip`, `wheel`) by their real digests and returns the manifest, the parsed deployment, the canonical registry routes and a writer for the seed layout (`blobs/sha256/<hex>` plus `tau-seed.json`). The seed directory is the fixture registry of every child-process tier: `startDependencyMirror` serves it on `127.0.0.1:0` and records each request, so a surface proves mirror order, no-fallback and redirect refusal from outside the process. `createFakeRegistry` is the in-process transport, `installFetchTripwire` fails any stray global `fetch`, and `readGoldenReceipts`, `compareWithGolden` and `appendGoldenSummary` compare a sealed receipt with the producer's `tau-plugin.golden.json` and write the comparison to `TAU_GOLDEN_SUMMARY_FILE` for a CI summary.
 
 ```typescript
 import { createPreparationHost } from '@taucad/runtime/preparation/node';
 import { createFakeRegistry, createFixtureClosure, utf8 } from '@taucad/runtime-testing/preparation';
 
 const closure = await createFixtureClosure({
-  payloads: [{ name: 'worker.py', bytes: utf8('print("ready")\n'), format: 'raw', destination: 'worker' }],
+  dependencyFiles: [{ name: 'worker.py', bytes: utf8('print("ready")\n'), format: 'raw', destination: 'worker' }],
 });
 const registry = createFakeRegistry(closure.routes);
 const host = createPreparationHost({ plugins: [closure.plugin()], store: '/tmp/tau-store', fetch: registry.fetch });

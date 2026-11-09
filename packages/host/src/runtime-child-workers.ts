@@ -3,7 +3,7 @@
  *
  * The runtime child runs project code under Node's permission model without `--allow-child-process`, so it cannot
  * start a native kernel's worker itself. It asks its daemon instead, over the IPC channel it was forked with: the
- * daemon checks that the launch comes from a closure sealed in the payload store, verifies it, wraps it in the OS
+ * daemon checks that the launch comes from a closure sealed in the dependency store, verifies it, wraps it in the OS
  * sandbox and spawns it (`runtime-child-supervisor.ts`), then carries the worker's pipes back here. This module is
  * that request and those pipes, shaped as `@taucad/native-process-core`'s `NativeWorkerProcess`, so a child installs
  * it with `installNativeWorkerLauncher` and every native session it runs launches through the daemon.
@@ -213,7 +213,7 @@ export const createRuntimeChildWorkerLauncher = (
  * A native runtime verifier that asks the daemon to re-verify a closure on this child's behalf (D8, ruling X35).
  *
  * A native session re-verifies its runtime when its worker exits before the handshake, so the refusal names the
- * damaged files. A runtime child cannot read the payload store, so this verifier sends the runtime root to the daemon,
+ * damaged files. A runtime child cannot read the dependency store, so this verifier sends the runtime root to the daemon,
  * which verifies it against its receipt and answers with what differs. A daemon that refuses, fails or is gone leaves
  * the bare exit standing.
  *

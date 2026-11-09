@@ -15,7 +15,7 @@ import { createHostAdmissionAuthority, HostAdmissionRefusal } from '@taucad/runt
 import { createKernelSuccess, nonemptyExportFiles } from '@taucad/runtime/kernel';
 import { createPreparationHost, parsePluginDeployment, systemLibraryRefusal } from '@taucad/runtime/preparation/node';
 import type {
-  DependencyPayload,
+  DependencyFile,
   HostIndicators,
   PluginPreparation,
   PreparationHost,
@@ -56,14 +56,14 @@ const linuxHost: HostIndicators = {
 };
 
 const packageName = '@taucad/t19-fixture';
-const payloadBytes = new TextEncoder().encode('print("ready")\n');
-const payloadUrl = 'https://registry.example/payloads/worker.py';
-const payload: DependencyPayload = {
+const dependencyFileBytes = new TextEncoder().encode('print("ready")\n');
+const dependencyFileUrl = 'https://registry.example/files/worker.py';
+const dependencyFile: DependencyFile = {
   name: 'worker.py',
-  integrity: `sha256-${createHash('sha256').update(payloadBytes).digest('base64')}`,
-  byteLength: payloadBytes.byteLength,
+  integrity: `sha256-${createHash('sha256').update(dependencyFileBytes).digest('base64')}`,
+  byteLength: dependencyFileBytes.byteLength,
   format: 'raw',
-  origin: { kind: 'url', urls: [payloadUrl] },
+  origin: { kind: 'url', urls: [dependencyFileUrl] },
   destination: 'worker',
 };
 
@@ -72,7 +72,7 @@ const pluginOf = (seal?: PreparationPlugin['seal']): PreparationPlugin => ({
   deployment: parsePluginDeployment({
     schemaVersion: 1,
     dependencies: {
-      engine: [{ target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' }, payloads: [payload] }],
+      engine: [{ target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' }, files: [dependencyFile] }],
     },
     kernels: { gate: { requires: ['engine'], extensions: ['gate'] } },
   }),
@@ -82,10 +82,10 @@ const pluginOf = (seal?: PreparationPlugin['seal']): PreparationPlugin => ({
 const urlOf = (url: string | URL | Request): string =>
   typeof url === 'string' ? url : 'href' in url ? url.href : url.url;
 
-/** The one payload origin; every other URL is a 404, so nothing reaches the network. */
+/** The one dependency file origin; every other URL is a 404, so nothing reaches the network. */
 const registry = vi.fn(async (url: string | URL | Request): Promise<Response> => {
   const target = urlOf(url);
-  return target === payloadUrl ? new Response(payloadBytes) : new Response(null, { status: 404 });
+  return target === dependencyFileUrl ? new Response(dependencyFileBytes) : new Response(null, { status: 404 });
 });
 
 const json = (body: unknown): Response =>

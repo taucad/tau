@@ -4,7 +4,7 @@
 //
 // <store>/
 //   generation                          rewritten by every seal, repair and GC
-//   blobs/sha256/<hex>                  verified payload bytes, kept after sealing
+//   blobs/sha256/<hex>                  verified dependency file bytes, kept after sealing
 //   blobs/alias/<algorithm>-<hex>       the sha256 key of a blob pinned by sha384 or sha512
 //   closures/sha256/<hex>/receipt.json  the seal: written last, inside staging, before the rename
 //   closures/sha256/<hex>/launch.json   the launch index: the launch set's rows, itself a receipted file
@@ -143,7 +143,7 @@ export const hashFile = async (path: string, signal?: AbortSignal): Promise<stri
  * own key; a sha384 or sha512 pin is looked up in the alias written when its blob was published.
  * @internal
  * @param layout - The store.
- * @param integrity - The payload's pin.
+ * @param integrity - The dependency file's pin.
  * @returns The sha256 hex key, or `undefined` when unknown.
  */
 export const blobKey = async (layout: StoreLayout, integrity: Integrity): Promise<string | undefined> => {
@@ -214,7 +214,7 @@ const isReceipt = (value: unknown): value is ClosureReceipt => {
     typeof receipt.treeIntegrity === 'string' &&
     typeof receipt.tauVersion === 'string' &&
     Array.isArray(receipt.files) &&
-    Array.isArray(receipt.payloads)
+    Array.isArray(receipt.dependencyFiles)
   );
 };
 
@@ -602,8 +602,8 @@ export const collectStoreGarbage = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- receipts are few
     const receipt = await readReceipt(layout, key);
-    for (const payload of receipt?.payloads ?? []) {
-      liveBlobs.add(payload.sha256);
+    for (const dependencyFile of receipt?.dependencyFiles ?? []) {
+      liveBlobs.add(dependencyFile.sha256);
     }
   }
   let blobNames: string[] = [];

@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 /**
  * The `tau_kernel` modules every Python kernel's closure carries beside its own worker, relative to the worker
- * directory. A kernel package pins its generated copy of each as a raw payload of its `tau-plugin.json`.
+ * directory. A kernel package pins its generated copy of each as a raw dependency file of its `tau-plugin.json`.
  * @public
  */
 export const pythonKernelModules = [
@@ -101,7 +101,7 @@ const optionsSchemaOf = (closure: ReturnType<typeof closureSchemaOf>) =>
   z.strictObject({
     /**
      * An explicit closure (tests, producer trees, a desktop-prepared interpreter). Absent, the kernel binds in
-     * `initialize` to the sealed closure the installed resolver, or the payload store, finds.
+     * `initialize` to the sealed closure the installed resolver, or the dependency store, finds.
      */
     closure: closure.optional(),
     /** Milliseconds. Zero waits for completion or cancellation. */

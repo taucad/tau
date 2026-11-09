@@ -9,15 +9,15 @@ import { promisify } from 'node:util';
 
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
 import { validateGlbData } from '@taucad/runtime-testing';
-import { startPayloadMirror } from '@taucad/runtime-testing/preparation';
-import type { PayloadMirror } from '@taucad/runtime-testing/preparation';
+import { startDependencyMirror } from '@taucad/runtime-testing/preparation';
+import type { DependencyMirror } from '@taucad/runtime-testing/preparation';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/tau.mjs');
-/** The payload seed `pnpm nx run build123d:seed` fills; `TAU_PAYLOAD_DIR` points `tau prepare` at it. */
+/** The dependency seed `pnpm nx run build123d:seed` fills; `TAU_DEPENDENCY_DIR` points `tau prepare` at it. */
 const seedDirectory = resolve(repoRoot, 'out/cache/build123d-seed');
 
 const deployment = parsePluginDeployment(
@@ -27,21 +27,21 @@ const deployment = parsePluginDeployment(
 const indicators = detectHostIndicators();
 const selection =
   indicators === undefined ? undefined : selectVariant(deployment.dependencies['engine'] ?? [], indicators);
-/** The mirror path of every payload this host's variant downloads: `blobs/sha256/<hex>`. */
-const payloadPaths = [
+/** The mirror path of every dependency file this host's variant downloads: `blobs/sha256/<hex>`. */
+const dependencyPaths = [
   ...new Set(
     selection?.status === 'selected'
-      ? selection.variant.payloads
-          .filter((payload) => payload.origin.kind === 'url')
+      ? selection.variant.files
+          .filter((dependencyFile) => dependencyFile.origin.kind === 'url')
           .map(
-            (payload) =>
-              `blobs/sha256/${Buffer.from(payload.integrity.slice('sha256-'.length), 'base64').toString('hex')}`,
+            (dependencyFile) =>
+              `blobs/sha256/${Buffer.from(dependencyFile.integrity.slice('sha256-'.length), 'base64').toString('hex')}`,
           )
       : [],
   ),
 ];
 const seedPresent =
-  selection?.status === 'selected' && payloadPaths.every((path) => existsSync(join(seedDirectory, path)));
+  selection?.status === 'selected' && dependencyPaths.every((path) => existsSync(join(seedDirectory, path)));
 
 const model = `from dataclasses import dataclass
 
@@ -81,16 +81,16 @@ const runCli = async (
 /*
  * The W17 oracle on the real binary, from an empty config directory: `tau export main.py` refuses naming
  * `tau prepare build123d`; `tau prepare build123d` from a loopback mirror of the seed under no-fallback asks the
- * mirror for each payload once and never the origin; then the export writes valid geometry.
+ * mirror for each dependency file once and never the origin; then the export writes valid geometry.
  */
 describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepared from a no-fallback mirror)', () => {
   let root: string;
   let environment: NodeJS.ProcessEnv;
-  let mirror: PayloadMirror;
+  let mirror: DependencyMirror;
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'tau-build123d-export-'));
-    // The model's directory is the workspace the kernel mirrors, so the payload store stays outside it.
+    // The model's directory is the workspace the kernel mirrors, so the dependency store stays outside it.
     await mkdir(join(root, 'project'));
     await writeFile(join(root, 'project', 'main.py'), model);
     // A bare PATH and an empty config directory: nothing on the machine supplies Python or a prepared closure.
@@ -102,7 +102,7 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
       NX_PREFER_NODE_STRIP_TYPES: 'true',
     };
     /* eslint-enable @typescript-eslint/naming-convention -- camelCase names resume. */
-    mirror = await startPayloadMirror(seedDirectory);
+    mirror = await startDependencyMirror(seedDirectory);
   });
 
   afterAll(async () => {
@@ -110,7 +110,7 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
     await rm(root, { recursive: true, force: true });
   });
 
-  it('should refuse before preparation, prepare from the mirror fetching each payload once, then export valid geometry', async () => {
+  it('should refuse before preparation, prepare from the mirror fetching each dependency file once, then export valid geometry', async () => {
     const input = join(root, 'project', 'main.py');
     const output = join(root, 'model.glb');
 
@@ -124,8 +124,8 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
     /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
     const prepared = await runCli(['prepare', 'build123d', '--json'], {
       ...environment,
-      TAU_PAYLOAD_MIRROR: mirror.url,
-      TAU_PAYLOAD_MIRROR_NO_FALLBACK: '1',
+      TAU_DEPENDENCY_MIRROR: mirror.url,
+      TAU_DEPENDENCY_MIRROR_NO_FALLBACK: '1',
       /* A loopback mirror must bypass any proxy the runner sets (S7). */
       NO_PROXY: '127.0.0.1,localhost',
       no_proxy: '127.0.0.1,localhost',
@@ -142,10 +142,10 @@ describe.runIf(seedPresent)('tau export of a Build123d model (real binary, prepa
     expect(prepared.exitCode, prepared.stderr).toBe(0);
     expect(JSON.parse(prepared.stdout.trim().split('\n').at(-1)!)).toMatchObject({ status: 'ready' });
     const blobRequests = mirror.requests.filter(({ path }) => path.startsWith('blobs/'));
-    /* Each downloaded payload is asked for once and answered 200. The package's own files (`packagePath` origins)
+    /* Each downloaded dependency file is asked for once and answered 200. The package's own files (`packagePath` origins)
      * are never asked for: they are read from the package (X51, I10). */
     expect(blobRequests.map(({ path, status }) => `${path} ${String(status)}`).toSorted()).toEqual(
-      payloadPaths.map((path) => `${path} 200`).toSorted(),
+      dependencyPaths.map((path) => `${path} 200`).toSorted(),
     );
 
     const exported = await runCli(['export', input, '--ext=glb', `--output=${output}`], environment);

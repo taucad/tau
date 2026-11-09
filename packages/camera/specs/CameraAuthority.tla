@@ -237,8 +237,7 @@ Labels ==
 \* `lastWrittenRevision`): it may write again a revision that was already written, and the camera's
 \* latest source may by then be `viewport` or `bounds`, which keep the pose. The binding must therefore
 \* hold the source of the last pose-changing change itself (`poseBy`); `lastChange` alone does not give
-\* it. The charter's I7 wording, incident-path step 2 and the G6 camera rule need this one exception
-\* recorded.
+\* it. The charter's I7, its incident-path step 2 and the G6 camera rule record this one exception.
 Observe(label) ==
   /\ file.pose # seen
   /\ label \in Labels

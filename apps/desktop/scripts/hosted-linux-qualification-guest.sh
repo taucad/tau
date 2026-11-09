@@ -26,7 +26,13 @@ git checkout --detach "$source_sha"
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 # Use the repository's integrity-pinned pnpm and frozen dependencies. No token is exported during install.
 corepack enable
-pnpm install --frozen-lockfile
+# Postinstall downloads from GitHub releases can answer 504 for minutes; a frozen install is idempotent.
+for attempt in 1 2 3; do
+  pnpm install --frozen-lockfile && break
+  [[ "$attempt" -lt 3 ]] || exit 1
+  echo "pnpm install attempt $attempt failed; retrying" >&2
+  sleep $((attempt * 30))
+done
 # The guest gets the same guard as setup-nx's "Rerun Nx once after a segfault" step: Nx 22.7.1 is sometimes
 # killed by SIGSEGV about two seconds into a command, before it runs anything, and the guest's own install has no
 # such guard (guest (ubuntu) on #1378: `nx run desktop:test-qualification-electron-writer` killed 2 s after start).

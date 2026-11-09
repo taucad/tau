@@ -166,7 +166,7 @@ INCORRECT:
 
 ### Coming-Soon Features
 
-Mark a feature that is not available yet with the coming-soon icon (`ComingSoonIcon`, the lucide `Clock`, muted) in place of the tick, never with a tick, a greyed tick or a text suffix on each line. Any list that uses the icon shows `ComingSoonLegend` once beneath it, with the same icon and its meaning, and each such item carries the screen-reader prefix "Coming soon: ". A feature that exists on a plan is never marked coming soon.
+Mark a feature that is not available yet with the coming-soon icon (`ComingSoonIcon`, the lucide `Circle`: an empty, muted circle) in place of the tick, never with a tick, a greyed tick or a text suffix on each line. Any list that uses the icon shows `ComingSoonLegend` once beneath it, with the same icon and the words "Coming soon" only, and each such item carries the screen-reader prefix "Coming soon: ". A feature that exists on a plan is never marked coming soon.
 
 **Why**: a tick means "you get this"; a list that mixes shipped and unshipped features under one mark misleads a buyer, and an unexplained icon is a puzzle.
 

@@ -71,7 +71,7 @@ describe('PlanCards', () => {
 
     const legend = document.querySelector('[data-slot=coming-soon-legend]');
 
-    expect(legend).toHaveTextContent('Coming soon. In development and not part of any plan yet.');
+    expect(legend).toHaveTextContent('Coming soon');
     expect(legend?.querySelector('[data-slot=coming-soon-icon]')).not.toBeNull();
     expect(document.querySelectorAll('[data-slot=coming-soon-legend]')).toHaveLength(1);
   });

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Check, Clock } from 'lucide-react';
+import { Check, Circle } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Card, CardContent, CardHeader } from '@taucad/ui/components/card';
 import { cn } from '@taucad/ui/utils/cn';
@@ -27,7 +27,7 @@ export const comingSoonMeaning = 'Coming soon';
  * default; the text beside it carries the meaning.
  */
 export function ComingSoonIcon({ className }: { readonly className?: string }): React.JSX.Element {
-  return <Clock data-slot='coming-soon-icon' aria-hidden='true' className={cn('text-muted-foreground', className)} />;
+  return <Circle data-slot='coming-soon-icon' aria-hidden='true' className={cn('text-muted-foreground', className)} />;
 }
 
 /** The key for the coming-soon icon, shown once under any list that uses it. */
@@ -37,7 +37,7 @@ export function ComingSoonLegend({ className }: { readonly className?: string })
       <span className='flex h-lh shrink-0 items-center'>
         <ComingSoonIcon className='size-3.5' />
       </span>
-      <span>{comingSoonMeaning}. In development and not part of any plan yet.</span>
+      <span>{comingSoonMeaning}</span>
     </p>
   );
 }

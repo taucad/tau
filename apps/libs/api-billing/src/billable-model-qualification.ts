@@ -288,6 +288,32 @@ const routes = [
       pricingRevision: '2026-11-09',
     },
   ),
+  route(
+    'morph-glm-5.3-flash',
+    'GLM 5.3 Flash',
+    'openai-completions',
+    1_048_576,
+    1_048_576,
+    rates('.2', '.04', undefined, '.7'),
+    {
+      combinedMaximum: 1_048_576n,
+      outputParameter: 'max_tokens',
+      pricingRevision: '2026-11-09',
+    },
+  ),
+  route(
+    'morph-deepseek-v4.1-flash',
+    'DeepSeek V4.1 Flash',
+    'openai-completions',
+    1_048_576,
+    1_048_576,
+    rates('.12', '.008', undefined, '.8'),
+    {
+      combinedMaximum: 1_048_576n,
+      outputParameter: 'max_tokens',
+      pricingRevision: '2026-11-09',
+    },
+  ),
   route('xai-grok-4.7', 'Grok 4.7', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
   route('xai-grok-4.6', 'Grok 4.6', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
 ] as const;

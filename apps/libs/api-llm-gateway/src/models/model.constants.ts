@@ -1308,7 +1308,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
     },
     'glm-5.3-flash': {
-      enabled: false,
+      enabled: true,
       id: 'morph-glm-5.3-flash',
       providerKind: 'tau-hosted',
       name: 'GLM 5.3 Flash',
@@ -1345,7 +1345,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
     },
     'deepseek-v4.1-flash': {
-      enabled: false,
+      enabled: true,
       id: 'morph-deepseek-v4.1-flash',
       providerKind: 'tau-hosted',
       name: 'DeepSeek V4.1 Flash',

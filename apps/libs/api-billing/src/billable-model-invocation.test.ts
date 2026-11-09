@@ -243,6 +243,8 @@ describe('BillableModelInvocationService', () => {
         ['together-kimi-k3', 'moonshotai/Kimi-K3', 'openai-completions', 'max_completion_tokens'],
         ['together-glm-5.2', 'zai-org/GLM-5.2', 'openai-completions', 'max_completion_tokens'],
         ['morph-kimi-k3.1-pro', 'morph-kimik31', 'openai-completions', 'max_tokens'],
+        ['morph-glm-5.3-flash', 'morph-glm53flash', 'openai-completions', 'max_tokens'],
+        ['morph-deepseek-v4.1-flash', 'morph-dsv41flash', 'openai-completions', 'max_tokens'],
         ['xai-grok-4.7', 'grok-4.7', 'openai-responses', 'max_output_tokens'],
         ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<

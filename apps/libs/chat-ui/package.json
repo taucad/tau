@@ -113,8 +113,7 @@
     "remark-parse": "catalog:",
     "unified": "catalog:",
     "unist-util-visit": "catalog:",
-    "xstate": "catalog:",
-    "zod": "catalog:"
+    "xstate": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
@@ -126,6 +125,7 @@
     "@testing-library/user-event": "^14.6.1",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

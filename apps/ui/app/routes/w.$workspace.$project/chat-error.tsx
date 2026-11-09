@@ -12,6 +12,7 @@ import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/
 import { ENV } from '#environment.config.js';
 import { cardOf } from '#utils/chat-error-card.js';
 import {
+  autoResumableProviderUnavailableCode,
   autoResumableRateLimitCode,
   canAutoResumeModelPending,
   lookUpModelAttempt,
@@ -800,6 +801,11 @@ function ChatErrorBody({
           resumable={resumable}
           title={category === 'billingRecovery' ? 'Finalizing earlier work' : undefined}
           description={parsedError.message}
+          autoResume={
+            parsedError.code === autoResumableProviderUnavailableCode
+              ? autoResumeTarget(currentRunId, currentAttempt)
+              : undefined
+          }
         />
       );
     }

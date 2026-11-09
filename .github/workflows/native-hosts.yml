@@ -96,7 +96,8 @@ jobs:
 
       # Nightly and on dispatch, every row. On a push to `main` the Linux rows always run; the Intel
       # row runs when Build123d, PicoGK or the CLI is affected since the push base, and `native-linux`
-      # lists the `test:native-linux` projects affected since it (every row when there is no base).
+      # lists the `test:native-linux` projects affected since it (every row when there is no base or
+      # the push changes this workflow).
       # On a pull request the Linux rows when it affects a project the rows exercise, the affected
       # `native-linux` projects, and never the Intel row. `tail -1` drops Nx's log lines.
       - name: Select the rows
@@ -105,10 +106,21 @@ jobs:
           PUSH_BASE: ${{ steps.push-base.outputs.sha }}
         run: |
           set -o pipefail
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ -z "$PUSH_BASE" ]; then
-            echo '::notice title=native-hosts plan::No earlier successful push run on main; every row runs.'
-          fi
-          if [ "$GITHUB_EVENT_NAME" != pull_request ] && { [ "$GITHUB_EVENT_NAME" != push ] || [ -z "$PUSH_BASE" ]; }; then
+          every=false
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) ;;
+            push)
+              if [ -z "$PUSH_BASE" ]; then
+                echo '::notice title=native-hosts plan::No earlier successful push run on main; every row runs.'
+                every=true
+              elif ! git diff --quiet "$PUSH_BASE" "$GITHUB_SHA" -- .github/workflows/native-hosts.yml; then
+                echo '::notice title=native-hosts plan::The push changes this workflow; every row runs.'
+                every=true
+              fi
+              ;;
+            *) every=true ;;
+          esac
+          if [ "$every" = true ]; then
             native=$(pnpm nx show projects --with-target test:native-linux --json | tail -1)
             echo "Native linux-x64 rows: $native"
             echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"

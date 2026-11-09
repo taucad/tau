@@ -45,7 +45,8 @@ afterAll(() => {
 });
 
 // `gh` prints the successful push runs' head shas, newest first; `git merge-base --is-ancestor`
-// succeeds for the shas in ANCESTORS; `pnpm nx show projects` records its arguments and answers
+// succeeds for the shas in ANCESTORS; `git diff --quiet` records its arguments and exits DIFF_EXIT
+// (0, no change, by default); `pnpm nx show projects` records its arguments and answers
 // AFFECTED_* for `--affected`, ALL_* otherwise (HOSTS_* for the `--projects` query).
 writeFileSync(
   join(stubs, 'gh'),
@@ -56,7 +57,14 @@ writeFileSync(
 );
 writeFileSync(
   join(stubs, 'git'),
-  '#!/bin/sh\n[ "$1 $2 $4" = "merge-base --is-ancestor $GITHUB_SHA" ] || exit 2\nfor a in $ANCESTORS; do [ "$a" = "$3" ] && exit 0; done\nexit 1\n',
+  [
+    '#!/bin/sh',
+    'if [ "$1 $2" = "diff --quiet" ]; then echo "git $*" >> "$CALLS"; exit "$DIFF_EXIT"; fi',
+    '[ "$1 $2 $4" = "merge-base --is-ancestor $GITHUB_SHA" ] || exit 2',
+    'for a in $ANCESTORS; do [ "$a" = "$3" ] && exit 0; done',
+    'exit 1',
+    '',
+  ].join('\n'),
   { mode: 0o700 },
 );
 writeFileSync(
@@ -97,6 +105,7 @@ const run = (script: string, env: ReadonlyArray<readonly [string, string]>): Run
         ['GITHUB_REPOSITORY', 'taucad/tau'],
         ['GITHUB_SHA', 'head'],
         ['CALLS', calls],
+        ['DIFF_EXIT', '0'],
         ...env,
       ]),
     });
@@ -183,15 +192,40 @@ describe.each([darwinPath, hostsPath])('the push base of %s', (path) => {
 });
 
 describe('native-darwin row selection', () => {
-  const plan = step(darwinPath, 'plan').run!;
-  const select = (event: string, pushBase = '') =>
+  const planStep = step(darwinPath, 'plan');
+  const plan = planStep.run ?? '';
+  const fullRowPaths = planStep.env?.['FULL_ROW_PATHS'] ?? '';
+  const select = (event: string, pushBase = '', diffExit = '0') =>
     run(plan, [
       ['GITHUB_EVENT_NAME', event],
       ['PUSH_BASE', pushBase],
       ['BENCHMARKS', 'false'],
+      ['FULL_ROW_PATHS', fullRowPaths],
+      ['DIFF_EXIT', diffExit],
       ['ALL', '["build123d","cli","picogk"]'],
       ['AFFECTED', '["cli"]'],
     ]);
+
+  it('should run every row when a push changes this workflow or a nuget oracle source', () => {
+    const result = select('push', 'older', '1');
+    expect(result.outputs['projects']).toBe('build123d,cli,picogk');
+    expect(result.calls).toContain(`git diff --quiet older head -- ${fullRowPaths}`);
+    expect(result.calls).not.toContain('--affected');
+  });
+
+  it('should list this workflow and every oracle source outside the native closure as full-row paths', () => {
+    const paths = fullRowPaths.split(' ');
+    expect(paths).toContain(darwinPath);
+    expect(paths).toContain('libs/tau-examples/src/standalone/picogk');
+    const oracle = readFileSync(resolve(root, 'scripts/src/check-standalone-project.ts'), 'utf8');
+    const sources = [
+      'scripts/src/check-standalone-project.ts',
+      ...[...oracle.matchAll(/from '\.\.\/\.\.\/([^']+)'/gu)].map(([, path]) => path ?? ''),
+      ...[...oracle.matchAll(/from '#([\w-]+)\.js'/gu)].map(([, name]) => `scripts/src/${name ?? ''}.ts`),
+    ];
+    // `libs/types` is in the closure of every native project, so Nx affected already covers it.
+    expect(sources.filter((path) => !path.startsWith('libs/types/') && !paths.includes(path))).toEqual([]);
+  });
 
   it('should run only the rows affected since the last successful push run on a push to main', () => {
     const result = select('push', 'older');
@@ -267,6 +301,18 @@ describe('native-hosts row selection', () => {
       intel: 'false',
       'native-linux': '',
     });
+  });
+
+  it('should run every row when a push changes this workflow', () => {
+    const result = run(plan, [
+      ['GITHUB_EVENT_NAME', 'push'],
+      ['PUSH_BASE', 'older'],
+      ['DIFF_EXIT', '1'],
+      ['ALL', '["picogk"]'],
+    ]);
+    expect(result.outputs).toMatchObject({ linux: 'true', intel: 'true', 'native-linux': 'picogk' });
+    expect(result.calls).toContain(`git diff --quiet older head -- ${hostsPath}`);
+    expect(result.calls).not.toContain('--affected');
   });
 
   it('should list the affected native-linux projects on a push to main', () => {

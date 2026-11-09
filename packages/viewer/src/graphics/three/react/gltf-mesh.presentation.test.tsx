@@ -11,9 +11,11 @@ import { useLayoutEffect } from 'react';
 import type { RenderFrame } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import type { Mesh, Object3D } from 'three';
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
@@ -118,13 +120,16 @@ const surfaceMaterial: GlbMaterial = {
   pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0.1, roughnessFactor: 0.8 },
 };
 
-/** One part with a surface and its edges; `indices` changes the topology, `lift` only the positions. */
-function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffer> {
+/**
+ * One part with a surface and its edges. `indices` changes the topology, `lift` only the positions and
+ * `name` only the component the part becomes.
+ */
+function buildGlb({ lift = 0, indices = [0, 1, 2], name = 'Part' } = {}): Uint8Array<ArrayBuffer> {
   const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]);
   return writeGlb({
     nodes: [
       {
-        name: 'Part',
+        name,
         primitives: [
           {
             mode: 4,
@@ -138,6 +143,44 @@ function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffe
       },
     ],
   });
+}
+
+function findSurface(scene: Object3D): Mesh {
+  let found: Mesh | undefined;
+  scene.traverse((object) => {
+    if (!found && object.type === 'Mesh') {
+      found = object as Mesh;
+    }
+  });
+  if (!found) {
+    throw new Error('Expected a surface mesh.');
+  }
+  return found;
+}
+
+/** Spy on the dispose of the first surface geometry `parseAsync` produced, the one on screen. */
+async function spyOnPresentedGeometryDispose(
+  parseAsync: MockInstance<typeof GLTFLoader.prototype.parseAsync>,
+): Promise<MockInstance<() => void>> {
+  const result = parseAsync.mock.results[0];
+  if (result?.type !== 'return') {
+    throw new Error('Expected a parsed presentation.');
+  }
+  const gltf = await result.value;
+  return vi.spyOn(findSurface(gltf.scene).geometry, 'dispose');
+}
+
+/** Whether capture of `bytes` has been admitted; read `admitted` after flushing. */
+function trackAdmission(bytes: Uint8Array<ArrayBuffer>): {
+  readonly state: { admitted: boolean };
+  readonly done: Promise<void>;
+} {
+  const state = { admitted: false };
+  const done = (async (): Promise<void> => {
+    await awaitGeometryPresentation(bytes, new AbortController().signal);
+    state.admitted = true;
+  })();
+  return { state, done };
 }
 
 type SentEvent = {
@@ -385,6 +428,30 @@ describe('GltfMesh presentation protocol', () => {
     });
   });
 
+  describe('in-place eligibility', () => {
+    it('should parse again when the same geometry belongs to a different component', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildGlb({ name: 'Renamed' })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+      renderFrame();
+
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      expect(measuredTelemetry().at(-1)?.durations).not.toHaveProperty('inPlace');
+    });
+  });
+
   describe('superseded revisions', () => {
     it('should start every requested revision but finish only the newest while a parse is queued', async () => {
       const original = GLTFLoader.prototype.parseAsync;
@@ -436,6 +503,8 @@ describe('GltfMesh presentation protocol', () => {
       await waitForCommits(['a']);
       renderFrame();
       const committed = view.container.querySelector('primitive');
+      expect(committed).not.toBeNull();
+      const disposeGeometry = await spyOnPresentedGeometryDispose(parseAsync);
       const before = trace().length;
       parseAsync.mockRejectedValueOnce(new Error('invalid replacement'));
 
@@ -467,6 +536,18 @@ describe('GltfMesh presentation protocol', () => {
         parsesStarted: 2,
       });
       expect(view.container.querySelector('primitive')).toBe(committed);
+      expect(disposeGeometry).not.toHaveBeenCalled();
+
+      // The committed bundle is still live: the next same-topology result is written into it in place.
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 3 })} geometryHash='c' presentationRevision={3} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'c']);
+      renderFrame();
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      expect(measuredTelemetry().at(-1)).toMatchObject({ revision: 3, key: 'c', outcome: 'presented' });
+      expect(measuredTelemetry().at(-1)?.durations).toHaveProperty('inPlace');
+      expect(disposeGeometry).not.toHaveBeenCalled();
     });
   });
 
@@ -495,11 +576,13 @@ describe('GltfMesh presentation protocol', () => {
       vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
         .mockResolvedValueOnce([])
         .mockRejectedValueOnce(new Error('topology failed'));
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
       const view = render(
         <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
       );
       await waitForCommits(['a']);
       renderFrame();
+      const disposeGeometry = await spyOnPresentedGeometryDispose(parseAsync);
       const before = trace().length;
 
       // An armed section view refuses the in-place path, so equal topology still parses.
@@ -518,6 +601,94 @@ describe('GltfMesh presentation protocol', () => {
         'gltfPresentationMeasured 2:b failed',
       ]);
       expect(committedKeys()).toEqual(['a']);
+      expect(disposeGeometry).not.toHaveBeenCalled();
+    });
+
+    it('should send only analysis-ready when a section view is armed after a display-ready commit', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+      const source = buildGlb();
+      const view = render(
+        <GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      renderFrame();
+      const before = trace().length;
+
+      mocks.sectionView = { isActive: true };
+      view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitFor(() => {
+        expect(trace(before)).toContain('gltfAnalysisReady 1:a');
+      });
+      await act(async () => undefined);
+      renderFrame();
+
+      // No new preparation and no second telemetry record: analysis lands on the presentation already on screen.
+      expect(trace(before)).toEqual(['gltfAnalysisReady 1:a']);
+
+      // A scene that carries section topology refuses the in-place path even once the section view is off.
+      mocks.sectionView = { isActive: false };
+      const afterAnalysis = trace().length;
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'b']);
+      renderFrame();
+      expect(trace(afterAnalysis)).toEqual([
+        'setHoveredModelComponent unit:a none',
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b display-ready',
+        'gltfPresentationCommitted 2:b unit:b',
+        'gltfPresentationMeasured 2:b presented',
+      ]);
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      expect(measuredTelemetry().at(-1)?.durations).toHaveProperty('parse');
+      expect(measuredTelemetry().at(-1)?.durations).not.toHaveProperty('inPlace');
+    });
+
+    it('should parse an armed replacement while analysis of the unarmed scene on screen is still running', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const analysing =
+        Promise.withResolvers<Awaited<ReturnType<typeof sectionTopology.registerGltfSectionSurfaceSources>>>();
+      const analyze = vi
+        .spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
+        .mockImplementationOnce(async () => analysing.promise)
+        .mockResolvedValue([]);
+      const source = buildGlb();
+      const view = render(
+        <GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      mocks.sectionView = { isActive: true };
+      view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitFor(() => {
+        expect(analyze).toHaveBeenCalledOnce();
+      });
+      const before = trace().length;
+
+      // The scene on screen has no section topology yet; the armed view alone refuses the in-place path.
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitFor(() => {
+        expect(trace(before)).toContain('gltfDisplayReady 2:b analysis-ready');
+      });
+      await act(async () => undefined);
+      // The replacement's analysis queues behind the one already running, so it cannot commit yet.
+      expect(committedKeys()).toEqual(['a']);
+      analysing.resolve([]);
+      await waitForCommits(['a', 'b']);
+
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      // The queued analysis of `a` still lands, and is reported, after `b` has been prepared.
+      expect(trace(before).slice(0, 6)).toEqual([
+        'setHoveredModelComponent unit:a none',
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b analysis-ready',
+        'gltfAnalysisReady 1:a',
+        'gltfAnalysisReady 2:b',
+        'gltfPresentationCommitted 2:b unit:b',
+      ]);
     });
 
     it('should send cancelled telemetry, then clear hover, when the viewer unmounts during analysis', async () => {
@@ -577,6 +748,65 @@ describe('GltfMesh presentation protocol', () => {
       const opportunities = rendererSpans().filter((span) => span.name === 'renderer.presentation-opportunity');
       expect(opportunities).toHaveLength(1);
       expect(opportunities[0]?.detail).toMatchObject({ key: 'a', revision: 1, backend: 'webgl' });
+    });
+  });
+
+  describe('capture admission release', () => {
+    it('should admit capture of bytes whose parse fails, without a frame', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockRejectedValueOnce(new Error('invalid model'));
+      const source = buildGlb();
+      render(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      const admission = trackAdmission(source);
+
+      await waitFor(() => {
+        expect(trace()).toContain('gltfPresentationFailed 1:a');
+      });
+      await act(async () => undefined);
+
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
+    });
+
+    it('should admit capture of superseded bytes while their parse is still queued', async () => {
+      const original = GLTFLoader.prototype.parseAsync;
+      const gate = Promise.withResolvers<void>();
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockImplementationOnce(async (data, path) => {
+        await gate.promise;
+        return original.call(new GLTFLoader(), data, path);
+      });
+      const first = buildGlb();
+      const view = render(<GltfMesh gltfFile={first} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      const admission = trackAdmission(first);
+      await waitFor(() => {
+        expect(parseAsync).toHaveBeenCalledOnce();
+      });
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 1 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await act(async () => undefined);
+
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
+      gate.resolve();
+      await waitForCommits(['b']);
+    });
+
+    it('should admit capture when the viewer unmounts before the first frame', async () => {
+      const source = buildGlb();
+      const view = render(
+        <GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      const admission = trackAdmission(source);
+      await waitForCommits(['a']);
+      expect(admission.state.admitted).toBe(false);
+
+      view.unmount();
+      await act(async () => undefined);
+
+      expect(admission.state.admitted).toBe(true);
+      await admission.done;
     });
   });
 

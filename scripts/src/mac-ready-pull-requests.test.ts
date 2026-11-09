@@ -66,7 +66,9 @@ describe('macOS jobs on draft pull requests', () => {
   it('should skip the DMG window preview on a draft and keep only the Linux and Windows assembly legs', () => {
     const { jobs } = workflow('.github/workflows/desktop-packaging.yml');
     expect(jobs['dmg-window-preview']?.['runs-on']).toBe('macos-26');
-    expect(jobs['dmg-window-preview']?.if).toBe(expression('!github.event.pull_request.draft'));
+    expect(jobs['dmg-window-preview']?.if).toBe(
+      expression("!cancelled() && needs.select.outputs.run != 'false' && !github.event.pull_request.draft"),
+    );
     expect(draftBranches(jobs['assembly']?.strategy?.matrix?.['os'])).toEqual({
       draft: ['ubuntu-24.04', 'windows-2025'],
       ready: ['ubuntu-24.04', 'windows-2025', 'macos-15'],

@@ -6,7 +6,7 @@ import type { ScheduledRun, ScheduledWorkflow } from '#nightly-watchdog.js';
 
 const now = new Date('2026-11-08T18:30:00Z');
 const daily: ScheduledWorkflow = { file: 'e2e-nightly.yml', name: 'E2E nightly', crons: ['23 13 * * *'] };
-const weekly: ScheduledWorkflow = { file: 'docs-links.yml', name: 'Docs links', crons: ['17 4 * * 1'] };
+const weekly: ScheduledWorkflow = { file: 'pin-freshness.yml', name: 'Pin freshness', crons: ['17 6 * * 1'] };
 const run = (createdAt: string, status: string, conclusion: string | undefined): ScheduledRun => ({
   status,
   conclusion,
@@ -51,7 +51,7 @@ describe('nightly watchdog', () => {
     expect(payload.alert_uid).toBe('tau-nightly-2026-11-08');
     expect(payload.title).toBe('2 Tau nightly workflows need attention');
     expect(payload.message).toContain('E2E nightly (e2e-nightly.yml): failed, failure');
-    expect(payload.message).toContain('Docs links (docs-links.yml): missing');
+    expect(payload.message).toContain('Pin freshness (pin-freshness.yml): missing');
   });
 
   it('should find every scheduled workflow in the repository, including itself', async () => {

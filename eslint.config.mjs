@@ -277,10 +277,6 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
 const moduleBoundaryOptions = {
-  // Bambu's unpublished hardware qualifier uses host camera capture; its shipped
-  // plugin and browser-safe settings subpath do not import the host.
-  // ponytail: exclude this development-only edge; split the qualifier project if it gains runtime consumers.
-  ignoredCircularDependencies: [['bambu', 'host']],
   allowCircularSelfDependency: true,
   /*
    * The Quick Look extensions are a nested app project (`desktop-quick-look`,
@@ -669,21 +665,6 @@ const config = [
     plugins: { '@nx': nxEslintPlugin },
     rules: {
       '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
-    },
-  },
-
-  {
-    /* The unpublished X1C qualifier imports the host for hardware-only capture. Nx checks the closing
-     * path (host → agent-tools → bambu), not that import edge, so scope the documented exception here. */
-    files: ['packages/plugins/bambu/scripts/qualify-x1c.mts'],
-    rules: {
-      '@nx/enforce-module-boundaries': [
-        'error',
-        {
-          ...moduleBoundaryOptions,
-          ignoredCircularDependencies: [...moduleBoundaryOptions.ignoredCircularDependencies, ['host', 'agent-tools']],
-        },
-      ],
     },
   },
 

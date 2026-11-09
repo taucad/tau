@@ -49,6 +49,12 @@ certificate trust, sockets, and device lifetime; importing this package does not
 | `bambuA1MiniManifest`         | manifest        | A1 mini hardware, FFF process, actions, jobs and qualification profiles       |
 | `bambuSettingsConfiguration`  | configuration   | sparse project preferences (plate, levelling, slots); also at `./settings`    |
 
+LAN endpoint helpers live at `@taucad/bambu/lan`, for a host that drives a printer outside the machine runtime (the
+supervised qualification does): `bambuServicePort(manifest, 'mqtt' | 'camera')` and `bambuFtpsPort` (the ports the
+provider connects to), `bambuCandidateAddress(candidate)` (a network candidate's address) and
+`parseBambuDiscoveryDatagram(input)` (one untrusted discovery advertisement to a candidate). The provider reads the same
+functions.
+
 The `default` preset retains the X1C registration (`machines.default`). Select the `a1Mini` preset to register `machines.a1Mini`, or compose both directly:
 
 ```typescript
@@ -141,7 +147,7 @@ This executes the same eight exports and source-hash update; it does not bypass 
 
 ## Supervised X1C qualification
 
-The repository-only `bambu:qualify-x1c` target runs the supervised hardware stages. Each stage needs consent for that
+The repository-only `host:qualify-x1c` target (`packages/host/scripts/qualify-x1c.mts`, which drives this provider through the real host launcher) runs the supervised hardware stages. Each stage needs consent for that
 invocation: `TAU_X1C_STAGE_CONSENT=read-only` for the discovery, certificate, observation, camera and live-view stages,
 which never upload, start or control a print; `TAU_X1C_STAGE_CONSENT=upload-and-start` for `print-cube`, which uploads
 the pinned 25 mm PETG cube (`out/hardware/bambu-x1c`), starts it once from AMS slot A1 on firmware 01.12.00.00 and follows
@@ -157,7 +163,7 @@ match, and exclusively creates the mode-`0600` config without printing its endpo
 TAU_X1C_STAGE_CONSENT=read-only \
 TAU_X1C_APPROVED_MQTT_PIN=sha256:<approved-fingerprint> \
 TAU_X1C_APPROVED_CAMERA_PIN=sha256:<approved-fingerprint> \
-pnpm nx run bambu:qualify-x1c -- --stage=prepare-read-only
+pnpm nx run host:qualify-x1c -- --stage=prepare-read-only
 ```
 
 Keep the following JSON outside the repository at an absolute path with mode `0600`. Do not add an access code to it.
@@ -193,23 +199,23 @@ code.
 
 ```bash
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
-TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=probe-read-only
+TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=probe-read-only
 
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
-TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=camera-read-only
+TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=camera-read-only
 
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
-TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=serve-read-only
+TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=serve-read-only
 
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
-TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=read-only
+TAU_X1C_STAGE_CONSENT=read-only pnpm nx run host:qualify-x1c -- --stage=read-only
 ```
 
 With the printer idle, the plate clear, Developer Mode on and PETG in AMS slot A1, the operator may then print the cube:
 
 ```bash
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
-TAU_X1C_STAGE_CONSENT=upload-and-start pnpm nx run bambu:qualify-x1c -- --stage=print-cube
+TAU_X1C_STAGE_CONSENT=upload-and-start pnpm nx run host:qualify-x1c -- --stage=print-cube
 ```
 
 ## Versioning and stability

@@ -246,7 +246,7 @@ describe('billable model request contract', () => {
                 {
                   type: 'text',
                   text: 'fixture',
-                  cache_control: { type: 'ephemeral', ttl: '1h' },
+                  cache_control: { type: 'ephemeral', ttl: '24h' },
                 },
               ],
             },
@@ -320,6 +320,40 @@ describe('billable model request contract', () => {
         'openai-responses',
       ).success,
     ).toBe(true);
+  });
+
+  /*
+   * A Responses conversation routes to one OpenAI or xAI server by a hashed key so its
+   * prefix cache is found again. The key is bounded at OpenAI's documented 64 characters,
+   * and the retention controls stay refused because no route prices a longer lifetime.
+   */
+  it('admits a bounded Responses prompt cache key and still refuses the retention controls', () => {
+    const base = {
+      model: 'gpt-5.6-luna',
+      stream: true,
+      store: false,
+      max_output_tokens: 64,
+      input: 'fixture',
+    };
+    const parse = (extra: Record<string, unknown>): boolean =>
+      safeParseBillableModelRequest({ ...base, ...extra }, 'openai-responses').success;
+    expect(parse({ prompt_cache_key: 'a'.repeat(32) })).toBe(true);
+    expect(parse({ prompt_cache_key: 'a'.repeat(64) })).toBe(true);
+    expect(parse({ prompt_cache_key: 'a'.repeat(65) })).toBe(false);
+    expect(parse({ prompt_cache_key: '' })).toBe(false);
+    expect(parse({ prompt_cache_key: 'a'.repeat(32), prompt_cache_retention: '24h' })).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        {
+          model: 'gemini-3.5-flash',
+          stream: true,
+          max_completion_tokens: 16,
+          messages: [{ role: 'user', content: 'fixture' }],
+          prompt_cache_key: 'a'.repeat(32),
+        },
+        'openai-completions',
+      ).success,
+    ).toBe(false);
   });
 
   it('admits only the catalog-owned Anthropic and Gemini reasoning controls', () => {
@@ -629,7 +663,7 @@ describe('document block admission', () => {
    * Refusing the marker would refuse the turn; dropping it would forfeit the
    * cache on the most expensive turns there are.
    */
-  it('admits the cache breakpoint on an Anthropic document block, and only a well-formed one', () => {
+  it('admits the cache breakpoint on an Anthropic document block at either documented lifetime, and only a well-formed one', () => {
     expect(
       safeParseBillableModelRequest(
         anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral' } }),
@@ -639,6 +673,12 @@ describe('document block admission', () => {
     expect(
       safeParseBillableModelRequest(
         anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral', ttl: '1h' } }),
+        'anthropic',
+      ).success,
+    ).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral', ttl: '24h' } }),
         'anthropic',
       ).success,
     ).toBe(false);

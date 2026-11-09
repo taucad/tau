@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0 (2026-11-09)
+
+### Features
+
+- feat(agent-host): Send each model step's turn step and gap as gateway headers (#1675) (cd28b4d93)
+
+### Fixes
+
+- fix(api-llm-gateway): Disable the Morph DeepSeek V4.1 Flash model for now (#1687) (6d7bd925b)
+
+### Other changes
+
+- refactor(ui): Cut the chat-ui app library from the chat domain (UI wave B) (#1678) (9ff51774b)
+- refactor(api): Extract api-git-core and api-git-mirror libraries (#1682) (9c9f1c241)
+- refactor(runtime): Rename runtime payloads to dependency files (#1673) (007c14ee7)
+
 ## 0.6.0 (2026-11-09)
 
 ### Features

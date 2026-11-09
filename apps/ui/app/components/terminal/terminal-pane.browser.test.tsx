@@ -6,6 +6,7 @@ import { page, userEvent } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopTerminalBridge, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
+import { readTerminalTheme } from '#components/terminal/terminal-theme.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 
 const render = (ui: React.ReactNode) => renderReact(ui, { wrapper: KeyboardProvider });
@@ -178,4 +179,24 @@ it('keeps a narrow Terminal headerless with one caret and keyboard access action
   expect(screen.queryByRole('button', { name: 'Allow and restart' })).toBeNull();
   await audit(container);
   await shot('08-narrow-request-access', 'light');
+});
+
+/* The sRGB the tokens resolve to, which AurigaX needs as hex. */
+/* oxlint-disable tau-lint/no-hardcoded-color -- expected renderer theme values, not styling. */
+const fallbackForeground = '#ffffff';
+it.each([
+  ['light', '#ffffff', '#0d0d0d'],
+  ['dark', '#141414', '#eeeeee'],
+])('resolves the editor surface tokens for the Terminal (%s)', (theme, background, foreground) => {
+  /* oxlint-enable tau-lint/no-hardcoded-color */
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  const { container } = render(<div />);
+  const host = container.firstElementChild as HTMLElement;
+  const resolved = readTerminalTheme(host);
+  /* The editor paints `--background` and `--foreground`; the Terminal must draw the same sRGB, not the fallbacks. */
+  expect(resolved.background).toBe(background);
+  expect(resolved.foreground).toBe(foreground);
+  expect(resolved.red).toMatch(/^#[\da-f]{6}$/u);
+  expect(resolved.red).not.toBe(fallbackForeground);
+  expect(host.childElementCount).toBe(0);
 });

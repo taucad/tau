@@ -616,7 +616,13 @@ export function TerminalPane({
             />
           ) : null}
           <div className='relative min-h-0 flex-1'>
-            <div ref={hostRef} data-slot='terminal' className='absolute inset-0 overflow-hidden bg-background p-1' />
+            {/* The editor's surface fills the pane; the grid sits at the 12px text inset of the editor's breadcrumbs and
+             * the notice above, and the part of a cell left over at the right and bottom is the same surface. */}
+            <div
+              ref={hostRef}
+              data-slot='terminal'
+              className='absolute inset-0 overflow-hidden bg-background px-3 py-2'
+            />
             {state.phase === 'running' && findTerm !== undefined ? (
               <Input
                 ref={actionInputRef}

@@ -58,14 +58,30 @@ if [[ "$mode" == clean-host ]]; then
   sudo passwd --lock "$consumer" >/dev/null
   consumer_uid="$(id -u "$consumer")"
   sudo loginctl enable-linger "$consumer"
-  for _attempt in $(seq 1 60); do [[ -S "/run/user/$consumer_uid/bus" ]] && break; sleep 1; done
-  [[ -S "/run/user/$consumer_uid/bus" ]] || { printf 'Consumer session bus did not start\n' >&2; exit 1; }
+  # Lingering requests the user manager; start it and its socket-activated bus explicitly, as a graphical login would.
+  sudo systemctl start "user@$consumer_uid.service"
+  sudo -n -u "$consumer" env -i "XDG_RUNTIME_DIR=/run/user/$consumer_uid" \
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$consumer_uid/systemd/private" systemctl --user start dbus.socket || true
+  # /run/user/<uid> is 0700 and owned by the consumer, so this administrator can only see the socket through sudo;
+  # a plain test from this account was always false (the actual cause of run 42563902208's refusal).
+  for _attempt in $(seq 1 120); do sudo test -S "/run/user/$consumer_uid/bus" && break; sleep 1; done
+  if ! sudo test -S "/run/user/$consumer_uid/bus"; then
+    printf 'Consumer session bus did not start\n' >&2
+    # Unit states and the user manager's own log only; the consumer has no credentials or profile yet.
+    loginctl show-user "$consumer" --property=State --property=Linger --property=RuntimePath || true
+    systemctl show "user@$consumer_uid.service" --property=ActiveState,SubState,Result || true
+    sudo -n -u "$consumer" env -i "XDG_RUNTIME_DIR=/run/user/$consumer_uid" systemctl --user show dbus.socket \
+      --property=ActiveState,SubState,Result,Listen || true
+    sudo ls -la "/run/user/$consumer_uid" || true
+    sudo journalctl --no-pager -o short-iso -u "user@$consumer_uid.service" | tail -n 30 || true
+    exit 1
+  fi
   # Same rights a desktop user has on their own display, from the session's cookie.
   xauth -f "$HOME/.Xauthority" nlist :0 |
     sudo -n -u "$consumer" env -i "HOME=/home/$consumer" xauth -f "/home/$consumer/.Xauthority" nmerge -
   # Search (x) on this home and read on the verified Node runtime. The public harness checkout is world-readable under
   # umask 022, so the consumer reads it as any local user could; the job's environment file (the only credential) is
-  # 0600, and the run's output directory is made owner-only below. Nothing grants the consumer a write or admin path.
+  # 0600, as are the run's private TLS keys. Nothing grants the consumer a write or admin path.
   sudo setfacl -m "u:$consumer:x" "$HOME"
   sudo setfacl -R -m "u:$consumer:rX" "$HOME/node"
   # The consumer's download browser, installed once outside every home and read-only to it.
@@ -98,8 +114,8 @@ subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=mod
 # The harness now creates both parents itself; these stay as a guest-side belt
 # and braces, and neither touches the leaves it creates with recursive=false.
 (root / 'out').mkdir(exist_ok=True)
-# Run outputs stay with this account; a clean-host consumer has no reason to read them.
-(root / 'out').chmod(0o700)
+# Run outputs keep the umask's 0755: a clean-host consumer must read the run's public mirror CA there to trust it in
+# its own NSS database. Private TLS keys and the trust journal are written 0600 by the harness.
 (pathlib.Path.home() / '.config').mkdir(exist_ok=True)
 # Exercise the same native ZIP listing/extraction used by authenticated artifact admission.
 with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:

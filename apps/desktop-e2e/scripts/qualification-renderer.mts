@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 import type { Page } from 'playwright';
 import { z } from 'zod';
 /* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns its attach failure evidence. */
-import { recordCdpAttachFailure } from './qualification-cdp-diagnostics.mjs';
+import { recordCdpAttachFailure, snapshotTargets } from './qualification-cdp-diagnostics.mjs';
 /* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns the bounded native close driver. */
 import { requestQualificationQuit } from './qualification-quit.mjs';
 
@@ -147,6 +147,7 @@ const main = async (): Promise<void> => {
   // A freshly reinstalled app can publish its debugging port before its browser answers CDP target discovery: run
   // 41745619222 macos-dmg-arm64 connected the reinstall-ui websocket and then hit the default 30s connect timeout.
   // Allow the same two minutes the harness already gives the app renderer to appear; it accepts nothing new.
+  const beforeAttach = await snapshotTargets(port);
   const attach = chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 });
   const browser = await attach.catch(async (error: unknown) => {
     const expectedPid = Number(process.env['TAU_QUALIFICATION_EXPECTED_PID']);
@@ -154,6 +155,8 @@ const main = async (): Promise<void> => {
       port,
       pid: Number.isSafeInteger(expectedPid) && expectedPid > 0 ? expectedPid : undefined,
       output,
+      profile,
+      beforeAttach,
     });
     throw error;
   });

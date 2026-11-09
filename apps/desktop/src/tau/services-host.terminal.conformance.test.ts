@@ -8,9 +8,9 @@
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only the noncacheable Nx target sets. `TAU_SHELL_CONFORMANCE_ROW` names
  * the row, `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes and, on Linux, `TAU_SHELL_CONFORMANCE_BWRAP`
- * the installed, profiled bubblewrap. On macOS the provider runs with its default, so the PTY rows are recorded
- * `unverified` until the operator's own-pty run (ruling 2026-10-24T20:45Z); agents never run that probe. macOS runs
- * the probe (pipes) and the refusal rows.
+ * the installed, profiled bubblewrap. The provider is configured as the desktop ships it (`services-host-shell.ts`):
+ * on macOS that is the own-pty Seatbelt rule, so the PTY rows run on MAC-A and MAC-X too (operator ruling
+ * 2026-11-09), and R03 proves a provider without that rule still refuses the Terminal.
  */
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,18 +31,18 @@ import type { ServicesHost, UtilityPort } from '#tau/services-host.impl.js';
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
 const row = process.env['TAU_SHELL_CONFORMANCE_ROW'] ?? 'unnamed';
 const bwrapPath = process.env['TAU_SHELL_CONFORMANCE_BWRAP'] ?? '/usr/bin/bwrap';
-const ptyRows = process.platform === 'linux';
+const ptyRows = process.platform === 'linux' || process.platform === 'darwin';
 
 type RowResult = Readonly<{ id: string; title: string; status: 'pass' | 'fail' | 'unverified'; detail?: string }>;
 const results: RowResult[] = [];
 
 type RowSpec = Readonly<{ id: string; title: string; pty: boolean }>;
 
-/** One row; a PTY row is recorded `unverified` where the PTY is not validated yet (macOS). */
+/** One row; a PTY row is recorded `unverified` on a platform that is not a row of this suite. */
 const define = ({ id, title, pty }: RowSpec, body: () => Promise<void>): void => {
   if (pty && !ptyRows) {
     it.skip(`${id}: ${title} (unverified on ${process.platform})`, () => undefined);
-    results.push({ id, title, status: 'unverified', detail: 'macOS PTY awaits the operator own-pty run' });
+    results.push({ id, title, status: 'unverified', detail: `no PTY row on ${process.platform}` });
     return;
   }
   it(`${id}: ${title}`, { timeout: 90_000 }, async () => {
@@ -81,7 +81,7 @@ let host: ServicesHost;
 let windows = 0;
 
 /** One pane: the renderer's end of a `terminal` port, acknowledging what it reads as a painted pane would. */
-const openPane = (projectRoot = project) => {
+const openPane = (projectRoot = project, through: ServicesHost = host) => {
   const channel = new MessageChannel();
   const frames: TerminalHostFrame[] = [];
   let text = '';
@@ -123,7 +123,7 @@ const openPane = (projectRoot = project) => {
     },
   } as unknown as UtilityPort;
   windows += 1;
-  host.handleMessage({
+  through.handleMessage({
     data: { type: 'concern', concern: 'terminal', context: { projectRoot, windowId: String(windows) } },
     ports: [utilityPort],
   });
@@ -215,6 +215,8 @@ describe.runIf(enabled)('desktop terminal conformance', () => {
         bwrapPath,
         home,
         custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- the provider's own option name.
+        ...(process.platform === 'darwin' ? { macOSTerminal: true } : {}),
       }),
       checkouts: new Map(),
       appDataRoots: [appData],
@@ -281,17 +283,32 @@ describe.runIf(enabled)('desktop terminal conformance', () => {
     expect(pane.of('refused')[0]?.code).toBe('invalid-frame');
   });
 
-  if (!ptyRows) {
-    anyRow(
-      'R03',
-      'macOS without the operator-validated own-pty rule refuses the Terminal as pty-unavailable',
-      async () => {
-        const pane = openPane();
+  if (process.platform === 'darwin') {
+    anyRow('R03', 'a macOS provider without the own-pty rule refuses the Terminal as pty-unavailable', async () => {
+      const ruleless = await probeHostShell({
+        provider: createSandboxShellProvider({
+          home,
+          custody: { directory: join(appData, 'shell-custody-ruleless'), sessionDirectory: sessions },
+        }),
+        checkouts: new Map(),
+        appDataRoots: [appData],
+        projectRoots: () => [project, other],
+        sessionDirectory: sessions,
+        home,
+      });
+      const refusing = createServicesHost({ terminalShell: async () => ruleless, log: () => undefined });
+      try {
+        refusing.handleMessage({ data: { type: 'allowRoots', roots: [project, other] }, ports: [] });
+        const pane = openPane(project, refusing);
         pane.send({ type: 'open', size: { columns: 80, rows: 24 } });
         await pane.until(() => pane.of('refused').length > 0, 'refused');
         expect(pane.of('refused')[0]?.code).toBe('pty-unavailable');
-      },
-    );
+        expect(pane.of('opened')).toEqual([]);
+        pane.disconnect();
+      } finally {
+        refusing.dispose();
+      }
+    });
   }
 
   conformance('T01', 'the shell reads a TTY and starts in the project', async () => {

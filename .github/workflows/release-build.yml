@@ -658,9 +658,14 @@ jobs:
   # If-None-Match and never replaced. The upload credential (go-live SEC-9) lives
   # on the `payloads` environment; until the operator sets it this job only
   # verifies the layer and says why it skipped.
+  # Production channel only: the `payloads` credential writes the production public bucket,
+  # which also holds user content, so staging tags (and the nightly staging cron) must not
+  # read it. Staging still gets the layer from its digest-named GitHub Release. Interim
+  # until the per-environment payload buckets exist (Brain incident
+  # 2026-11-09-r2-shared-bucket-blast-radius, blueprint phase 0).
   picogk-layer-mirror:
     needs: [resolve, desktop-macos, picogk-layer-linux]
-    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}
+    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' && needs.resolve.outputs.channel == 'production' }}
     name: Mirror the Tau PicoGK ${{ matrix.target }} layer to cdn.tau.new
     runs-on: ubuntu-24.04
     timeout-minutes: 30

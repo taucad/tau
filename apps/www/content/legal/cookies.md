@@ -25,7 +25,7 @@ Interface choices (sidebar state, kernel, model, editor and display preferences)
 
 On the web, Tau asks on your first visit whether to allow analytics. If you accept, PostHog Cloud records page views, browser and device information, feature use, your account identity when you are signed in, error events and session replays, and stores its own first-party cookies and local storage. Replays mask all text and inputs. If your choice is unknown, declined or withdrawn, PostHog is not started and nothing is sent.
 
-The desktop app sends the same analytics, without session replay, unless you turn it off; it tells you this when you first open it, and keeps its analytics identity in the app's local storage rather than in a cookie.
+The desktop app sends the same analytics, without session replay, unless you turn it off in **Settings → Data controls**, and keeps its analytics identity in the app's local storage rather than in a cookie.
 
 PostHog receives this data; see the [PostHog privacy policy](https://posthog.com/privacy).
 

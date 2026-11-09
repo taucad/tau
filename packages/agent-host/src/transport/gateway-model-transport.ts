@@ -754,14 +754,25 @@ const piModelFor = (options: {
           ? { compat: { forceAdaptiveThinking: true } }
           : {}),
       }
-    : {
-        ...common,
-        // Both OpenAI codecs share this base: the bundled SDK appends
-        // `/chat/completions` or `/responses` to it.
-        api: isOpenAiResponsesProviderKind(options.request.providerKind) ? 'openai-responses' : 'openai-completions',
-        baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
-        ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
-      };
+    : isOpenAiResponsesProviderKind(options.request.providerKind)
+      ? {
+          ...common,
+          // Both OpenAI codecs share this base: the bundled SDK appends
+          // `/chat/completions` or `/responses` to it.
+          api: 'openai-responses',
+          baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+        }
+      : {
+          ...common,
+          api: 'openai-completions',
+          baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+          ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
+          // Pi detects `provider: 'together'` and switches to its Together thinking
+          // format, which always adds `reasoning: { enabled }`. Tau never forwards a
+          // reasoning effort on this wire, and the gateway's strict completions
+          // boundary refuses that key, so every Together turn was a 400.
+          ...(options.request.providerKind === 'together' ? { compat: { thinkingFormat: 'openai' } } : {}),
+        };
 };
 
 /**

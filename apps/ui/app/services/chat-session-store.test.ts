@@ -17,7 +17,7 @@ import { createAgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-transport';
 import { pathToFileURL } from 'node:url';
-import { createActor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
 import { errorCategory } from '@taucad/types/constants';
 import type * as AiSdk from 'ai';
@@ -7063,41 +7063,67 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
 
 /* Audit R5: a failure that passes by itself resumes on the store's clock, not a card's, so no view has to be mounted. */
 describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
-  const rateLimitedRows = (runId: string): Array<Record<string, unknown>> => [
+  const failedRows = (runId: string, detail: Record<string, unknown>): Array<Record<string, unknown>> => [
     lifecycleRow(0, 'admitted', runId),
     lifecycleRow(1, 'running', runId),
-    logRow(2, {
-      runId,
-      type: 'run.lifecycle',
-      state: 'failed',
-      attempt: 1,
-      detail: {
-        code: 'RATE_LIMITED',
-        message: 'The model provider asked Tau to wait.',
-        status: 429,
-        details: { retryAfterSeconds: 3 },
-      },
-    }),
+    logRow(2, { runId, type: 'run.lifecycle', state: 'failed', attempt: 1, detail }),
   ];
+  const rateLimitedRows = (runId: string): Array<Record<string, unknown>> =>
+    failedRows(runId, {
+      code: 'RATE_LIMITED',
+      message: 'The model provider asked Tau to wait.',
+      status: 429,
+      details: { retryAfterSeconds: 3 },
+    });
 
-  const openOnClock = async (chatId: string, projectId: string) => {
+  /* The chat's machine with the gateway's attempt route answered by the row. */
+  const lookups: string[] = [];
+  let lookupAnswers: Array<'settled' | 'waiting'> = [];
+  const chatSessionOnRoute = chatSessionMachine.provide({
+    actors: {
+      admitTurn: chatTurnAdmission,
+      lookUpModelAttempt: createAsyncLogic<'settled' | 'waiting', { readonly attemptId: string }>({
+        run: async ({ input }) => {
+          lookups.push(input.attemptId);
+          return lookupAnswers[lookups.length - 1] ?? 'waiting';
+        },
+      }),
+    },
+  });
+
+  /* What reached the chat's admission: the resume lands there, and is refused so no host is needed. */
+  const admitted: ChatTurnGesture[] = [];
+  const admitNothing = (chatId: string): void => {
+    publishAdmission(chatId, (gesture) => {
+      admitted.push(gesture);
+      throw new Error('Refused by the row.');
+    });
+  };
+
+  const openOnClock = async (chatId: string) => {
     const clock = new StepClock();
-    const store = new ChatSessionStore({ chatSession, clock });
+    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
     store.setDependencies(createStubDeps());
-    const session = store.acquire(chatId, projectId);
+    admitNothing(chatId);
+    const session = store.acquire(chatId, `project_${chatId}`);
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
-    const requestTurn = vi.spyOn(store, 'requestTurn').mockResolvedValue(undefined);
-    return { clock, store, session, requestTurn };
+    return { clock, store, session };
   };
+
+  const continues = (): ChatTurnGesture[] => admitted.filter((gesture) => gesture.kind === 'continue');
 
   beforeEach(() => {
     resetAutoResumes();
+    resetChatTurnServices();
+    admitted.length = 0;
+    lookups.length = 0;
+    lookupAnswers = [];
   });
 
   it('should resume a rate-limited run once its wait ends, with no failure card mounted', async () => {
-    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_rate', 'project_r5_rate');
+    const { clock, store, session } = await openOnClock('chat_r5_rate');
 
     publishLogRows(store, session.chatId, rateLimitedRows('run_r5_rate'));
 
@@ -7108,54 +7134,144 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
       delayMilliseconds: 3000,
     });
     clock.advance(2999);
-    expect(requestTurn).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(continues()).toEqual([]);
     clock.advance(1);
-    expect(requestTurn).toHaveBeenCalledExactlyOnceWith(session.chatId, { kind: 'continue' });
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+    });
 
-    // The failure is still on screen until the resumed run reports; nothing resumes it a second time.
-    publishLogRows(store, session.chatId, [lifecycleRow(3, 'paused', 'run_r5_rate')], 3);
+    // The failure stays on screen until the resumed run reports, and nothing resumes it a second time.
     clock.advance(60_000);
-    expect(requestTurn).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(continues()).toHaveLength(1);
+    expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'resuming' })).toBe(true);
+    publishLogRows(store, session.chatId, [lifecycleRow(3, 'running', 'run_r5_rate')], 3);
+    expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
     store.release(session.chatId);
   });
 
-  it('should keep waiting after the chat’s pane closes while its project is open, then resume', async () => {
-    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_closed', 'project_r5_closed');
-    startTurnOwner(store, 'project_r5_closed');
+  it('should wait out a provider outage once', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_outage');
+
+    publishLogRows(
+      store,
+      session.chatId,
+      failedRows('run_r5_outage', {
+        code: 'PROVIDER_UNAVAILABLE',
+        message: 'The model provider is temporarily unavailable.',
+        status: 503,
+      }),
+    );
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toMatchObject({ kind: 'providerUnavailable' });
+    clock.advance(2000);
+
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+    });
+    store.release(session.chatId);
+  });
+
+  it('should ask the gateway about a pending model attempt until it settles, then resume once', async () => {
+    lookupAnswers = ['waiting', 'settled'];
+    const { clock, store, session } = await openOnClock('chat_r5_pending');
+
+    publishLogRows(
+      store,
+      session.chatId,
+      failedRows('run_r5_pending', {
+        code: 'RUN_ABANDONED',
+        message: 'The gateway has not finished model request req_r5:1:5; resume the turn once it has.',
+        details: { attemptId: 'req_r5:1:5', code: 'MODEL_ATTEMPT_PENDING' },
+      }),
+    );
+    await clock.advanceAsync(0);
+    expect(lookups).toEqual(['req_r5:1:5']);
+    expect(continues()).toEqual([]);
+
+    await clock.advanceAsync(5000);
+
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+    });
+    expect(lookups).toHaveLength(2);
+    store.release(session.chatId);
+  });
+
+  it('should offer the wait of a chat whose log was read before it opened', async () => {
+    const clock = new StepClock();
+    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
+    store.setDependencies(createStubDeps());
+    admitNothing('chat_r5_read');
+    const releaseObservation = store.observe('chat_r5_read', 'project_r5_read');
+    publishLogRows(store, 'chat_r5_read', rateLimitedRows('run_r5_read'));
+
+    const session = store.acquire('chat_r5_read', 'project_r5_read');
+
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toMatchObject({ kind: 'rateLimit' });
+    store.release(session.chatId);
+    releaseObservation();
+  });
+
+  it('should end the wait unspent when the chat cannot admit the resume, and wait again once it can', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_unadmitted');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_unadmitted'));
+
+    resetChatTurnServices();
+    clock.advance(3000);
+    await Promise.resolve();
+
+    expect(continues()).toEqual([]);
+    expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
+
+    // Its route publishes the admission again: the same failed attempt is still the page's to resume.
+    admitNothing(session.chatId);
+    store.refreshMessageQueue(session.chatId);
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toMatchObject({ kind: 'rateLimit', attempt: 1 });
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+    });
+    store.release(session.chatId);
+  });
+
+  it('should end the wait when the chat’s last view closes, and offer it again when it reopens', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_closed');
+    store.acquire(session.chatId, 'project_chat_r5_closed');
     publishLogRows(store, session.chatId, rateLimitedRows('run_r5_closed'));
 
     store.release(session.chatId);
-
-    expect(store.get(session.chatId)).toBe(session);
-    clock.advance(3000);
-    expect(requestTurn).toHaveBeenCalledExactlyOnceWith(session.chatId, { kind: 'continue' });
-    // The wait ended, so its hold did too.
-    expect(store.get(session.chatId)).toBeUndefined();
-  });
-
-  it('should end the wait and its hold when the chat’s project closes', async () => {
-    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_project', 'project_r5_project');
-    startTurnOwner(store, 'project_r5_project');
-    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_project'));
+    expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'counting' })).toBe(true);
     store.release(session.chatId);
-    expect(store.get(session.chatId)).toBe(session);
-
-    store.setProjectSession('project_r5_project', undefined);
-
-    expect(store.get(session.chatId)).toBeUndefined();
     clock.advance(60_000);
-    expect(requestTurn).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(continues()).toEqual([]);
+
+    // The closed chat's admission went with it; its route publishes a new one when it opens again.
+    expect(store.get(session.chatId)).toBeUndefined();
+    admitNothing(session.chatId);
+    const reopened = store.acquire(session.chatId, 'project_chat_r5_closed');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_closed'));
+    expect(reopened.stateActorRef.getSnapshot().context.autoResume).toMatchObject({ kind: 'rateLimit', attempt: 1 });
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+    });
+    store.release(session.chatId);
   });
 
   it('should stop waiting when the person resumes by hand', async () => {
-    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_hand', 'project_r5_hand');
+    const { clock, store, session } = await openOnClock('chat_r5_hand');
     publishLogRows(store, session.chatId, rateLimitedRows('run_r5_hand'));
 
-    session.stateActorRef.send({ type: 'requestTurn', gesture: { kind: 'continue' } });
+    void store.requestTurn(session.chatId, { kind: 'continue' });
+    await vi.waitFor(() => {
+      expect(continues()).toHaveLength(1);
+    });
     clock.advance(60_000);
+    await Promise.resolve();
 
-    expect(requestTurn).not.toHaveBeenCalled();
-    expect(session.stateActorRef.getSnapshot().context.autoResume).toBeUndefined();
+    expect(continues()).toHaveLength(1);
     store.release(session.chatId);
   });
 });

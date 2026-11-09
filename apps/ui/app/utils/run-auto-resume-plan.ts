@@ -274,3 +274,22 @@ export function autoResumePlanOf(
   }
   return undefined;
 }
+
+/**
+ * Whether the chat's visible failure is still the one a resumed wait answered: the same kind on the same failed
+ * attempt of a run still resumable, the ledger aside. The resume's card stays until this turns false (audit R5).
+ *
+ * @param plan - The wait this page resumed.
+ * @param state - The chat's projection, attachment and errors.
+ * @returns `true` while the failure has not left.
+ * @public
+ */
+export function autoResumeStillAnswers(plan: AutoResumePlan, state: VisibleFailureSource): boolean {
+  const target = selectAutoResumeTarget(state.projection);
+  return (
+    target !== undefined &&
+    autoResumeKeyOf(plan.kind, target) === plan.key &&
+    selectRunResumable(state.projection) &&
+    selectVisibleChatErrorEntry(state) !== undefined
+  );
+}

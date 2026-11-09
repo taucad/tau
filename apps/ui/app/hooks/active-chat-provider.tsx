@@ -871,10 +871,11 @@ export function useChatAutoResume(): AutoResumePlan | undefined {
     },
     [activeChatId, store],
   );
-  const snapshot = useCallback(
-    () => store.get(activeChatId)?.stateActorRef.getSnapshot().context.autoResume,
-    [activeChatId, store],
-  );
+  const snapshot = useCallback(() => {
+    const state = store.get(activeChatId)?.stateActorRef.getSnapshot();
+    // The plan is read only inside the region that holds it (MC-R26's intent, without per-state context).
+    return state === undefined || state.matches({ autoResume: 'idle' }) ? undefined : state.context.autoResume;
+  }, [activeChatId, store]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 

@@ -804,11 +804,16 @@ describe('chatSessionMachine — the chat waits on its own clock (audit R5)', ()
     clock.advance(1);
 
     expect(due).toEqual([countdownPlan(1)]);
-    expect(autoResumeState(actor)).toBe('idle');
-    // A spent wait is never waited out again.
+    // The plan stays in hand while the store resumes it, so its card stays up and it is never waited out again.
+    expect(autoResumeState(actor)).toBe('resuming');
+    expect(actor.getSnapshot().context.autoResume).toEqual(countdownPlan(1));
     actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
     clock.advance(10_000);
     expect(due).toHaveLength(1);
+    // The failure it answered leaves.
+    actor.send({ type: 'autoResumeWithdrawn' });
+    expect(autoResumeState(actor)).toBe('idle');
+    expect(actor.getSnapshot().context.autoResume).toBeUndefined();
     actor.stop();
   });
 
@@ -866,7 +871,7 @@ describe('chatSessionMachine — the chat waits on its own clock (audit R5)', ()
 
     expect(lookups).toHaveLength(2);
     expect(due).toEqual([pendingPlan]);
-    expect(autoResumeState(actor)).toBe('idle');
+    expect(autoResumeState(actor)).toBe('resuming');
     await clock.advanceAsync(60_000);
     expect(lookups).toHaveLength(2);
     actor.stop();

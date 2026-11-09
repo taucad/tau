@@ -87,7 +87,7 @@ import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-c
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
-import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 import {
   canAutoResumeModelPending,
@@ -1427,6 +1427,7 @@ export class ChatSessionStore {
         throw new Error(`Chat ${chatId} is already acquired in project ${existing.projectId}.`);
       }
       existing.viewRefcount += 1;
+      existing.offerChatWaits();
       return existing;
     }
 
@@ -1436,6 +1437,8 @@ export class ChatSessionStore {
     session.observationRelease = this.observe(chatId, projectId);
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
+    // The root bound before the session was registered; its first read of the chat's waits is now.
+    session.offerChatWaits();
     this.#refreshSnapshot();
     this.#notifyMembership();
     return session;
@@ -1447,6 +1450,8 @@ export class ChatSessionStore {
       return;
     }
     session.viewRefcount -= 1;
+    // An unviewed chat resumes nothing on its own: its wait ends unspent, and is offered again on return.
+    session.offerChatWaits();
     this.#disposeIfUnreferenced(session);
   }
 
@@ -1784,6 +1789,8 @@ export class ChatSessionStore {
     if (actor?.getSnapshot().status === 'active') {
       actor.send({ type: 'refresh' });
     }
+    // A newly published admission lets the chat's automatic resume be offered.
+    this.#sessions.get(chatId)?.offerChatWaits();
   }
 
   /** Retry a retained delivery with its original command identity. */
@@ -1956,13 +1963,6 @@ export class ChatSessionStore {
   public setProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
     if (ref === undefined) {
       this.#projectSessions.delete(projectId);
-      /* A closed project resumes nothing on its own: its chats' waits end, and so does the hold they kept. */
-      for (const session of this.#sessions.values()) {
-        if (session.projectId === projectId && this.#awaitsAutoResume(session)) {
-          session.stateActorRef.send({ type: 'autoResumeWithdrawn' });
-          this.#disposeIfUnreferenced(session);
-        }
-      }
     } else {
       this.#projectSessions.set(projectId, ref);
       this.#projectRunKeys.delete(projectId);
@@ -2933,12 +2933,8 @@ export class ChatSessionStore {
      * moment it ends is the only moment that reference is released — a chat
      * whose last view unmounted mid-admission is never asked about again. */
     let admitting = this.#isAdmittingTurn(session);
-    let awaitsAutoResume = this.#awaitsAutoResume(session);
     session.turnSubscriptions = [
       /* The chat's own waits (audit R5): the machine holds them on the store's clock, the store carries them out. */
-      stateActorRef.on('autoResumeDue', ({ plan }) => {
-        this.#resumeAutomatically(session, plan);
-      }),
       stateActorRef.on('remotePullDue', () => {
         void this.requestRemotePull(session.chatId);
       }),
@@ -2956,12 +2952,10 @@ export class ChatSessionStore {
       }),
       stateActorRef.subscribe(() => {
         const admits = this.#isAdmittingTurn(session);
-        const awaits = this.#awaitsAutoResume(session);
-        if ((admitting && !admits) || (awaitsAutoResume && !awaits)) {
+        if (admitting && !admits) {
           this.#disposeIfUnreferenced(session);
         }
         admitting = admits;
-        awaitsAutoResume = awaits;
       }),
     ];
   }
@@ -2978,28 +2972,51 @@ export class ChatSessionStore {
   #bindChatWaits(session: InternalSession): Array<{ unsubscribe: () => void }> {
     const { chatId, stateActorRef } = session;
     let offered: string | undefined;
+    /* The wait this page resumed: its card stays until the failure it answered leaves (`autoResume.resuming`). */
+    let resumed: AutoResumePlan | undefined;
     let awaitsPull = false;
     const live = (): boolean =>
       this.#sessions.get(chatId) === session && stateActorRef.getSnapshot().status === 'active';
+    /* Only a viewed chat that can admit a turn resumes on its own: a resume needs both to land (audit R5). */
+    const canResume = (): boolean => session.viewRefcount > 0 && chatTurnAdmit(chatId) !== undefined;
     const offerAutoResume = (): void => {
       if (!live()) {
         return;
       }
-      const plan = autoResumePlanOf(
-        {
-          projection: this.getProjection(chatId),
-          attachmentStatus: this.getAttachmentStatus(chatId),
-          error: session.chat.error,
-          persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
-        },
-        Date.now(),
-      );
+      const source = {
+        projection: this.getProjection(chatId),
+        attachmentStatus: this.getAttachmentStatus(chatId),
+        error: session.chat.error,
+        persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
+      };
+      const plan = canResume() ? autoResumePlanOf(source, Date.now()) : undefined;
+      if (
+        plan === undefined &&
+        resumed !== undefined &&
+        resumed.key === offered &&
+        autoResumeStillAnswers(resumed, source)
+      ) {
+        return;
+      }
+      resumed = undefined;
       if (plan?.key === offered) {
         return;
       }
       offered = plan?.key;
       stateActorRef.send(plan === undefined ? { type: 'autoResumeWithdrawn' } : { type: 'autoResumeOffered', plan });
     };
+    const autoResumeDue = stateActorRef.on('autoResumeDue', ({ plan }) => {
+      if (!live() || plan.key !== offered) {
+        return;
+      }
+      if (!canResume() || !spendAutoResume(plan, Date.now())) {
+        offered = undefined;
+        stateActorRef.send({ type: 'autoResumeWithdrawn' });
+        return;
+      }
+      resumed = plan;
+      void this.requestTurn(chatId, { kind: 'continue' });
+    });
     const offerPull = (): void => {
       if (!live()) {
         return;
@@ -3025,35 +3042,12 @@ export class ChatSessionStore {
       offerPull();
     };
     return [
+      autoResumeDue,
       { unsubscribe: unsubscribeChat },
       { unsubscribe: unsubscribeProjection },
       persistence,
       { unsubscribe: unsubscribePull },
     ];
-  }
-
-  /**
-   * Resume a run whose automatic resume's wait ended, once per failed attempt on the page-wide ledger.
-   *
-   * @param session - The chat.
-   * @param plan - The wait that ended.
-   */
-  #resumeAutomatically(session: InternalSession, plan: AutoResumePlan): void {
-    if (this.#sessions.get(session.chatId) !== session || !spendAutoResume(plan, Date.now())) {
-      return;
-    }
-    void this.requestTurn(session.chatId, { kind: 'continue' });
-  }
-
-  /**
-   * Whether the chat's machine is waiting out an automatic resume. While its project is open that wait holds the
-   * session, so closing the chat's pane does not stop the resume (audit R5).
-   *
-   * @param session - The chat to ask about.
-   * @returns Whether `autoResume` is not `idle`.
-   */
-  #awaitsAutoResume(session: InternalSession): boolean {
-    return !session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' });
   }
 
   /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
@@ -4550,7 +4544,6 @@ export class ChatSessionStore {
       session.viewRefcount > 0 ||
       session.runHeld ||
       this.#isAdmittingTurn(session) ||
-      (this.#awaitsAutoResume(session) && this.#projectSessions.has(session.projectId)) ||
       this.#sessions.get(session.chatId) !== session
     ) {
       return;

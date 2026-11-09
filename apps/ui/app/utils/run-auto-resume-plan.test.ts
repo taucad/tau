@@ -14,7 +14,7 @@ import {
   recordRateLimitAutoResume,
   resetAutoResumes,
 } from '#utils/run-auto-resume.js';
-import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
 import type { VisibleFailureSource } from '#utils/run-auto-resume-plan.js';
 
 /* The caught-up log of one run that failed on its first attempt with `error`, as the chat's views read it. */
@@ -171,6 +171,21 @@ describe('autoResumePlanOf (audit R5)', () => {
         now,
       ),
     ).toBeUndefined();
+  });
+
+  it('should keep a resumed wait answering its failure after the ledger is spent, and only that failure', () => {
+    const plan = autoResumePlanOf(failedRun(rateLimited()), now, noJitter);
+    expect(plan).toBeDefined();
+    if (plan === undefined) {
+      return;
+    }
+    recordRateLimitAutoResume('run_1', 1);
+
+    expect(autoResumeStillAnswers(plan, failedRun(rateLimited()))).toBe(true);
+    expect(autoResumeStillAnswers({ ...plan, key: 'rateLimit:run_1:2', attempt: 2 }, failedRun(rateLimited()))).toBe(
+      false,
+    );
+    expect(autoResumeStillAnswers(plan, {})).toBe(false);
   });
 
   it('should offer nothing before the log is read, or when no failure is visible', () => {

@@ -147,13 +147,21 @@ export type ChatSessionMachineContext = Readonly<{
   turn: ChatTurn | undefined;
   /** A gesture made while a turn was live; admitted when that run ends (V2). */
   pendingGesture: ChatTurnGesture | undefined;
-  /** The automatic resume being waited out, while `autoResume` is not `idle`. */
+  /**
+   * The automatic resume in hand while `autoResume` is not `idle`; read only after `snapshot.matches` says so.
+   * Kept as a root key like `turn` and `pendingGesture`: this machine has no per-state context schemas (MC-R26 debt).
+   */
   autoResume: AutoResumePlan | undefined;
-  /** The last automatic resume that fired, expired or was superseded; it is never offered again. */
+  /** The last automatic resume a gesture superseded or the run's bound expired; it is never offered again. */
   autoResumeSpent: string | undefined;
   /** The heartbeat between two asks for a pull, while `remotePull.awaiting`. Milliseconds. */
   pullHeartbeatMilliseconds: number;
 }>;
+
+/** A countdown's plan. @public */
+export type AutoResumeCountdown = Extract<AutoResumePlan, { kind: 'rateLimit' | 'providerUnavailable' }>;
+/** A pending model attempt's plan. @public */
+export type AutoResumeAttempt = Extract<AutoResumePlan, { kind: 'modelPending' }>;
 
 /** Events accepted by chatSessionMachine. @public */
 export type ChatSessionMachineEvent =
@@ -321,38 +329,34 @@ const autoResumeStates = {
   idle: '#chat-session.autoResume.idle',
   counting: '#chat-session.autoResume.counting',
   awaitingAttempt: '#chat-session.autoResume.awaitingAttempt',
+  resuming: '#chat-session.autoResume.resuming',
 } as const;
 
+/* The wait in hand, read only inside the states that hold one (MC-R26). */
+const planInHand = (context: ChatSessionMachineContext): AutoResumePlan | undefined => context.autoResume;
+
 /* The store re-offers the visible failure on every change it hears, so the same key is idempotent re-delivery, and a
- * spent key (fired, expired or superseded by a gesture) is never waited out twice. A new key replaces the wait. */
+ * spent key (superseded by a gesture, or past the run's bound) is never waited out again. A new key replaces the wait.
+ * A wait that fired is not spent here: the page-wide ledger records the resume, so the store offers it no more. */
 const offerAutoResume = (
   { context, event }: ChatSessionArgs<EventOf<'autoResumeOffered'>>,
   enq: ChatSessionEnqueue,
 ) => {
-  if (event.plan.key === context.autoResumeSpent || event.plan.key === context.autoResume?.key) {
+  if (event.plan.key === context.autoResumeSpent || event.plan.key === planInHand(context)?.key) {
     /* Idempotent re-delivery of the wait in hand, or of one already spent. */
     return {};
   }
   announce(context, enq);
-  return {
-    target: event.plan.kind === 'modelPending' ? autoResumeStates.awaitingAttempt : autoResumeStates.counting,
-    reenter: true,
-    context: { autoResume: event.plan },
-  };
+  return event.plan.kind === 'modelPending'
+    ? { target: autoResumeStates.awaitingAttempt, reenter: true, context: { autoResume: event.plan } }
+    : { target: autoResumeStates.counting, reenter: true, context: { autoResume: event.plan } };
 };
 
-/* The wait ends for good: nothing else is waited out for this key. */
-const spendAutoResume = (context: ChatSessionMachineContext): ChatSessionPatch => ({
-  autoResume: undefined,
-  autoResumeSpent: context.autoResume?.key,
-});
-
-const autoResumeDue = (context: ChatSessionMachineContext, enq: ChatSessionEnqueue) => {
-  if (context.autoResume !== undefined) {
-    enq.emit({ type: 'autoResumeDue', chatId: context.chatId, plan: context.autoResume });
-  }
+/* The wait ended: the store resumes the run, and the chat keeps presenting the wait until the failure is gone. */
+const autoResumeDue = (context: ChatSessionMachineContext, plan: AutoResumePlan, enq: ChatSessionEnqueue) => {
+  enq.emit({ type: 'autoResumeDue', chatId: context.chatId, plan });
   announce(context, enq);
-  return { target: autoResumeStates.idle, context: spendAutoResume(context) };
+  return { target: autoResumeStates.resuming, context: { autoResume: plan } };
 };
 
 const withdrawAutoResume = ({ context }: ChatSessionArgs<EventOf<'autoResumeWithdrawn'>>, enq: ChatSessionEnqueue) => {
@@ -363,13 +367,19 @@ const withdrawAutoResume = ({ context }: ChatSessionArgs<EventOf<'autoResumeWith
 /* A gesture (the card's Resume, a new message) supersedes the wait, so the wait never resumes a second time. */
 const supersedeAutoResume = ({ context }: ChatSessionArgs<EventOf<'requestTurn'>>, enq: ChatSessionEnqueue) => {
   announce(context, enq);
-  return { target: autoResumeStates.idle, context: spendAutoResume(context) };
+  return {
+    target: autoResumeStates.idle,
+    context: { autoResume: undefined, autoResumeSpent: planInHand(context)?.key },
+  };
 };
 
 /* The run's bound passed before the gateway settled the attempt: the card waits for the person (D4). */
 const expireAutoResume = ({ context }: Readonly<{ context: ChatSessionMachineContext }>, enq: ChatSessionEnqueue) => {
   announce(context, enq);
-  return { target: autoResumeStates.idle, context: spendAutoResume(context) };
+  return {
+    target: autoResumeStates.idle,
+    context: { autoResume: undefined, autoResumeSpent: planInHand(context)?.key },
+  };
 };
 
 const runStates = {
@@ -391,6 +401,7 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
  * - `adoptRun` in the states that hold a turn or a live run.
  * - `autoResumeWithdrawn` with no wait in hand.
+ * - `requestTurn` in `autoResume.resuming`: the store's own resume, or a gesture over it; the run region owns both.
  * - `runElsewhereAwaitsPull` while already asking, and `runElsewherePullSettled` while not.
  *
  * @public
@@ -410,6 +421,7 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
   ),
   ...pairs([runStates.queued, runStates.running], ['adoptRun']),
   ['autoResume.idle', 'autoResumeWithdrawn'],
+  ['autoResume.resuming', 'requestTurn'],
   ['remotePull.awaiting', 'runElsewhereAwaitsPull'],
   ['remotePull.idle', 'runElsewherePullSettled'],
 ];
@@ -427,16 +439,20 @@ export const chatSessionMachine = setup({
     emitted: eventSchemas<ChatSessionMachineEmitted>(),
   },
   actors: chatSessionActors,
+  /* The wait's delays were chosen by the store when it was offered, jitter included (N9). */
   delays: {
-    /* Chosen by the store when the failure was offered, jitter included (N9). */
-    autoResumeDelay: ({ context }) =>
-      context.autoResume === undefined || context.autoResume.kind === 'modelPending'
-        ? 0
-        : context.autoResume.delayMilliseconds,
-    attemptBound: ({ context }) =>
-      context.autoResume?.kind === 'modelPending' ? context.autoResume.boundMilliseconds : 0,
-    attemptPoll: ({ context }) =>
-      context.autoResume?.kind === 'modelPending' ? context.autoResume.pollMilliseconds : 0,
+    autoResumeDelay: ({ context }) => {
+      const plan = planInHand(context);
+      return plan === undefined || plan.kind === 'modelPending' ? 0 : plan.delayMilliseconds;
+    },
+    attemptBound: ({ context }) => {
+      const plan = planInHand(context);
+      return plan?.kind === 'modelPending' ? plan.boundMilliseconds : 0;
+    },
+    attemptPoll: ({ context }) => {
+      const plan = planInHand(context);
+      return plan?.kind === 'modelPending' ? plan.pollMilliseconds : 0;
+    },
     pullHeartbeat: ({ context }) => context.pullHeartbeatMilliseconds,
   },
 }).createMachine({
@@ -636,7 +652,10 @@ export const chatSessionMachine = setup({
         /* A rate limit's or a provider outage's countdown. */
         counting: {
           after: {
-            autoResumeDelay: ({ context }, enq) => autoResumeDue(context, enq),
+            autoResumeDelay: ({ context }, enq) =>
+              context.autoResume === undefined
+                ? /* Unreachable: `counting` is entered only with a plan. */ { target: autoResumeStates.idle }
+                : autoResumeDue(context, context.autoResume, enq),
           },
           on: { requestTurn: supersedeAutoResume, autoResumeWithdrawn: withdrawAutoResume },
         },
@@ -657,15 +676,33 @@ export const chatSessionMachine = setup({
                   attemptId: context.autoResume?.kind === 'modelPending' ? context.autoResume.attemptId : '',
                 }),
                 onDone: ({ context, event }, enq) =>
-                  event.output === 'settled' ? autoResumeDue(context, enq) : { target: 'pausing' },
-                /* The lookup answers `waiting` for every failure; a throw is asked again like one. */
-                onError: { target: 'pausing' },
+                  event.output === 'settled' && context.autoResume !== undefined
+                    ? autoResumeDue(context, context.autoResume, enq)
+                    : { target: 'pausing' },
+                /* The lookup answers every failure `waiting` and never throws, so a throw is a defect: record it and
+                 * stop waiting, and the card waits for the person (MC-R12, MC-R29). */
+                onError: ({ context, event }, enq) => {
+                  announce(context, enq);
+                  return {
+                    target: autoResumeStates.idle,
+                    context: {
+                      fault: failureMessage(event.error, 'lookUpModelAttempt failed'),
+                      autoResume: undefined,
+                      autoResumeSpent: context.autoResume?.key,
+                    },
+                  };
+                },
               },
             },
             pausing: {
               after: { attemptPoll: { target: 'lookingUp' } },
             },
           },
+        },
+        /* The wait ended and the store resumed the run: the card keeps presenting the wait until the failure leaves
+         * the chat (the store withdraws it) or another failure replaces it. */
+        resuming: {
+          on: { autoResumeWithdrawn: withdrawAutoResume },
         },
       },
       on: { autoResumeOffered: offerAutoResume },

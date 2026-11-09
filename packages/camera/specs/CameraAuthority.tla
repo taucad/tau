@@ -58,9 +58,10 @@
 (*   Observe          a `recordSync` publication reaching the binding,     *)
 (*                    then `adoptPersistedPose` and the camera's answer:   *)
 (*                    AdoptApplied `adoptionApplied`, AdoptDropped         *)
-(*                    `adoptionDropped`, on which the binding re-issues    *)
-(*                    the person's current pose as an edit [the record     *)
-(*                    effect of `useViewSettingsSync` and its `apply`]     *)
+(*                    `adoptionDropped`; AdoptDropped:resaved is the same  *)
+(*                    `adoptionDropped` plus the binding's re-issued edit  *)
+(*                    of the person's current pose [the record effect of   *)
+(*                    `useViewSettingsSync` and its `apply`]               *)
 (*   Captured, Landed the binding's `edit` and the store's checked write   *)
 (*                    [`persist` and `writeRecord`]                        *)
 (*   EchoObserved     `poseObserved{echoRevision}` from the controls       *)
@@ -145,8 +146,8 @@ TypeOK ==
   /\ arrivedBusy \subseteq Poses
   /\ foreignCount \in 0..MaxForeign
   /\ act \in {"Init", "InteractionEnded", "SettleElapsed", "RecordOwn", "AdoptApplied", "AdoptDropped",
-              "AdoptQueued", "PendingApplied", "Captured", "Landed", "ForeignWrite", "EchoObserved",
-              "QuietElapsed"}
+              "AdoptDropped:resaved", "AdoptQueued", "PendingApplied", "Captured", "Landed", "ForeignWrite",
+              "EchoObserved", "QuietElapsed"}
               \cup {DragLabel[s] : s \in DragSources} \cup {ChangeLabel[s] : s \in ChangeSources}
 
 Init ==
@@ -230,7 +231,14 @@ Labels ==
 \* The store publishes the file's camera pose and the binding handles it once. An `own` record is not
 \* adopted (I6). A `foreign` one is sent to the camera, which applies it at the gate and otherwise drops
 \* it (D15) or, as built, queues it. On a drop the binding re-issues the camera's current pose as an edit
-\* when a person made it, so the person's pose is saved over the foreign one (D15, last writer wins).
+\* when a person made it, so the person's pose is saved over the foreign one (D15, last writer wins); the
+\* step is labelled `AdoptDropped:resaved` unless that edit is already in flight. This re-save is deliberately outside the G6 camera rule
+\* as worded (written only when `lastChange.source` is a person source and the revision is newer than
+\* `lastWrittenRevision`): it may write again a revision that was already written, and the camera's
+\* latest source may by then be `viewport` or `bounds`, which keep the pose. The binding must therefore
+\* hold the source of the last pose-changing change itself (`poseBy`); `lastChange` alone does not give
+\* it. The charter's I7 wording, incident-path step 2 and the G6 camera rule need this one exception
+\* recorded.
 Observe(label) ==
   /\ file.pose # seen
   /\ label \in Labels
@@ -247,14 +255,15 @@ Observe(label) ==
                   /\ pending' = NoPending
                   /\ act' = "AdoptApplied"
              ELSE /\ UNCHANGED <<cam, poseBy, quiet, echo, adoptedPose>>
-                  /\ intent' = IF ResaveOnDrop /\ Adoption = "drop" /\ WriteRule = "provenance"
-                                  /\ poseBy \in PersonSources
-                               THEN [pose |-> cam.pose, source |-> poseBy]
-                               ELSE intent
                   /\ IF Adoption = "drop"
-                     THEN /\ pending' = NoPending
-                          /\ act' = "AdoptDropped"
-                     ELSE /\ pending' = [pose |-> file.pose, writer |-> file.writer]
+                     THEN LET resave == IF ResaveOnDrop /\ WriteRule = "provenance" /\ poseBy \in PersonSources
+                                        THEN [pose |-> cam.pose, source |-> poseBy]
+                                        ELSE intent
+                          IN /\ intent' = resave
+                             /\ pending' = NoPending
+                             /\ act' = IF resave # intent THEN "AdoptDropped:resaved" ELSE "AdoptDropped"
+                     ELSE /\ UNCHANGED intent
+                          /\ pending' = [pose |-> file.pose, writer |-> file.writer]
                           /\ act' = "AdoptQueued"
 
 \* "queue" only: the gate opens and the waiting pose applies.
@@ -266,11 +275,13 @@ PendingApplied ==
   /\ UNCHANGED <<file, seen, saved, firstPose, arrivedBusy, foreignCount>>
   /\ act' = "PendingApplied"
 
-\* "value" rule only: the settled pose is captured for saving unless a value heuristic excludes it.
+\* "value" rule only: the settled pose is captured for saving unless a value heuristic excludes it. Nothing
+\* is saved before the first automatic frame (`persist` checks `framing.initialized`).
 Captured ==
   /\ WriteRule = "value"
   /\ Gate
   /\ pending = NoPending
+  /\ firstPose # Rig
   /\ cam.pose \notin {saved, adoptedPose, firstPose}
   /\ intent' = [pose |-> cam.pose, source |-> poseBy]
   /\ saved' = cam.pose
@@ -337,7 +348,8 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-AdoptionRequests == {"AdoptApplied", "AdoptDropped", "AdoptQueued"}
+AdoptDrops == {"AdoptDropped", "AdoptDropped:resaved"}
+AdoptionRequests == {"AdoptApplied", "AdoptQueued"} \cup AdoptDrops
 AdoptionApplies == {"AdoptApplied", "PendingApplied"}
 
 \* I2, D15: a persisted pose that arrived while the person was dragging or settling never becomes the
@@ -348,7 +360,7 @@ LocalInputWins == cam.pose \notin arrivedBusy
 NothingQueued == pending = NoPending
 
 \* D15: a persisted pose that arrives while the camera is idle applies at once.
-IdleForeignApplies == act \in {"AdoptDropped", "AdoptQueued"} => cam.input # "idle"
+IdleForeignApplies == act \in AdoptDrops \cup {"AdoptQueued"} => cam.input # "idle"
 
 \* Nothing is in flight: the gesture has settled, every edit has landed, every publication is handled
 \* and no controls update is pending. The nightly simulation keeps the behaviours that reach it.
@@ -361,14 +373,14 @@ Quiescent ==
   /\ echo = 0
   /\ seen = file.pose
 
-\* D15: when the drag ends, the person's pose is saved over a foreign pose the camera dropped.
-DroppedPoseOverwritten ==
-  Quiescent => ~(file.writer = "foreign" /\ file.pose \in arrivedBusy /\ poseBy \in PersonSources)
+\* D15, D20: at rest, a pose a person made is the pose this view saved.
+PersonPoseSaved == Quiescent /\ poseBy \in PersonSources => file.pose = cam.pose /\ file.writer = "self"
 
 \* I6: the binding never asks the camera to adopt a record this view wrote.
 OwnNeverAdopted == act \in AdoptionRequests => file.writer # "self"
 
-\* I7, D20: this view writes only poses a person commanded.
+\* I7, D20: this view writes only poses a person commanded. `file.source` is the source of the change that
+\* produced the written pose, not the camera's latest source at the time of the write (see the re-save).
 OnlyPersonPosesWritten == file.writer = "self" => file.source \in PersonSources
 
 \* I8: a persisted pose applies only in input.idle.

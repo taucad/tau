@@ -21,7 +21,7 @@
         "violated": "NoSnapBack"
       },
       "kind": "defect",
-      "ref": "The orbit snap-back: the view's own save is published as foreign, waits for the quiet window and replaces the newer drag pose",
+      "ref": "The orbit snap-back: after the first frame, the view's own save of a drag pose is published as foreign and, the quiet window having passed, replaces the newer pose of the same drag",
       "fixedBy": "taucad/tau#1602 for the view store; G1 (digest attribution, I5) and G6b (binding and camera gate) for every interleaving"
     },
     "CameraAuthority.today-foreign-mid-drag.cfg": {
@@ -30,7 +30,7 @@
         "violated": "LocalInputWins"
       },
       "kind": "defect",
-      "ref": "As built, a foreign pose that arrives during a drag is queued and applied over the person's pose once the quiet window passes",
+      "ref": "As built, a foreign pose that arrives during a drag is applied over the person's pose once the quiet window has passed",
       "fixedBy": "G3 (the camera drops adoptPersistedPose outside input.idle, D15) and G6b"
     },
     "CameraAuthority.today-held-drag.cfg": {
@@ -86,7 +86,7 @@
     "CameraAuthority.no-resave-on-drop.cfg": {
       "tier": "pr",
       "expect": {
-        "violated": "DroppedPoseOverwritten"
+        "violated": "PersonPoseSaved"
       },
       "kind": "witness",
       "ref": "ResaveOnDrop removed: a person's pose that landed before a foreign write is not saved again when the camera drops the foreign pose, so the file keeps the dropped pose (D15)"

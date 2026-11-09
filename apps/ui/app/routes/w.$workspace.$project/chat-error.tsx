@@ -434,6 +434,19 @@ function codedErrorCard({
         />
       );
     }
+    /* A provider outage reads `pausedTurn` in the card map, so the category switch below never sees it: the resumable
+     * one gets its auto-resume card here (regression review R6). */
+    if (code === autoResumableProviderUnavailableCode && retry === 'resume' && resumable && autoResume !== undefined) {
+      return (
+        <ChatErrorServiceUnavailable
+          className={className}
+          resumable
+          title='Service Temporarily Unavailable'
+          description={error.message}
+          autoResume={autoResume}
+        />
+      );
+    }
     return paused;
   }
 

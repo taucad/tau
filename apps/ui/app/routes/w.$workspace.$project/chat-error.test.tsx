@@ -428,6 +428,22 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
 
+  it('should resume a provider outage pause on its own, counting down beside Resume', () => {
+    projected({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: 'The model provider is temporarily unavailable.',
+      code: 'PROVIDER_UNAVAILABLE',
+      httpStatus: 503,
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 2 seconds');
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
   it('should keep Try again for a service refusal the host rules unrecoverable', () => {
     persisted({
       category: errorCategory.overloaded,

@@ -345,17 +345,24 @@ describe('TurnContextSnapshot skills pin', () => {
   ] as const;
   const brep = { name: 'brep', description: 'Build native BRep geometry', fingerprint: 'a' };
   const gears = { name: 'gears', description: 'Involute gears', fingerprint: 'b' };
+  type Snapshot = Awaited<ReturnType<typeof createTurnContextSnapshot>>;
+  /** The turn after `previous`, whose request history carries every earlier context's messages. */
   const snapshot = async (
     skills: ReadonlyArray<typeof brep> | undefined,
-    previous?: Awaited<ReturnType<typeof createTurnContextSnapshot>>,
-  ): ReturnType<typeof createTurnContextSnapshot> =>
-    createTurnContextSnapshot({
+    ...previous: readonly Snapshot[]
+  ): Promise<Snapshot> => {
+    const carried = previous
+      .flatMap((context) => context.initialMessages)
+      .findLast((message) => message.id === skillsUpdateMessageId);
+    return createTurnContextSnapshot({
       chatId: 'chat-1',
       systemPrompt: 'static\n\ndynamic',
       systemPromptBlocks: blocks,
       clientContext: skills === undefined ? undefined : { skills },
-      previousContext: previous,
+      previousContext: previous.at(-1),
+      carriedSkillsNote: typeof carried?.content === 'string' ? carried.content : undefined,
     });
+  };
 
   it("should keep the first turn's skills block byte for byte when the catalog changes, and note the change", async () => {
     const first = await snapshot([brep]);
@@ -382,6 +389,35 @@ describe('TurnContextSnapshot skills pin', () => {
     const second = await snapshot([brep], first);
     expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
     expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should note a catalog change once: the turn after it carries no note of its own', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    const third = await snapshot([brep, gears], first, second);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+    expect(third.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(third.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+    expect(third.postCompactionMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should note a reversion to the pinned catalog once', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    const third = await snapshot([brep], first, second);
+    const fourth = await snapshot([brep], first, second, third);
+    const note = third.initialMessages.find((message) => message.id === skillsUpdateMessageId);
+    expect(note?.content).toContain('**brep**');
+    expect(note?.content).not.toContain('**gears**');
+    expect(fourth.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should carry the catalog of a chat that began without one as a note once, not on every turn', async () => {
+    const first = await snapshot(undefined);
+    const second = await snapshot([brep], first);
+    const third = await snapshot([brep], first, second);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+    expect(third.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
   });
 
   it('should pin the catalog in string-prompt form too', async () => {

@@ -14,6 +14,9 @@ import { codedFailureDetail } from '#harness/coded-failure.js';
 import { createInterruptRecoveryMessage, interruptedToolOutput } from '#harness/interrupt-recovery.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import {
+  attachTurnContexts,
+  carriedSkillsNote,
+  committedTurnContexts,
   createAgentSession,
   fundingPrincipal,
   lastCommittedTurnContext,
@@ -2562,6 +2565,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         config.clientContext ??
         (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
       /* Journaled (RA-R3): a restart before the turn commits replays exactly this admission. */
+      const rows = log.rows === undefined ? events : await log.rows();
       const context = await createTurnContextSnapshot({
         chatId,
         systemPrompt: config.systemPrompt,
@@ -2573,7 +2577,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         contextMessages: config.contextMessages,
         clientContext,
         recentSkills: options.recentSkills,
-        previousContext: lastCommittedTurnContext(log.rows === undefined ? events : await log.rows()),
+        previousContext: lastCommittedTurnContext(rows),
+        carriedSkillsNote: carriedSkillsNote(attachTurnContexts(await log.messages(), committedTurnContexts(rows))),
       });
       /* The chat's last run ended on answers no attempt was told (a denial, a Stop): this run is told first. */
       const lastRunId = events.findLast(

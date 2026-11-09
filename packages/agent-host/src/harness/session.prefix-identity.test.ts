@@ -8,6 +8,7 @@
  * compared with the first request of turn two in cache order (`prefix-identity.fixture`).
  */
 import { describe, expect, it } from 'vitest';
+import { skillsUpdateMessageId } from '#harness/cad-middleware.js';
 import type { ClientContext, RecentSkill } from '#harness/cad-middleware.js';
 import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
 import { canonicalize, classifyBoundary, fixtureTools, recordingFetch } from '#harness/prefix-identity.fixture.js';
@@ -170,10 +171,10 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
   return { turns: perTurn, requests: perTurnRequests };
 };
 
-/** The turn boundary: the last request of turn one against the first request of turn two. */
-const turnBoundary = (run: ChatRun): ReturnType<typeof classifyBoundary> => {
-  const previous = canonicalize(run.turns[0]!.at(-1)!);
-  const next = canonicalize(run.turns[1]![0]!);
+/** A turn boundary: the last request of one turn against the first request of the next. */
+const turnBoundary = (run: ChatRun, from = 0): ReturnType<typeof classifyBoundary> => {
+  const previous = canonicalize(run.turns[from]!.at(-1)!);
+  const next = canonicalize(run.turns[from + 1]![0]!);
   return classifyBoundary(previous, next);
 };
 
@@ -241,6 +242,26 @@ describe('I1 request prefix identity across consecutive user turns', () => {
     const note = run.requests[1]![0]!.messages.find((message) => message.id.startsWith('tau:skills-update'));
     expect(note, 'the newer catalog rides as a tail note').toBeDefined();
     expect(JSON.stringify(note?.content)).toContain('openscad-basics');
+  });
+
+  it('should note a catalog change once, in the turn it changed, and keep the prefix on every later turn', async () => {
+    const skillsAB = [...skillsA, { name: 'gears', description: 'Involute gears.', fingerprint: 'f2' }];
+    const files = ['main.scad', 'README.md'];
+    const run = await runChat([
+      turnOne,
+      { ...turnTwo, clientContext: { skills: skillsAB } },
+      { ...turnTwo, runId: 'run-3', snapshot: snapshotText('README.md', files), clientContext: { skills: skillsAB } },
+      { ...turnTwo, runId: 'run-4', snapshot: snapshotText('nut.scad', files), clientContext: { skills: skillsAB } },
+    ]);
+    /* The history keeps turn two's note where it was; no later turn adds one of its own. */
+    const notes = run.requests.map(
+      (requests) => requests[0]!.messages.filter((message) => message.id === skillsUpdateMessageId).length,
+    );
+    expect(notes).toEqual([0, 1, 1, 1]);
+    for (const from of [0, 1, 2]) {
+      const verdict = turnBoundary(run, from);
+      expect(verdict.identicalThroughHistory, `turn ${String(from + 1)} to ${String(from + 2)}`).toBe(true);
+    }
   });
 
   it('should keep the prefix when agent memory was edited between turns (S4)', async () => {

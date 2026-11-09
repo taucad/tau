@@ -52,6 +52,7 @@ import {
   createTurnContextSnapshot,
   createToolResultTrimmerMiddleware,
   latexDelimiterMiddleware,
+  skillsUpdateMessageId,
 } from '#harness/cad-middleware.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
 import { installCompaction, isCompactionSummaryRow } from '#harness/compaction.js';
@@ -287,6 +288,19 @@ export const committedTurnContexts = (events: readonly AgentLogEvent[]): readonl
 export const lastCommittedTurnContext = (events: readonly AgentLogEvent[]): TurnContextSnapshot | undefined => {
   const row = events.findLast((event) => event.type === 'turn.history-projection-committed');
   return row?.type === 'turn.history-projection-committed' ? row.context : undefined;
+};
+
+/**
+ * The newest skills note the request history carries: the catalog an earlier turn's context told the model, which the
+ * next turn's note is compared against.
+ *
+ * @param messages - The request messages, with each committed turn's context attached.
+ * @returns The note's text, or `undefined` when the pinned block is the catalog the history tells.
+ * @internal
+ */
+export const carriedSkillsNote = (messages: readonly ProviderMessage[]): string | undefined => {
+  const note = messages.findLast((message) => message.id === skillsUpdateMessageId);
+  return typeof note?.content === 'string' ? note.content : undefined;
 };
 
 /** The bytes of a context that reach a provider: role and content, never ids or metadata. */
@@ -1556,6 +1570,18 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     }
     return history.map((message) => materializedById.get(message.id) ?? message);
   };
+  /** What the chat's history tells the next turn's context about skills: the block it pins and the note it carries. */
+  const skillsCarriage = async (): Promise<{
+    readonly previousContext: TurnContextSnapshot | undefined;
+    readonly carriedSkillsNote: string | undefined;
+  }> => {
+    const rows = await record.rows();
+    const history = await record.history();
+    return {
+      previousContext: lastCommittedTurnContext(rows),
+      carriedSkillsNote: carriedSkillsNote(attachTurnContexts(history, committedTurnContexts(rows))),
+    };
+  };
   const initialHistory = await record.history();
   const initialEvents = await record.events();
   const initialRows = await record.rows();
@@ -2173,7 +2199,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               contextMessages: options.contextMessages,
               clientContext: options.clientContext,
               recentSkills: options.recentSkills,
-              previousContext: lastCommittedTurnContext(await record.rows()),
+              ...(await skillsCarriage()),
             }));
           if (!(await prepareStartOfTurn())) {
             return false;

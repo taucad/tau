@@ -298,11 +298,26 @@ ${
 </system-reminder>`;
 
 /**
+ * Whether the chat's request history already tells the model this catalog: by the newest skills note it carries when
+ * it carries one, else by the pinned block. A chat whose first turn had no catalog carries `undefined` for the block.
+ */
+const historyCarriesCatalog = (
+  history: Readonly<{ previous: TurnContextSnapshot; carriedSkillsNote: string | undefined }>,
+  skills: readonly ClientSkill[],
+  currentSkillsBlock: string | undefined,
+): boolean =>
+  history.carriedSkillsNote === undefined
+    ? pinnedSkillsBlock(history.previous) === currentSkillsBlock
+    : history.carriedSkillsNote === skillsUpdateNote(skills);
+
+/**
  * Resolve the exact browser-safe system/client context committed with one turn.
  *
  * The skills catalog is pinned per chat (prompt-cache identity I1): the block the chat's previous turn carried in its
- * cached system prefix is kept byte for byte, whether or not the catalog has since been read or changed, and a
- * catalog that differs from the pinned one rides as a note in the turn's context messages instead.
+ * cached system prefix is kept byte for byte, whether or not the catalog has since been read or changed. A catalog
+ * that differs from the one the request history carries, in the newest skills note of an earlier turn's context or
+ * else in the pinned block, rides as a note in this turn's context messages instead, so a change is noted once: the
+ * turns after it add no note, and the history keeps the one note where it was.
  *
  * @internal
  */
@@ -319,6 +334,11 @@ export const createTurnContextSnapshot = async (options: {
   readonly recentSkills?: RecentSkillsPort | undefined;
   /** The chat's last committed context, whose skills block this turn pins; `undefined` on the chat's first turn. */
   readonly previousContext?: TurnContextSnapshot | undefined;
+  /**
+   * The newest skills note the chat's request history carries before this turn (`carriedSkillsNote`), when an earlier
+   * turn's context noted a catalog change the history still holds.
+   */
+  readonly carriedSkillsNote?: string | undefined;
 }): Promise<TurnContextSnapshot> => {
   const skills = options.clientContext?.skills ?? [];
   const memory = options.clientContext?.memory ?? {};
@@ -326,7 +346,12 @@ export const createTurnContextSnapshot = async (options: {
   const skillsBlock =
     options.previousContext === undefined ? currentSkillsBlock : pinnedSkillsBlock(options.previousContext);
   const skillsNote =
-    currentSkillsBlock === skillsBlock
+    options.previousContext === undefined ||
+    historyCarriesCatalog(
+      { previous: options.previousContext, carriedSkillsNote: options.carriedSkillsNote },
+      skills,
+      currentSkillsBlock,
+    )
       ? undefined
       : contextMessage({ id: skillsUpdateMessageId, kind: 'skills-update', content: skillsUpdateNote(skills) });
   const recent = await resolveRecentSkills({

@@ -84,6 +84,7 @@ export type Terminal = {
     theme: TerminalTheme;
     textBlending?: 'native' | 'linear' | 'linear-corrected';
     textWeight?: number;
+    minimumContrastRatio?: number;
   };
   readonly cols: number;
   readonly rows: number;

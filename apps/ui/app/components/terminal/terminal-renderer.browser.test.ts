@@ -115,9 +115,16 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
       }
       return [...context.getImageData(0, 0, 1, 1).data];
     };
-    renderer.setTheme({ ...theme, background: '#fafafa' }, { textBlending: 'linear', textWeight: 0.65 });
+    renderer.setTheme(
+      { ...theme, background: '#fafafa' },
+      {
+        textBlending: 'linear',
+        textWeight: 0.65,
+        minimumContrastRatio: 4.5,
+      },
+    );
     expect(background()).toEqual([250, 250, 250, 255]);
-    renderer.setTheme(theme, { textBlending: 'linear-corrected', textWeight: 1.15 });
+    renderer.setTheme(theme, { textBlending: 'linear-corrected', textWeight: 1.15, minimumContrastRatio: 1 });
     expect(background()).toEqual([16, 16, 16, 255]);
   });
 

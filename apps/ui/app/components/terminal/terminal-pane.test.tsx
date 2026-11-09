@@ -7,6 +7,7 @@ import type { DesktopTerminalBridge, DesktopTerminalSession, TerminalHostFrame }
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
 import type { TerminalRendererLoader } from '#components/terminal/terminal-pane.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
+import { highContrastQuery, highContrastRatio } from '#components/terminal/terminal-theme.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 
 const render = (ui: React.ReactNode) => renderReact(ui, { wrapper: KeyboardProvider });
@@ -258,6 +259,48 @@ describe('TerminalPane', () => {
     document.documentElement.classList.remove('dark');
     await act(async () => undefined);
     expect(harness.view.setTheme).toHaveBeenCalledTimes(2);
+  });
+
+  it('should raise the open Terminal to the contrast floor when the contrast preference changes', async () => {
+    const { matchMedia } = globalThis;
+    let matches = false;
+    const listeners = new Set<() => void>();
+    const spy = vi.spyOn(globalThis, 'matchMedia').mockImplementation((query) => {
+      const list: MediaQueryList = {
+        ...matchMedia(query),
+        get matches() {
+          return query === highContrastQuery && matches;
+        },
+        addEventListener(_type: string, listener: () => void) {
+          if (query === highContrastQuery) {
+            listeners.add(listener);
+          }
+        },
+        removeEventListener(_type: string, listener: () => void) {
+          listeners.delete(listener);
+        },
+      };
+      return list;
+    });
+    try {
+      const { unmount } = render(
+        <TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />,
+      );
+      await startTerminal();
+      expect(listeners.size).toBe(1);
+      matches = true;
+      for (const listener of listeners) {
+        listener();
+      }
+      expect(harness.view.setTheme).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ minimumContrastRatio: highContrastRatio }),
+      );
+      unmount();
+      expect(listeners.size).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('should refit and resize the session when the font loads after the Terminal opened', async () => {

@@ -57,8 +57,12 @@ export type TerminalRendererView = {
   search(term: string, newer: boolean): boolean;
   clearFind(): void;
   setScreenReaderMode(enabled: boolean): void;
-  /** Recolour the open terminal, screen and scrollback included, and blend its text for the new background. */
-  setTheme(theme: TerminalTheme, text: Pick<TerminalTextRendering, 'textBlending' | 'textWeight'>): void;
+  /** Recolour the open terminal, screen and scrollback included, and set its text for the new background and contrast. */
+  setTheme(
+    theme: TerminalTheme,
+    text: Pick<TerminalTextRendering, 'textBlending' | 'textWeight'> &
+      Pick<TerminalRendererOptions, 'minimumContrastRatio'>,
+  ): void;
   dispose(): void;
 };
 
@@ -540,9 +544,10 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
       }
     },
     setTheme(theme, text) {
-      /* The renderer repaints once it has the colours, so the blending goes first and no frame mixes the two. */
+      /* The renderer repaints once it has the colours, so the text settings go first and no frame mixes the two. */
       terminal.options.textBlending = text.textBlending;
       terminal.options.textWeight = text.textWeight;
+      terminal.options.minimumContrastRatio = text.minimumContrastRatio;
       terminal.options.theme = theme;
     },
     dispose() {

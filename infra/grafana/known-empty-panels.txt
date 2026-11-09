@@ -229,3 +229,14 @@ SLO / Executive › B2 Copy Freshness, SLO-6 (30d)
 AI Agent › Evidence Admissions by Outcome
 AI Agent › Evidence Deliveries by Outcome
 AI Agent › Langfuse Erasure Steps by Outcome
+
+# Agent prompt cache (prompt caching program R3). The turn-step series need the agent host's x-tau-turn-step and
+# x-tau-turn-gap headers (R1), and the 1-hour write panel needs the Anthropic 1-hour cache tier (W2.2 transport).
+Agent prompt cache › First-Step Cache-Hit Share (24h)
+Agent prompt cache › First-Step TTFT p95 (24h)
+Agent prompt cache › First-Step Outcome Share by Gap Bucket
+Agent prompt cache › First-Step Hit Share by Provider
+Agent prompt cache › First-Step Token Mix
+Agent prompt cache › First-Step TTFT p50 by Cache Outcome
+Agent prompt cache › 1-Hour Cache Writes, All Steps
+Agent prompt cache › Turn Header Coverage

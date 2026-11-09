@@ -10,9 +10,19 @@
  *    cache is on and the command fails with one of Nx's remote cache errors, it is rerun once with the remote cache
  *    off. Tasks that already succeeded replay from the local cache.
  *
+ * 3. Nx talks to the remote cache through a relay on 127.0.0.1 that this guard runs for the command's lifetime, so Nx
+ *    only ever sees answers it accepts (GET 200/404, PUT 200/403/409) and a cache fault costs a miss, not a rerun:
+ *    - an entry over the Workers request body limit is not sent (the edge would answer 413 or reset the upload);
+ *    - after the first PUT refused with 403 (a read token, as on pull requests) no further entry is uploaded;
+ *    - an unreachable server, a timeout or an unexpected status is a GET miss or a refused PUT.
+ *    The rerun in 2 stays as the fallback if the relay itself fails. A nested Nx call reuses its parent's relay.
+ *
  * Output is piped and scanned only while the remote cache is on; otherwise Nx inherits the terminal as before.
  */
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { constants } from 'node:os';
 import process from 'node:process';
 
@@ -77,8 +87,167 @@ const runOnceMoreOnSegfault = async (env: NodeJS.ProcessEnv, scan: boolean): Pro
   return run(env, scan);
 };
 
-const cacheOn = Boolean(process.env[cacheServer]);
-let result = await runOnceMoreOnSegfault(process.env, cacheOn);
+// Cloudflare refuses request bodies over 100 MB on the workers.dev route; stay clear of it.
+const maxEntryBytes = 90 * 1024 * 1024;
+const relayHost = '127.0.0.1';
+const cachePath = /^\/v1\/cache\/[\dA-Za-z]{1,128}$/;
+
+type Tally = Record<'hits' | 'misses' | 'stored' | 'present' | 'oversize' | 'refused' | 'faults', number>;
+
+const readBody = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> => {
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = chunk as Uint8Array<ArrayBuffer>;
+    chunks.push(bytes);
+    length += bytes.byteLength;
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const bytes of chunks) {
+    body.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  return body;
+};
+
+const startCacheRelay = async (upstream: string): Promise<{ url: string; tally: Tally; close: () => void }> => {
+  const tally: Tally = { hits: 0, misses: 0, stored: 0, present: 0, oversize: 0, refused: 0, faults: 0 };
+  let writesRefused = false;
+  const base = upstream.replace(/\/+$/, '');
+
+  const answer = (response: ServerResponse, status: number, body?: Uint8Array<ArrayBuffer>): void => {
+    response.writeHead(status, body ? { 'content-length': String(body.byteLength) } : { 'content-length': '0' });
+    response.end(body);
+  };
+
+  /** `requestTimeout` is in milliseconds. */
+  const forward = async (request: IncomingMessage, init: RequestInit, requestTimeout: number): Promise<Response> => {
+    const headers = new Headers();
+    if (request.headers.authorization) {
+      headers.set('authorization', request.headers.authorization);
+    }
+    for (const [name, value] of new Headers(init.headers ?? {})) {
+      headers.set(name, value);
+    }
+    return fetch(`${base}${request.url ?? ''}`, { ...init, headers, signal: AbortSignal.timeout(requestTimeout) });
+  };
+
+  const handleGet = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    try {
+      const reply = await forward(request, { method: 'GET' }, 120_000);
+      if (reply.status === 200) {
+        // Buffered, so a dropped download is a miss rather than a truncated entry.
+        const body = new Uint8Array(await reply.arrayBuffer());
+        tally.hits += 1;
+        answer(response, 200, body);
+        return;
+      }
+      if (reply.status === 404) {
+        tally.misses += 1;
+      } else {
+        tally.faults += 1;
+      }
+    } catch {
+      tally.faults += 1;
+    }
+    answer(response, 404);
+  };
+
+  const handlePut = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const declared = Number(request.headers['content-length'] ?? Number.NaN);
+    const body = await readBody(request);
+    if (writesRefused) {
+      tally.refused += 1;
+      answer(response, 403);
+      return;
+    }
+    if (Number.isNaN(declared) ? body.byteLength > maxEntryBytes : declared > maxEntryBytes) {
+      tally.oversize += 1;
+      answer(response, 403);
+      return;
+    }
+    try {
+      const reply = await forward(
+        request,
+        { method: 'PUT', body, headers: { 'content-type': 'application/octet-stream' } },
+        300_000,
+      );
+      await reply.arrayBuffer();
+      if (reply.status === 200) {
+        tally.stored += 1;
+        answer(response, 200);
+        return;
+      }
+      if (reply.status === 409) {
+        tally.present += 1;
+        answer(response, 409);
+        return;
+      }
+      if (reply.status === 403) {
+        writesRefused = true;
+        tally.refused += 1;
+        answer(response, 403);
+        return;
+      }
+      tally.faults += 1;
+    } catch {
+      tally.faults += 1;
+    }
+    answer(response, 403);
+  };
+
+  const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const path = (request.url ?? '').split('?')[0] ?? '';
+    try {
+      if (!cachePath.test(path)) {
+        answer(response, 404);
+      } else if (request.method === 'GET') {
+        await handleGet(request, response);
+      } else if (request.method === 'PUT') {
+        await handlePut(request, response);
+      } else {
+        answer(response, 405);
+      }
+    } catch {
+      tally.faults += 1;
+      if (!response.headersSent) {
+        answer(response, request.method === 'GET' ? 404 : 403);
+      }
+    }
+  };
+
+  const server = createServer((request, response) => {
+    void handle(request, response);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, relayHost, () => {
+      resolve();
+    });
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://${relayHost}:${port}`,
+    tally,
+    close: () => {
+      server.close();
+    },
+  };
+};
+
+const withLoopbackNoProxy = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const merged = [env.NO_PROXY, env.no_proxy, relayHost].filter(Boolean).join(',');
+  return { ...env, NO_PROXY: merged, no_proxy: merged };
+};
+
+const upstream = process.env[cacheServer] ?? '';
+const cacheOn = upstream !== '';
+// A nested Nx call (a target that runs Nx) already points at its parent's relay.
+const relay = cacheOn && !upstream.startsWith(`http://${relayHost}:`) ? await startCacheRelay(upstream) : undefined;
+const cacheEnv = relay ? withLoopbackNoProxy({ ...process.env, [cacheServer]: relay.url }) : process.env;
+
+let result = await runOnceMoreOnSegfault(cacheEnv, cacheOn);
 
 if (cacheOn && result.code !== 0 && result.matched) {
   warn(
@@ -86,6 +255,20 @@ if (cacheOn && result.code !== 0 && result.matched) {
     `nx ${args.join(' ')} failed on a remote cache error; rerunning once with the remote cache off`,
   );
   result = await runOnceMoreOnSegfault({ ...process.env, [cacheServer]: '' }, false);
+}
+
+if (relay) {
+  relay.close();
+  const { tally } = relay;
+  const summary = Object.entries(tally)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(', ');
+  if (Object.values(tally).some((count) => count > 0)) {
+    console.error(`nx-guard: remote cache: ${summary}`);
+  }
+  if (tally.faults > 0) {
+    warn('Nx remote cache faults', `${tally.faults} remote cache request(s) failed and were treated as misses`);
+  }
 }
 
 process.exitCode = result.signal ? 128 + constants.signals[result.signal] : (result.code ?? 1);

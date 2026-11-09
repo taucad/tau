@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { kernelConfigurations } from '@taucad/types/constants';
-import { getIconIdForFilename } from '#components/icons/file-extension-icon.js';
+import { getIconIdForFilename } from '#icons/file-extension-icon.js';
 
 describe('getIconIdForFilename', () => {
   it('prefers a whole-filename match over the extension', () => {

@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { getCoreRowModel, getPaginationRowModel, useReactTable } from '@tanstack/react-table';
 import type { PaginationState } from '@tanstack/react-table';
 import { describe, expect, it } from 'vitest';
-import { DataTablePagination } from '#components/ui/data-table.js';
+import { DataTablePagination } from '#components/data-table.js';
 
 const rows = Array.from({ length: 31 }, (_, index) => ({ id: String(index) }));
 

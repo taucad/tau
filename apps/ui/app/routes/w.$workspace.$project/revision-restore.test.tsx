@@ -22,7 +22,7 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 const toastWarning = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: toastSuccess, error: toastError, info: toastInfo, warning: toastWarning },
 }));
 const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());

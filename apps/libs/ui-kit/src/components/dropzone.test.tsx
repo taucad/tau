@@ -2,7 +2,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { Dropzone } from '#components/ui/dropzone.js';
+import { Dropzone } from '#components/dropzone.js';
 
 describe('Dropzone', () => {
   it('should open one native file picker from the keyboard and accept its selection', async () => {

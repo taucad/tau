@@ -207,6 +207,10 @@ const config: KnipConfig = {
         'src/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
       ],
     },
+    'apps/libs/ui-kit': {
+      // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
+      entry: ['scripts/svg-sprite.d.ts'],
+    },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
       entry: ['src/graceful-shutdown.signal-fixture.ts'],
@@ -287,8 +291,6 @@ const config: KnipConfig = {
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
-        // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
-        'scripts/svg-sprite.d.ts',
         // `build*` targets run it as a runtime cache input.
         'geospec-mt-assets-cache-key.ts',
         // Script of calibration-preview.html, served by vite.calibration.config.ts.

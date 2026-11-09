@@ -5,7 +5,7 @@ import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { ExportSelector } from '#components/files/export-selector.js';
 import {
   FloatingPanel,

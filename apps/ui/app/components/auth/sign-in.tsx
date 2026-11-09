@@ -11,7 +11,7 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldSeparator } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';

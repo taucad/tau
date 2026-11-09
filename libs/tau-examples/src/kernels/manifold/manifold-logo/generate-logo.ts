@@ -12,7 +12,7 @@
  * the README records how each was measured.
  *
  * The output is the UI's `manifold` icon, so it also lands in the sprite's
- * raw icon directory; run `pnpm nx run ui:generate-svg-sprite` afterwards.
+ * raw icon directory; run `pnpm nx run ui-kit:generate-svg-sprite` afterwards.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -850,7 +850,7 @@ export const targets: readonly string[] = [
   join(here, 'manifold.svg'),
   // The UI sprite's raw icon: one source, so the mark cannot drift from the
   // part it is rendered from.
-  join(here, '../../../../../../apps/ui/app/components/icons/raw/manifold.svg'),
+  join(here, '../../../../../../apps/libs/ui-kit/src/icons/raw/manifold.svg'),
 ];
 
 const isMain =

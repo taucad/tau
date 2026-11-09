@@ -22,7 +22,7 @@ import {
   permissionModeName,
   permissionModeOptions,
 } from '#components/chat/permission-mode-copy.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { desktopPermissions } from '#filesystem/desktop-permissions.js';
 import type { PermissionMode } from '#filesystem/desktop-permissions.js';

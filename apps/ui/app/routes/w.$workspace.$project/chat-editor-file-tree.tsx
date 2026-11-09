@@ -47,7 +47,7 @@ import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   FloatingPanelContent,
   FloatingPanelContentBody,
@@ -89,7 +89,7 @@ import {
   sidebarRowClass,
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
-import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon, getIconIdForFilename } from '@taucad/ui-kit/icons/file-extension-icon';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '#utils/zip-download.utils.js';

@@ -26,7 +26,7 @@ describe('LazySection', () => {
   });
 
   it('should not render children before intersection', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px'>
@@ -38,7 +38,7 @@ describe('LazySection', () => {
   });
 
   it('should render children after IntersectionObserver triggers', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px'>
@@ -57,7 +57,7 @@ describe('LazySection', () => {
   });
 
   it('should render a placeholder with specified minHeight', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     const { container } = render(
       <LazySection minHeight='400px'>
@@ -70,7 +70,7 @@ describe('LazySection', () => {
   });
 
   it('should disconnect observer after first intersection', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px'>
@@ -89,7 +89,7 @@ describe('LazySection', () => {
   });
 
   it('should render fallback when provided and not yet visible', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px' fallback={<div data-testid='fallback'>Loading...</div>}>
@@ -102,7 +102,7 @@ describe('LazySection', () => {
   });
 
   it('should not render fallback after intersection', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px' fallback={<div data-testid='fallback'>Loading...</div>}>
@@ -122,7 +122,7 @@ describe('LazySection', () => {
   });
 
   it('should accept a rootMargin for early triggering', async () => {
-    const { LazySection } = await import('#components/ui/lazy-section.js');
+    const { LazySection } = await import('#components/lazy-section.js');
 
     render(
       <LazySection minHeight='400px' rootMargin='200px'>

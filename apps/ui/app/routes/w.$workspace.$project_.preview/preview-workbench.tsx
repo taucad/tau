@@ -23,7 +23,7 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import { PreviewPhoneTopBar } from '#routes/w.$workspace.$project_.preview/preview-phone-top-bar.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /** Owned previews retain their rooted files and native-kernel selection, with a transient workbench arrangement. */
 export function OwnedPreviewProviders({

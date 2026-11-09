@@ -6,9 +6,10 @@
  * initial value, search box stuck at its initial text).
  */
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { expect, it } from 'vitest';
 
-const sourcePath = 'app/components/ui/data-table.tsx';
+const sourcePath = path.join(import.meta.dirname, 'data-table.tsx');
 
 it('opts every table component out of React Compiler memoization', async () => {
   const source = await readFile(sourcePath, 'utf8');

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { FolderOpen, PanelsTopLeft } from 'lucide-react';
 import { resolveRootedPath } from '@taucad/utils/path';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { toast } from '#components/ui/sonner.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import { toast } from '@taucad/ui/components/sonner';
 import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';

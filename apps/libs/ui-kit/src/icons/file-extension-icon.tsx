@@ -2,9 +2,8 @@ import { File as FileIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensionSet } from '@taucad/types/constants';
 import { FormatBadge } from '@taucad/workbench-panes/components/format-badge';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
-import { getFileExtension } from '#utils/filesystem.utils.js';
+import { SvgIcon } from '#icons/svg-icon.js';
+import type { SvgIcons } from '#icons/generated/svg-icons.js';
 
 type IconConfig =
   | {
@@ -137,6 +136,16 @@ const iconConfigByFilename: Partial<Record<string, IconConfig>> = {
     id: 'readme.md',
   },
 };
+
+/** Lowercased text after the last dot, or `''` when there is none (same rule as the app's `getFileExtension`). */
+function getFileExtension(filename: string): string {
+  const lastDotIndex = filename.lastIndexOf('.');
+  if (lastDotIndex === -1 || lastDotIndex === filename.length - 1) {
+    return '';
+  }
+
+  return filename.slice(lastDotIndex + 1).toLowerCase();
+}
 
 /** Last path segment, lowercased — call sites pass bare names and full paths alike. */
 function getBasename(path: string): string {

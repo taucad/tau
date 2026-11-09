@@ -6,7 +6,7 @@ import { PluginKey } from '@tiptap/pm/state';
 import { File as FileIcon, Folder, MessageSquare, Camera, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { Separator } from '@taucad/ui/components/separator';
 import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';

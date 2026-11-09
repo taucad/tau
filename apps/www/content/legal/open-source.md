@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 862 packages, with the license each declares.
+The web and desktop apps include the following 873 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -272,7 +272,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-pacer](https://github.com/TanStack/pacer) | 0.22.1 | MIT |
 | [@tanstack/react-query](https://github.com/TanStack/query) | 5.104.2 | MIT |
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
+| [@tanstack/react-table](https://github.com/TanStack/table) | 8.21.3 | MIT |
+| [@tanstack/react-virtual](https://github.com/TanStack/virtual) | 3.14.17 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
+| [@tanstack/table-core](https://github.com/TanStack/table) | 8.21.3 | MIT |
+| [@tanstack/virtual-core](https://github.com/TanStack/virtual) | 3.19.2 | MIT |
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
@@ -343,6 +347,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [aria-hidden](https://github.com/theKashey/aria-hidden) | 1.2.6 | MIT |
 | [async-lock](https://github.com/rogierschouten/async-lock) | 1.4.1 | MIT |
 | [atomic-sleep](https://github.com/davidmarkclements/atomic-sleep) | 1.0.0 | MIT |
+| [attr-accept](https://github.com/react-dropzone/attr-accept) | 2.2.5 | MIT |
 | [auto-bind](https://github.com/sindresorhus/auto-bind) | 5.0.1 | MIT |
 | [available-typed-arrays](https://github.com/inspect-js/available-typed-arrays) | 1.0.7 | MIT |
 | [bail](https://github.com/wooorm/bail) | 2.0.2 | MIT |
@@ -502,6 +507,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [fetch-blob](https://github.com/node-fetch/fetch-blob) | 3.2.0 | MIT |
 | [fflate](https://github.com/101arrowz/fflate) | 0.6.11 | MIT |
 | [fflate](https://github.com/101arrowz/fflate) | 0.8.3 | MIT |
+| [file-selector](https://github.com/react-dropzone/file-selector) | 2.1.2 | MIT |
 | [finalhandler](https://github.com/pillarjs/finalhandler) | 2.1.1 | MIT |
 | [flatbush](https://github.com/mourner/flatbush) | 4.6.2 | ISC |
 | [flatqueue](https://github.com/mourner/flatqueue) | 3.1.0 | ISC |
@@ -580,6 +586,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [jose](https://github.com/panva/jose) | 6.2.12 | MIT |
 | [joycon](https://github.com/egoist/joycon) | 3.1.1 | MIT |
 | [js-sdsl](https://github.com/js-sdsl/js-sdsl) | 4.3.0 | MIT |
+| [js-tokens](https://github.com/lydell/js-tokens) | 4.0.0 | MIT |
 | [js-tokens](https://github.com/lydell/js-tokens) | 9.0.1 | MIT |
 | [js-yaml](https://github.com/nodeca/js-yaml) | 4.3.2 | MIT |
 | [json-bigint](https://github.com/sidorares/json-bigint) | 1.0.0 | MIT |
@@ -607,6 +614,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [lodash.get](https://github.com/lodash/lodash) | 4.4.2 | MIT |
 | [lodash.isequal](https://github.com/lodash/lodash) | 4.5.0 | MIT |
 | [long](https://github.com/dcodeIO/long.js) | 5.3.2 | Apache-2.0 |
+| [loose-envify](https://github.com/zertosh/loose-envify) | 1.4.0 | MIT |
 | [lru-cache](https://github.com/isaacs/node-lru-cache) | 10.4.3 | ISC |
 | [lucide-react](https://github.com/lucide-icons/lucide) | 0.552.0 | ISC |
 | maath | 0.10.8 | MIT |
@@ -709,6 +717,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [process](https://github.com/shtylman/node-process) | 0.11.10 | MIT |
 | [process-nextick-args](https://github.com/calvinmetcalf/process-nextick-args) | 2.0.1 | MIT |
 | [promise-worker-transferable](https://github.com/terikon/promise-worker-transferable) | 1.0.4 | Apache-2.0 |
+| [prop-types](https://github.com/facebook/prop-types) | 15.8.1 | MIT |
 | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) | 4.1.2 | MIT |
 | [property-graph](https://github.com/donmccurdy/property-graph) | 4.1.0 | MIT |
 | [property-information](https://github.com/wooorm/property-information) | 7.2.0 | MIT |
@@ -724,6 +733,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [react](https://github.com/react/react) | 19.3.1 | MIT |
 | [react-colorful](https://github.com/omgovich/react-colorful) | 5.8.1 | MIT |
 | [react-day-picker](https://github.com/gpbl/react-day-picker) | 10.0.2 | MIT |
+| [react-dropzone](https://github.com/react-dropzone/react-dropzone) | 14.4.1 | MIT |
+| [react-is](https://github.com/facebook/react) | 16.13.1 | MIT |
 | [react-is](https://github.com/facebook/react) | 18.3.1 | MIT |
 | [react-reconciler](https://github.com/facebook/react) | 0.33.0 | MIT |
 | [react-redux](https://github.com/reduxjs/react-redux) | 9.3.0 | MIT |

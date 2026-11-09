@@ -3,7 +3,7 @@ import type { RefCallback } from 'react';
 import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { OmniScroller } from '#components/omni-scroller.js';
 
 const setHorizontalOverflow = (
   element: HTMLElement,

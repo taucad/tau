@@ -1,7 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 
@@ -105,7 +105,7 @@ vi.mock('#services/headless-capture.js', () => ({
   captureFilesToDataUrls: () => ['data:image/webp;base64,AQID'],
   omittedSectionCutsNotice: mocks.notice,
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 
 const currentView: ContextSuggestionItem = {
   id: 'screenshot-current-view',

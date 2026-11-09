@@ -33,7 +33,7 @@ const { mockToast } = vi.hoisted(() => ({
     ) => void
   >(),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: mockToast }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: mockToast }));
 
 const storageValues = new Map<string, string>();
 vi.stubGlobal(

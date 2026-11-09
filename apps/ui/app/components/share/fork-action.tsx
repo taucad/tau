@@ -15,7 +15,7 @@ import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js'
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 

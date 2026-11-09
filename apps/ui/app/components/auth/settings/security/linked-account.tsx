@@ -18,7 +18,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { SettingsRow } from '#components/settings/settings-item.js';
 

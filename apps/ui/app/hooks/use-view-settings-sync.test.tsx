@@ -769,10 +769,15 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   const poseWrites = (writeRecord: ReturnType<typeof vi.fn<(next: WorkbenchView) => Promise<boolean>>>) =>
     writeRecord.mock.calls.map(([next]) => next.camera).filter((camera) => camera.kind === 'pose');
 
+  const disposers: Array<() => void> = [];
+
   beforeEach(() => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    for (const dispose of disposers.splice(0)) {
+      dispose();
+    }
     vi.useRealTimers();
   });
 
@@ -792,6 +797,10 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       </GraphicsProvider>
     );
     const view = render(draw(record));
+    disposers.push(() => {
+      view.unmount();
+      graphicsRef.stop();
+    });
     const session = getViewCameraSession(graphicsRef)!;
     return {
       graphicsRef,
@@ -800,10 +809,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       rig: session.rig.actorRef,
       rerender: (next: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => {
         view.rerender(draw(next, recordLocalPatch));
-      },
-      dispose: () => {
-        view.unmount();
-        graphicsRef.stop();
       },
     };
   }
@@ -823,10 +828,11 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     advance(50);
     const foreign = workbenchRecords.view.schema.parse({ ...base, camera: pose([0, 1, 0], 9) });
     harness.rerender(foreign);
+    expect(harness.rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
     for (let step = 1; step <= 10; step += 1) {
       advance(50);
-      drag(step);
       expect(harness.rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+      drag(step);
     }
     advance(settle - 1);
     expect(harness.rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
@@ -835,7 +841,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     advance(settle * 4);
     expect(harness.rig.getSnapshot().context.view.direction).toEqual([0, 1, 0]);
     expect(poseWrites(harness.writeRecord).filter((camera) => camera.direction[0] === 1)).toEqual([]);
-    harness.dispose();
   });
 
   it('should apply a foreign pose at once while the camera is idle', () => {
@@ -846,7 +851,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     const foreign = workbenchRecords.view.schema.parse({ ...base, camera: pose([0, 1, 0], 9) });
     harness.rerender(foreign);
     expect(harness.rig.getSnapshot().context.view).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
-    harness.dispose();
   });
 
   it('should never write an adopted pose back over the foreign instruction it came from', () => {
@@ -858,13 +862,13 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     const foreign = workbenchRecords.view.schema.parse({ ...base, camera: { kind: 'preset', preset: 'front' } });
     harness.rerender(foreign);
     expect(harness.rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    harness.writeRecord.mockClear();
     advance(settle * 4);
     /* The adoption moved the rig, so the settle callback ran and wrote; it kept the instruction, not the pose. */
     expect(harness.writeRecord).toHaveBeenCalled();
     expect(harness.writeRecord.mock.calls.map(([next]) => next.camera)).toEqual(
       harness.writeRecord.mock.calls.map(() => foreign.camera),
     );
-    harness.dispose();
   });
 
   it('should never apply an own echo while a newer local pose is live', () => {
@@ -888,7 +892,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       advance(50);
       expect(harness.rig.getSnapshot().context.view.verticalSpan).toBe(2);
     }
-    harness.dispose();
   });
 
   it('should leave a live pose alone when a foreign grid-only edit arrives during a drag', () => {
@@ -906,7 +909,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(harness.rig.getSnapshot().context.view).toMatchObject({ direction: [1, 0, 0], verticalSpan: 4 });
     }
     expect(poseWrites(harness.writeRecord).some((camera) => camera.verticalSpan === 4)).toBe(true);
-    harness.dispose();
   });
 
   describe('framing', () => {
@@ -928,6 +930,10 @@ describe('useViewSettingsSync settle-window characterisation', () => {
         </GraphicsProvider>
       );
       const view = render(draw(0, smallBounds));
+      disposers.push(() => {
+        view.unmount();
+        graphicsRef.stop();
+      });
       const session = getViewCameraSession(graphicsRef)!;
       return {
         graphicsRef,
@@ -936,10 +942,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
         rig: session.rig.actorRef,
         frame: (radius: number, bounds: Box3) => {
           view.rerender(draw(radius, bounds));
-        },
-        dispose: () => {
-          view.unmount();
-          graphicsRef.stop();
         },
       };
     }
@@ -952,7 +954,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(harness.session.framing.firstFrameView).toBeDefined();
       advance(settle * 4);
       expect(poseWrites(harness.writeRecord)).toEqual([]);
-      harness.dispose();
     });
 
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {
@@ -966,7 +967,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(refit.verticalSpan).toBeGreaterThan(firstFrame.verticalSpan);
       advance(settle * 4);
       expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: refit.verticalSpan });
-      harness.dispose();
     });
 
     it('should save a Fit view the person commanded (kept by D20)', () => {
@@ -986,7 +986,6 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(fitted.verticalSpan).toBeLessThan(40);
       advance(settle * 4);
       expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: fitted.verticalSpan });
-      harness.dispose();
     });
   });
 });

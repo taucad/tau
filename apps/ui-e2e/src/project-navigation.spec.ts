@@ -544,13 +544,10 @@ test('project and chat rows reveal their actions over a dissolving name', async 
       button.textContent.includes('New project'),
     );
     /* `ProjectsLabel` appends a `N live` count beside the word whenever a
-     * project is open (`project-navigation.tsx:427-430`), so the label reads
-     * `Projects1 live` here. */
+     * project is open (`project-navigation.tsx`), so the label reads
+     * `Recents1 live` here. It is the sidebar's only group label. */
     const projects = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find((label) =>
-      label.textContent.startsWith('Projects'),
-    );
-    const platform = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find(
-      (label) => label.textContent === 'Platform',
+      label.textContent.startsWith('Recents'),
     );
     const project = document.querySelector<HTMLElement>('[data-slot="project-trigger"]');
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')];
@@ -558,9 +555,9 @@ test('project and chat rows reveal their actions over a dissolving name', async 
      * standing destinations live: `navSecondary` — and with it the `Files` row
      * this used to read — moved into the user dropdown in `be3d0eb6e`, and
      * `Project Library` has never been a committed label. */
-    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'All projects');
+    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
     const community = navButtons.find((button) => button.textContent.trim() === 'Community');
-    if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
+    if (!search || !newProject || !projects || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
     }
     const searchBounds = search.getBoundingClientRect();
@@ -586,7 +583,6 @@ test('project and chat rows reveal their actions over a dissolving name', async 
           (newProjectIconBounds.top + newProjectIconBounds.height / 2 - newProjectBounds.top),
       ),
       leftDelta: Math.abs(searchBounds.left - newProjectBounds.left),
-      labelColors: [getComputedStyle(projects).color, getComputedStyle(platform).color],
       rightDelta: Math.abs(searchBounds.right - newProjectBounds.right),
       shortcutCenterDelta: Math.abs(
         searchShortcutBounds.top +
@@ -602,12 +598,11 @@ test('project and chat rows reveal their actions over a dissolving name', async 
   expect(headerControlMetrics.leftDelta).toBeLessThanOrEqual(0.5);
   expect(headerControlMetrics.rightDelta).toBeLessThanOrEqual(0.5);
   expect(headerControlMetrics.shortcutCenterDelta).toBeLessThanOrEqual(0.5);
-  expect(headerControlMetrics.labelColors[0]).toBe(headerControlMetrics.labelColors[1]);
   for (const edges of headerControlMetrics.horizontalEdges.slice(1)) {
     expect(Math.abs(edges[0]! - headerControlMetrics.horizontalEdges[0]![0]!)).toBeLessThanOrEqual(0.5);
     expect(Math.abs(edges[1]! - headerControlMetrics.horizontalEdges[0]![1]!)).toBeLessThanOrEqual(0.5);
   }
-  await target.expectVisible(selectors.getByRole('link', { name: 'All projects', exact: true }));
+  await target.expectVisible(selectors.getByRole('link', { name: 'Projects', exact: true }));
 
   const paneHeaderHeightDelta = await target.evaluate(() => {
     const chatHeader = document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"]');

@@ -8,13 +8,20 @@ export const docsOrigin = 'https://docs.tau.new';
 export const downloadsOrigin = 'https://downloads.tau.new';
 
 /**
+ * The app's Home for a link from these pages. Bare `/` serves this site again without the `tau-entry=app` preference,
+ * which the `data-open-app` click hook writes only on a plain left click with cookies allowed. The UI's marketing edge
+ * hands any `/` with a non-campaign query to the app, and the app then records the preference and drops the query.
+ */
+export const appHomePath = '/?app';
+
+/**
  * A link into the Tau app. Every page here is served through the app's own hostname (the UI's marketing edge
  * function), so a same-origin path reaches the app wherever the page loaded: local development, a site's netlify.app
  * address, staging or production, with nothing rewritten after load.
  * @param path - The app path, starting with `/`.
- * @returns The same-origin link.
+ * @returns The same-origin link; `/` becomes {@link appHomePath}.
  */
-export const appHref = (path: `/${string}`): string => path;
+export const appHref = (path: `/${string}`): string => (path === '/' ? appHomePath : path);
 
 /** Staging hosts that serve these pages through the app's proxy, mapped to their own docs origin. */
 const stagingDocsOrigins = new Map([['taucad.dev', 'https://docs.taucad.dev']]);

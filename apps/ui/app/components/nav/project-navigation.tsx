@@ -138,7 +138,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
           {isAwaitingListing
             ? Array.from({ length: placeholderCount }, (_, index) => (
                 <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
-                  <SidebarRowSkeleton name={rememberedShape?.projects[index]?.name} />
+                  <SidebarRowSkeleton />
                 </SidebarMenuItem>
               ))
             : null}
@@ -534,7 +534,7 @@ function ProjectNavigationItem({
 }
 
 /**
- * The group label: "Projects", how many are live, and *Close idle* (D5, D19).
+ * The group label: "Recents", how many are live, and *Close idle* (D5, D19).
  *
  * The budget stays stated (I28) in two words, and its way out — closing exactly
  * the projects the registry says a policy may close — is the label's overflow
@@ -547,9 +547,10 @@ function ProjectsLabel(): React.JSX.Element {
   const { closeProject } = useSidebarCommands();
   return (
     <div className='group/label flex h-7 items-center gap-1 pr-0.5'>
-      <SidebarGroupLabel className='min-w-0 flex-1'>
-        Projects
-        {projects > 0 ? <span className='ml-1.5 font-normal tabular-nums'>{`${String(projects)} live`}</span> : null}
+      {/* As quiet as the "Earlier" divider below it: the nav row above already says "Projects". */}
+      <SidebarGroupLabel className='min-w-0 flex-1 text-xs font-normal text-muted-foreground/70'>
+        Recents
+        {projects > 0 ? <span className='ml-1.5 tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
       {idleProjectIds.length > 0 ? (
         <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'>
@@ -560,12 +561,12 @@ function ProjectsLabel(): React.JSX.Element {
                 variant='ghost'
                 size='icon'
                 className={sidebarRowButtonClass}
-                aria-label='More actions for projects'
+                aria-label='More actions for recent projects'
               >
                 <EllipsisVertical aria-hidden className='size-3.5' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent drawerTitle='Projects' side='right' align='start' className='w-48'>
+            <DropdownMenuContent drawerTitle='Recents' side='right' align='start' className='w-48'>
               <DropdownMenuItem
                 onSelect={() => {
                   for (const projectId of idleProjectIds) {

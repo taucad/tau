@@ -15,6 +15,7 @@ import {
   parsePin,
   dependencyTag,
   pinFor,
+  pinServed,
   pinStatus,
   publishPlan,
   readPin,
@@ -59,10 +60,15 @@ const { production, staging } = blobBases;
 const noWait: RetryPolicy = { attempts: 2, wait: async () => undefined };
 
 const serve =
-  (routes: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error>, seen: string[] = []): typeof fetch =>
-  async (input) => {
+  (
+    routes: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error>,
+    seen: string[] = [],
+    requests: string[] = [],
+  ): typeof fetch =>
+  async (input, init) => {
     const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
     seen.push(url);
+    requests.push(`${init?.method ?? 'GET'} ${url}`);
     const route = routes.get(url);
     if (route instanceof Error) {
       throw route;
@@ -425,6 +431,79 @@ describe('picogk-browser-host-pin', () => {
     });
   });
 
+  describe('served decision', () => {
+    const manifestUrl = (base: string) => `${base}${pin.manifest.sha256}`;
+
+    it('should stop at one HEAD when production does not serve the manifest', async () => {
+      const requests: string[] = [];
+      const transport = serve(mirror(new Map(), [staging]), [], requests);
+      await expect(pinServed({ pin, transport, retry: noWait })).resolves.toEqual({
+        served: false,
+        reason: `${manifestUrl(production)} is not served (HTTP 404)`,
+      });
+      expect(requests).toEqual([`HEAD ${manifestUrl(production)}`]);
+    });
+
+    it('should stop at the staging HEAD without fetching any blob when staging does not serve the manifest', async () => {
+      const requests: string[] = [];
+      const transport = serve(mirror(new Map(), [production]), [], requests);
+      await expect(pinServed({ pin, transport, retry: noWait })).resolves.toEqual({
+        served: false,
+        reason: `${manifestUrl(staging)} is not served (HTTP 404)`,
+      });
+      expect(requests).toEqual([`HEAD ${manifestUrl(production)}`, `HEAD ${manifestUrl(staging)}`]);
+    });
+
+    it('should read another status, an unreachable host or a wrong length as not served', async () => {
+      await expect(
+        pinServed({ pin, transport: serve(mirror(new Map([[manifestUrl(production), 503]]))), retry: noWait }),
+      ).resolves.toEqual({ served: false, reason: `${manifestUrl(production)} answered HTTP 503` });
+      await expect(
+        pinServed({
+          pin,
+          transport: serve(mirror(new Map([[manifestUrl(staging), new Error('offline')]]))),
+          retry: noWait,
+        }),
+      ).resolves.toEqual({ served: false, reason: `${manifestUrl(staging)} could not be probed: offline` });
+      const throwsText: typeof fetch = async () => {
+        // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- a transport may throw a non-Error
+        throw 'refused';
+      };
+      await expect(pinServed({ pin, transport: throwsText })).resolves.toEqual({
+        served: false,
+        reason: `${manifestUrl(production)} could not be probed: refused`,
+      });
+      const wrongLength: typeof fetch = async () =>
+        new Response(undefined, { status: 200, headers: { 'content-length': '1' } });
+      await expect(pinServed({ pin, transport: wrongLength, retry: noWait })).resolves.toEqual({
+        served: false,
+        reason: `${manifestUrl(production)} is 1 bytes, not the pinned ${String(pin.manifest.byteLength)}`,
+      });
+    });
+
+    it('should prove both hosts in full before deciding the pin is served', async () => {
+      const requests: string[] = [];
+      await expect(
+        pinServed({ pin, transport: serve(mirror(), [], requests), retry: noWait, concurrency: 2 }),
+      ).resolves.toEqual({
+        served: true,
+        reason: `manifest ${pin.manifest.sha256} and its 6 files are already served with their digests at ${production} and ${staging}`,
+      });
+      expect(requests.slice(0, 2)).toEqual([`HEAD ${manifestUrl(production)}`, `HEAD ${manifestUrl(staging)}`]);
+      // The manifest and the five distinct files, read once on each host.
+      expect(requests.slice(2).filter((request) => request.startsWith('GET '))).toHaveLength(12);
+      // Without a retry policy, a host that serves everything at once is proven without a wait.
+      await expect(pinServed({ pin, transport: serve(mirror()) })).resolves.toMatchObject({ served: true });
+      const missingBlob = `${staging}${hex(contents['_framework/dotnet.js']!)}`;
+      await expect(
+        pinServed({ pin, transport: serve(mirror(new Map([[missingBlob, 404]]))), retry: noWait }),
+      ).resolves.toEqual({
+        served: false,
+        reason: `_framework/dotnet.js: ${missingBlob} answered HTTP 404`,
+      });
+    });
+  });
+
   describe('command line', () => {
     it('should print usage for an unknown command or missing flag', async () => {
       for (const argv of [
@@ -540,6 +619,27 @@ describe('picogk-browser-host-pin', () => {
       expect(errors.at(-1)).toBe(
         `Pinned PicoGK browser host blobs that are not served with their digest:\n  manifest: ${production}${pin.manifest.sha256} answered HTTP 404`,
       );
+    });
+
+    it('should report whether a written pin is already served as a step output', async () => {
+      const root = await temporary();
+      const path = join(root, 'browser-host.pin.json');
+      const { out, errors, io: streams } = io();
+      await expect(run(['served', '--pin', path], streams)).resolves.toBe(1);
+      expect(errors).toEqual([`${path} does not exist; write the pin before asking whether it is served.`]);
+      await writeFile(path, serializePin(pin));
+      await expect(
+        run(['served', '--pin', path], streams, { transport: serve(mirror()), retry: noWait }),
+      ).resolves.toBe(0);
+      await expect(
+        run(['served', '--pin', path], streams, { transport: serve(new Map()), retry: noWait }),
+      ).resolves.toBe(0);
+      expect(out).toEqual(['served=true', 'served=false']);
+      expect(errors.slice(1)).toEqual([
+        `Already served: manifest ${pin.manifest.sha256} and its 6 files are already served with their digests at ${production} and ${staging}.`,
+        `Not served: ${production}${pin.manifest.sha256} is not served (HTTP 404).`,
+      ]);
+      await expect(run(['served', '--pin', path, '--base', production], streams)).resolves.toBe(2);
     });
 
     it('should name each environment by its dependency host', () => {

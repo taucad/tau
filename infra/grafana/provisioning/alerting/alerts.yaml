@@ -1157,25 +1157,55 @@ groups:
         isPaused: true
       - uid: alerting-rule-health
         title: TauAlertingRuleHealth
-        condition: rule_health
+        condition: rule_health_threshold
         data:
-          - refId: rule_health
+          - refId: rule_health_logs
+            queryType: range
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: alert-state-history
+            model:
+              expr: 'sum(count_over_time({from="state-history", folderUID="tau-local"} | json | current=~"Error.*" | ruleTitle!="TauAlertingRuleHealth" [30m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: rule_health_logs
+          - refId: rule_health_reduce
             queryType: ''
             relativeTimeRange:
-              from: 900
+              from: 0
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: __expr__
             model:
-              expr: sum(increase(grafana_alerting_rule_evaluation_failures_total{app=~".*"}[15m])) > 0
-              intervalMs: 15000
-              maxDataPoints: 20
-              refId: rule_health
+              type: reduce
+              reducer: last
+              expression: rule_health_logs
+              refId: rule_health_reduce
+          - refId: rule_health_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: rule_health_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: rule_health_threshold
         noDataState: OK
         execErrState: OK
         for: 15m
         annotations:
           runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
-          summary: Grafana failed to evaluate an alert rule in the last 15 min. The series name is Grafana's own and is unverified on the hosted Prometheus datasource (package.md §12.2); added paused until W4 confirms it or replaces it with an operator check of rule state. Rules that fail to evaluate also report through their execution-error state.
+          summary: 'Some rule in this environment''s folder entered an Error state in the last 30 min, by Grafana''s own alert state history (Loki, logical datasource alert-state-history; folderUID="tau-local" binds to tau-<environment>). Lines carry ruleTitle, ruleUID and error: query {from="state-history", folderUID="tau-<environment>"} | json | current=~"Error.*" to see which rule failed and why. Excludes its own title so its own evaluation error cannot keep it firing. Locally the datasource maps to the local Loki, which has no state-history streams; the local copy stays paused.'
         labels:
           severity: warning
           service: tau-api

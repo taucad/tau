@@ -8,23 +8,30 @@ import { scrubUrl } from '#lib/sentry-event.lib.js';
  * Browser tracing (SB17, D3): sampled page-load and navigation transactions named by React Router
  * route id, with the SDK's web vitals, continued into the API through `sentry-trace` and `baggage`.
  *
- * Staging traces every page load, so the suite can assert on traces (A17). Production stays off
- * until the integration's lazy-chunk size and main-thread cost are measured on a constrained phone
- * on staging; the blueprint's production rate is then 0.05.
+ * Staging traces every page load, so the suite can assert on traces (A17). Production traces one
+ * in twenty (the blueprint's 0.05), set once the main-thread cost was measured on a constrained
+ * phone on staging with resource spans left out (see `ignoredResourceSpanOps`).
  */
 
 /** An SDK integration, as `@sentry/react` accepts one (it does not re-export the type). */
 type SentryIntegration = Parameters<typeof Sentry.addIntegration>[0];
 
+/** The share of production page loads and navigations traced (SB17, D3). */
+const productionTracesSampleRate = 0.05;
+
 /**
  * The share of page loads and navigations traced in an environment, or `undefined` for none.
  *
  * @param environment - The SDK environment (`staging`, `production`, or an `-e2e` variant).
- * @returns 1 outside production; `undefined` in production, which installs no tracing at all.
+ * @returns 0.05 in production, 1 elsewhere; `undefined` with no environment, which installs no tracing at all.
  * @public
  */
-export const tracesSampleRate = (environment: string | undefined): number | undefined =>
-  environment === undefined || environment === 'production' || environment.startsWith('production-') ? undefined : 1;
+export const tracesSampleRate = (environment: string | undefined): number | undefined => {
+  if (environment === undefined) {
+    return undefined;
+  }
+  return environment === 'production' || environment.startsWith('production-') ? productionTracesSampleRate : 1;
+};
 
 /** Escape a string for use inside a regular expression. */
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
@@ -136,7 +143,8 @@ export const scrubTransaction = <TransactionEvent extends Event>(event: Transact
  * and API calls (`http.client`); one span per fetched script, stylesheet or asset is not in it. Measured on staging
  * over 48 h to 2026-11-09: about 258 spans per page load, 206 of them `resource.script` and 33 more `resource.other`
  * and `resource.link`; and on an emulated constrained phone (Moto G4, 4x CPU throttle) about 480 ms of `sentry.lib`
- * main-thread time per load with tracing against about 120 ms without it.
+ * main-thread time per load with tracing against about 120 ms without it. With these ops left out (tau#1615, staging
+ * 2026-11-09T07:35Z): 18 spans in the page-load transaction and about 240-325 ms of `sentry.lib` time per traced load.
  */
 const ignoredResourceSpanOps = [
   'resource.script',
@@ -147,7 +155,7 @@ const ignoredResourceSpanOps = [
 ] as const;
 
 /**
- * The tracing integration for an environment, or none in production (see the module comment).
+ * The tracing integration for an environment, or none when the environment is unknown.
  *
  * @param environment - The SDK environment.
  * @returns The integrations to add.

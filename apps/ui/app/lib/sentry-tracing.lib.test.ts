@@ -13,13 +13,15 @@ describe('tracesSampleRate', () => {
     expect(tracesSampleRate(environment)).toBe(1);
   });
 
-  it.each([undefined, 'production', 'production-e2e'])(
-    'should not trace in %s until the staging cost is measured',
-    (environment) => {
-      expect(tracesSampleRate(environment)).toBeUndefined();
-      expect(tracingIntegrations(environment)).toStrictEqual([]);
-    },
-  );
+  it.each(['production', 'production-e2e'])('should trace one page load in twenty in %s', (environment) => {
+    expect(tracesSampleRate(environment)).toBe(0.05);
+    expect(tracingIntegrations(environment).map((integration) => integration.name)).toStrictEqual(['BrowserTracing']);
+  });
+
+  it('should not trace without an environment', () => {
+    expect(tracesSampleRate(undefined)).toBeUndefined();
+    expect(tracingIntegrations(undefined)).toStrictEqual([]);
+  });
 
   it('should install the browser tracing integration where it traces', () => {
     expect(tracingIntegrations('staging').map((integration) => integration.name)).toStrictEqual(['BrowserTracing']);

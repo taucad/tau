@@ -399,7 +399,13 @@ export const publishPlan = (options: {
   ];
 };
 
-type Fetched = { readonly bytes?: Uint8Array<ArrayBuffer>; readonly failure?: string };
+/**
+ * One fetch of a blob: its bytes, or why it was not served and whether another attempt may succeed. A failure is final
+ * only when the host answered with a whole body that cannot be the pinned blob: more bytes than pinned, or the pinned
+ * length with another digest. A body cut mid-stream (undici's `terminated`, a reset or a premature close), a refused
+ * connection and an unexpected status, a `404` from an edge's cached miss included, are retried.
+ */
+type Fetched = { readonly bytes?: Uint8Array<ArrayBuffer>; readonly failure?: string; readonly final?: boolean };
 
 /** One blob to fetch: its URL, the digest and length it must have, and whether its bytes are kept. */
 type BlobRequest = {
@@ -409,40 +415,63 @@ type BlobRequest = {
   readonly keep: boolean;
 };
 
-const fetchOnce = async ({ url, expected, transport, keep }: BlobRequest): Promise<Fetched> => {
-  let response: Response;
-  try {
-    response = await transport(url, { redirect: 'error' });
-  } catch (error) {
-    return { failure: `${url} could not be fetched: ${error instanceof Error ? error.message : String(error)}` };
+// An error's message with its cause's, so undici's bare `terminated` or `fetch failed` names the socket error behind it.
+const describeError = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return String(error);
   }
-  if (response.status !== 200 || response.body === null) {
-    return { failure: `${url} answered HTTP ${String(response.status)}` };
-  }
+  return error.cause instanceof Error ? `${error.message} (${error.cause.message})` : error.message;
+};
+
+const readBody = async (
+  { url, expected, keep }: BlobRequest,
+  body: ReadableStream<Uint8Array<ArrayBuffer>>,
+): Promise<Fetched> => {
   const hash = createHash('sha256');
   const kept = keep ? new Uint8Array(expected.byteLength) : new Uint8Array();
   let byteLength = 0;
-  // Leaving the loop early cancels the body, so an oversized blob is never read to its end.
-  for await (const chunk of response.body) {
-    byteLength += chunk.byteLength;
-    if (byteLength > expected.byteLength) {
-      return { failure: `${url} serves more than the pinned ${String(expected.byteLength)} bytes` };
+  try {
+    // Leaving the loop early cancels the body, so an oversized blob is never read to its end.
+    for await (const chunk of body) {
+      byteLength += chunk.byteLength;
+      if (byteLength > expected.byteLength) {
+        return { failure: `${url} serves more than the pinned ${String(expected.byteLength)} bytes`, final: true };
+      }
+      hash.update(chunk);
+      if (keep) {
+        kept.set(chunk, byteLength - chunk.byteLength);
+      }
     }
-    hash.update(chunk);
-    if (keep) {
-      kept.set(chunk, byteLength - chunk.byteLength);
-    }
+  } catch (error) {
+    return { failure: `${url} was cut off after ${String(byteLength)} bytes: ${describeError(error)}` };
   }
   if (byteLength !== expected.byteLength) {
     return { failure: `${url} served ${String(byteLength)} bytes, not ${String(expected.byteLength)}` };
   }
   if (hash.digest('hex') !== expected.sha256) {
-    return { failure: `${url} does not hash to ${expected.sha256}` };
+    return { failure: `${url} does not hash to ${expected.sha256}`, final: true };
   }
   return { bytes: kept };
 };
 
-/** How a check retries a blob that is not served yet: a just-written blob can meet a cached miss at the edge. */
+const fetchOnce = async (request: BlobRequest): Promise<Fetched> => {
+  const { url, transport } = request;
+  let response: Response;
+  try {
+    response = await transport(url, { redirect: 'error' });
+  } catch (error) {
+    return { failure: `${url} could not be fetched: ${describeError(error)}` };
+  }
+  if (response.status !== 200 || response.body === null) {
+    return { failure: `${url} answered HTTP ${String(response.status)}` };
+  }
+  return readBody(request, response.body);
+};
+
+/**
+ * How a check retries a blob that is not served yet or not served whole: a just-written blob can meet a cached miss at
+ * the edge, and a connection can drop mid-body.
+ */
 export type RetryPolicy = { readonly attempts: number; readonly wait: (attempt: number) => Promise<void> };
 
 const defaultRetry: RetryPolicy = {
@@ -462,7 +491,7 @@ const fetchBlob = async (request: BlobRequest, retry: RetryPolicy): Promise<Fetc
     }
     // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
     result = await fetchOnce(request);
-    if (result.failure === undefined) {
+    if (result.failure === undefined || result.final === true) {
       return result;
     }
   }
@@ -478,7 +507,7 @@ const fetchBlob = async (request: BlobRequest, retry: RetryPolicy): Promise<Fetc
  * @param options.base - The digest-addressed base, ending in `/`.
  * @param options.transport - The `fetch` to use.
  * @param options.concurrency - How many blobs are fetched at once.
- * @param options.retry - How often, and after how long, a blob that is not served yet is fetched again.
+ * @param options.retry - How often, and after how long, a blob that is not served yet or was cut off is fetched again.
  * @returns One line per blob that is not served with its pinned bytes.
  */
 export const checkPinnedBlobs = async (options: {
@@ -540,7 +569,7 @@ export type ServedDecision = { readonly served: boolean; readonly reason: string
  * @param options - The pin, the transport and the full check's retry policy and concurrency.
  * @param options.pin - The pin just written from the verified bundle.
  * @param options.transport - The `fetch` to use.
- * @param options.retry - How the full check retries a blob that is not served yet.
+ * @param options.retry - How the full check retries a blob that is not served yet or was cut off.
  * @param options.concurrency - How many blobs the full check fetches at once.
  * @returns Whether both hosts serve every blob, and a one-line reason.
  */
@@ -636,8 +665,8 @@ const reportServed = async (
  * Run one command.
  * @param argv - The arguments after the script path.
  * @param io - Where to write results and diagnostics.
- * @param network - The `fetch` the `check` command uses and how it retries a blob that is not served yet; by default
- *   the global `fetch` with three attempts.
+ * @param network - The `fetch` the `check` and `served` commands use and how they retry a blob that is not served yet
+ *   or was cut off; by default the global `fetch` with three attempts.
  * @param network.transport - The `fetch` to use.
  * @param network.retry - The retry policy.
  * @returns The exit code.

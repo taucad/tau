@@ -58,7 +58,6 @@ const pin: PicogkBrowserHostPin = {
 };
 const { production, staging } = blobBases;
 const noWait: RetryPolicy = { attempts: 2, wait: async () => undefined };
-
 const serve =
   (
     routes: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error>,
@@ -77,6 +76,40 @@ const serve =
       ? new Response(undefined, { status: route ?? 404 })
       : new Response(route);
   };
+// The error undici raises when a response body is cut mid-stream, with the socket error it wraps.
+const terminated = () => new TypeError('terminated', { cause: new Error('other side closed') });
+// A 200 whose body yields the first half of the bytes and then fails with the reason.
+const cutOff = (bytes: Uint8Array<ArrayBuffer>, reason: unknown): Response =>
+  new Response(
+    new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start(controller) {
+        if (bytes.byteLength > 0) {
+          controller.enqueue(bytes.slice(0, Math.ceil(bytes.byteLength / 2)));
+        }
+      },
+      pull(controller) {
+        controller.error(reason);
+      },
+    }),
+  );
+// A transport that answers each listed URL's first `times` requests with a body cut off by the reason, then delegates.
+const interrupting = (
+  next: typeof fetch,
+  urls: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+  options: { readonly times: number; readonly reason?: unknown; readonly requests?: string[] },
+): typeof fetch => {
+  const counts = new Map<string, number>();
+  return async (input, init) => {
+    const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+    options.requests?.push(`${init?.method ?? 'GET'} ${url}`);
+    const bytes = urls.get(url);
+    const count = (counts.get(url) ?? 0) + 1;
+    counts.set(url, count);
+    return bytes !== undefined && count <= options.times
+      ? cutOff(bytes, options.reason ?? terminated())
+      : next(input, init);
+  };
+};
 // Both environments' hosts, each serving every pinned blob, unless an override replaces a route.
 const mirror = (
   overrides: ReadonlyMap<string, Uint8Array<ArrayBuffer> | number | Error> = new Map(),
@@ -414,6 +447,91 @@ describe('picogk-browser-host-pin', () => {
       expect(waits).toEqual([1]);
     });
 
+    it('should retry a blob whose body is cut off mid-stream and pass once it is read whole', async () => {
+      const manifestUrl = `${production}${pin.manifest.sha256}`;
+      const blobUrl = `${production}${hex(contents['_framework/dotnet.native.wasm']!)}`;
+      const requests: string[] = [];
+      const waits: number[] = [];
+      const transport = interrupting(
+        serve(mirror()),
+        new Map([
+          [manifestUrl, manifestBytes],
+          [blobUrl, encode(contents['_framework/dotnet.native.wasm']!)],
+        ]),
+        { times: 1, requests },
+      );
+      const retry: RetryPolicy = {
+        attempts: 3,
+        wait: async (attempt) => {
+          waits.push(attempt);
+        },
+      };
+      await expect(checkPinnedBlobs({ pin, base: production, transport, retry })).resolves.toEqual([]);
+      expect(requests.filter((request) => request === `GET ${manifestUrl}`)).toHaveLength(2);
+      expect(requests.filter((request) => request === `GET ${blobUrl}`)).toHaveLength(2);
+      expect(waits).toEqual([1, 1]);
+    });
+
+    it('should name the URL and the error when a body is cut off on every attempt', async () => {
+      const blobUrl = `${production}${hex(contents['refs/PicoGK.dll']!)}`;
+      const manifestUrl = `${production}${pin.manifest.sha256}`;
+      const requests: string[] = [];
+      const retry: RetryPolicy = { attempts: 3, wait: async () => undefined };
+      const transport = interrupting(serve(mirror()), new Map([[blobUrl, encode(contents['refs/PicoGK.dll']!)]]), {
+        times: 3,
+        requests,
+      });
+      await expect(checkPinnedBlobs({ pin, base: production, transport, retry })).resolves.toEqual([
+        `refs/PicoGK.dll: ${blobUrl} was cut off after 8 bytes: terminated (other side closed)`,
+      ]);
+      expect(requests.filter((request) => request === `GET ${blobUrl}`)).toHaveLength(3);
+      // A reset that is not an Error, and one without a cause, are reported as they are.
+      const reset = interrupting(serve(mirror()), new Map([[manifestUrl, manifestBytes]]), {
+        times: 3,
+        reason: 'ECONNRESET',
+      });
+      await expect(checkPinnedBlobs({ pin, base: production, transport: reset, retry })).resolves.toEqual([
+        `manifest: ${manifestUrl} was cut off after ${String(Math.ceil(manifestBytes.byteLength / 2))} bytes: ECONNRESET`,
+      ]);
+      const closed = interrupting(serve(mirror()), new Map([[manifestUrl, new Uint8Array()]]), {
+        times: 3,
+        reason: new Error('Premature close'),
+      });
+      await expect(checkPinnedBlobs({ pin, base: production, transport: closed, retry })).resolves.toEqual([
+        `manifest: ${manifestUrl} was cut off after 0 bytes: Premature close`,
+      ]);
+    });
+
+    it('should not retry a whole body with another digest or more bytes than pinned', async () => {
+      const changedUrl = `${production}${hex(contents['_framework/dotnet.native.wasm']!)}`;
+      const oversizedUrl = `${production}${hex('shared reference')}`;
+      const requests: string[] = [];
+      const waits: number[] = [];
+      const retry: RetryPolicy = {
+        attempts: 3,
+        wait: async (attempt) => {
+          waits.push(attempt);
+        },
+      };
+      const transport = serve(
+        mirror(
+          new Map([
+            [changedUrl, encode('wasm bytez')],
+            [oversizedUrl, encode('shared reference and more')],
+          ]),
+        ),
+        [],
+        requests,
+      );
+      await expect(checkPinnedBlobs({ pin, base: production, transport, retry })).resolves.toEqual([
+        `_framework/dotnet.native.wasm: ${changedUrl} does not hash to ${hex(contents['_framework/dotnet.native.wasm']!)}`,
+        `refs/PicoGK.dll: ${oversizedUrl} serves more than the pinned 16 bytes`,
+      ]);
+      expect(requests.filter((request) => request === `GET ${changedUrl}`)).toHaveLength(1);
+      expect(requests.filter((request) => request === `GET ${oversizedUrl}`)).toHaveLength(1);
+      expect(waits).toEqual([]);
+    });
+
     it('should stop at a missing manifest or a manifest that is not the pinned inventory', async () => {
       const manifestUrl = `${production}${pin.manifest.sha256}`;
       await expect(
@@ -442,6 +560,45 @@ describe('picogk-browser-host-pin', () => {
         reason: `${manifestUrl(production)} is not served (HTTP 404)`,
       });
       expect(requests).toEqual([`HEAD ${manifestUrl(production)}`]);
+    });
+
+    it('should probe an unserved manifest once whatever the retry policy allows', async () => {
+      const requests: string[] = [];
+      const waits: number[] = [];
+      const retry: RetryPolicy = {
+        attempts: 3,
+        wait: async (attempt) => {
+          waits.push(attempt);
+        },
+      };
+      await expect(
+        pinServed({ pin, transport: serve(mirror(new Map(), [staging]), [], requests), retry }),
+      ).resolves.toEqual({ served: false, reason: `${manifestUrl(production)} is not served (HTTP 404)` });
+      expect(requests).toEqual([`HEAD ${manifestUrl(production)}`]);
+      expect(waits).toEqual([]);
+    });
+
+    it('should retry a blob cut off mid-stream while proving a served pin', async () => {
+      const blobUrl = `${staging}${hex(contents['multi/_framework/dotnet.js']!)}`;
+      const transport = interrupting(
+        serve(mirror()),
+        new Map([[blobUrl, encode(contents['multi/_framework/dotnet.js']!)]]),
+        {
+          times: 1,
+        },
+      );
+      await expect(pinServed({ pin, transport, retry: noWait })).resolves.toMatchObject({ served: true });
+      const always = interrupting(
+        serve(mirror()),
+        new Map([[blobUrl, encode(contents['multi/_framework/dotnet.js']!)]]),
+        {
+          times: 2,
+        },
+      );
+      await expect(pinServed({ pin, transport: always, retry: noWait })).resolves.toEqual({
+        served: false,
+        reason: `multi/_framework/dotnet.js: ${blobUrl} was cut off after 11 bytes: terminated (other side closed)`,
+      });
     });
 
     it('should stop at the staging HEAD without fetching any blob when staging does not serve the manifest', async () => {
@@ -619,6 +776,31 @@ describe('picogk-browser-host-pin', () => {
       expect(errors.at(-1)).toBe(
         `Pinned PicoGK browser host blobs that are not served with their digest:\n  manifest: ${production}${pin.manifest.sha256} answered HTTP 404`,
       );
+    });
+
+    it('should retry a body cut off mid-stream and name the URL and error once every attempt is cut off', async () => {
+      const root = await temporary();
+      const path = join(root, 'browser-host.pin.json');
+      await writeFile(path, serializePin(pin));
+      const { out, errors, io: streams } = io();
+      const blobUrl = `${production}${hex(contents['_framework/dotnet.native.wasm']!)}`;
+      const blob = new Map([[blobUrl, encode(contents['_framework/dotnet.native.wasm']!)]]);
+      await expect(
+        run(['check', '--pin', path, '--environment', 'production'], streams, {
+          transport: interrupting(serve(mirror()), blob, { times: 1 }),
+          retry: noWait,
+        }),
+      ).resolves.toBe(0);
+      expect(out).toEqual([`Every blob of manifest ${pin.manifest.sha256} (6 files) is served at ${production}.`]);
+      await expect(
+        run(['check', '--pin', path, '--environment', 'production'], streams, {
+          transport: interrupting(serve(mirror()), blob, { times: 2 }),
+          retry: noWait,
+        }),
+      ).resolves.toBe(1);
+      expect(errors).toEqual([
+        `Pinned PicoGK browser host blobs that are not served with their digest:\n  _framework/dotnet.native.wasm: ${blobUrl} was cut off after 5 bytes: terminated (other side closed)`,
+      ]);
     });
 
     it('should report whether a written pin is already served as a step output', async () => {

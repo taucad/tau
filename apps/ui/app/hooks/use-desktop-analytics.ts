@@ -1,7 +1,7 @@
 /**
  * The desktop app's analytics choice (legal decision Q3): product analytics run unless the person turns them off in
- * Settings → Data controls, and the app says so once at first launch. The choice is a device preference in the app's
- * local storage, beside its other preferences; the desktop app has no cookie consent.
+ * Settings → Data controls. The choice is a device preference in the app's local storage, beside its other
+ * preferences; the desktop app has no cookie consent.
  *
  * @module
  */
@@ -11,11 +11,10 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { store } from '#hooks/use-cookie.js';
 
-/** The storage names `useCookie` would give these preferences. */
+/** The storage name `useCookie` would give this preference. */
 export const desktopAnalyticsStorageName = `${metaConfig.cookiePrefix}${cookieName.desktopAnalytics}`;
-export const desktopAnalyticsNoticeStorageName = `${metaConfig.cookiePrefix}${cookieName.desktopAnalyticsNotice}`;
 
-/** Copy for the Data controls switch and the first-launch notice. It says "analytics" and names no vendor. */
+/** Copy for the Data controls switch. It says "analytics" and names no vendor. */
 export const desktopAnalyticsCopy = {
   label: 'Analytics',
   description: 'Send usage analytics to help improve Tau',
@@ -25,10 +24,6 @@ export const desktopAnalyticsCopy = {
     'Share usage and diagnostics and error reports are separate.',
   ],
   learnMore: 'Learn more',
-  noticeTitle: 'Tau sends usage analytics',
-  noticeDescription:
-    'The desktop app sends usage analytics to help improve Tau. You can turn this off in Settings → Data controls.',
-  noticeAction: 'Data controls',
 } as const;
 
 /** Anything but an explicit `false` is on: analytics run unless the person turns them off. */
@@ -56,17 +51,3 @@ export function useDesktopAnalytics(): readonly [isEnabled: boolean, setEnabled:
   }, []);
   return [isEnabled, setEnabled];
 }
-
-/**
- * Records the first-launch notice as shown, unless it already was. Read at the moment of showing, never from a
- * render snapshot, so a hydration default cannot show it twice.
- *
- * @returns Whether this call is the first, and so should show the notice.
- */
-export const claimDesktopAnalyticsNotice = (): boolean => {
-  if (store.get<unknown>(desktopAnalyticsNoticeStorageName) === true) {
-    return false;
-  }
-  store.update(desktopAnalyticsNoticeStorageName, true);
-  return true;
-};

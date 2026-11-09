@@ -17,8 +17,6 @@ vi.mock('#environment.config.js', () => ({
 }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined, isPending: false }) }));
-// The notice has its own suite; here it only must not need a router.
-vi.mock('#components/desktop-analytics-notice.js', () => ({ DesktopAnalyticsNotice: (): undefined => undefined }));
 
 const requests: string[] = [];
 vi.spyOn(XMLHttpRequest.prototype, 'open').mockImplementation((_method, url) => {
@@ -123,7 +121,7 @@ describe('DesktopAnalyticsProvider', () => {
     const init = vi.spyOn(posthog, 'init');
     const capture = vi.spyOn(posthog, 'capture');
 
-    // Default on: no decision is needed, and the notice does not hold capture back.
+    // Default on: no decision is needed before capture.
     render(tree());
     await settle();
     expect(init).toHaveBeenCalledOnce();

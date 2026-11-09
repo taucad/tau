@@ -86,6 +86,18 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
+import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
+import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
+import {
+  canAutoResumeModelPending,
+  lookUpModelAttempt,
+  nextProviderUnavailableRetry,
+  nextRateLimitRetry,
+  recordModelPendingAutoResume,
+  recordProviderUnavailableAutoResume,
+  recordRateLimitAutoResume,
+} from '#utils/run-auto-resume.js';
 import {
   chatProjectionLogic,
   selectAttentionRow,
@@ -93,6 +105,7 @@ import {
   selectCurrentRun,
   selectOpenInterrupts,
   selectRunFailure,
+  selectRunElsewhereAwaitsPull,
   selectRunPhase,
   selectTranscriptSource,
   selectToolsInFlight,
@@ -104,7 +117,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
-import { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '@taucad/agent-host';
+import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -574,6 +587,8 @@ type InternalSession = ChatSession & {
   readonly projectId: string;
   /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
+  /** Read the chat's waits now (`#bindChatWaits`); bound with the root. */
+  offerChatWaits: () => void;
   /**
    * The chat's record store and project. Known at acquire (PV-S4); a reacquired chat's I/O waits only for its released
    * predecessor's drain (D7).
@@ -726,6 +741,50 @@ const receivedAtOf = async (client: SegmentStatClient, path: string): Promise<Re
   return mtimeMs === undefined || mtimeMs <= 0 ? {} : { receivedAt: mtimeMs };
 };
 
+/* The attempt route, asked with the page's session cookie while a chat waits on a pending model attempt (RA-R1). */
+const modelAttemptLookup = createAsyncLogic<'settled' | 'waiting', { readonly attemptId: string }>({
+  run: async ({ input, signal }) => {
+    const answer = await lookUpModelAttempt({ apiBaseUrl: ENV.TAU_API_URL, attemptId: input.attemptId, signal });
+    signal.throwIfAborted();
+    return answer;
+  },
+});
+
+/**
+ * Whether an automatic resume's wait may still resume the run, and the ledger entry that spends it: checked again
+ * when the wait ends, so a failed attempt is never resumed twice by this page.
+ *
+ * @param plan - The wait that ended.
+ * @param now - The current time, in epoch milliseconds.
+ * @returns Whether the run was resumed on the ledger.
+ */
+const spendAutoResume = (plan: AutoResumePlan, now: number): boolean => {
+  const { runId, attempt } = plan;
+  switch (plan.kind) {
+    case 'rateLimit': {
+      if (nextRateLimitRetry(runId, attempt) === undefined) {
+        return false;
+      }
+      recordRateLimitAutoResume(runId, attempt);
+      return true;
+    }
+    case 'providerUnavailable': {
+      if (nextProviderUnavailableRetry(runId, attempt) === undefined) {
+        return false;
+      }
+      recordProviderUnavailableAutoResume(runId, attempt);
+      return true;
+    }
+    case 'modelPending': {
+      if (!canAutoResumeModelPending(runId, attempt, now)) {
+        return false;
+      }
+      recordModelPendingAutoResume(runId, attempt);
+      return true;
+    }
+  }
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
@@ -843,7 +902,7 @@ export class ChatSessionStore {
     this.#chatSessionLogic =
       chatSession ??
       chatSessionMachine.provide({
-        actors: { admitTurn: chatTurnAdmission },
+        actors: { admitTurn: chatTurnAdmission, lookUpModelAttempt: modelAttemptLookup },
       });
     this.#rootOptions = rootOptions;
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
@@ -1897,6 +1956,13 @@ export class ChatSessionStore {
   public setProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
     if (ref === undefined) {
       this.#projectSessions.delete(projectId);
+      /* A closed project resumes nothing on its own: its chats' waits end, and so does the hold they kept. */
+      for (const session of this.#sessions.values()) {
+        if (session.projectId === projectId && this.#awaitsAutoResume(session)) {
+          session.stateActorRef.send({ type: 'autoResumeWithdrawn' });
+          this.#disposeIfUnreferenced(session);
+        }
+      }
     } else {
       this.#projectSessions.set(projectId, ref);
       this.#projectRunKeys.delete(projectId);
@@ -2867,7 +2933,16 @@ export class ChatSessionStore {
      * moment it ends is the only moment that reference is released — a chat
      * whose last view unmounted mid-admission is never asked about again. */
     let admitting = this.#isAdmittingTurn(session);
+    let awaitsAutoResume = this.#awaitsAutoResume(session);
     session.turnSubscriptions = [
+      /* The chat's own waits (audit R5): the machine holds them on the store's clock, the store carries them out. */
+      stateActorRef.on('autoResumeDue', ({ plan }) => {
+        this.#resumeAutomatically(session, plan);
+      }),
+      stateActorRef.on('remotePullDue', () => {
+        void this.requestRemotePull(session.chatId);
+      }),
+      ...this.#bindChatWaits(session),
       stateActorRef.on('startTurnRequest', ({ request }) => {
         /* Recency counts a taken gesture: a refused one never gets here (L3 D16, LT08). */
         void this.touchChatRecency(
@@ -2881,12 +2956,104 @@ export class ChatSessionStore {
       }),
       stateActorRef.subscribe(() => {
         const admits = this.#isAdmittingTurn(session);
-        if (admitting && !admits) {
+        const awaits = this.#awaitsAutoResume(session);
+        if ((admitting && !admits) || (awaitsAutoResume && !awaits)) {
           this.#disposeIfUnreferenced(session);
         }
         admitting = admits;
+        awaitsAutoResume = awaits;
       }),
     ];
+  }
+
+  /**
+   * Offer the chat's machine what it waits out on its own (audit R5), from the facts the chat's views read: the
+   * automatic resume its visible failure allows (`autoResumePlanOf`), and whether another device's run awaits pulls
+   * (`selectRunElsewhereAwaitsPull`, re-read at the moments that changes with the clock alone). Nothing here depends on
+   * a card or a composer being mounted.
+   *
+   * @param session - The chat whose root was just bound.
+   * @returns The subscriptions, ended with the session.
+   */
+  #bindChatWaits(session: InternalSession): Array<{ unsubscribe: () => void }> {
+    const { chatId, stateActorRef } = session;
+    let offered: string | undefined;
+    let awaitsPull = false;
+    const live = (): boolean =>
+      this.#sessions.get(chatId) === session && stateActorRef.getSnapshot().status === 'active';
+    const offerAutoResume = (): void => {
+      if (!live()) {
+        return;
+      }
+      const plan = autoResumePlanOf(
+        {
+          projection: this.getProjection(chatId),
+          attachmentStatus: this.getAttachmentStatus(chatId),
+          error: session.chat.error,
+          persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
+        },
+        Date.now(),
+      );
+      if (plan?.key === offered) {
+        return;
+      }
+      offered = plan?.key;
+      stateActorRef.send(plan === undefined ? { type: 'autoResumeWithdrawn' } : { type: 'autoResumeOffered', plan });
+    };
+    const offerPull = (): void => {
+      if (!live()) {
+        return;
+      }
+      const projection = this.getProjection(chatId);
+      const awaits = projection !== undefined && selectRunElsewhereAwaitsPull(projection, Date.now());
+      if (awaits === awaitsPull) {
+        return;
+      }
+      awaitsPull = awaits;
+      stateActorRef.send(
+        awaits
+          ? { type: 'runElsewhereAwaitsPull', heartbeatMilliseconds: runHeartbeatMilliseconds }
+          : { type: 'runElsewherePullSettled' },
+      );
+    };
+    const unsubscribeChat = this.subscribeChat(chatId, offerAutoResume);
+    const unsubscribeProjection = this.subscribeProjection(chatId, offerAutoResume);
+    const persistence = session.persistenceActorRef.subscribe(offerAutoResume);
+    const unsubscribePull = subscribeRunElsewhere(this, chatId, offerPull);
+    session.offerChatWaits = () => {
+      offerAutoResume();
+      offerPull();
+    };
+    return [
+      { unsubscribe: unsubscribeChat },
+      { unsubscribe: unsubscribeProjection },
+      persistence,
+      { unsubscribe: unsubscribePull },
+    ];
+  }
+
+  /**
+   * Resume a run whose automatic resume's wait ended, once per failed attempt on the page-wide ledger.
+   *
+   * @param session - The chat.
+   * @param plan - The wait that ended.
+   */
+  #resumeAutomatically(session: InternalSession, plan: AutoResumePlan): void {
+    if (this.#sessions.get(session.chatId) !== session || !spendAutoResume(plan, Date.now())) {
+      return;
+    }
+    void this.requestTurn(session.chatId, { kind: 'continue' });
+  }
+
+  /**
+   * Whether the chat's machine is waiting out an automatic resume. While its project is open that wait holds the
+   * session, so closing the chat's pane does not stop the resume (audit R5).
+   *
+   * @param session - The chat to ask about.
+   * @returns Whether `autoResume` is not `idle`.
+   */
+  #awaitsAutoResume(session: InternalSession): boolean {
+    return !session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' });
   }
 
   /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
@@ -3063,6 +3230,7 @@ export class ChatSessionStore {
   #startChatRoot(session: InternalSession): void {
     this.#bindTurnEmits(session);
     session.chatRoot.start();
+    session.offerChatWaits();
     const facts = this.#revisionFacts.get(session.projectId);
     if (facts !== undefined) {
       sendRevisionFacts(session.stateActorRef, facts);
@@ -4309,6 +4477,7 @@ export class ChatSessionStore {
       presentedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],
+      offerChatWaits: () => undefined,
       dispose: () => {
         unsubscribeReachability?.();
         heldSubscription.unsubscribe();
@@ -4381,6 +4550,7 @@ export class ChatSessionStore {
       session.viewRefcount > 0 ||
       session.runHeld ||
       this.#isAdmittingTurn(session) ||
+      (this.#awaitsAutoResume(session) && this.#projectSessions.has(session.projectId)) ||
       this.#sessions.get(session.chatId) !== session
     ) {
       return;

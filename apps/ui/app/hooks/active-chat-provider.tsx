@@ -42,7 +42,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { isResumableRun, runHeartbeatMilliseconds } from '@taucad/agent-host';
+import { isResumableRun } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
@@ -59,12 +59,7 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import {
-  selectCaughtUp,
-  selectCurrentRun,
-  selectRunElsewhere,
-  selectRunElsewhereAwaitsPull,
-} from '#machines/chat-projection.logic.js';
+import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
@@ -89,6 +84,7 @@ import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -469,7 +465,6 @@ function ActiveChatSessionProvider({
   const stop = useSessionStop(session);
   const resume = useSessionResume(session, chatId);
   const runElsewhere = useSessionRunElsewhere(chatId);
-  useRunElsewherePull(chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -858,36 +853,29 @@ function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
 }
 
 /**
- * Ask for pulls of the project's remote while another device's run on this chat awaits them (XD3, rounds 18 and 19):
- * quiet here a while, it holds the chat until pulls show it stayed quiet there for the staleness bound, and the
- * composer holds its send meanwhile, so nothing else would ask. Asked once it starts awaiting them, then once a
- * heartbeat's interval while it still does (a pull that failed offline is asked again); sync records each of them.
- * Each answer says whether this device can pull the chat at all (round 27): where it cannot, the run no longer holds
- * the chat and the composer sends, as the host's fence carries its turn.
+ * The automatic resume the active chat's machine is waiting out (audit R5), for its failure card to show: the store
+ * offers it and the machine holds the wait, so the card only presents it.
+ *
+ * @returns The wait in hand, or `undefined`.
+ * @public
  */
-function useRunElsewherePull(chatId: string): void {
+export function useChatAutoResume(): AutoResumePlan | undefined {
+  const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
   const subscribe = useCallback(
-    (listener: () => void) => subscribeRunElsewhere(store, chatId, listener),
-    [chatId, store],
+    (listener: () => void) => {
+      const subscription = store.get(activeChatId)?.stateActorRef.subscribe(listener);
+      return () => {
+        subscription?.unsubscribe();
+      };
+    },
+    [activeChatId, store],
   );
-  const snapshot = useCallback(() => {
-    const projection = store.getProjection(chatId);
-    return projection !== undefined && selectRunElsewhereAwaitsPull(projection, Date.now());
-  }, [chatId, store]);
-  const awaitsPull = useSyncExternalStore(subscribe, snapshot, snapshot);
-  useEffect(() => {
-    if (!awaitsPull) {
-      return undefined;
-    }
-    void store.requestRemotePull(chatId);
-    const timer = setInterval(() => {
-      void store.requestRemotePull(chatId);
-    }, runHeartbeatMilliseconds);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [awaitsPull, chatId, store]);
+  const snapshot = useCallback(
+    () => store.get(activeChatId)?.stateActorRef.getSnapshot().context.autoResume,
+    [activeChatId, store],
+  );
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { util as zodUtility } from 'zod';
-import { createActor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import * as machineModule from './chat-session.machine.js';
 import { guardActors } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 import { chatSessionIgnoredEvents, chatSessionMachine } from './chat-session.machine.js';
 import type { ChatRequest, ChatSessionMachineEvent, ChatTurn, ChatTurnGesture } from './chat-session.machine.js';
 
@@ -205,7 +207,12 @@ describe('chatSessionMachine', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'completed' });
 
-    expect(Object.keys(actor.getSnapshot().value as Record<string, unknown>).sort()).toEqual(['revision', 'run']);
+    expect(Object.keys(actor.getSnapshot().value as Record<string, unknown>).sort()).toEqual([
+      'autoResume',
+      'remotePull',
+      'revision',
+      'run',
+    ]);
     actor.stop();
   });
 
@@ -645,6 +652,25 @@ describe('chatSessionMachine run ownership', () => {
   });
 });
 
+const countdownPlan = (attempt: number, delayMilliseconds = 3000): AutoResumePlan => ({
+  key: `rateLimit:run-1:${String(attempt)}`,
+  kind: 'rateLimit',
+  runId: 'run-1',
+  attempt,
+  delayMilliseconds,
+  resumeAt: delayMilliseconds,
+});
+
+const pendingPlan: AutoResumePlan = {
+  key: 'modelPending:run-1:1',
+  kind: 'modelPending',
+  runId: 'run-1',
+  attempt: 1,
+  attemptId: 'req_1:1:5',
+  boundMilliseconds: 20_000,
+  pollMilliseconds: 5000,
+};
+
 describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
   const events = [
     ...(['admitted', 'running', 'paused', 'completed', 'cancelled'] as const).map(
@@ -667,6 +693,16 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     { type: 'dirtyChanged', dirty: true },
     { type: 'syncState', state: 'pending' },
   ] satisfies ChatSessionMachineEvent[];
+  /* The waits are regions orthogonal to the run, so they are sampled apart from it, with the one run event they read. */
+  const waitEvents = [
+    { type: 'autoResumeOffered', plan: countdownPlan(1) },
+    { type: 'autoResumeOffered', plan: countdownPlan(2) },
+    { type: 'autoResumeOffered', plan: pendingPlan },
+    { type: 'autoResumeWithdrawn' },
+    { type: 'requestTurn', gesture: { kind: 'continue' } },
+    { type: 'runElsewhereAwaitsPull', heartbeatMilliseconds: 60_000 },
+    { type: 'runElsewherePullSettled' },
+  ] satisfies ChatSessionMachineEvent[];
 
   it('answers every sampled event, or declares it ignored, in every reachable state', () => {
     expect(
@@ -687,6 +723,24 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     ).toEqual([]);
   });
 
+  it('answers every sampled wait event, or declares it ignored, in every reachable state (audit R5)', () => {
+    expect(
+      unansweredEvents(chatSessionMachine, {
+        input: { chatId: 'chat-1', projectId: 'proj_1' },
+        events: waitEvents,
+        limit: 100_000,
+        ignore: chatSessionIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            snapshot.context.pendingGesture !== undefined,
+            snapshot.context.autoResume?.key,
+            snapshot.context.autoResumeSpent,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
   it('leaves no dead letter, unanswered delivery or fault over a turn lifecycle', () => {
     const guard = guardActors({ ignore: { 'chat-session': chatSessionIgnoredEvents } });
     const actor = createActor(chatSessionMachine, {
@@ -698,6 +752,160 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     actor.send({ type: 'toolParts', inFlight: 1, approvals: 0 });
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
     expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
+    actor.stop();
+  });
+});
+
+describe('chatSessionMachine — the chat waits on its own clock (audit R5)', () => {
+  const autoResumeState = (actor: { getSnapshot: () => { value: unknown } }): string =>
+    regionPath((actor.getSnapshot().value as { autoResume: unknown }).autoResume);
+
+  const startOnClock = (answers: ReadonlyArray<'settled' | 'waiting'> = []) => {
+    const clock = new StepClock();
+    const lookups: string[] = [];
+    const guard = guardActors({ ignore: { 'chat-session': chatSessionIgnoredEvents } });
+    const logic = chatSessionMachine.provide({
+      actors: {
+        lookUpModelAttempt: createAsyncLogic<'settled' | 'waiting', { readonly attemptId: string }>({
+          run: async ({ input }) => {
+            lookups.push(input.attemptId);
+            return answers[lookups.length - 1] ?? 'waiting';
+          },
+        }),
+      },
+    });
+    const actor = createActor(logic, {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+      clock,
+      inspect: guard.inspect,
+    }).start();
+    const due: AutoResumePlan[] = [];
+    const pulls: string[] = [];
+    actor.on('autoResumeDue', ({ plan }) => {
+      due.push(plan);
+    });
+    actor.on('remotePullDue', ({ chatId }) => {
+      pulls.push(chatId);
+    });
+    return { actor, clock, due, pulls, lookups, guard };
+  };
+
+  it('should resume a countdown once when its wait ends, however often the store offers it', () => {
+    const { actor, clock, due } = startOnClock();
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    expect(autoResumeState(actor)).toBe('counting');
+    clock.advance(2000);
+    // The store re-offers on every change it hears; the wait in hand is not restarted.
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1, 9000) });
+    clock.advance(999);
+    expect(due).toEqual([]);
+
+    clock.advance(1);
+
+    expect(due).toEqual([countdownPlan(1)]);
+    expect(autoResumeState(actor)).toBe('idle');
+    // A spent wait is never waited out again.
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    clock.advance(10_000);
+    expect(due).toHaveLength(1);
+    actor.stop();
+  });
+
+  it('should keep waiting whatever the views do, and wait anew for the next failed attempt', () => {
+    const { actor, clock, due } = startOnClock();
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    clock.advance(3000);
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(2, 400) });
+    clock.advance(400);
+
+    expect(due.map((plan) => plan.attempt)).toEqual([1, 2]);
+    actor.stop();
+  });
+
+  it('should let a gesture supersede the wait, so the run never resumes twice', () => {
+    const { actor, clock, due } = startOnClock();
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    actor.send({ type: 'requestTurn', gesture: { kind: 'continue' } });
+    expect(autoResumeState(actor)).toBe('idle');
+    expect(runState(actor)).toBe('queued.admitting');
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    clock.advance(10_000);
+
+    expect(due).toEqual([]);
+    actor.stop();
+  });
+
+  it('should stop waiting when the failure is withdrawn, and wait again if it returns', () => {
+    const { actor, clock, due } = startOnClock();
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    actor.send({ type: 'autoResumeWithdrawn' });
+    clock.advance(10_000);
+    expect(due).toEqual([]);
+
+    actor.send({ type: 'autoResumeOffered', plan: countdownPlan(1) });
+    clock.advance(3000);
+    expect(due).toHaveLength(1);
+    actor.stop();
+  });
+
+  it('should ask the attempt route until the gateway settles it, then resume once', async () => {
+    const { actor, clock, due, lookups } = startOnClock(['waiting', 'settled']);
+
+    actor.send({ type: 'autoResumeOffered', plan: pendingPlan });
+    await clock.advanceAsync(0);
+    expect(lookups).toEqual(['req_1:1:5']);
+    expect(autoResumeState(actor)).toBe('awaitingAttempt.pausing');
+    expect(due).toEqual([]);
+
+    await clock.advanceAsync(5000);
+
+    expect(lookups).toHaveLength(2);
+    expect(due).toEqual([pendingPlan]);
+    expect(autoResumeState(actor)).toBe('idle');
+    await clock.advanceAsync(60_000);
+    expect(lookups).toHaveLength(2);
+    actor.stop();
+  });
+
+  it('should stop asking at the run’s bound and resume nothing', async () => {
+    const { actor, clock, due, lookups } = startOnClock();
+
+    actor.send({ type: 'autoResumeOffered', plan: pendingPlan });
+    await clock.advanceAsync(19_999);
+    expect(autoResumeState(actor)).not.toBe('idle');
+
+    await clock.advanceAsync(1);
+
+    expect(autoResumeState(actor)).toBe('idle');
+    const asked = lookups.length;
+    await clock.advanceAsync(60_000);
+    expect(lookups).toHaveLength(asked);
+    expect(due).toEqual([]);
+    actor.stop();
+  });
+
+  it('should ask for a pull at once and then once a heartbeat while a run elsewhere awaits one', () => {
+    const { actor, clock, pulls } = startOnClock();
+
+    actor.send({ type: 'runElsewhereAwaitsPull', heartbeatMilliseconds: 60_000 });
+    expect(pulls).toEqual(['chat-1']);
+    actor.send({ type: 'runElsewhereAwaitsPull', heartbeatMilliseconds: 60_000 });
+    clock.advance(59_999);
+    expect(pulls).toHaveLength(1);
+    clock.advance(1);
+    expect(pulls).toHaveLength(2);
+    clock.advance(60_000);
+    expect(pulls).toHaveLength(3);
+
+    actor.send({ type: 'runElsewherePullSettled' });
+    clock.advance(600_000);
+
+    expect(pulls).toHaveLength(3);
     actor.stop();
   });
 });

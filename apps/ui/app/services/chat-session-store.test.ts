@@ -24,6 +24,8 @@ import type * as AiSdk from 'ai';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { resetAutoResumes } from '#utils/run-auto-resume.js';
 import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -6918,7 +6920,8 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
   /*
    * Rounds 18 and 19: quiet is evidenced by pulls, as the agent host reads it. The page reads this device's record of
    * its pulls beside the segments, so a run quiet here for twenty minutes holds the chat until pulls found its segment
-   * as it is for more than the bound, and the page asks its project for pulls meanwhile.
+   * as it is for more than the bound, and the page asks its project for pulls meanwhile. The store asks on its own,
+   * with no composer mounted (audit R5).
    */
   it('should hold a foreign run until pulls found it quiet past the bound, and ask the project for them', async () => {
     const projectId = 'project_run_pulled';
@@ -6958,8 +6961,9 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     const projection = store.getProjection(chatId)!;
     expect(selectRunElsewhere(projection, Date.now())).toMatchObject({ runId: 'run-pulled' });
     expect(selectRunElsewhereAwaitsPull(projection, Date.now())).toBe(true);
-    await store.requestRemotePull(chatId);
-    expect(pulls).toEqual([projectId]);
+    await vi.waitFor(() => {
+      expect(pulls).toEqual([projectId]);
+    });
 
     /* Pulls found nothing newer for more than the bound: the run no longer holds. */
     await client.writeFile(`${events}/pulled-at`, record(20 * 60 * 1000));
@@ -7008,12 +7012,16 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       store.acquire(chatId, projectId);
       await store.refreshRemoteSegments(chatId, projectId);
       await vi.waitFor(() => {
-        expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toMatchObject({ runId: 'run-unpullable' });
+        expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+          expect.objectContaining({ runId: 'run-unpullable' }),
+        ]);
       });
 
+      /* A run that awaits pulls is asked for by the store on its own (audit R5); this asks once more either way. */
       await store.requestRemotePull(chatId);
 
-      expect(asked).toEqual([[projectId, chatId]]);
+      expect(asked).toContainEqual([projectId, chatId]);
+      expect(asked.length).toBe(holds ? 1 : 2);
       const elsewhere = selectRunElsewhere(store.getProjection(chatId)!, Date.now());
       if (holds) {
         expect(elsewhere).toMatchObject({ runId: 'run-unpullable' });
@@ -7050,5 +7058,104 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     });
     store.release(chatId);
     unobserve();
+  });
+});
+
+/* Audit R5: a failure that passes by itself resumes on the store's clock, not a card's, so no view has to be mounted. */
+describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
+  const rateLimitedRows = (runId: string): Array<Record<string, unknown>> => [
+    lifecycleRow(0, 'admitted', runId),
+    lifecycleRow(1, 'running', runId),
+    logRow(2, {
+      runId,
+      type: 'run.lifecycle',
+      state: 'failed',
+      attempt: 1,
+      detail: {
+        code: 'RATE_LIMITED',
+        message: 'The model provider asked Tau to wait.',
+        status: 429,
+        details: { retryAfterSeconds: 3 },
+      },
+    }),
+  ];
+
+  const openOnClock = async (chatId: string, projectId: string) => {
+    const clock = new StepClock();
+    const store = new ChatSessionStore({ chatSession, clock });
+    store.setDependencies(createStubDeps());
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const requestTurn = vi.spyOn(store, 'requestTurn').mockResolvedValue(undefined);
+    return { clock, store, session, requestTurn };
+  };
+
+  beforeEach(() => {
+    resetAutoResumes();
+  });
+
+  it('should resume a rate-limited run once its wait ends, with no failure card mounted', async () => {
+    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_rate', 'project_r5_rate');
+
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_rate'));
+
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toMatchObject({
+      kind: 'rateLimit',
+      runId: 'run_r5_rate',
+      attempt: 1,
+      delayMilliseconds: 3000,
+    });
+    clock.advance(2999);
+    expect(requestTurn).not.toHaveBeenCalled();
+    clock.advance(1);
+    expect(requestTurn).toHaveBeenCalledExactlyOnceWith(session.chatId, { kind: 'continue' });
+
+    // The failure is still on screen until the resumed run reports; nothing resumes it a second time.
+    publishLogRows(store, session.chatId, [lifecycleRow(3, 'paused', 'run_r5_rate')], 3);
+    clock.advance(60_000);
+    expect(requestTurn).toHaveBeenCalledOnce();
+    store.release(session.chatId);
+  });
+
+  it('should keep waiting after the chat’s pane closes while its project is open, then resume', async () => {
+    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_closed', 'project_r5_closed');
+    startTurnOwner(store, 'project_r5_closed');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_closed'));
+
+    store.release(session.chatId);
+
+    expect(store.get(session.chatId)).toBe(session);
+    clock.advance(3000);
+    expect(requestTurn).toHaveBeenCalledExactlyOnceWith(session.chatId, { kind: 'continue' });
+    // The wait ended, so its hold did too.
+    expect(store.get(session.chatId)).toBeUndefined();
+  });
+
+  it('should end the wait and its hold when the chat’s project closes', async () => {
+    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_project', 'project_r5_project');
+    startTurnOwner(store, 'project_r5_project');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_project'));
+    store.release(session.chatId);
+    expect(store.get(session.chatId)).toBe(session);
+
+    store.setProjectSession('project_r5_project', undefined);
+
+    expect(store.get(session.chatId)).toBeUndefined();
+    clock.advance(60_000);
+    expect(requestTurn).not.toHaveBeenCalled();
+  });
+
+  it('should stop waiting when the person resumes by hand', async () => {
+    const { clock, store, session, requestTurn } = await openOnClock('chat_r5_hand', 'project_r5_hand');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_hand'));
+
+    session.stateActorRef.send({ type: 'requestTurn', gesture: { kind: 'continue' } });
+    clock.advance(60_000);
+
+    expect(requestTurn).not.toHaveBeenCalled();
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toBeUndefined();
+    store.release(session.chatId);
   });
 });

@@ -62,8 +62,8 @@ describe('helperModelRoute', () => {
     ['xai', 'grok-4.6', 'openai-responses'],
     ['anthropic', 'claude-haiku-5.5', 'anthropic'],
     ['vertexai', 'gemini-3.8-flash', 'openai-completions'],
-    ['together', 'kimi-k3', 'openai-completions'],
-    ['morph', 'kimi-k3.1-pro', 'openai-completions'],
+    ['together', 'kimi-k3.1-pro', 'openai-completions'],
+    ['morph', 'deepseek-v4.1-flash', 'openai-completions'],
   ] as const)('should route %s %s to its provider model on its wire', (providerId, slug, wire) => {
     const row = catalogRow(providerId, slug);
 
@@ -201,10 +201,10 @@ describe('helperRequestBody', () => {
   });
 
   it('should send Together Kimi the standard ceiling and thinking off, without a Moonshot reasoning effort', () => {
-    const body = bodyFor(catalogRow('together', 'kimi-k3'));
+    const body = bodyFor(catalogRow('together', 'kimi-k3.1-pro'));
 
     expect(body).toEqual({
-      model: 'moonshotai/Kimi-K3',
+      model: 'moonshotai/Kimi-K3.1-Pro',
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 64,
@@ -217,14 +217,14 @@ describe('helperRequestBody', () => {
   });
 
   it('should turn Together GLM thinking off', () => {
-    const body = bodyFor(catalogRow('together', 'glm-5.2'));
+    const body = bodyFor(catalogRow('together', 'glm-5.3'));
 
-    expect(body).toMatchObject({ model: 'zai-org/GLM-5.2', max_tokens: 64, reasoning: { enabled: false } });
+    expect(body).toMatchObject({ model: 'zai-org/GLM-5.3', max_tokens: 64, reasoning: { enabled: false } });
     expect(body).not.toHaveProperty('reasoning_effort');
   });
 
   it('should send a Together row outside the Kimi and GLM families no reasoning switch', () => {
-    const row = catalogRow('together', 'llama-4-maverick');
+    const row = catalogRow('together', 'deepseek-v4-pro');
     const body = helperRequestBody(
       { providerId: 'together', modelId: row.model, wire: 'openai-completions' },
       row,
@@ -235,9 +235,9 @@ describe('helperRequestBody', () => {
   });
 
   it('should send Morph the ceiling but not the row reasoning effort it never received', () => {
-    const body = bodyFor(catalogRow('morph', 'kimi-k3.1-pro'));
+    const body = bodyFor(catalogRow('morph', 'deepseek-v4.1-flash'));
 
-    expect(body).toMatchObject({ model: 'morph-kimik31', max_tokens: 64 });
+    expect(body).toMatchObject({ model: 'morph-dsv41flash', max_tokens: 64 });
     expect(body).not.toHaveProperty('reasoning_effort');
     expect(body).not.toHaveProperty('reasoning');
   });

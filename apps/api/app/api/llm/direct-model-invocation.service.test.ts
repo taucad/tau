@@ -216,7 +216,7 @@ describe('DirectModelInvocationService', () => {
     },
     {
       wire: 'openai-completions',
-      row: catalogRow('together', 'kimi-k3'),
+      row: catalogRow('together', 'kimi-k3.1-pro'),
       url: 'https://api.together.ai/v1/chat/completions',
       usage: { input_tokens: 30, output_tokens: 12, cached: 20, reasoning: 8 },
     },

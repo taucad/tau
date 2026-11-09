@@ -14,7 +14,10 @@ permissions: # Required for nrwl/nx-set-shas to read workflow runs
   actions: 'read'
 
 env:
-  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
+  # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
 # Never cancelled: the next push checks only its own commits, so a cancelled
 # run would leave the previous push's commits unchecked.

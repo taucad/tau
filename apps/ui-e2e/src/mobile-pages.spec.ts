@@ -105,7 +105,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     expectPageRules(audit, 'home');
     // Home is untitled and session-neutral: the bar is the sidebar trigger alone, with no action.
     await expectShellBar(undefined, viewport.width);
-    const homeHeading = selectors.getByRole('heading', { level: 1, name: 'Design parts and assemblies in code' });
+    const homeHeading = selectors.getByRole('heading', { level: 1, name: 'What do you want to build?' });
     const [headingBox, composerBox, projectsBox] = await Promise.all([
       box(homeHeading),
       box(composer),

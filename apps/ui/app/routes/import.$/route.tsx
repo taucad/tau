@@ -15,6 +15,7 @@ import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '#machines/import-staging.js';
+import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '#machines/import-staging.js';
 import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
@@ -40,7 +41,9 @@ import {
   resolveImportRoute,
   supportedKernelExtensions,
   findMainFile,
+  handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
+import { toast } from '#components/ui/sonner.js';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
@@ -271,14 +274,50 @@ export default function ImportRoute(): React.JSX.Element {
   }, [fileManagerRef]);
   /* A linked import's run: leaving the route stops its stage in the worker, the fetch with it. */
   const linkedImportAbortRef = useRef<AbortController | undefined>(undefined);
-  useEffect(
-    () => () => {
+  /*
+   * The desktop import grants this import holds (W7.4): let go once the
+   * project is created, the review is cancelled, another source replaces
+   * them, or the route is left. A failed create keeps them, so a retry can
+   * stage again; main lets go of the rest when the window closes.
+   */
+  const hostGrantsRef = useRef<string[]>([]);
+  /* False once the route is left: a grant that resolves after that is let go at once, never held. */
+  const routeActiveRef = useRef(true);
+  const releaseHostGrants = useCallback((grants: readonly string[]): void => {
+    const bridge = desktopBridge();
+    if (grants.length === 0 || bridge === undefined) {
+      return;
+    }
+    const release = async (): Promise<void> => {
+      try {
+        await bridge.dialog.releaseImportGrants(grants);
+      } catch {
+        /* Main lets go of them when the window closes. */
+      }
+    };
+    // async-iife: fire-and-forget -- a release is best effort; the window's close releases the rest.
+    void release();
+  }, []);
+  const holdHostGrants = useCallback(
+    (grants: readonly string[]): void => {
+      if (!routeActiveRef.current) {
+        releaseHostGrants(grants);
+        return;
+      }
+      releaseHostGrants(hostGrantsRef.current.splice(0, hostGrantsRef.current.length, ...grants));
+    },
+    [releaseHostGrants],
+  );
+  useEffect(() => {
+    routeActiveRef.current = true;
+    return () => {
       linkedImportAbortRef.current?.abort(new Error('The import was cancelled.'));
       importSessionRef.current?.close();
       importSessionRef.current = undefined;
-    },
-    [],
-  );
+      holdHostGrants([]);
+      routeActiveRef.current = false;
+    };
+  }, [holdHostGrants]);
   const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
@@ -457,6 +496,8 @@ export default function ImportRoute(): React.JSX.Element {
                 }),
             });
 
+            /* Staged and committed: the host's copy is done with what was chosen. */
+            holdHostGrants([]);
             return { type: 'projectCreated', projectId: project.id };
           } catch (error) {
             presentLocationError(error);
@@ -467,9 +508,9 @@ export default function ImportRoute(): React.JSX.Element {
     }),
     {
       input: {
-        plan: async (source) => {
+        plan: async (source, signal) => {
           const session = await importSession();
-          return session.plan(source);
+          return session.plan(source, signal === undefined ? undefined : { signal });
         },
       },
       inspect,
@@ -570,6 +611,29 @@ export default function ImportRoute(): React.JSX.Element {
 
   // Disk machine selectors
   const diskState = useSelector(diskActorRef, (snapshot) => snapshot);
+  /* A host pick starts an import only when the machine takes it; one it refuses mid-review or mid-create
+   * is let go, and the import in progress keeps its grants (W7.4). */
+  const startHostImport = useCallback(
+    (grants: readonly HostImportGrant[]): void => {
+      const event = { type: 'processHost', grants } as const;
+      const accepted = handOverHostGrants({
+        accepted: routeActiveRef.current && diskActorRef.getSnapshot().can(event),
+        incoming: grants.map(({ grant }) => grant),
+        held: hostGrantsRef.current,
+        release: releaseHostGrants,
+      });
+      if (!accepted) {
+        if (routeActiveRef.current) {
+          toast.error('Finish or cancel the current import before opening another.');
+        }
+        return;
+      }
+      setActiveMode('disk');
+      setLocalOperation('read');
+      diskActorRef.send(event);
+    },
+    [diskActorRef, releaseHostGrants],
+  );
   const diskListing = useSelector(diskActorRef, (snapshot) => snapshot.context.listing);
   const loadDiskPreview = useCallback(
     async (paths: readonly string[]) => {
@@ -606,15 +670,16 @@ export default function ImportRoute(): React.JSX.Element {
           return;
         }
         const opened = await bridge.openFiles.consume();
-        if (!active || opened.length === 0) {
+        if (!active) {
+          /* Consumed after this effect ended: nothing will import them, so they are let go now. */
+          releaseHostGrants(opened.map(({ grant }) => grant));
           return;
         }
-        setActiveMode('disk');
-        setLocalOperation('read');
-        diskActorRef.send({
-          type: 'processFiles',
-          files: opened.map((file) => new File([file.bytes], file.name)),
-        });
+        if (opened.length === 0) {
+          return;
+        }
+        /* Grants, not bytes: the desktop host copies the opened files into the staging itself (W7.4). */
+        startHostImport(opened.map(({ grant, name }): HostImportGrant => ({ grant, name, kind: 'file' })));
         clearDesktopOpen(false);
       } catch (error) {
         if (active) {
@@ -630,7 +695,7 @@ export default function ImportRoute(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [clearDesktopOpen, diskActorRef, isDesktopOpen]);
+  }, [clearDesktopOpen, diskActorRef, isDesktopOpen, releaseHostGrants, startHostImport]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state
@@ -754,6 +819,25 @@ export default function ImportRoute(): React.JSX.Element {
     },
     [diskActorRef],
   );
+
+  /* Desktop: the native picker mints a grant, and the host copies the folder into the staging itself (W7.4). */
+  const handleHostFolderPick = useCallback(async (): Promise<void> => {
+    try {
+      const picked = await desktopBridge()?.dialog.selectImportFolder();
+      if (picked === undefined) {
+        return;
+      }
+      if (!routeActiveRef.current) {
+        /* Picked after the route was left: nothing will import it. */
+        releaseHostGrants([picked.grant]);
+        return;
+      }
+      startHostImport([{ ...picked, kind: 'directory' }]);
+    } catch (error) {
+      diskActorRef.send({ type: 'externalError', error: error instanceof Error ? error : new Error(String(error)) });
+    }
+  }, [diskActorRef, releaseHostGrants, startHostImport]);
+  const isDesktopHost = desktopBridge() !== undefined;
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
     const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
@@ -907,6 +991,7 @@ export default function ImportRoute(): React.JSX.Element {
     diskState.matches('reading') ||
     diskState.matches('readingDataTransfer') ||
     diskState.matches('readingDirectoryHandle') ||
+    diskState.matches('readingHost') ||
     diskState.matches('extracting') ||
     diskState.matches('selectingMainFile') ||
     diskState.matches('creating');
@@ -929,6 +1014,7 @@ export default function ImportRoute(): React.JSX.Element {
         }}
         onCancel={() => {
           diskActorRef.send({ type: 'reset' });
+          holdHostGrants([]);
           setActiveMode(undefined);
         }}
       />
@@ -941,13 +1027,15 @@ export default function ImportRoute(): React.JSX.Element {
     (diskState.matches('reading') ||
       diskState.matches('readingDataTransfer') ||
       diskState.matches('readingDirectoryHandle') ||
+      diskState.matches('readingHost') ||
       diskState.matches('extracting') ||
       diskState.matches('creating'))
   ) {
     const isReading =
       diskState.matches('reading') ||
       diskState.matches('readingDataTransfer') ||
-      diskState.matches('readingDirectoryHandle');
+      diskState.matches('readingDirectoryHandle') ||
+      diskState.matches('readingHost');
     const isCreating = diskState.matches('creating');
 
     return (
@@ -962,6 +1050,7 @@ export default function ImportRoute(): React.JSX.Element {
             ? undefined
             : () => {
                 diskActorRef.send({ type: 'reset' });
+                holdHostGrants([]);
                 setActiveMode(undefined);
               }
         }
@@ -1251,6 +1340,13 @@ export default function ImportRoute(): React.JSX.Element {
                 <UploadCard
                   onDataTransfer={handleDataTransfer}
                   onDirectoryHandleSelected={handleDirectoryHandleSelected}
+                  {...(isDesktopHost
+                    ? {
+                        onPickHostFolder: () => {
+                          void handleHostFolderPick();
+                        },
+                      }
+                    : {})}
                   onFilesSelected={handleFilesSelected}
                   onFolderSelected={handleFolderSelected}
                   onZipSelected={handleZipSelected}

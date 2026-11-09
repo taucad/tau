@@ -183,7 +183,7 @@ export function NewProjectLink({
   const isInPhoneBar = usePhoneTopBar().hasAction && isDeferredToPhoneBar;
   return (
     <Button asChild size={size} className={cn(isInPhoneBar && 'max-md:hidden')} data-slot='new-project-link'>
-      <NavLink to='/projects/new'>
+      <NavLink to='/'>
         {({ isPending }) => (
           <>
             New project
@@ -522,7 +522,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         headingLevel={headingLevel}
         className='mb-0'
         // Only the page that owns `/projects` defers to the phone top bar; an embedded library keeps it.
-        action={<NewProjectLink isDeferredToPhoneBar={headingLevel === 1} />}
+        action={headingLevel === 1 ? <NewProjectLink isDeferredToPhoneBar /> : undefined}
       />
 
       {workspaceBindingRepairs.length > 0 && (

@@ -10,7 +10,7 @@ export const content = (): React.JSX.Element => (
         eyebrow: 'Product',
         title: 'Code-based CAD with an AI agent',
         body: 'Describe a part or write the CAD code yourself. Tau keeps the model as editable source, checks its geometry against the requirements you set and exports STEP, STL and 3MF.',
-        aside: <div className='actions'>{cta('Start designing', '/projects/new', 'product')}</div>,
+        aside: <div className='actions'>{cta('Start designing', '/', 'product')}</div>,
       })}
       <div className='cell'>{workspaceFigure('eager')}</div>
     </section>

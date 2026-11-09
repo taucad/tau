@@ -176,10 +176,11 @@ serial build, so exact output is identical in every host.
   drops only those that repeat an index or place two corners at one position: adaptive meshes use
   in-line triangles to stitch merged cells to their neighbours, and dropping them would open cracks.
 
-The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
-display mesh in the fast lane. The viewer's settings menu shows both, since they are evaluate options every
-view shares; a change re-evaluates the model. Exports take the same two options and mesh uniformly (0) unless they
-set one; an adaptive export needs `lane: 'fast'`, and as every fast export, only STL is written. An exact render that asks for adaptivity is
+The render option `meshAdaptivity` (0 to below 1) asks for an adaptive display mesh in the fast lane. The
+viewer's settings menu shows it, since it is an evaluate option every view shares; a change re-evaluates the
+model. OpenVDB's relax pass for adaptive meshes stays off: measured, it moved vertices further from the surface
+and added slivers, so it is not an option. Exports take the same option and mesh uniformly (0) unless they
+set it; an adaptive export needs `lane: 'fast'`, and as every fast export, only STL is written. An exact render that asks for adaptivity is
 refused with a typed `REPRESENTATION_UNSUPPORTED` issue. PicoVoxel 0.1.0, whose `toMesh()` takes no
 options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.1 meshes them.
 An unset `meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at

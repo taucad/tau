@@ -466,13 +466,17 @@ export const picogkTessellation = (
     vertices,
     elapsed: meshConstruction + meshExtraction + normalGeneration,
     ...(result.voxelSize === undefined ? {} : { voxelSize: result.voxelSize }),
-    ...(result.meshing === undefined ? {} : { adaptivity: result.meshing.adaptivity, relax: result.meshing.relax }),
+    ...(result.meshing === undefined ? {} : { adaptivity: result.meshing.adaptivity }),
   };
 };
 
 const meshCount = z.number().int().nonnegative();
 
-/** A PicoGK tessellation report restored from a handle snapshot. @internal */
+/**
+ * A PicoGK tessellation report restored from a handle snapshot. A snapshot written while the relax option existed
+ * may carry a boolean `relax`; it is accepted and dropped.
+ * @internal
+ */
 export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
   .object({
     triangles: meshCount,
@@ -482,4 +486,5 @@ export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
     adaptivity: z.number().gt(0).lt(1).optional(),
     relax: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ relax: _relax, ...report }) => report);

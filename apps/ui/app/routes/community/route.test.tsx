@@ -145,7 +145,7 @@ describe('Community route', () => {
       'placeholder',
       'Search examples…',
     );
-    expect(screen.getByRole('link', { name: 'New project' })).toHaveAttribute('href', '/projects/new');
+    expect(screen.getByRole('link', { name: 'New project' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
   });
 

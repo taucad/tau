@@ -6,6 +6,7 @@ export default defineConfig({
     tauCloudBuildEnabled: 'false',
     tauTelemetryHostCloudBuild: 'false',
     tauSentryDsn: '""',
+    tauSentryRelease: '""',
     tauPostHogClientKey: '""',
   },
   test: {

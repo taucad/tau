@@ -25,9 +25,9 @@ type DriftGauges = Pick<MetricsService, 'billingLedgerDrift' | 'billingDriftedAc
 /**
  * Case kinds this sweep opens.
  *
- * An open or attention case here pauses new admission for its own account through the existing
- * `credit-ledger.service.ts` financial-case gate; see the lane report's Lead seam for the
- * one-line union that admits this list alongside `cashBlockingFinancialCaseKinds`.
+ * An open or attention case here names its own account, so it stops that account's spending through the
+ * `credit-ledger.service.ts` financial-case gate and its new collection through
+ * `assertCollectionNotSpendBlocked`; both read `spendBlockingFinancialCaseKinds`, which includes this list.
  */
 export const journalBlockingFinancialCaseKinds: readonly string[] = [
   'journal_balance_drift',

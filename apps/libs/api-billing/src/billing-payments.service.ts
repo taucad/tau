@@ -20,6 +20,7 @@ import type { BillingPolicyService } from '#billing-policy.service.js';
 import { BillingTaxService } from '#billing-tax.service.js';
 import type { QualifiedCashTaxCorrection } from '#billing-tax.service.js';
 import { activePurchaseStates, cashOccurredAt, exactPaymentOfferTotals } from '#billing-payment-contract.js';
+import { assertCollectionNotSpendBlocked } from '#billing-cash-reconciliation.service.js';
 import {
   checkoutExpiryEvidenceSchema,
   noChargeEvidenceSchema,
@@ -178,7 +179,6 @@ type UnclaimedCashProjection = {
 };
 
 export type BillingCashQualification = {
-  assertNewCollectionScope(accountId: string, transaction?: Transaction): Promise<void>;
   releaseQualifiedClaim(input: {
     readonly environment: FinancialEnvironment;
     readonly stripeAccountId: string;
@@ -512,7 +512,7 @@ export class BillingPaymentsService {
     );
     await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, owner.accountId);
-      await this.cash.assertNewCollectionScope(owner.accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, owner.accountId);
       const active = await tx
         .select({ id: billingPurchase.id })
         .from(billingPurchase)
@@ -1270,7 +1270,7 @@ export class BillingPaymentsService {
     };
     const won = await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, owner.accountId);
-      await this.cash.assertNewCollectionScope(owner.accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, owner.accountId);
       const inserted = await tx
         .insert(subscription)
         .values({
@@ -2336,7 +2336,7 @@ export class BillingPaymentsService {
         throw new ConflictException({ code: 'renewal_leg_request_conflict' });
       if (leg.providerObjectId !== null) return { ...leg, mayDispatch: false };
       const mayDispatch = leg.state === 'prepared';
-      // Closure or a paused cash scope blocks a new schedule dispatch; recovering an unknown outcome stays allowed.
+      // Closure or a spend-blocking case blocks a new schedule dispatch; recovering an unknown outcome stays allowed.
       if (mayDispatch) await this.assertOpenCollectionScope(offer.accountId, tx);
       const [claimed] = await tx
         .update(billingProviderLeg)
@@ -2820,7 +2820,7 @@ export class BillingPaymentsService {
     const automaticStartedAt = new Date();
     const inserted = await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, accountId);
-      await this.cash.assertNewCollectionScope(accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, accountId);
       const [lockedAccount] = await tx
         .select()
         .from(creditAccount)
@@ -2944,7 +2944,7 @@ export class BillingPaymentsService {
   ): Promise<void> {
     const allowed = await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, accountId);
-      await this.cash.assertNewCollectionScope(accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, accountId);
       // Read the consent in any state: a revoked one is the permanent reason that must close the purchase below.
       const [consent] = await tx
         .select()
@@ -4486,7 +4486,7 @@ export class BillingPaymentsService {
   private async claimPurchaseLeg(accountId: string, actionId: string) {
     return this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, accountId);
-      await this.cash.assertNewCollectionScope(accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, accountId);
       const purchase = await this.ownedPurchase(accountId, actionId, tx);
       if (purchase.state !== 'prepared') return undefined;
       // An automatic reload purchase is confirmed by its worker from the consent; its leg holds the worker's envelope,
@@ -5376,7 +5376,7 @@ export class BillingPaymentsService {
     if (rows[0] === undefined) throw new ConflictException({ code: 'stale_provider_leg_claim' });
   }
 
-  /** Locks the account and refuses new collection for a closed account or an unresolved cash-integrity case. */
+  /** Locks the account and refuses new collection for a closed account or one a spend-blocking case names. */
   private async assertOpenCollectionScope(accountId: string, transaction?: Transaction): Promise<void> {
     const gate = async (tx: Transaction): Promise<void> => {
       await this.lockPaymentAccount(tx, accountId);
@@ -5386,7 +5386,7 @@ export class BillingPaymentsService {
         .where(and(eq(creditAccount.id, accountId), eq(creditAccount.environment, this.config.environment)))
         .limit(1);
       if (rows[0]?.status !== 'open') throw new ConflictException({ code: 'payment_account_not_open' });
-      await this.cash.assertNewCollectionScope(accountId, tx);
+      await assertCollectionNotSpendBlocked(tx, this.config.environment, accountId);
     };
     if (transaction === undefined) {
       await this.databaseService.database.transaction(gate);

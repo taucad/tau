@@ -26,7 +26,7 @@ const png = new Uint8Array(
   Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'),
 );
 // A view's default meshing: the uniform mesh.
-const uniformMesh = { meshAdaptivity: 0, meshRelax: false } as const;
+const uniformMesh = { meshAdaptivity: 0 } as const;
 const changedPng = new Uint8Array(
   Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAU0lEQVR4nO3SIQEAIAwF0UUhClGIQCRi0WZYwMOZE1Nf7ImLUnvuN0c77vUeAnDA74f3LoAH4BEKwAF4hAJwAB6hAByARygAB+ARCsABeIQCaMACMopMiEeoqxsAAAAASUVORK5CYII=',

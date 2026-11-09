@@ -275,3 +275,15 @@ test('should reject Linux ARM hints even when another hint only names Linux', ()
     }
   }
 });
+
+test('should start every new project from the app home', () => {
+  for (const [placement, html] of [
+    ['product', renderToStaticMarkup(<MemoryRouter>{product()}</MemoryRouter>)],
+    ['pricing-free', renderToStaticMarkup(<MemoryRouter>{pricing()}</MemoryRouter>)],
+  ] as const) {
+    const link = new RegExp(`<a\\b[^>]*data-placement="${placement}"[^>]*>`, 'u').exec(html)?.[0];
+    expect(link).toContain('href="/?app"');
+    // The entry script writes the app preference before following it, so `/` opens the app, not this site.
+    expect(link).toContain('data-open-app=""');
+  }
+});

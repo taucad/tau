@@ -22,11 +22,12 @@
 #          intermediate `deps`/`build` stages survive across runs and across
 #          GitHub-Actions runners (R13 in
 #          docs/research/api-docker-build-optimization.md).
-#        - Nx Cloud build secret (`nx_cloud_token`) so `pnpm nx build api`
-#          can read `NX_CLOUD_ACCESS_TOKEN` via the repo-scope read-only Actions
-#          secret (`tau-repo` IaC)—without baking it into a layer (R8). The Dockerfile
-#          reads it via
-#          `--mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN`.
+#        - Nx remote cache build secrets (`nx_cache_server`, `nx_cache_token`) so
+#          the API build reads the self-hosted cache with the repository's
+#          read-only token (tau-cloud `tau-ci-cache`) without baking either into
+#          a layer (R8). The Dockerfile mounts them as
+#          `NX_SELF_HOSTED_REMOTE_CACHE_SERVER` and
+#          `NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN`.
 #   3. Push the resulting image to `registry.fly.io/<app>:<sha>` and deploy
 #      it via `flyctl deploy --image ...` so Fly.io skips its own builder.
 #
@@ -219,7 +220,8 @@ jobs:
           build-args: SENTRY_UPLOAD_ENABLED=${{ inputs.app == 'api' }}
           secrets: |
             sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
-            nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+            nx_cache_server=${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+            nx_cache_token=${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
       # Each push to `main` runs on its own, so an older run can reach this queue
       # after a newer one has deployed; it must not put its commit back.

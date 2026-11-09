@@ -605,6 +605,29 @@ describe('ProjectLibrary', () => {
     expect(screen.getByText('bracket-beta')).toBeInTheDocument();
   });
 
+  /* Every new project starts from Home, so the library's New project leads there,
+   * and Home itself, where the composer already is, shows no second copy. */
+  it('leads New project to Home on /projects and drops it on Home', () => {
+    const { unmount } = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+    expect(screen.getByRole('link', { name: 'New project' })).toHaveAttribute('href', '/');
+    unmount();
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary headingLevel={2} />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+    expect(screen.queryByRole('link', { name: 'New project' })).not.toBeInTheDocument();
+  });
+
   it('keeps same-named projects distinct with their directory slug', () => {
     mockUseProjectsResult = {
       ...createUseProjectsResult(),
@@ -804,7 +827,7 @@ describe('ProjectLibrary', () => {
 
   /* R5: a remembered empty list is known before the worker lists, so no skeleton stands in for it. */
   it('renders the empty state while loading when the last listing had no projects', () => {
-    mockRememberedShape = { count: 0, projects: [] };
+    mockRememberedShape = { count: 0 };
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(
@@ -820,7 +843,7 @@ describe('ProjectLibrary', () => {
   });
 
   it('reserves one card per remembered project while the listing loads', () => {
-    mockRememberedShape = { count: 3, projects: [] };
+    mockRememberedShape = { count: 3 };
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(
@@ -837,7 +860,7 @@ describe('ProjectLibrary', () => {
 
   /* R14: the paging row is reserved with the grid when the remembered list spans pages. */
   it('reserves a page of cards and the paging row when the remembered list spans pages', () => {
-    mockRememberedShape = { count: 45, projects: [] };
+    mockRememberedShape = { count: 45 };
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(

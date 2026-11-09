@@ -12,6 +12,8 @@ const define = {
   /* Runtime telemetry's own Cloud-host signal for main, never derived from the billing gate above. */
   tauTelemetryHostCloudBuild: JSON.stringify(process.env['TAU_TELEMETRY_HOST'] === 'cloud'),
   tauSentryDsn: JSON.stringify(process.env['SENTRY_DSN'] ?? ''),
+  /* The release workflow names one Sentry release per tag (`tau-desktop@<version>`); empty keeps the SDK default. */
+  tauSentryRelease: JSON.stringify(process.env['SENTRY_RELEASE'] ?? ''),
   /* The release workflow passes the PostHog project key; without one the renderer's analytics stay inert. */
   tauPostHogClientKey: JSON.stringify(process.env['POSTHOG_CLIENT_KEY'] ?? ''),
 } as const;

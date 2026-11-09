@@ -58,6 +58,18 @@ describe('an event log with other devices’ segments (XD1)', () => {
     expect(await log.historyIntact()).toBe(true);
   });
 
+  it('should give the rows the history folds, over every segment, while read() stays this device’s rows', async () => {
+    const log = await openLog(phoneTurn, { current: [segment('device-desktop', desktopTurn)] });
+
+    expect(await log.rows?.()).toEqual([...desktopTurn, ...phoneTurn]);
+    expect(await log.read()).toEqual(phoneTurn);
+    /* A row this device appends joins the rows at their tail. */
+    const next = said({ leaderEpoch: 'epoch-phone', sequence: 1, at: '2026-10-23T09:00:01.000Z', text: 'phone again' });
+    await log.append(next);
+    expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0', 'epoch-phone-1']);
+    expect(await log.rows?.()).toEqual([...desktopTurn, ...phoneTurn, next]);
+  });
+
   it('should check an own history row against the merged history and append it to this device’s file only', async () => {
     const { storage, bytes } = memoryEventLogStorage(bytesOf(phoneTurn));
     const log = await createEventLogAppender({

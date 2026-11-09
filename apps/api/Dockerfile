@@ -80,7 +80,8 @@ ENV NX_NATIVE_COMMAND_RUNNER=false
 # runtime dependency on the GeoSpec engine; its header says why.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
-    --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
+    --mount=type=secret,id=nx_cache_server,env=NX_SELF_HOSTED_REMOTE_CACHE_SERVER \
+    --mount=type=secret,id=nx_cache_token,env=NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN \
     node apps/api/scripts/build-image.mts
 
 # Upload maps from the exact built image before pruning. The token is available

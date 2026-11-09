@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createInlineImportDecoder,
+  createInlineImportMeasurer,
   importStagingDirectory,
   importStagingStaleMilliseconds,
   planImport,
@@ -11,7 +12,12 @@ import {
   stageImport,
   zipImportSource,
 } from '@taucad/filesystem/importer';
-import type { ImportDecoder, ImportStagingPort } from '@taucad/filesystem/importer';
+import type {
+  HostImportCopyReceipt,
+  HostImportSourcePort,
+  ImportDecoder,
+  ImportStagingPort,
+} from '@taucad/filesystem/importer';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { BatchEntry } from '@taucad/filesystem';
 import {
@@ -434,6 +440,48 @@ describe('the import channel', () => {
       expect(staged.files).toBe(1);
     });
 
+    it('clears a plan whose cancel crossed its answer, and never a newer plan', async () => {
+      const { port1, port2 } = new MessageChannel();
+      serveImportChannel(port1, {
+        importStaging: async () => portOf(new MemoryProvider()),
+        decode: createInlineImportDecoder(),
+        policy: tauPathPolicy,
+      });
+      const answers = new Map<number, PromiseWithResolvers<{ result?: unknown; error?: { message: string } }>>();
+      const answerOf = async (id: number): Promise<{ result?: unknown; error?: { message: string } }> => {
+        const held = answers.get(id) ?? Promise.withResolvers();
+        answers.set(id, held);
+        return held.promise;
+      };
+      port2.addEventListener('message', (event: MessageEvent<{ id: number; result?: unknown; error?: unknown }>) => {
+        const { id } = event.data;
+        if ('result' in event.data || 'error' in event.data) {
+          void answerOf(id);
+          answers.get(id)?.resolve(event.data as { result?: unknown; error?: { message: string } });
+        }
+      });
+      port2.start();
+      const send = (message: Record<string, unknown>): void => {
+        port2.postMessage(message);
+      };
+      /* The worker adopts plan 0 and answers it; the page's cancel of it arrives after. */
+      send({ id: 0, type: 'plan', source: { kind: 'zip', file: await zipOf({ 'a.kcl': 'a' }) } });
+      await answerOf(0);
+      send({ id: -1, type: 'cancel', plan: 0 });
+      send({ id: 1, type: 'stage', operationId: 'req_a', scope, target: 'a' });
+      const refused = await answerOf(1);
+      expect(refused.error?.message).toBe('Nothing is planned to stage.');
+      /* A late cancel of an older plan leaves the newer one in place. */
+      send({ id: 2, type: 'plan', source: { kind: 'zip', file: await zipOf({ 'b.kcl': 'b' }) } });
+      await answerOf(2);
+      send({ id: -1, type: 'cancel', plan: 0 });
+      send({ id: 3, type: 'stage', operationId: 'req_b', scope, target: 'b' });
+      const staged = await answerOf(3);
+      expect(staged.result).toMatchObject({ files: 1 });
+      port2.postMessage({ type: 'cancel', close: true, id: -1 });
+      port2.close();
+    });
+
     it('refuses a download that ends before its declared length as corrupt', async () => {
       const zip = await zipOf({ 'r-abc/main.kcl': 'm' });
       answering(
@@ -681,5 +729,87 @@ describe('the import channel', () => {
       expect(await provider.exists(importStagingDirectory('req_refused'))).toBe(false);
       expect(await provider.exists('gear')).toBe(false);
     });
+  });
+});
+
+describe('a source chosen on the desktop host', () => {
+  /* A host that holds one granted folder: it lists and previews by grant, and copies into the staging itself. */
+  const hostFolder: Record<string, string> = { 'main.scad': 'cube(1);', 'lib/gear.scad': 'module g() {}' };
+  const encoder = new TextEncoder();
+  const sources: HostImportSourcePort = {
+    list: async (grant, path) => {
+      expect(grant).toBe('grant-bracket');
+      const prefix = path === '' ? '' : `${path}/`;
+      const names = new Map<string, 'file' | 'dir'>();
+      for (const file of Object.keys(hostFolder)) {
+        if (file.startsWith(prefix)) {
+          const [name, ...rest] = file.slice(prefix.length).split('/');
+          names.set(name!, rest.length > 0 ? 'dir' : 'file');
+        }
+      }
+      const rows = [...names].map(([name, kind]) => ({
+        name,
+        kind,
+        size: kind === 'file' ? encoder.encode(hostFolder[`${prefix}${name}`]).byteLength : 0,
+        mtimeMs: 1,
+      }));
+      return { rows, more: false };
+    },
+    read: async (_grant, path, maximumBytes) => encoder.encode(hostFolder[path]).slice(0, maximumBytes),
+  };
+
+  const connectHost = (provider: MemoryProvider, hostSources?: () => Promise<HostImportSourcePort | undefined>) => {
+    const measure = createInlineImportMeasurer();
+    const copied: string[] = [];
+    const port: ImportStagingPort = {
+      ...portOf(provider),
+      copyHost: async (_grant, entries) =>
+        Promise.all(
+          entries.map(async ({ from, path }) => {
+            const bytes = encoder.encode(hostFolder[from]);
+            copied.push(from);
+            await provider.writeFile(path, bytes);
+            const { size: _, ...facts } = await measure(bytes, bytes.byteLength);
+            const applied: HostImportCopyReceipt = { outcome: 'applied', facts };
+            return applied;
+          }),
+        ),
+    };
+    const session = openImportSession({
+      postMessage: (message: { port: MessagePort }) => {
+        serveImportChannel(message.port, {
+          importStaging: async () => port,
+          decode: vi.fn(createInlineImportDecoder()),
+          policy: tauPathPolicy,
+          ...(hostSources === undefined ? {} : { hostSources }),
+        });
+      },
+    } as unknown as Pick<Worker, 'postMessage'>);
+    sessions.push(session);
+    return { session, copied };
+  };
+
+  it('plans by grant, previews through the host, and stages what the host copied', async () => {
+    const provider = new MemoryProvider();
+    const { session, copied } = connectHost(provider, async () => sources);
+    const listing = await session.plan({
+      kind: 'host',
+      grants: [{ grant: 'grant-bracket', name: 'Bracket', kind: 'directory' }],
+    });
+    expect(listing.name).toBe('Bracket');
+    expect(listing.files.map(({ path }) => path).toSorted()).toEqual(['lib/gear.scad', 'main.scad']);
+    const preview = await session.preview(['main.scad'], 1024);
+    expect(new TextDecoder().decode(preview['main.scad']!.content)).toBe('cube(1);');
+    const staged = await session.stage('req_host', scope, { target: 'Bracket' });
+    expect(staged.files).toBe(2);
+    expect(copied.toSorted()).toEqual(['lib/gear.scad', 'main.scad']);
+    expect(new TextDecoder().decode(await provider.readFile('Bracket/main.scad'))).toBe('cube(1);');
+  });
+
+  it('refuses a host source where no host holds one', async () => {
+    const { session } = connectHost(new MemoryProvider());
+    await expect(
+      session.plan({ kind: 'host', grants: [{ grant: 'grant-bracket', name: 'Bracket', kind: 'directory' }] }),
+    ).rejects.toThrow(/cannot import a folder/u);
   });
 });

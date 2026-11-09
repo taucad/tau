@@ -121,7 +121,7 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
               Sign in
             </a>
             <Button asChild size='sm'>
-              <a href={appHref('/projects/new')} data-event='cta' data-placement='header'>
+              <a href={appHref('/')} data-open-app data-event='cta' data-placement='header'>
                 Start designing ↗
               </a>
             </Button>
@@ -203,8 +203,8 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
         <p>
           <strong>Help us improve Tau?</strong>
           <br />
-          Allow optional PostHog analytics in the Tau app, including session recording, and basic page counts on this
-          site. <Link to='/legal/cookies/'>Cookie policy</Link>
+          Allow optional analytics in the Tau app, including session recording, and basic page counts on this site.{' '}
+          <Link to='/legal/cookies/'>Cookie policy</Link>
         </p>
         <div className='actions'>
           <Button variant='outline' data-consent='declined'>

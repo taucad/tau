@@ -853,7 +853,7 @@ export const createLinuxAptQualificationDriver = (
     const commandLine = stage === 'initial' ? ['gio', 'launch', desktopEntry] : [launcher, ...args];
     let spawned: number | undefined;
     if (stage === 'initial') {
-      // gio launch hands its stdio to the launched app: detach it so the call returns and the app keeps no pipe.
+      // The gio launch command hands its stdio to the launched app: detach it so the call returns and the app keeps no pipe.
       const result = await consumer.exec(
         '/bin/sh',
         [

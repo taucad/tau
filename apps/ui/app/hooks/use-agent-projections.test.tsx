@@ -32,6 +32,7 @@ const defaultModel: ResolvedModel = {
   family: 'gpt',
   provider: { id: 'openai', name: 'OpenAI' },
   isResolved: true,
+  isNamePending: false,
 };
 const claudeModel: ResolvedModel = {
   id: 'anthropic/claude-sonnet',
@@ -39,6 +40,7 @@ const claudeModel: ResolvedModel = {
   family: 'claude',
   provider: { id: 'anthropic', name: 'Anthropic' },
   isResolved: true,
+  isNamePending: false,
 };
 const resolveModel = (id: string): ResolvedModel => (id === claudeModel.id ? claudeModel : defaultModel);
 

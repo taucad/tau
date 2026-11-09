@@ -42,6 +42,7 @@ const resolved = (model: Model): ResolvedModel => ({
   family: model.details.family,
   provider: model.provider,
   isResolved: true,
+  isNamePending: false,
   model,
 });
 
@@ -51,13 +52,25 @@ const state: {
   effort: ChatComposerContextValue['model']['effort'];
   placements: readonly AgentHostPlacementTarget[];
   canSelectExecution: boolean;
+  /** The catalog has not named the model yet. */
+  isNamePending: boolean;
 } = {
   execution: { kind: 'tau', model: fable.id },
   model: fable,
   effort: 'high',
   placements: [],
   canSelectExecution: true,
+  isNamePending: false,
 };
+
+const pending = (id: string): ResolvedModel => ({
+  id,
+  name: id,
+  family: 'unknown',
+  provider: { id: 'unknown', name: 'Unknown' },
+  isResolved: false,
+  isNamePending: true,
+});
 const setActiveModel = vi.fn();
 const setActiveEffort = vi.fn();
 const setActiveExecution = vi.fn();
@@ -66,7 +79,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
     model: {
       modelId: state.model.id,
-      model: resolved(state.model),
+      model: state.isNamePending ? pending(state.model.id) : resolved(state.model),
       effort: state.effort,
       setActiveModel,
       setActiveEffort,
@@ -196,6 +209,7 @@ describe('ChatAgentSheet', () => {
     state.effort = 'high';
     state.placements = [];
     state.canSelectExecution = true;
+    state.isNamePending = false;
     models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
     models.catalog = { status: 'loaded', models: catalog };
     models.isPinningEnabled = true;
@@ -208,6 +222,16 @@ describe('ChatAgentSheet', () => {
     const trigger = screen.getByRole('button', { name: 'Agent and model: Fable 5.1, effort High' });
     expect(within(trigger).getByTestId('svg-icon')).toHaveAttribute('data-icon', 'claude');
     expect(trigger).toHaveTextContent('High');
+  });
+
+  it('holds a fixed-width placeholder, never the raw id or an empty label, until the catalog names the model', () => {
+    state.isNamePending = true;
+    renderSheet();
+
+    const trigger = screen.getByRole('button', { name: 'Agent and model: Model' });
+    expect(trigger).not.toHaveTextContent(fable.id);
+    expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('w-20');
+    expect(trigger.querySelector('[data-slot="trigger-model"]')).toBeNull();
   });
 
   it('opens with focus on the Model row and shows the level in an Effort row', async () => {

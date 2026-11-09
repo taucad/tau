@@ -898,7 +898,7 @@ export const createLinuxAptQualificationDriver = (
             readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => ''),
           ]);
           const parent = /^PPid:\s+(\d+)/mu.exec(status)?.[1] ?? 'exited';
-          return `${pid} (parent ${parent}) ${executable} ${JSON.stringify(rawCommandLine.split('\0').filter(Boolean).slice(1))}`;
+          return `${pid} (parent ${parent}) ${executable} ${JSON.stringify(rawCommandLine.replaceAll('\0', ' ').trim())}`;
         }),
       );
       throw new QualificationUnavailable(

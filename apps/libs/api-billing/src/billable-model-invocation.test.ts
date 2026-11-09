@@ -5,7 +5,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#billable-model-invocation.service.js';
-import { LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
+import { gatewayModelRoutes, LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
 import { billableModelRouteIds, CodeOwnedBillableModelQualificationResolver } from '#billable-model-qualification.js';
 import { createBillableModelProviderAdapters } from '#billable-model-provider.js';
 import { createBillableModelEvidenceCollector } from '#billable-model-evidence.js';
@@ -245,7 +245,6 @@ describe('BillableModelInvocationService', () => {
         ['together-glm-5.3-flash', 'zai-org/GLM-5.3-Flash', 'openai-completions', 'max_completion_tokens'],
         ['together-minimax-m3.1-flash', 'MiniMaxAI/MiniMax-M3.1-Flash', 'openai-completions', 'max_completion_tokens'],
         ['together-deepseek-v4-pro', 'deepseek-ai/DeepSeek-V4-Pro-0813', 'openai-completions', 'max_completion_tokens'],
-        ['morph-deepseek-v4.1-flash', 'morph-dsv41flash', 'openai-completions', 'max_tokens'],
         ['xai-grok-4.7', 'grok-4.7', 'openai-responses', 'max_output_tokens'],
         ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<
@@ -273,7 +272,9 @@ describe('BillableModelInvocationService', () => {
       ],
     ]);
     const adapters = createBillableModelProviderAdapters({ get: (key) => configured.get(key) });
-    expect([...adapters.keys()].sort()).toEqual([...billableModelRouteIds].sort());
+    // A funded route whose catalog row is disabled has no gateway route, so it gets no adapter.
+    const dispatchable = new Set(gatewayModelRoutes().map((route) => route.routeId));
+    expect([...adapters.keys()].sort()).toEqual(billableModelRouteIds.filter((id) => dispatchable.has(id)).sort());
     const resolver = new CodeOwnedBillableModelQualificationResolver({
       adapters,
       executionTimeout: 30_000,

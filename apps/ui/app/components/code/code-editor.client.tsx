@@ -8,6 +8,7 @@ import type { EditorSymbolCrumb } from '#components/code/editor-language-feature
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
+import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
 
 /** Browser timing marks carry pane identity but never document text or paths. */
 export function markCodeEditorMilestone(name: string, viewId: string): void {
@@ -49,13 +50,16 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
   const syntaxController = useRef<AbortController | undefined>(undefined);
   const loadRuntime = useCallback(async (): Promise<void> => {
     const request = ++runtimeLoadSequence.current;
+    const runtimeSpan = pageProjectOpenPerformance().begin('editor.runtime');
     try {
       const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
+      runtimeSpan.finish(request === runtimeLoadSequence.current ? 'ok' : 'superseded');
       if (request === runtimeLoadSequence.current) {
         setFailure(undefined);
         setView(() => CodeEditorView);
       }
     } catch (error) {
+      runtimeSpan.finish('error');
       if (request === runtimeLoadSequence.current) {
         setFailure(error instanceof Error ? error : new Error(String(error)));
       }

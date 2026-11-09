@@ -1,20 +1,20 @@
-# Privacy Policy - TauCAD Limited
+# Privacy Policy - TAUCAD LIMITED
 
 *Effective date: October 25, 2026*
 
 ## 1. Introduction
 
-This Privacy Policy describes how TauCAD Limited ("we," "us," or "our") collects, uses, and discloses your personal information when you use our software as a service (the "Service"). TauCAD Limited is the data controller responsible for your personal data.
+This Privacy Policy describes how TAUCAD LIMITED ("we," "us," or "our") collects, uses, and discloses your personal information when you use our software as a service (the "Service"). TAUCAD LIMITED is the data controller responsible for your personal data.
 
 We are committed to protecting your personal information and your right to privacy. This Privacy Policy applies to all information collected through our Service, as well as any related services, sales, marketing, or events. This Privacy Policy also describes your rights under applicable privacy laws, including the GDPR, UK GDPR, CCPA, LGPD, and other regional privacy laws.
 
 ## 2. Definitions
 
 - **Cookie**: a small file placed on your device to enable certain features and functionality.
-- **Company**: when this policy mentions "Company," "we," "us," or "our," it refers to TauCAD Limited.
-- **Country**: where TauCAD Limited is incorporated, in this case New Zealand.
+- **Company**: when this policy mentions "Company," "we," "us," or "our," it refers to TAUCAD LIMITED.
+- **Country**: where TAUCAD LIMITED is incorporated, in this case New Zealand.
 - **Personal Data**: any information that directly, indirectly, or in connection with other information allows for the identification of a natural person.
-- **Service**: refers to the software as a service provided by TauCAD Limited.
+- **Service**: refers to the software as a service provided by TAUCAD LIMITED.
 - **Third-party service**: refers to companies and individuals that provide services on our behalf, such as hosting, analytics, payment processing, and AI processing.
 - **You**: a person or entity that accesses or uses the Service.
 
@@ -72,7 +72,7 @@ We do not intentionally collect sensitive personal information such as health da
 
 ## 4. How We Use Your Information
 
-TauCAD Limited uses the collected data for:
+TAUCAD LIMITED uses the collected data for:
 
 - Providing and maintaining our Service
 - Notifying you about changes to our Service
@@ -248,7 +248,7 @@ To delete your account, use the account deletion feature in your settings or con
 
 ## 13. Automated Decision-Making
 
-TauCAD Limited does **not** use automated decision-making or profiling that produces legal effects concerning you. All significant decisions affecting your account or access are made with human involvement.
+TAUCAD LIMITED does **not** use automated decision-making or profiling that produces legal effects concerning you. All significant decisions affecting your account or access are made with human involvement.
 
 ## 14. Links to Other Sites
 
@@ -276,4 +276,4 @@ For users in the United Kingdom: We are in the process of appointing a UK Repres
 
 ### 16.3 Data Protection Officer
 
-As an organization that does not engage in large-scale systematic monitoring of individuals or large-scale processing of special categories of data, TauCAD Limited is not required to appoint a Data Protection Officer under GDPR Article 37. For all data protection inquiries, please contact privacy@tau.new.
+As an organization that does not engage in large-scale systematic monitoring of individuals or large-scale processing of special categories of data, TAUCAD LIMITED is not required to appoint a Data Protection Officer under GDPR Article 37. For all data protection inquiries, please contact privacy@tau.new.

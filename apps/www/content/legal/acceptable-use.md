@@ -1,10 +1,10 @@
-# Acceptable Use Policy - TauCAD Limited
+# Acceptable Use Policy - TAUCAD LIMITED
 
 *Effective date: December 29, 2025*
 
 ## 1. Introduction
 
-This Acceptable Use Policy ("AUP") governs your use of the TauCAD Limited software service (the "Service"). This AUP is incorporated by reference into our [Terms of Service](/legal/terms). By using our Service, you agree to comply with this AUP.
+This Acceptable Use Policy ("AUP") governs your use of the TAUCAD LIMITED software service (the "Service"). This AUP is incorporated by reference into our [Terms of Service](/legal/terms). By using our Service, you agree to comply with this AUP.
 
 We may update this AUP from time to time. Continued use of the Service after changes constitutes acceptance of the updated AUP.
 

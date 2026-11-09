@@ -1,8 +1,8 @@
-# Sub-processors - TauCAD Limited
+# Sub-processors - TAUCAD LIMITED
 
 *Effective date: October 25, 2026*
 
-This page lists all third-party service providers (sub-processors) that process personal data on behalf of TauCAD Limited in connection with our Service. This list is maintained in accordance with our [Privacy Policy](/legal/privacy) and applicable data protection laws.
+This page lists all third-party service providers (sub-processors) that process personal data on behalf of TAUCAD LIMITED in connection with our Service. This list is maintained in accordance with our [Privacy Policy](/legal/privacy) and applicable data protection laws.
 
 We require all sub-processors to implement appropriate technical and organizational security measures and to process personal data only for the purposes we specify.
 

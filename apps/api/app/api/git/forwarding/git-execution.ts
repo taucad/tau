@@ -1,5 +1,5 @@
-import type { ShutdownService } from '#lifecycle/shutdown.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import type { VerificationKeys } from '#api/git/forwarding/contract/keys.js';

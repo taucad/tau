@@ -38,6 +38,7 @@ const makeResolvedModel = (
     family: 'gpt',
     provider: { id: 'openai', name: 'OpenAI' },
     isResolved: true,
+    isNamePending: false,
     model: {
       support: {
         tools: true,

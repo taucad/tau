@@ -5,20 +5,18 @@ import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { getEnvironment } from '#config/environment.config.js';
-import { TelemetryModule } from '#telemetry/telemetry.module.js';
-import { RedisModule } from '#redis/redis.module.js';
-import { DatabaseModule } from '#database/database.module.js';
-import { DatabaseService } from '#database/database.service.js';
-import { AuthModule } from '#auth/auth.module.js';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import { getEnvironment } from '@taucad/api-core';
+import { TelemetryModule } from '@taucad/api-observability';
+import { RedisModule } from '@taucad/api-redis';
+import { DatabaseModule, DatabaseService } from '@taucad/api-database';
+import { AuthModule } from '@taucad/api-auth/module';
+import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
+import { BillingModule, BillingService, CreditLedgerService } from '@taucad/api-billing';
 // IMPORTANT: LoggerModule must be imported AFTER every `@InjectPinoLogger`
 // consumer above — nestjs-pino materialises the per-context logger providers
 // from decorator side effects that have run by the time logger.module.ts
 // evaluates (production gets this ordering transitively via ApiModule).
-import { LoggerModule } from '#logger/logger.module.js';
+import { LoggerModule } from '@taucad/api-observability/logger-module';
 
 /**
  * Focused NestJS module for billing integration tests: REAL database, Redis,
@@ -34,6 +32,7 @@ import { LoggerModule } from '#logger/logger.module.js';
     RedisModule, // @Global()
     DatabaseModule,
     BillingModule,
+    AuthExtensionsModule.forRoot({ tauCloudEnabled: true }),
     AuthModule.forRootAsync({ tauCloudEnabled: true }),
   ],
   providers: [{ provide: APP_PIPE, useClass: ZodValidationPipe }],

@@ -1,0 +1,11 @@
+{
+  "alphabet": [],
+  "sources": {
+    "src/billable-model-invocation.service.ts#cancel": "3b2a41341aab1f596e9da9abbdc11b6a7e58a6b32495c96f465216682ba14f2d",
+    "src/billable-model-invocation.service.ts#finish": "d3680dac4d862d5bea6305e037d6a1aa630381bc5ea1b62dc247346a6bb4e8cc"
+  },
+  "specs": {
+    "GatewayInvocation.tla": "e224d972cac767975ede33c3ff2c874b16a37cd874408b8115742d18c14fe26d"
+  },
+  "tables": {}
+}

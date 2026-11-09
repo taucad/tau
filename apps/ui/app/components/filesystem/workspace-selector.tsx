@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Check, ChevronDown, FolderOpen, House, Plus, Settings, ShieldAlert, Unplug } from 'lucide-react';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
@@ -147,23 +147,14 @@ export function WorkspaceSelector({
 }: WorkspaceSelectorProperties): React.JSX.Element | undefined {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const [remembered, setRemembered] = useRememberedProjectLocation();
+  const [, setRemembered] = useRememberedProjectLocation();
   /* What the chip reads once the locations are known, remembered for the next load's first paint. */
   const shownKind = state.phase === 'ready' && state.shouldShowPicker ? state.value.kind : undefined;
   const shownLabel = state.phase === 'ready' && state.shouldShowPicker ? state.selectedOption.label : undefined;
-  /* Read, not watched: Home mounts two selectors with their own state, and one that re-wrote whenever
-   * the other's write changed the preference would ping-pong with it until React gives up. Each
-   * selector writes only when what it shows changes. */
-  const rememberedRef = useRef(remembered);
+  /* Written when this chip's own reading changes, never in answer to the stored value: two selectors that read
+   * different locations (a connect lands in one first) would otherwise overwrite each other without end. */
   useEffect(() => {
-    rememberedRef.current = remembered;
-  }, [remembered]);
-  useEffect(() => {
-    if (
-      shownKind !== undefined &&
-      shownLabel !== undefined &&
-      (shownKind !== rememberedRef.current.kind || shownLabel !== rememberedRef.current.label)
-    ) {
+    if (shownKind !== undefined && shownLabel !== undefined) {
       setRemembered({ kind: shownKind, label: shownLabel });
     }
   }, [setRemembered, shownKind, shownLabel]);

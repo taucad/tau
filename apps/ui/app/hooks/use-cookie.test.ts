@@ -1,6 +1,10 @@
 import * as Cookies from 'es-cookie';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { store } from '#hooks/use-cookie.js';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { readServerPreferences, store, useCookie } from '#hooks/use-cookie.js';
+import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 const names = [
   'tau-test-write',
@@ -160,4 +164,50 @@ it('rereads every preference when another tab clears storage', () => {
   expect(listener).toHaveBeenCalledOnce();
   expect(store.get('tau-test-cleared')).toBeUndefined();
   unsubscribe();
+});
+
+const mirroredModel = 'tau-chat-model';
+
+it('mirrors a server-visible preference into a request cookie of the same JSON, and removes both together', () => {
+  store.update(mirroredModel, 'anthropic-claude-haiku-5.5');
+
+  expect(globalThis.localStorage.getItem(mirroredModel)).toBe('"anthropic-claude-haiku-5.5"');
+  expect(Cookies.get(mirroredModel)).toBe('"anthropic-claude-haiku-5.5"');
+
+  store.remove(mirroredModel);
+  expect(Cookies.get(mirroredModel)).toBeUndefined();
+});
+
+it('gives a server-visible preference stored before mirroring its cookie on first read', () => {
+  globalThis.localStorage.setItem(mirroredModel, '"anthropic-claude-opus-5.5"');
+
+  expect(store.get(mirroredModel)).toBe('anthropic-claude-opus-5.5');
+  expect(Cookies.get(mirroredModel)).toBe('"anthropic-claude-opus-5.5"');
+  store.remove(mirroredModel);
+});
+
+it('brings a stale server-visible cookie in step with local storage', () => {
+  Cookies.set(mirroredModel, '"old"');
+  globalThis.localStorage.setItem(mirroredModel, '"new"');
+
+  expect(store.get(mirroredModel)).toBe('new');
+  expect(Cookies.get(mirroredModel)).toBe('"new"');
+  store.remove(mirroredModel);
+});
+
+// eslint-disable-next-line @typescript-eslint/naming-convention -- a React component, rendered by name.
+function Probe(): React.JSX.Element {
+  const [model] = useCookie<string | undefined>(cookieName.chatModel, undefined);
+  const [kernel] = useCookie(cookieName.cadKernel, 'openscad');
+  return createElement('span', null, `${model ?? 'none'}|${kernel}`);
+}
+
+it('renders a server-visible preference from the request on the server, and others from their default', () => {
+  const preferences = readServerPreferences(
+    'tau-chat-model=%22anthropic-claude-haiku-5.5%22; tau-cad-kernel=%22replicad%22',
+  );
+
+  const html = renderToString(createElement(ServerPreferencesProvider, { value: preferences }, createElement(Probe)));
+
+  expect(html).toContain('anthropic-claude-haiku-5.5|openscad');
 });

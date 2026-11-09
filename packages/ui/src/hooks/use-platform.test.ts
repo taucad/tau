@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { usePlatform } from '#hooks/use-platform.js';
+import { RequestPlatformProvider, usePlatform } from '#hooks/use-platform.js';
 
 /** A component that records the platform it rendered with and shows it. */
 const probe =
@@ -51,6 +51,36 @@ describe('usePlatform', () => {
 
     expect(seen[0]).toBe('mac');
     expect(seen.at(-1)).toBe('other');
+    expect(container.textContent).toBe('other');
+    expect(recoverableErrors).toEqual([]);
+    act(() => {
+      root.unmount();
+    });
+  });
+  it('renders the request platform on the server under a request platform provider', () => {
+    expect(
+      renderToString(createElement(RequestPlatformProvider, { platform: 'other' }, createElement(probe([])))),
+    ).toBe('<span>other</span>');
+  });
+
+  it('hydrates a Windows client with the request platform and never renders the Mac label', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    const seen: string[] = [];
+    const tree = createElement(RequestPlatformProvider, { platform: 'other' }, createElement(probe(seen)));
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(tree);
+    seen.length = 0;
+    const recoverableErrors: unknown[] = [];
+
+    const root = await act(async () =>
+      hydrateRoot(container, tree, {
+        onRecoverableError(error) {
+          recoverableErrors.push(error);
+        },
+      }),
+    );
+
+    expect(seen).not.toContain('mac');
     expect(container.textContent).toBe('other');
     expect(recoverableErrors).toEqual([]);
     act(() => {

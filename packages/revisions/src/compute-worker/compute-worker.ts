@@ -27,6 +27,7 @@
  */
 
 import { indexPack } from 'isomorphic-git';
+import { installBufferGlobal } from '#buffer-global.js';
 import { decodeImportEntry, measureImportBytes } from '@taucad/filesystem/importer';
 import type { ImportDecodeRequest, ImportDecodedEntry, ImportMeasuredFacts } from '@taucad/filesystem/importer';
 import { bytesToHex, digest } from '#object-hash.js';
@@ -212,6 +213,8 @@ export const createInlineCompute = (): ComputeWorker => {
     sha256: async (bytes) => hashHex('sha256', bytes),
     sha256Kept: async (bytes) => ({ sha256: await hashHex('sha256', bytes), data: bytes }),
     indexPack: async (pack) => {
+      /* This realm may be a fresh worker with no `Buffer`; without one the indexer reads a `null` pack. */
+      installBufferGlobal();
       const { fs, files } = memoryFiles(pack);
       try {
         await indexPack({ fs, dir: '', gitdir: '', filepath: 'pack.pack' });

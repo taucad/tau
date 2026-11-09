@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MetricsService } from '#telemetry/metrics.js';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
 import { mintGrant, storagePath } from '#api/git/forwarding/contract/grant.js';
 import type { StorageGrant } from '#api/git/forwarding/contract/grant.js';

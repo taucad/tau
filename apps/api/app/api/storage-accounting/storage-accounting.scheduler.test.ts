@@ -7,7 +7,7 @@ import {
   memorySnapshotStore,
 } from '#api/storage-accounting/storage-accounting.scheduler.js';
 import type { StorageAccountingMetrics } from '#api/storage-accounting/storage-accounting.scheduler.js';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import type { OwnerPlanSettings } from '#api/storage-accounting/owner-plans.js';
 import { mock } from 'vitest-mock-extended';
 

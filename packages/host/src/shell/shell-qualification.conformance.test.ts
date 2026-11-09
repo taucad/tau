@@ -2077,6 +2077,10 @@ describe.runIf(enabled)('shell qualification', () => {
             'eight native commands must be simultaneously held at the release barrier',
           ).toBe(true);
           observedReady = first.filter((index) => existsSync(readyPath(index))).length;
+          /* On Linux a launch counts as started only once the host has read its sandbox's announcement from the
+           * pipe, and the workload's ready file can land before that read is processed. Give the count a moment to
+           * catch up; it still has to reach exactly eight, and the checks below still hold it there. */
+          await eventually(() => counting.highWater() >= 8, 10_000);
           expect(counting.highWater()).toBe(8);
           pending.push(...extra.map(async (index) => call(index)));
           await delay(250);

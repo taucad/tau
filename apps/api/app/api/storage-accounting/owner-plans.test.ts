@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { storageLimitBytesByTier } from '@taucad/billing';
-import type { DatabaseType } from '#database/database.service.js';
+import type { DatabaseType } from '@taucad/api-database';
 import { ownerPlansOf, readOwnerPlans } from '#api/storage-accounting/owner-plans.js';
 import type { OwnerPlanSettings, OwnerSubscriptionRow } from '#api/storage-accounting/owner-plans.js';
 

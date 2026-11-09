@@ -1,0 +1,71 @@
+{
+  "name": "@taucad/api-observability",
+  "version": "0.1.0-beta.0",
+  "description": "API telemetry, metrics, tracing, Sentry and logging",
+  "type": "module",
+  "sideEffects": [
+    "./src/otel.ts",
+    "./src/sentry.ts"
+  ],
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-observability"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-observability#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cardinality-views": "./src/cardinality-views.ts",
+    "./logger-factory": "./src/logger/logger-factory.ts",
+    "./logger-module": "./src/logger/logger.module.ts",
+    "./metrics": "./src/metrics.ts",
+    "./otel": "./src/otel.ts",
+    "./sentry": "./src/sentry.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@nestjs/common": "catalog:",
+    "@nestjs/config": "^4.0.4",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/auto-instrumentations-node": "catalog:",
+    "@opentelemetry/exporter-logs-otlp-http": "catalog:",
+    "@opentelemetry/exporter-prometheus": "catalog:",
+    "@opentelemetry/exporter-trace-otlp-http": "catalog:",
+    "@opentelemetry/resources": "catalog:",
+    "@opentelemetry/sdk-logs": "catalog:",
+    "@opentelemetry/sdk-node": "catalog:",
+    "@pyroscope/nodejs": "catalog:",
+    "@sentry/node": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "@traceloop/instrumentation-langchain": "catalog:",
+    "fastify": "catalog:",
+    "nestjs-pino": "^4.6.1",
+    "pino-http": "^10.5.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "catalog:",
+    "dotenv": "catalog:",
+    "pino-pretty": "catalog:",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

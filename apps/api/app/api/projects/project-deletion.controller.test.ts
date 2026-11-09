@@ -16,10 +16,9 @@ import {
 import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
 import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
 import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import type { Environment } from '#config/environment.config.js';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { DatabaseService } from '#database/database.service.js';
+import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import type { Environment } from '@taucad/api-core';
+import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 // The HTTP adapter, guard and exception filter are real. The durable deletion

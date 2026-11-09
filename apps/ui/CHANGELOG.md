@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 (2026-11-08)
+
+### Features
+
+- feat(filesystem, ui, api): Confirm editor saves before close and stream exports and publications (W12) (#1581) (be2ffdbcc)
+- feat(revisions): Honour the checkout's own Git ignore rules on both legs (#1572) (a01585196)
+
+### Fixes
+
+- fix(openscad-language): Retry the wasi-sdk download on a network error or 5xx (#1582) (1da53560c)
+- fix(ui): serve Home's composer at its final shape, focused, with the remembered location (#1558) (97dd154c5)
+
 ## 0.4.0 (2026-11-08)
 
 ### Features

@@ -231,7 +231,7 @@ describe('auth and onboarding', () => {
     matrixRow('AU-09', 'P1', async () => {
       const account = await createAccount('au09');
       accounts.push(account);
-      // Better Auth's built-in rule for /sign-in* allows 3 per 10 s per process (apps/api/app/config/auth.ts only
+      // Better Auth's built-in rule for /sign-in* allows 3 per 10 s per process (apps/libs/api-auth/src/config/auth.ts only
       // overrides /get-session), so a burst of 101 meets the limit even split across staging's two API machines;
       // Run 1 saw 3 × 401, 98 × 429. No 429 at all means sign-in is not rate limited: a product finding.
       const responses = await Promise.all(

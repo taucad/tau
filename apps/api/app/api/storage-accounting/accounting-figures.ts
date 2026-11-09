@@ -1,6 +1,6 @@
 import type { TauMetrics } from '@taucad/telemetry';
 import type { z } from 'zod';
-import type { StorageAccountingTask } from '#telemetry/metrics.js';
+import type { StorageAccountingTask } from '@taucad/api-observability/metrics';
 
 /** The gauges the storage accounting scheduler exports from its tasks' figures (W14 OB3). */
 export const accountingGauges = [

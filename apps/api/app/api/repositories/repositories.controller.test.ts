@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { isPublicAuth } from '#constants/auth.constant.js';
+import { isPublicAuth } from '@taucad/api-auth';
 import { RepositoriesController } from '#api/repositories/repositories.controller.js';
 import type { RepositoriesService } from '#api/repositories/repositories.service.js';
 

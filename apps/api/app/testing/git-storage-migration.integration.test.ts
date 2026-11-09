@@ -6,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { assertSchemaCompatibility, readMigrationHead } from '#database/database-migration.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { assertSchemaCompatibility, readMigrationHead } from '@taucad/api-database/migration';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 /**
  * Testing policy §13: a durable migration needs failure-injection and restart
@@ -21,7 +21,7 @@ import { databaseReachable } from '#testing/database-reachable.js';
  * a re-run completes without re-applying anything, so a retried release is
  * safe. This suite proves both on a scratch database it creates and drops.
  */
-const migrationsFolder = path.resolve(import.meta.dirname, '../database/migrations');
+const migrationsFolder = path.resolve(import.meta.dirname, '../../../libs/api-database/src/migrations');
 /*
  * The workspace's own PostgreSQL, which `pnpm infra:up` starts and CI's
  * `docker-compose` job brings up with the same credentials. Its own variable

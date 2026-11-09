@@ -18,13 +18,13 @@ import { materializePublication, materializePublishedTags } from '#api/publicati
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
-import { lockProjectLifecycle } from '#database/project-lifecycle.js';
-import * as schema from '#database/schema.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
+import { lockProjectLifecycle } from '@taucad/api-database/project-lifecycle';
+import * as schema from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 /** Real transactions and independent pooled connections; all data lives in a disposable database. */
 describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publication deletion lifecycle', () => {

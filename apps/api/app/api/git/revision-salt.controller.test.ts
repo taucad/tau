@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 
 /**

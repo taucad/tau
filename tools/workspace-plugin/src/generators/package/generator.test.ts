@@ -236,6 +236,26 @@ describe('package generator', () => {
     expect(instructions).not.toContain('pnpm nx size example');
   });
 
+  it('scaffolds a source-consumed API server library named in the api tag dimension', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await packageGenerator(tree, { name: 'api-example', scope: 'apps/libs', scopeTag: 'api', layer: 'feature' });
+
+    const root = 'apps/libs/api-example';
+    const projectJson = readJson<{ tags: string[] }>(tree, `${root}/project.json`);
+    const packageJson = readJson<{ name: string; private: boolean; publishConfig?: unknown }>(
+      tree,
+      `${root}/package.json`,
+    );
+
+    expect(projectJson.tags).toStrictEqual(['scope:api', 'type:app-lib', 'layer:feature', 'api:example']);
+    expect(packageJson.name).toBe('@taucad/api-example');
+    expect(packageJson.private).toBe(true);
+    expect(packageJson.publishConfig).toBeUndefined();
+    expect(tree.exists(`${root}/tsdown.config.ts`)).toBe(false);
+    expect(readText(tree, `${root}/vitest.config.ts`)).toContain("environment: 'node'");
+  });
+
   it.each([
     {
       label: 'a missing app-lib layer',
@@ -268,9 +288,19 @@ describe('package generator', () => {
       message: '--scopeTag=ui is not supported when --scope=packages',
     },
     {
-      label: 'an unsupported API-only app-lib scope',
+      label: 'an API-only app-lib without the api- name prefix',
       schema: { name: 'example', scope: 'apps/libs', layer: 'util', scopeTag: 'api' } as const,
-      message: '--scopeTag=api is not supported when --scope=apps/libs',
+      message: '--scopeTag=api requires a name of the form api-<name>; got example',
+    },
+    {
+      label: 'an API-only React app-lib',
+      schema: { name: 'api-example', scope: 'apps/libs', layer: 'ui', scopeTag: 'api', react: true } as const,
+      message: '--react is not supported for an API server library',
+    },
+    {
+      label: 'an API-only scope outside app-libs',
+      schema: { name: 'api-example', scope: 'libs', scopeTag: 'api' } as const,
+      message: '--scopeTag=api is not supported when --scope=libs',
     },
   ])('rejects $label before changing the Tree', async ({ schema, message }) => {
     const tree = createTreeWithEmptyWorkspace();

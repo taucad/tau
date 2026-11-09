@@ -39,16 +39,16 @@ function renderNavChat({ isTouchSized }: { readonly isTouchSized?: boolean } = {
 }
 
 describe('NavChat', () => {
-  it('should link New Project to the home composer, not the project creation page', () => {
+  it('should link New project to the home composer, not the project creation page', () => {
     renderNavChat();
 
-    expect(screen.getByRole('link', { name: /New Project/ })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: /New project/ })).toHaveAttribute('href', '/');
   });
 
   it('should ask the home composer for focus when clicked', async () => {
     renderNavChat();
 
-    await userEvent.click(screen.getByRole('link', { name: /New Project/ }));
+    await userEvent.click(screen.getByRole('link', { name: /New project/ }));
 
     expect(await screen.findByText('Home Composer')).toBeInTheDocument();
     expect(screen.getByTestId('focus-request')).toHaveTextContent('true');
@@ -73,16 +73,16 @@ describe('NavChat', () => {
     expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE');
   });
 
-  it('should give the phone sheet a 44px New Project', () => {
+  it('should give the phone sheet a 44px New project', () => {
     renderNavChat({ isTouchSized: true });
-    const button = screen.getByRole('link', { name: /New Project/ }).querySelector('[data-slot=sidebar-menu-button]');
+    const button = screen.getByRole('link', { name: /New project/ }).querySelector('[data-slot=sidebar-menu-button]');
     expect(button).toHaveAttribute('data-size', 'lg');
     expect(button).toHaveClass('h-11');
   });
 
-  it('should keep the desktop New Project at the compact row height', () => {
+  it('should keep the desktop New project at the compact row height', () => {
     renderNavChat();
-    const button = screen.getByRole('link', { name: /New Project/ }).querySelector('[data-slot=sidebar-menu-button]');
+    const button = screen.getByRole('link', { name: /New project/ }).querySelector('[data-slot=sidebar-menu-button]');
     expect(button).toHaveAttribute('data-size', 'default');
     expect(button).toHaveClass('h-7');
   });

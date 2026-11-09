@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { HomeChatComposer } from '#routes/_index/home-chat-composer.js';
+import { HomeChatComposer, homeComposerEndId } from '#routes/_index/home-chat-composer.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 
 const send = vi.hoisted(() => vi.fn());
@@ -66,13 +66,37 @@ describe('Home chat composer', () => {
       </TooltipProvider>,
     );
     expect(within(container).getAllByText('OpenSCAD')).toHaveLength(1);
-    expect(container.querySelector('textarea')).toHaveAttribute('data-autofocus');
+    expect(container.querySelector('textarea')).toHaveAttribute('autofocus');
     const bar = container.querySelector('[data-slot="composer-bar"]')!;
     expect(bar).toHaveAttribute('inert');
     expect(bar.querySelector('[aria-label="Add"]')).not.toBeNull();
     expect(bar.querySelector('[aria-label="Create in Home"]')).not.toBeNull();
     expect(bar.querySelector('[data-slot="trigger-model"]')).toHaveTextContent('Haiku 5.5');
     expect(bar.querySelector('[aria-label="Send"]')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  /* Gate finding 1 (#1562): first paint waits until the parser has passed the whole composer. */
+  it('should hold first paint until the parser reaches the marker after the composer', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <TooltipProvider>
+        <HomeChatComposer />
+      </TooltipProvider>,
+    );
+    const expectLink = container.querySelector('link[rel="expect"]');
+    expect(expectLink).toHaveAttribute('blocking', 'render');
+    expect(expectLink).toHaveAttribute('href', `#${homeComposerEndId}`);
+    const marker = container.querySelector(`#${homeComposerEndId}`)!;
+    expect(marker).toHaveAttribute('hidden');
+    /* Everything the first paint must show whole comes before the marker in document order. */
+    for (const part of [
+      container.querySelector('textarea')!,
+      container.querySelector('[data-slot="composer-bar"]')!,
+      container.querySelector('[data-slot="trigger-model"]')!,
+      within(container).getByText('OpenSCAD'),
+    ]) {
+      expect(part.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
   });
 
   it('should not autofocus the served input on a surface that opts out', () => {
@@ -82,7 +106,7 @@ describe('Home chat composer', () => {
         <HomeChatComposer enableAutoFocus={false} />
       </TooltipProvider>,
     );
-    expect(container.querySelector('textarea')).not.toHaveAttribute('data-autofocus');
+    expect(container.querySelector('textarea')).not.toHaveAttribute('autofocus');
   });
 
   it('should serve a native input, hold text typed before the composer arrives and hand it over', async () => {

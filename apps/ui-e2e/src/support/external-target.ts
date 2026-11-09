@@ -300,6 +300,7 @@ export type UiBrowserCommands = {
   uiReadObservedRequests(settle?: boolean): Promise<readonly string[]>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
+  uiEmulateCpuThrottling(rate: number, surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
   uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
   uiEmulateSafeAreaInsets(insets: TargetSafeAreaInsets | null, surface?: TargetSurface): Promise<void>;
@@ -318,6 +319,8 @@ export type UiBrowserCommands = {
     script?: readonly GatewayScriptTurn[],
     options?: AgentHostGatewayFixtureOptions,
   ): Promise<void>;
+  uiInstallModelCatalogFixture(latency?: number): Promise<void>;
+  uiStartModelCatalogApi(): Promise<{ readonly serverHasCatalog: boolean }>;
   uiInstallPostHogFixture(apiKey: string): Promise<void>;
   uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
   uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
@@ -414,6 +417,9 @@ export const emulateColorScheme = (
 ): Promise<void> => server.commands.uiEmulateColorScheme(colorScheme, surface);
 export const emulateContrast = (contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void> =>
   server.commands.uiEmulateContrast(contrast, surface);
+/** Slow the page's CPU by `rate`, 1 for none; it holds across reloads (see `uiEmulateCpuThrottling`). */
+export const emulateCpuThrottling = (rate: number, surface?: TargetSurface): Promise<void> =>
+  server.commands.uiEmulateCpuThrottling(rate, surface);
 export const emulateForcedColors = (forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void> =>
   server.commands.uiEmulateForcedColors(forcedColors, surface);
 export const emulateReducedMotion = (
@@ -749,6 +755,18 @@ export const installAgentHostGatewayFixture = (
   script?: readonly GatewayScriptTurn[],
   options?: AgentHostGatewayFixtureOptions,
 ): Promise<void> => server.commands.uiInstallAgentHostGatewayFixture(script, options);
+/**
+ * Answers the page's `/v1/models` with the API's real catalog rows, each after `latency` milliseconds; the UI
+ * server's own prefetch is untouched.
+ */
+export const installModelCatalogFixture = (latency?: number): Promise<void> =>
+  server.commands.uiInstallModelCatalogFixture(latency);
+/**
+ * Serves the API's real catalog on the API origin, so the UI server's own prefetch finds it as in production, and
+ * waits until that server renders with it; closes with the target (see `uiStartModelCatalogApi`).
+ */
+export const startModelCatalogApi = (): Promise<{ readonly serverHasCatalog: boolean }> =>
+  server.commands.uiStartModelCatalogApi();
 export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
 /** Releases a response parked mid-stream; omit `turn` for the newest gate. */
 export const releaseAgentHostGatewayFixture = (turn?: string): Promise<void> =>

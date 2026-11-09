@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { PrivacyService } from '#api/privacy/privacy.service.js';
 import { updatePrivacyPreferencesSchema } from '#api/privacy/privacy.schema.js';
-import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
-import type { TierAssurance } from '#api/billing/subscription-tier.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { user } from '#database/schema.js';
+import { effectiveTrainingConsent } from '@taucad/billing/training-consent';
+import type { TierAssurance } from '@taucad/api-billing';
+import type { DatabaseService } from '@taucad/api-database';
+import type { user } from '@taucad/api-database/schema';
 
 const decided = new Date('2026-10-29T00:00:00Z');
 

@@ -1,0 +1,115 @@
+# Database Module
+
+This module provides a NestJS-compatible database service using Drizzle ORM with PostgreSQL.
+
+## Features
+
+- ✅ NestJS dependency injection support
+- ✅ Automatic database migrations on startup
+- ✅ Proper connection lifecycle management
+- ✅ Type-safe database access
+- ✅ Configuration via environment variables
+- ✅ Single source of truth for database connections
+
+## Usage
+
+### 1. Import the DatabaseModule
+
+```typescript
+import { DatabaseModule } from '@taucad/api-database';
+
+@Module({
+  imports: [DatabaseModule],
+  // ...
+})
+export class YourModule {}
+```
+
+### 2. Inject DatabaseService in your services
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { DatabaseService } from '@taucad/api-database';
+
+@Injectable()
+export class YourService {
+  constructor(private readonly databaseService: DatabaseService) {}
+
+  async findUser(id: string) {
+    // Direct property access - simple and clean!
+    const db = this.databaseService.database;
+
+    // Use Drizzle ORM queries here
+    return await db.select().from(userTable).where(eq(userTable.id, id));
+  }
+
+  async createUser(userData: CreateUserData) {
+    // No method call needed - just access the property directly
+    return await this.databaseService.database.insert(userTable).values(userData);
+  }
+}
+```
+
+### 3. Environment Configuration
+
+Make sure you have the following environment variable set:
+
+```bash
+DATABASE_URL=postgresql://db_user:password@localhost:5432/database_name
+```
+
+### 4. One database per git worktree
+
+In development every linked git worktree resolves the local `DATABASE_URL` (and
+`BILLING_DATABASE_URL`) to its own fork, `<database>_<worktree id>`, through
+`@taucad/utils/worktree-database`. The API, `pnpm db:migrate`, the billing
+command and the e2e suites all derive the same name, and the first of them to
+run creates the fork by copying the base database inside the `tau-postgres`
+container (`pg_dump | psql`, so it works while the base is in use). Nothing
+changes in the main worktree, in CI or against a remote host, and `NODE_ENV=test`
+keeps `.env.test`. Drop a fork you no longer need with
+`docker exec tau-postgres dropdb -U dev_user <database>_<worktree id>`.
+
+## Migration
+
+Migrations run automatically during service initialization (`OnModuleInit`). The service ensures that:
+
+- Migrations complete **before** the service is marked as ready
+- All database connections use the same configuration
+- No duplicate connection logic
+
+Migrations live in `src/migrations/`; generate them with `pnpm db:generate` (`nx run api-database:db-generate`).
+
+## Architecture
+
+- **DatabaseService**: Main service providing database connection via public `database` property
+  - Handles database connection setup
+  - Runs migrations during initialization
+  - Manages connection lifecycle
+- **DatabaseModule**: NestJS module that provides the database service
+
+### Why this architecture?
+
+✅ **Single responsibility**: DatabaseService handles all database concerns  
+✅ **No duplication**: One place for connection logic  
+✅ **Proper timing**: Migrations run during `OnModuleInit` before service is ready  
+✅ **Consistency**: Same connection setup for both app and migrations
+
+## Legacy Support
+
+The original `client.ts` file is maintained for backward compatibility, but new code should use the `DatabaseService` with proper dependency injection.
+
+## File Structure
+
+```
+apps/libs/api-database/
+├── drizzle.config.ts       # drizzle-kit configuration (db-generate, db-push, db-studio)
+└── src/
+    ├── database.module.ts      # NestJS module
+    ├── database.service.ts     # Main database service (includes migrations)
+    ├── database.provider.ts    # DI tokens and providers
+    ├── database-migration.ts   # The release migration job (`./migration`)
+    ├── schema/                 # Every table, one file per domain (`./schema`)
+    ├── migrations/             # The one migration journal
+    └── testing/                # Scratch database and reachability helpers (`./testing/*`)
+```

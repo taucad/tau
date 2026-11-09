@@ -4,16 +4,16 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { IncomingMessage } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
-import type { RedisService } from '#redis/redis.service.js';
-import { attachHostDevice } from '#auth/auth.guard.js';
+import type { Environment } from '@taucad/api-core';
+import type { RedisService } from '@taucad/api-redis';
+import { attachHostDevice } from '@taucad/api-auth';
 import { gitRequestsPerUserPerWindow, gitRequestsPerWindow, quotaRefusalMarker } from '#api/git/git.constants.js';
 import { GitController, receivePackOutcome, syncOutcomeOf } from '#api/git/git.controller.js';
 import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 
 /**
  * D22 / charter I11 / L6-F3: every Hosted Remote route spends a per-`(user,

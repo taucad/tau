@@ -7,18 +7,21 @@ import type { WebSocket } from 'ws';
 
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
-import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
-import { hashHostGitCredential, resolveHostGitCredential } from '#api/hosts/host-git-credential.js';
-import { agentRun, project } from '#database/schema.js';
-import type { DatabaseService } from '#database/database.service.js';
-import type { RedisService } from '#redis/redis.service.js';
+import { relayHostFramesThroughRedis } from '@taucad/api-hosts/host-frame-relay';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import {
+  hashHostGitCredential,
+  hostControlMessageSchema,
+  HostsService,
+  resolveHostGitCredential,
+} from '@taucad/api-hosts';
+import { agentRun, project } from '@taucad/api-database/schema';
+import type { DatabaseService } from '@taucad/api-database';
+import type { RedisService } from '@taucad/api-redis';
 import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 
-vi.mock('#api/hosts/host-frame-relay.js', () => ({
+vi.mock('@taucad/api-hosts/host-frame-relay', () => ({
   relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn(), depart: vi.fn(async () => undefined) })),
 }));
 

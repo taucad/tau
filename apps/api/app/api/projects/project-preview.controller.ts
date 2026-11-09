@@ -15,14 +15,14 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { createHash } from 'node:crypto';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { UseAuth, User } from '@taucad/api-auth';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectPreviewDto } from '#api/projects/project-preview.dto.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
-import { DatabaseService } from '#database/database.service.js';
-import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
+import { DatabaseService } from '@taucad/api-database';
+import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
 
 @Controller({ path: 'projects', version: '1' })
 @UseAuth()

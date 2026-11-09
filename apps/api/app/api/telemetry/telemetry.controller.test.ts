@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ZodValidationPipe } from 'nestjs-zod';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { IngestEntryName, AttributeKey } from '@taucad/telemetry';

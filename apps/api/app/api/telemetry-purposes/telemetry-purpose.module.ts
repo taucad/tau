@@ -1,10 +1,9 @@
 import { Global, Injectable, Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
-import { DatabaseModule } from '#database/database.module.js';
-import { BillingModule } from '#api/billing/billing.module.js';
-import { HostsModule } from '#api/hosts/hosts.module.js';
-import { BillingService } from '#api/billing/billing.service.js';
-import type { TierAssurance } from '#api/billing/subscription-tier.js';
+import { DatabaseModule } from '@taucad/api-database';
+import { BillingModule, BillingService } from '@taucad/api-billing';
+import { HostsModule } from '@taucad/api-hosts';
+import type { TierAssurance } from '@taucad/api-billing';
 import { TelemetryPurposeController } from '#api/telemetry-purposes/telemetry-purpose.controller.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';

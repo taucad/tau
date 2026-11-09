@@ -1,7 +1,7 @@
 import { createPublicKey, generateKeyPairSync, randomBytes } from 'node:crypto';
-import type { ShutdownService } from '#lifecycle/shutdown.service.js';
+import type { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
+import type { MetricsService } from '@taucad/api-observability/metrics';
 import { mintGrant, storagePath, verifyGrant } from '#api/git/forwarding/contract/grant.js';
 import type { StorageGrant, StorageOperation } from '#api/git/forwarding/contract/grant.js';
 import type { SigningKey, VerificationKeys } from '#api/git/forwarding/contract/keys.js';

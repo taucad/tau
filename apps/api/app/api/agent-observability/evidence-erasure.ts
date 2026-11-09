@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, isNotNull, isNull, lte, notExists, or, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
-import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
-import { lockProjectLifecycle } from '#database/project-lifecycle.js';
+import type { Database, OwnerLockTransaction } from '@taucad/api-database/owner-lock';
+import { lockProjectLifecycle } from '@taucad/api-database/project-lifecycle';
 import {
   agentEvidenceErasure,
   agentEvidenceErasureTrace,
   agentEvidenceOutbox,
   agentEvidenceReceipt,
   project,
-} from '#database/schema.js';
+} from '@taucad/api-database/schema';
 
 /*
  * Erasure of delivered agent evidence (blueprint T13).

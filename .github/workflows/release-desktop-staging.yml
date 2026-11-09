@@ -7,6 +7,15 @@
 # Staging is not notarized unless a dispatch sets `notarize`, which adds a `Notarize: true` line;
 # per-push candidates run many times a day and stay off Apple's notary service.
 # Production `desktop@*` tags always package both.
+#
+# One automatic candidate is in flight at a time and the newest green commit wins
+# (operator decision 2026-11-08, Brain research/ci-throughput-review.md). While a
+# `desktop-staging@*` release build is still running, a green CI run creates no new
+# candidate. When that release build ends, this workflow wakes again and releases the
+# newest `main` commit with green CI, if the desktop changed since the last candidate.
+# The commits in between never get a candidate of their own: on 2026-11-07 every push
+# packaged one and desktop staging took a quarter of the macOS runner time. The nightly
+# and a dispatch always create theirs.
 name: Release desktop to staging
 run-name: Release desktop to staging
 
@@ -23,10 +32,12 @@ on:
         description: 'Notarize and staple the macOS archives (production does; staging does not by default)'
         type: boolean
         default: false
+  # `Release build` runs on tag pushes, whose `head_branch` is the tag; the job's `if`
+  # takes only `desktop-staging@*` ones.
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, Release build]
     types: [completed]
-    branches: [main]
+    branches: [main, 'desktop-staging@*']
 
 permissions: {}
 
@@ -36,28 +47,55 @@ concurrency:
 
 jobs:
   prerelease:
-    name: Create the staging desktop prerelease
+    name: Select the staging desktop candidate
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
-       (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_repository.full_name == github.repository))
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+       (github.event.workflow_run.path == '.github/workflows/release-build.yml' &&
+        github.event.workflow_run.event == 'push' &&
+        startsWith(github.event.workflow_run.head_branch, 'desktop-staging@')))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
       contents: read
-    environment:
-      name: release-pr
-      deployment: false
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      release: ${{ steps.selected.outputs.release }}
+      intel: ${{ steps.selected.outputs.intel }}
+      notarize: ${{ steps.selected.outputs.notarize }}
     steps:
-      - name: Find the newest main commit with green CI
-        id: target
+      # Automatic candidates only: the nightly and a dispatch go ahead regardless.
+      - name: Wait for the candidate in flight
+        id: inflight
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          busy=$(gh api "repos/${GH_REPO}/actions/workflows/release-build.yml/runs?event=push&per_page=50" \
+            --jq '[.workflow_runs[] | select(.status != "completed" and (.head_branch | startswith("desktop-staging@"))) | .head_branch] | join(" ")')
+          if [ -n "$busy" ]; then
+            echo "::notice::Desktop staging candidate in flight ($busy); the newest green commit is released when it ends."
+            echo "busy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "busy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find the newest main commit with green CI
+        id: target
+        if: steps.inflight.outputs.busy != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # A finished release build hands over to the newest green commit, not its own.
+          TRIGGER_SHA: ${{ github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.head_sha || '' }}
           STAGING_SUPPORT_SHA: ef81d9124c75b29e7115da226b3c616e0df2d43a
         run: |
           set -euo pipefail
@@ -88,17 +126,8 @@ jobs:
           echo "Releasing $sha, the newest main commit with green CI."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Mint tau-release-bot token
-        id: bot
-        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
-        with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-
       - name: Checkout
+        if: steps.inflight.outputs.busy != 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ steps.target.outputs.sha }}
@@ -106,13 +135,16 @@ jobs:
           fetch-depth: 0
 
       - name: Require OTA-capable source
+        if: steps.inflight.outputs.busy != 'true'
         run: test -f apps/desktop/src/main/ota-probe.ts && test -f apps/desktop/scripts/publish-desktop.mts
 
       - name: Setup Nx Environment
+        if: steps.inflight.outputs.busy != 'true'
         uses: ./.github/actions/setup-nx
 
       - name: Skip duplicate, obsolete or unaffected automatic candidates
         id: selected
+        if: steps.inflight.outputs.busy != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -161,16 +193,58 @@ jobs:
           fi
           echo "release=true" >> "$GITHUB_OUTPUT"
 
+  # Operator decision D3 (2026-11-08, Brain research/ci-throughput-review.md): the five shell
+  # conformance rows pass on the candidate's own commit before its tag exists, so release-build.yml,
+  # the installer candidates and route qualification only ever see a commit with green rows. A red
+  # row means no candidate this time; the next green commit, the nightly or a dispatch tries again.
+  shell:
+    name: Shell gate
+    needs: [prerelease]
+    if: needs.prerelease.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/shell-conformance.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+
+  tag:
+    name: Tag the staging desktop candidate
+    needs: [prerelease, shell]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prerelease.outputs.sha }}
+          persist-credentials: false
+
       - name: Create the tag and prerelease
-        if: steps.selected.outputs.release == 'true'
         id: release
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          TARGET: ${{ steps.target.outputs.sha }}
+          TARGET: ${{ needs.prerelease.outputs.sha }}
           RUN_NUMBER: ${{ github.run_number }}
-          INTEL: ${{ steps.selected.outputs.intel }}
-          NOTARIZE: ${{ steps.selected.outputs.notarize }}
+          RUN_ID: ${{ github.run_id }}
+          INTEL: ${{ needs.prerelease.outputs.intel }}
+          NOTARIZE: ${{ needs.prerelease.outputs.notarize }}
         run: |
           set -euo pipefail
           version=$(jq -r .version apps/desktop/package.json)
@@ -185,6 +259,8 @@ jobs:
           Staging build of the Tau desktop app from \`${TARGET}\` on \`main\`.
 
           It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is ${signing}. The channel feed advances only after a native OTA acceptance test.
+
+          Shell conformance gate: run ${RUN_ID}
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           # A draft, because a published release is immutable (go-live DEL-20):
@@ -206,11 +282,10 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
-        if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          ARCHES: ${{ steps.selected.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
-          SIGNING: ${{ steps.selected.outputs.notarize == 'true' && ', notarized' || '' }}
+          ARCHES: ${{ needs.prerelease.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
+          SIGNING: ${{ needs.prerelease.outputs.notarize == 'true' && ', notarized' || '' }}
         run: |
           {
             echo "Created the draft prerelease $TAG and its tag ($ARCHES$SIGNING)."

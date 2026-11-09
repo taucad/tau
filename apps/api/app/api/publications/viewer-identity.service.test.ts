@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { FastifyRequest } from 'fastify';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ViewerIdentityService } from '#api/publications/viewer-identity.service.js';
 
 type ApiConfigService = ConfigService<Environment, true>;

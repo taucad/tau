@@ -13,9 +13,13 @@ import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { CrashReportPrompt } from '#components/crash-report-prompt.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
+import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
+import { readShellRequestHints } from '#lib/shell-request-hints.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
+import { readServerPreferences } from '#hooks/use-cookie.js';
+import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
 
 // Every route mounts the palette items, so the example catalog loads on its own
 // chunk instead of joining each route's entry.
@@ -57,12 +61,21 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
   const globalPrivacyControl = request.headers.get('Sec-GPC') === '1';
+  const { pathname } = new URL(request.url);
+  /* R3: the model label is final on first paint. The offline shell is a neutral prerendered document. */
+  const queries = isOfflineShellPath(pathname) ? undefined : prefetchModelCatalog();
   return {
     consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
     globalPrivacyControl,
     env: await getClientEnvironment(),
-    pathname: new URL(request.url).pathname,
+    pathname,
+    // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
+    projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
+    // R4/R7: sidebar state and request platform, so the shell's first paint is final.
+    shellHints: readShellRequestHints(request),
     theme: await readThemeCookie(request),
+    preferences: readServerPreferences(request.headers.get('Cookie') ?? undefined),
+    queries: await queries,
   };
 }
 

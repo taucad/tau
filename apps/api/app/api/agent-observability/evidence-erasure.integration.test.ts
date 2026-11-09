@@ -18,13 +18,13 @@ import { erasureTiming, EvidenceErasureService } from '#api/agent-observability/
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.js';
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
-import type { DatabaseService, DatabaseType } from '#database/database.service.js';
-import * as schema from '#database/schema.js';
-import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-import { createScratchDatabase } from '#testing/scratch-database.js';
-import type { ScratchDatabase } from '#testing/scratch-database.js';
-import { databaseReachable } from '#testing/database-reachable.js';
+import type { DatabaseService, DatabaseType } from '@taucad/api-database';
+import * as schema from '@taucad/api-database/schema';
+import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
+import type { MetricsService } from '@taucad/api-observability/metrics';
+import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
+import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 
 const key = Uint8Array.from(randomBytes(32));
 const environment = 'test';

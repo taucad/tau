@@ -158,7 +158,11 @@ export function usePromptSkillsCatalog(): SkillMetadata[] {
 
 export type SkillsCatalogState = Catalog & Pick<ObservationSnapshot<Catalog>, 'status' | 'error'> & { retry(): void };
 
-/** Functional catalog selection with truthful authority health and same-owner retry. */
+/**
+ * Functional catalog selection with truthful authority health and same-owner retry.
+ * The status is `registering` until the file services exist (server render, early hydration);
+ * `closed` and `error` report a catalog observation that actually failed.
+ */
 export function useSkillsCatalogState(): SkillsCatalogState {
   const service = useCatalogService();
   const snapshot = useObservation(service);

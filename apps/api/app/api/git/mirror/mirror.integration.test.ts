@@ -14,10 +14,17 @@ import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getEnvironment } from '#config/environment.config.js';
-import * as schema from '#database/schema.js';
-import { project, projectDeletion, projectGit, projectGitLfsObject, storageTombstone, user } from '#database/schema.js';
-import { installMaintenanceRole, installMirrorRole } from '#database/service-roles.js';
+import { getEnvironment } from '@taucad/api-core';
+import * as schema from '@taucad/api-database/schema';
+import {
+  project,
+  projectDeletion,
+  projectGit,
+  projectGitLfsObject,
+  storageTombstone,
+  user,
+} from '@taucad/api-database/schema';
+import { installMaintenanceRole, installMirrorRole } from '@taucad/api-database/service-roles';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';

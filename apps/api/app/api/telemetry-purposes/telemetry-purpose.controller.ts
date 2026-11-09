@@ -1,9 +1,9 @@
 /* oxlint-disable new-cap -- NestJS parameter decorators are factories */
 import { Body, Controller, Get, NotFoundException, Put, Query, UseGuards } from '@nestjs/common';
-import type { AuthUser } from '#auth/auth.type.js';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { CloudHost, CloudHostEvidenceGuard } from '#api/hosts/cloud-host-evidence.guard.js';
-import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
+import type { AuthUser } from '@taucad/api-auth';
+import { UseAuth, User } from '@taucad/api-auth';
+import { CloudHost, CloudHostEvidenceGuard } from '@taucad/api-hosts';
+import type { CloudHostReporter } from '@taucad/api-hosts';
 import {
   TelemetryPurposesQueryDto,
   UpdateTelemetryPurposesDto,

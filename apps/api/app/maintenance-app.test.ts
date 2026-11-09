@@ -92,7 +92,7 @@ const listeningPackages = [
   '@opentelemetry/exporter-prometheus',
   '@opentelemetry/sdk-node',
 ];
-const listeningModules = ['app/main.ts', 'app/app.module.ts', 'app/telemetry/otel.ts'];
+const listeningModules = ['app/main.ts', 'app/app.module.ts', '../libs/api-observability/src/otel.ts'];
 
 describe('tau-maintenance image (DC4)', () => {
   it('should build a maintenance target that runs the maintenance command and exposes nothing', () => {
@@ -118,6 +118,15 @@ describe('tau-maintenance image (DC4)', () => {
       listeningModules.filter((module) => graph.modules.has(module)).map((module) => importChain(graph, module)),
     ).toEqual([]);
     expect(listeningPackages.filter((name) => graph.packages.has(name))).toEqual([]);
+  });
+
+  it('should reach no billing module', () => {
+    // The maintenance entry names billing only in type imports, which are erased before run time.
+    const graph = moduleGraph(maintenanceImageEntry());
+    const billing = [...graph.modules].filter((module) => module.startsWith('../libs/api-billing/'));
+
+    expect(graph.modules.size).toBeGreaterThan(0);
+    expect(billing.map((module) => importChain(graph, module))).toEqual([]);
   });
 
   describe('when the command module loads', () => {

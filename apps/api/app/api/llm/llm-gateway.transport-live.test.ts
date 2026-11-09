@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
+import { createBillableModelProviderAdapters } from '@taucad/api-billing';
 
 describe('billable provider route map', () => {
   it('adds only routes backed by configured provider credentials', () => {

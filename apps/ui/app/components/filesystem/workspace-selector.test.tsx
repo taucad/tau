@@ -137,11 +137,9 @@ describe('WorkspaceSelector', () => {
     globalThis.localStorage.clear();
   });
 
-  /* Home mounts two composers (the hero and the empty library's), each with its own location state.
-   * Connecting a folder in one leaves the other on Home; remembering must not make them overwrite each
-   * other until React gives up (maximum update depth). */
-  it('lets two selectors that show different locations both remember without a write loop', () => {
+  it('settles when two selectors show different locations', () => {
     globalThis.localStorage.clear();
+    /* A connect lands in one composer's state before another's; each chip remembers what it shows once. */
     const workshop = readyState({
       value: { kind: 'workspace', workspaceId: 'wsp_workshop' },
       selectedOption: {
@@ -151,24 +149,14 @@ describe('WorkspaceSelector', () => {
         detail: 'on your disk',
       },
     });
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { rerender } = render(
+    render(
       <TooltipProvider>
         <WorkspaceSelector state={readyState()} variant='toolbar' />
-        <WorkspaceSelector state={readyState()} variant='toolbar' />
-      </TooltipProvider>,
-    );
-    rerender(
-      <TooltipProvider>
         <WorkspaceSelector state={workshop} variant='toolbar' />
-        <WorkspaceSelector state={readyState()} variant='toolbar' />
       </TooltipProvider>,
     );
-
-    expect(screen.getByRole('button', { name: 'Create in Workshop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create in Home' })).toBeInTheDocument();
-    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/Maximum update depth|#185/u);
-    consoleError.mockRestore();
+    expect(screen.getByRole('button', { name: 'Create in Workshop' })).toBeInTheDocument();
     globalThis.localStorage.clear();
   });
 

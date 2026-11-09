@@ -1,0 +1,7 @@
+{
+  "name": "api-hosts",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-hosts",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:hosts"]
+}

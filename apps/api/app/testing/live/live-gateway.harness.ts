@@ -24,16 +24,19 @@ import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import type { KernelId } from '@taucad/types/constants';
-import { authInstanceKey } from '#constants/auth.constant.js';
-import { httpBodyLimit } from '#constants/http-body.constant.js';
-import { getEnvironment } from '#config/environment.config.js';
-import { HostsService } from '#api/hosts/hosts.service.js';
-import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
-import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
-import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import { ModelInvocationModule } from '#api/llm/model-invocation.module.js';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
-import type { ModelListEntry } from '#api/models/model.constants.js';
+import { authInstanceKey } from '@taucad/api-auth';
+import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
+import { getEnvironment } from '@taucad/api-core';
+import { HostsService } from '@taucad/api-hosts';
+import {
+  isModelListEntryEnabled,
+  LlmGatewayAuthGuard,
+  LlmGatewayController,
+  LlmGatewayService,
+  modelList,
+} from '@taucad/api-llm-gateway';
+import { ModelInvocationModule } from '#composition/model-invocation.module.js';
+import type { ModelListEntry } from '@taucad/api-llm-gateway';
 
 /**
  * In-process live model gateway for provider suites.

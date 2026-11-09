@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { TranscriptionProviderError } from '#api/voice/voice.types.js';
 import type { TranscriptionEvent, TranscriptionProvider } from '#api/voice/voice.types.js';
 

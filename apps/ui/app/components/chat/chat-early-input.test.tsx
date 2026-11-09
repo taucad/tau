@@ -10,7 +10,7 @@ import {
   chatComposerPlaceholder,
 } from '#components/chat/chat-input-styles.js';
 
-/** Run the served input's inline script the way the browser does at first paint: in place, after its input. */
+/** Run the served inline script the way the browser does: in place, where it was served. */
 const runEarlyScript = (container: HTMLElement): void => {
   const served = container.querySelector('script')!;
   const script = document.createElement('script');
@@ -194,33 +194,67 @@ describe('Home early input', () => {
     expect(frame.lastElementChild).toHaveClass('h-7');
   });
 
-  /* R11: focus at first paint, from the served script, unless something already holds it. */
-  it.each([
-    { enableAutoFocus: true, isClaimed: false, isFocused: true },
-    { enableAutoFocus: true, isClaimed: true, isFocused: false },
-    { enableAutoFocus: false, isClaimed: false, isFocused: false },
-  ])(
-    'should take focus at first paint when enableAutoFocus=$enableAutoFocus and focus claimed=$isClaimed',
-    ({ enableAutoFocus, isClaimed, isFocused }) => {
-      const other = document.createElement('button');
-      document.body.append(other);
-      const container = document.createElement('div');
-      container.innerHTML = renderToString(
-        <ChatEarlyInput enableAutoFocus={enableAutoFocus}>{() => null}</ChatEarlyInput>,
+  /* R11: the served input carries `autofocus`, so the browser focuses it at its first rendering update. */
+  it.each([true, false])('should serve autofocus only when enableAutoFocus=%s', (enableAutoFocus) => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <ChatEarlyInput enableAutoFocus={enableAutoFocus}>{() => null}</ChatEarlyInput>,
+    );
+    expect(within(container).getByRole('textbox').hasAttribute('autofocus')).toBe(enableAutoFocus);
+  });
+
+  it('should leave focus where the person put it before hydration', async () => {
+    const content = (
+      <ChatEarlyInput enableAutoFocus isHostReady={false}>
+        {() => null}
+      </ChatEarlyInput>
+    );
+    const other = document.createElement('button');
+    document.body.append(other);
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    other.focus();
+    const root = hydrateRoot(container, content);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(other).toHaveFocus();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      other.remove();
+    }
+  });
+
+  /* Gate finding 1 (#1562): a browser may paint the half-parsed document when the parser reaches a script, so
+   * the script comes after the whole box and its bar — a cut there never shows the box without its bar. */
+  it('should serve its script after the bar, and record edits from there', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <ChatEarlyInput bar={() => <div data-testid='bar' />}>{() => null}</ChatEarlyInput>,
+    );
+    document.body.append(container);
+    try {
+      const script = container.querySelector('script')!;
+      const bar = container.querySelector('[data-testid="bar"]')!;
+      /* The script is the composer's last element, so the bar precedes it in document order. */
+      expect(script.parentElement?.lastElementChild).toBe(script);
+      expect(script.parentElement).toContainElement(bar as HTMLElement);
+      runEarlyScript(container);
+      const input = within(container).getByRole<HTMLTextAreaElement & { tauEarlyDraft?: { edited: boolean } }>(
+        'textbox',
       );
-      document.body.append(container);
-      try {
-        if (isClaimed) {
-          other.focus();
-        }
-        runEarlyScript(container);
-        expect(document.activeElement === within(container).getByRole('textbox')).toBe(isFocused);
-      } finally {
-        container.remove();
-        other.remove();
-      }
-    },
-  );
+      expect(input.tauEarlyDraft).toEqual({ edited: false, composing: false });
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      expect(input.tauEarlyDraft?.edited).toBe(true);
+    } finally {
+      container.remove();
+    }
+  });
 
   it('should tell the bar when the input holds text, including text typed before hydration', async () => {
     const bars: EarlyChatInputBarState[] = [];

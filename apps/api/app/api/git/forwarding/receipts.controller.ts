@@ -11,7 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { maximumPostedReceiptLength } from '#api/git/forwarding/contract/receipt.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 

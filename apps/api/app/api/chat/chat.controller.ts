@@ -5,13 +5,12 @@ import { convertToModelMessages } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ChatTurnRequest } from '@taucad/chat/schemas';
 import { ChatService } from '#api/chat/chat.service.js';
-import { AuthGuard } from '#auth/auth.guard.js';
-import { User } from '#auth/decorators/auth.decorator.js';
+import { AuthGuard, User } from '@taucad/api-auth';
 import { ChatMessagesValidationPipe } from '#api/chat/chat.dto.js';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
-import { Span } from '#telemetry/tracer.service.js';
+import { Span } from '@taucad/api-observability';
 import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
-import { assertNoQuery, invocationSignal, readHint } from '#api/llm/llm-gateway.headers.js';
+import { assertNoQuery, invocationSignal, readHint } from '@taucad/api-llm-gateway';
 
 /**
  * The two secondary generators are all that remain of `POST /v1/chat`.

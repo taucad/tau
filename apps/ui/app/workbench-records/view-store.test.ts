@@ -462,6 +462,71 @@ describe('workbench view checked store', () => {
     store.dispose();
   });
 
+  it('attributes its own write to a watch read that starts after the write reply and supersedes the refresh', async () => {
+    /* The change-set watch (W8) delivers a write's events around its reply: one read starts while the write is in
+     * flight, and a later event starts a read after the reply that supersedes both it and the write's own refresh.
+     * That last read must still recognise the bytes as this store's write, or the owner treats its own echo as a
+     * foreign edit and re-applies the older camera pose over a newer drag. */
+    const data = memory();
+    const acknowledgement = Promise.withResolvers<void>();
+    const heldReads = Promise.withResolvers<void>();
+    let hold = false;
+    let held = 0;
+    const onChange = vi.fn<(state: ViewRecordState, source: 'read' | 'write', patch?: ViewRecordPatch) => void>();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          const captured = await data.files.readFile();
+          if (hold) {
+            held++;
+            await heldReads.promise;
+          }
+          return captured;
+        },
+        writeFileChecked: async ({ data: text }: { data: string }): Promise<CheckedFileWriteResult> => {
+          const content = encoder.encode(text);
+          data.setBytes(content);
+          await acknowledgement.promise;
+          return { status: 'applied', content };
+        },
+      },
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const camera: WorkbenchView['camera'] = {
+      kind: 'look',
+      direction: [0, -1, 0],
+    };
+    const saving = store.edit({ ...seed(), name: 'Local', camera });
+    await vi.waitFor(() => {
+      expect(data.get() && new TextDecoder().decode(data.get()!)).toContain('Local');
+    });
+    hold = true;
+    const inFlightWatch = store.read();
+    await vi.waitFor(() => {
+      expect(held).toBe(1);
+    });
+    acknowledgement.resolve();
+    await vi.waitFor(() => {
+      expect(held).toBe(2);
+    });
+    hold = false;
+    await store.read();
+    expect(onChange.mock.lastCall?.[0].record?.name).toBe('Local');
+    expect(onChange.mock.lastCall?.[1]).toBe('write');
+    expect(onChange.mock.lastCall?.[2]?.camera).toEqual(camera);
+    heldReads.resolve();
+    await inFlightWatch;
+    expect(await saving).toBe(true);
+    store.dispose();
+  });
+
   it('persists a selected kernel view and its options through a stale checked-write conflict', async () => {
     const data = memory();
     const store = makeStore(data);

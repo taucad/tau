@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Environment } from '#config/environment.config.js';
+import type { Environment } from '@taucad/api-core';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
 type Received = Readonly<{ method: string; path: string; headers: IncomingHttpHeaders }>;

@@ -616,7 +616,7 @@ export const createLinuxAptQualificationDriver = (
       if (kind === 'linux-appimage') {
         // What the consumer does with a downloaded AppImage: `chmod +x`, then run it.
         // oxlint-disable-next-line no-await-in-loop, no-bitwise -- Ordered consumer steps on POSIX mode bits.
-        const mode = await consumer.chmod(downloaded.path, downloaded.mode | 0o111);
+        const mode = await consumer.chmod(downloaded.path, (downloaded.mode & 0o777) | 0o111);
         // oxlint-disable-next-line no-await-in-loop -- The runtime must execute for the consumer after chmod.
         const probe = await consumer.exec(downloaded.path, ['--appimage-offset'], { killAfter: 60_000 });
         if (probe.status !== 0 || !/^[1-9]\d*$/u.test(probe.stdout.trim())) {
@@ -853,7 +853,17 @@ export const createLinuxAptQualificationDriver = (
     const commandLine = stage === 'initial' ? ['gio', 'launch', desktopEntry] : [launcher, ...args];
     let spawned: number | undefined;
     if (stage === 'initial') {
-      const result = await consumer.exec('gio', ['launch', desktopEntry], { env, killAfter: 60_000 });
+      // gio launch hands its stdio to the launched app: detach it so the call returns and the app keeps no pipe.
+      const result = await consumer.exec(
+        '/bin/sh',
+        [
+          '-c',
+          'e=$(mktemp) || exit 1; gio launch "$1" </dev/null >/dev/null 2>"$e"; s=$?; cat "$e" >&2; rm -f "$e"; exit $s',
+          'sh',
+          desktopEntry,
+        ],
+        { env, killAfter: 60_000 },
+      );
       if (result.status !== 0) {
         throw new QualificationUnavailable(`Desktop entry launch failed: ${result.stderr}`);
       }

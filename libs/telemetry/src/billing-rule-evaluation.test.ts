@@ -132,13 +132,12 @@ const opened = start + 10 * minute;
 
 /**
  * One `(kind, attributed)` series of a financial-case gauge, exported every minute as the OTLP exporter sends the
- * hourly recorded value. The gauge writes 0 for every known pair (invariant I6), so `value` is 0 outside `[from, to)`.
+ * hourly recorded value. The gauge writes 0 for every known pair (invariant I6), so the series reads `value` in `[from, to)` and 0 elsewhere.
  */
 const gauge = (
   name: string,
   labels: Readonly<{ kind: string; attributed: 'true' | 'false'; app?: string; instance?: string }>,
-  value: number,
-  { from = opened, to = Number.POSITIVE_INFINITY }: Readonly<{ from?: number; to?: number }> = {},
+  { value, from = opened, to = Number.POSITIVE_INFINITY }: Readonly<{ value: number; from?: number; to?: number }>,
 ): Series => {
   const samples: Sample[] = [];
   for (let t = 0; t <= end; t += minute) {
@@ -237,7 +236,9 @@ describe('Billing financial-case rule definitions (W4 A4.6, A4.7)', () => {
 
     expect(readers).toEqual([...tierUids, 'billing-supplier-invoice-mismatch'].toSorted());
     for (const uid of readers) {
-      expect(() => assertSupported(conditionOf(located(uid).rule)), uid).not.toThrow();
+      expect(() => {
+        assertSupported(conditionOf(located(uid).rule));
+      }, uid).not.toThrow();
     }
   });
 });
@@ -245,7 +246,7 @@ describe('Billing financial-case rule definitions (W4 A4.6, A4.7)', () => {
 describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', () => {
   it('should alert at the first evaluation that sees an unattributed case, without Pending', () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, 1),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, { value: 1 }),
     ]);
 
     expect(changes(transitions)).toEqual([`0s ${instanceOf('missing_local_payment')} Normal→Alerting`]);
@@ -253,8 +254,8 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
 
   it('should alert for an unattributed case of any kind, one instance per kind', () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'tax_registration_review', attributed: 'false' }, 1),
-      gauge(cases, { kind: 'dispute_unresolved', attributed: 'false' }, 2),
+      gauge(cases, { kind: 'tax_registration_review', attributed: 'false' }, { value: 1 }),
+      gauge(cases, { kind: 'dispute_unresolved', attributed: 'false' }, { value: 2 }),
     ]);
 
     expect(changes(transitions).toSorted()).toEqual(
@@ -267,8 +268,8 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
 
   it('should stay Normal on a zero unattributed count beside attributed cases', () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, 0),
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'true' }, 5),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, { value: 0 }),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'true' }, { value: 5 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -276,7 +277,7 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
 
   it("should ignore another environment's unattributed case", () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', app: otherApp }, 1),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', app: otherApp }, { value: 1 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -284,7 +285,7 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
 
   it('should resolve once the case is closed and the gauge reads zero again', () => {
     const transitions = simulate('billing-case-unattributed', [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, 1, { to: opened + hour }),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false' }, { value: 1, to: opened + hour }),
     ]);
 
     expect(changes(transitions)).toEqual([
@@ -297,7 +298,7 @@ describe('U billing-case-unattributed evaluated on synthetic series (W4 A4.1)', 
 describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.2)', () => {
   it('should page 15 minutes after a named spend-blocking case opens', () => {
     const transitions = simulate('billing-account-spend-blocked', [
-      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true' }, 1),
+      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true' }, { value: 1 }),
     ]);
 
     expect(changes(transitions)).toEqual([
@@ -308,7 +309,7 @@ describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.
 
   it('should match the journal kinds by prefix', () => {
     const transitions = simulate('billing-account-spend-blocked', [
-      gauge(cases, { kind: 'journal_unbalanced', attributed: 'true' }, 1),
+      gauge(cases, { kind: 'journal_unbalanced', attributed: 'true' }, { value: 1 }),
     ]);
 
     expect(transitions.map(({ to }) => to)).toEqual(['Pending', 'Alerting']);
@@ -316,7 +317,7 @@ describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.
 
   it('should never page for a named case resolved within 10 minutes', () => {
     const transitions = simulate('billing-account-spend-blocked', [
-      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true' }, 1, { to: opened + 10 * minute }),
+      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true' }, { value: 1, to: opened + 10 * minute }),
     ]);
 
     expect(changes(transitions)).toEqual([
@@ -327,7 +328,7 @@ describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.
 
   it('should leave an unattributed spend-blocking case to the unattributed tier', () => {
     const transitions = simulate('billing-account-spend-blocked', [
-      gauge(cases, { kind: 'dispute_unresolved', attributed: 'false' }, 1),
+      gauge(cases, { kind: 'dispute_unresolved', attributed: 'false' }, { value: 1 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -335,7 +336,7 @@ describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.
 
   it('should ignore a named case of a kind that never blocks spending', () => {
     const transitions = simulate('billing-account-spend-blocked', [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'true' }, 1),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'true' }, { value: 1 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -345,7 +346,7 @@ describe('T1 billing-account-spend-blocked evaluated on synthetic series (W4 A4.
 describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.4)', () => {
   it('should warn once a named owed case is older than 2 h', () => {
     const transitions = simulate('billing-owed-stale-2h', [
-      gauge(age, { kind: 'paid_unfulfilled_recovery', attributed: 'true' }, 7260),
+      gauge(age, { kind: 'paid_unfulfilled_recovery', attributed: 'true' }, { value: 7260 }),
     ]);
 
     expect(changes(transitions)).toEqual([`0s ${instanceOf('paid_unfulfilled_recovery')} Normal→Alerting`]);
@@ -353,8 +354,8 @@ describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.
 
   it('should not warn for an owed case younger than 2 h or a bookkeeping case of any age', () => {
     const transitions = simulate('billing-owed-stale-2h', [
-      gauge(age, { kind: 'missing_local_payment', attributed: 'true' }, 7140),
-      gauge(age, { kind: 'gross_fee_net_mismatch', attributed: 'true' }, 90_000),
+      gauge(age, { kind: 'missing_local_payment', attributed: 'true' }, { value: 7140 }),
+      gauge(age, { kind: 'gross_fee_net_mismatch', attributed: 'true' }, { value: 90_000 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -362,7 +363,7 @@ describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.
 
   it('should leave an unattributed owed case to the unattributed tier', () => {
     const transitions = simulate('billing-owed-stale-2h', [
-      gauge(age, { kind: 'missing_local_payment', attributed: 'false' }, 90_000),
+      gauge(age, { kind: 'missing_local_payment', attributed: 'false' }, { value: 90_000 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -370,7 +371,7 @@ describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.
 
   it('should page once a named owed case is older than 24 h', () => {
     const transitions = simulate('billing-owed-overdue-24h', [
-      gauge(age, { kind: 'unfulfilled_purchase_obligation', attributed: 'true' }, 86_460),
+      gauge(age, { kind: 'unfulfilled_purchase_obligation', attributed: 'true' }, { value: 86_460 }),
     ]);
 
     expect(changes(transitions)).toEqual([`0s ${instanceOf('unfulfilled_purchase_obligation')} Normal→Alerting`]);
@@ -378,7 +379,7 @@ describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.
 
   it('should not page for a named owed case just under 24 h', () => {
     const transitions = simulate('billing-owed-overdue-24h', [
-      gauge(age, { kind: 'missing_local_payment', attributed: 'true' }, 86_340),
+      gauge(age, { kind: 'missing_local_payment', attributed: 'true' }, { value: 86_340 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -388,8 +389,8 @@ describe('T2 owed-customer age rules evaluated on synthetic series (W4 A4.3, A4.
 describe('T3 billing-books-overdue-24h evaluated on synthetic series (W4 A4.5)', () => {
   it('should warn for a bookkeeping case older than 24 h whatever its attribution', () => {
     const transitions = simulate('billing-books-overdue-24h', [
-      gauge(age, { kind: 'tax_registration_review', attributed: 'false' }, 90_000),
-      gauge(age, { kind: 'supplier_invoice_total_mismatch', attributed: 'true' }, 90_000),
+      gauge(age, { kind: 'tax_registration_review', attributed: 'false' }, { value: 90_000 }),
+      gauge(age, { kind: 'supplier_invoice_total_mismatch', attributed: 'true' }, { value: 90_000 }),
     ]);
 
     expect(changes(transitions).toSorted()).toEqual(
@@ -402,8 +403,8 @@ describe('T3 billing-books-overdue-24h evaluated on synthetic series (W4 A4.5)',
 
   it('should not warn for a young bookkeeping case or an old owed case', () => {
     const transitions = simulate('billing-books-overdue-24h', [
-      gauge(age, { kind: 'tax_registration_review', attributed: 'false' }, 3600),
-      gauge(age, { kind: 'missing_local_payment', attributed: 'false' }, 90_000),
+      gauge(age, { kind: 'tax_registration_review', attributed: 'false' }, { value: 3600 }),
+      gauge(age, { kind: 'missing_local_payment', attributed: 'false' }, { value: 90_000 }),
     ]);
 
     expect(transitions).toEqual([]);
@@ -429,11 +430,11 @@ describe('Billing dashboard financial-case panels evaluated on synthetic series 
   /** Two Machines export the same hourly figure, so each pair is read once, then the two attribution values add. */
   const store = new SeriesStore(
     ['machine-1', 'machine-2'].flatMap((instance) => [
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', instance }, 3),
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'true', instance }, 2),
-      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true', instance }, 1),
-      gauge(cases, { kind: 'tax_registration_review', attributed: 'false', instance }, 0),
-      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', app: otherApp, instance }, 7),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', instance }, { value: 3 }),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'true', instance }, { value: 2 }),
+      gauge(cases, { kind: 'dispute_unresolved', attributed: 'true', instance }, { value: 1 }),
+      gauge(cases, { kind: 'tax_registration_review', attributed: 'false', instance }, { value: 0 }),
+      gauge(cases, { kind: 'missing_local_payment', attributed: 'false', app: otherApp, instance }, { value: 7 }),
     ]),
   );
   const at = opened + 30 * minute;
@@ -445,7 +446,9 @@ describe('Billing dashboard financial-case panels evaluated on synthetic series 
   it('should keep every financial-case panel bound to the app variable and the API service', () => {
     for (const title of caseTitles) {
       expect(panelExpr(title), title).toContain('{app=~"$app",service_name="tau-api"');
-      expect(() => assertSupported(panelExpr(title).replaceAll('$app', boundApp)), title).not.toThrow();
+      expect(() => {
+        assertSupported(panelExpr(title).replaceAll('$app', boundApp));
+      }, title).not.toThrow();
     }
   });
 

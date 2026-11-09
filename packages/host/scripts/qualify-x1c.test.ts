@@ -1,12 +1,12 @@
 import type { MachineNetworkStream } from '@taucad/runtime/machine';
 import { describe, expect, it } from 'vitest';
 
-// oxlint-disable-next-line no-restricted-imports -- The monitor test covers the qualification script's own module.
-import { printCubeOutcome } from '../scripts/print-cube-outcome.mjs';
+// oxlint-disable-next-line no-restricted-imports -- The monitor test covers the qualification script's sibling module; scripts have no `#` alias.
+import { printCubeOutcome } from './print-cube-outcome.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The start-evidence test covers the qualification script's own module.
-import { redactProjectFileReply, tapProjectFileReplies } from '../scripts/project-file-reply.mjs';
+import { redactProjectFileReply, tapProjectFileReplies } from './project-file-reply.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The reply type belongs to the same module.
-import type { ProjectFileReply } from '../scripts/project-file-reply.mjs';
+import type { ProjectFileReply } from './project-file-reply.mjs';
 
 const serial = '00M09C123456789';
 const address = '198.51.100.23';

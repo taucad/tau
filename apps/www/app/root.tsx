@@ -121,7 +121,7 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
               Sign in
             </a>
             <Button asChild size='sm'>
-              <a href={appHref('/projects/new')} data-event='cta' data-placement='header'>
+              <a href={appHref('/')} data-open-app data-event='cta' data-placement='header'>
                 Start designing ↗
               </a>
             </Button>

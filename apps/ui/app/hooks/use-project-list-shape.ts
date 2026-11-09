@@ -13,7 +13,7 @@ type ProjectListShapeLoaderData = {
  *
  * The server and the hydrating render read the count the request cookie carried,
  * through the root loader, so both draw the same number of slots. After hydration
- * the client reads its own snapshot, which adds the remembered names. The desktop
+ * the client reads its own snapshot of the same count. The desktop
  * (SPA) root has no loader, so it renders an unknown shape until hydration.
  *
  * @returns The shape, or `undefined` when this browser has never listed its projects.

@@ -23,13 +23,24 @@ const nxBin = join(repoRoot, 'node_modules/.bin/nx');
 /* Nx 22.7.1 intermittently segfaults before it runs anything, as the CI setup
  * (`.github/actions/setup-nx`) records; the Dockerfile also turns off its native PTY
  * runner. Call the bin directly, so the signal reaches this process instead of pnpm's
- * exit 1, then rerun once on SIGSEGV and pass every other outcome through. */
+ * exit 1, then rerun once on SIGSEGV.
+ * Nx's self-hosted remote cache client also fails a whole command when the cache is
+ * unreachable or refuses an entry, and a cache fault must not fail a build (tau-cloud
+ * `tau-ci-cache`). So a failure with the remote cache on is rerun once with it off;
+ * tasks that already succeeded replay from the local cache. */
 const nx = (...args: string[]): void => {
-  const run = () => spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
+  const run = (env: NodeJS.ProcessEnv = process.env) => {
+    let outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit', env });
+    if (outcome.signal === 'SIGSEGV') {
+      console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
+      outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit', env });
+    }
+    return outcome;
+  };
   let result = run();
-  if (result.signal === 'SIGSEGV') {
-    console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
-    result = run();
+  if (result.status !== 0 && process.env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']) {
+    console.warn(`nx ${args.join(' ')} failed with the remote cache on; rerunning once with it off`);
+    result = run({ ...process.env, NX_SELF_HOSTED_REMOTE_CACHE_SERVER: '' });
   }
   if (result.status !== 0) {
     throw new Error(`nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);

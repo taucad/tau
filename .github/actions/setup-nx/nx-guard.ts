@@ -23,6 +23,14 @@
  *    The rerun in 2 stays as the fallback if the relay itself fails. A nested Nx call reuses its parent's relay.
  *    At exit the relay prints a tally line and a timing line (requests, bytes, seconds and the slowest entries).
  *
+ * 4. Writes go behind once one has been accepted. Nx 22.7.12 waits for each PUT before it starts its next task, so a
+ *    large entry stalled a `--parallel=1` lane for 45-100 s. The first write, and every write until one is answered
+ *    200 or 409, waits for the upstream, so a refused token (403) still stops uploads after one answer. After that,
+ *    the relay answers 200 as soon as it holds the body and uploads it while Nx runs on: a 200 means accepted by the
+ *    relay; stored, or a future miss. At most 1 GiB waits in memory (past it a write waits for its upload again), and
+ *    at exit the guard waits at most 10 min for uploads still running. Entries it abandons and entries that fail
+ *    after Nx was answered are counted and annotated as warnings; neither can fail the build or store a wrong entry.
+ *
  * Output is piped and scanned only while the remote cache is on; otherwise Nx inherits the terminal as before.
  */
 import { spawn } from 'node:child_process';
@@ -105,6 +113,10 @@ const defaultLimits = {
   // An upload's timeout is this floor plus one second per `uploadBytesPerSecond` of the entry.
   uploadFloorMilliseconds: 300_000,
   uploadBytesPerSecond: mebibyte,
+  // Bodies accepted but not yet uploaded are held in memory; past this a write waits for its own upload.
+  maxPendingBytes: 1024 * mebibyte,
+  // After Nx exits, how long the guard keeps uploading before it abandons the rest; within every job's timeout.
+  drainMilliseconds: 10 * 60 * 1000,
 };
 type Limits = typeof defaultLimits;
 
@@ -132,7 +144,10 @@ const uploadTimeout = (limits: Limits, bytes: number): number =>
 const relayHost = '127.0.0.1';
 const cachePath = /^\/v1\/cache\/[\dA-Za-z]{1,128}$/;
 
-type Tally = Record<'hits' | 'misses' | 'stored' | 'multipart' | 'present' | 'oversize' | 'refused' | 'faults', number>;
+type Tally = Record<
+  'hits' | 'misses' | 'stored' | 'multipart' | 'present' | 'oversize' | 'refused' | 'faults' | 'behind' | 'abandoned',
+  number
+>;
 
 /** Requests that reached the upstream, by method: one GET per lookup, one PUT per entry (all of its parts). */
 type Timing = Record<'GET' | 'PUT', { requests: number; bytes: number; milliseconds: number; slowest: Sample[] }>;
@@ -179,8 +194,19 @@ const readBody = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffe
 const startCacheRelay = async (
   upstream: string,
   limits: Limits,
-): Promise<{ url: string; tally: Tally; timing: Timing; close: () => void }> => {
-  const tally: Tally = { hits: 0, misses: 0, stored: 0, multipart: 0, present: 0, oversize: 0, refused: 0, faults: 0 };
+): Promise<{ url: string; tally: Tally; timing: Timing; lost: () => number; close: () => Promise<void> }> => {
+  const tally: Tally = {
+    hits: 0,
+    misses: 0,
+    stored: 0,
+    multipart: 0,
+    present: 0,
+    oversize: 0,
+    refused: 0,
+    faults: 0,
+    behind: 0,
+    abandoned: 0,
+  };
   const timing = newTiming();
   /** Adds one request that started at `started` (`performance.now()`) and moved `bytes` to the timing line. */
   const record = (method: keyof Timing, started: number, bytes: number): void => {
@@ -194,6 +220,11 @@ const startCacheRelay = async (
     entry.slowest.length = Math.min(entry.slowest.length, slowestKept);
   };
   let writesRefused = false;
+  let writesAccepted = false;
+  const pending = new Set<Promise<void>>();
+  let pendingBytes = 0;
+  // Background uploads that ended in neither 200 nor 409, although Nx was told 200.
+  let lost = 0;
   const base = upstream.replace(/\/+$/, '');
 
   const answer = (response: ServerResponse, status: number, body?: Uint8Array<ArrayBuffer>): void => {
@@ -335,6 +366,49 @@ const startCacheRelay = async (
     answer(response, 404);
   };
 
+  /** Writes one entry upstream and keeps the tally; returns the status Nx gets for it. */
+  const upload = async (request: IncomingMessage, path: string, body: Uint8Array<ArrayBuffer>): Promise<number> => {
+    const started = performance.now();
+    if (body.byteLength > limits.singleRequestBytes) {
+      let status = 403;
+      try {
+        status = await putInParts(request, path, body);
+      } catch {
+        tally.faults += 1;
+      }
+      record('PUT', started, body.byteLength);
+      return status;
+    }
+    try {
+      const reply = await forward(request, path, {
+        method: 'PUT',
+        body,
+        headers: { 'content-type': 'application/octet-stream' },
+        requestTimeout: uploadTimeout(limits, body.byteLength),
+      });
+      record('PUT', started, body.byteLength);
+      await reply.arrayBuffer();
+      if (reply.status === 200) {
+        tally.stored += 1;
+        return 200;
+      }
+      if (reply.status === 409) {
+        tally.present += 1;
+        return 409;
+      }
+      if (reply.status === 403) {
+        writesRefused = true;
+        tally.refused += 1;
+        return 403;
+      }
+      tally.faults += 1;
+    } catch {
+      record('PUT', started, body.byteLength);
+      tally.faults += 1;
+    }
+    return 403;
+  };
+
   const handlePut = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {
     const declared = Number(request.headers['content-length'] ?? Number.NaN);
     const body = await readBody(request);
@@ -349,48 +423,34 @@ const startCacheRelay = async (
       answer(response, 403);
       return;
     }
-    const started = performance.now();
-    if (size > limits.singleRequestBytes) {
-      try {
-        answer(response, await putInParts(request, path, body));
-      } catch {
-        tally.faults += 1;
-        answer(response, 403);
-      }
-      record('PUT', started, body.byteLength);
+    // Write-behind (header, 4): once a write has been accepted, answer at once and upload while Nx runs on.
+    if (writesAccepted && pendingBytes + body.byteLength <= limits.maxPendingBytes) {
+      pendingBytes += body.byteLength;
+      const sendBehind = async (): Promise<void> => {
+        try {
+          const status = await upload(request, path, body);
+          if (status !== 200 && status !== 409) {
+            lost += 1;
+          }
+        } catch {
+          lost += 1;
+        } finally {
+          pendingBytes -= body.byteLength;
+          pending.delete(job);
+        }
+      };
+      // `upload` always awaits before it settles, so `job` is assigned before `finally` reads it.
+      const job = sendBehind();
+      pending.add(job);
+      tally.behind += 1;
+      answer(response, 200);
       return;
     }
-    try {
-      const reply = await forward(request, path, {
-        method: 'PUT',
-        body,
-        headers: { 'content-type': 'application/octet-stream' },
-        requestTimeout: uploadTimeout(limits, body.byteLength),
-      });
-      record('PUT', started, body.byteLength);
-      await reply.arrayBuffer();
-      if (reply.status === 200) {
-        tally.stored += 1;
-        answer(response, 200);
-        return;
-      }
-      if (reply.status === 409) {
-        tally.present += 1;
-        answer(response, 409);
-        return;
-      }
-      if (reply.status === 403) {
-        writesRefused = true;
-        tally.refused += 1;
-        answer(response, 403);
-        return;
-      }
-      tally.faults += 1;
-    } catch {
-      record('PUT', started, body.byteLength);
-      tally.faults += 1;
+    const status = await upload(request, path, body);
+    if (status === 200 || status === 409) {
+      writesAccepted = true;
     }
-    answer(response, 403);
+    answer(response, status);
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -430,8 +490,33 @@ const startCacheRelay = async (
     url: `http://${relayHost}:${port}`,
     tally,
     timing,
-    close: () => {
+    lost: () => lost,
+    /** Stops taking requests, then waits for background uploads, at most `drainMilliseconds`. */
+    close: async () => {
       server.close();
+      if (pending.size === 0) {
+        return;
+      }
+      const started = performance.now();
+      console.error(`nx-guard: remote cache: waiting for ${pending.size} background upload(s)`);
+      let timer: NodeJS.Timeout | undefined;
+      const expired = new Promise<'abandoned'>((resolve) => {
+        timer = setTimeout(() => {
+          resolve('abandoned');
+        }, limits.drainMilliseconds);
+      });
+      const drained = async (): Promise<'drained'> => {
+        await Promise.allSettled(pending);
+        return 'drained';
+      };
+      const outcome = await Promise.race([drained(), expired]);
+      clearTimeout(timer);
+      if (outcome === 'abandoned') {
+        tally.abandoned += pending.size;
+      }
+      console.error(
+        `nx-guard: remote cache: background uploads ${outcome} after ${seconds(performance.now() - started)}`,
+      );
     },
   };
 };
@@ -459,7 +544,7 @@ if (cacheOn && result.code !== 0 && result.matched) {
 }
 
 if (relay) {
-  relay.close();
+  await relay.close();
   const { tally } = relay;
   const summary = Object.entries(tally)
     .map(([name, count]) => `${count} ${name}`)
@@ -474,6 +559,22 @@ if (relay) {
   if (tally.faults > 0) {
     warn('Nx remote cache faults', `${tally.faults} remote cache request(s) failed and were treated as misses`);
   }
+  if (relay.lost() > 0) {
+    warn(
+      'Nx remote cache background uploads failed',
+      `${relay.lost()} entr(ies) answered 200 to Nx were not stored; each is a future miss`,
+    );
+  }
+  if (tally.abandoned > 0) {
+    warn(
+      'Nx remote cache uploads abandoned',
+      `${tally.abandoned} background upload(s) were still running after the drain limit; each is a future miss`,
+    );
+  }
 }
 
 process.exitCode = result.signal ? 128 + constants.signals[result.signal] : (result.code ?? 1);
+if (relay && relay.tally.abandoned > 0) {
+  // oxlint-disable-next-line unicorn/no-process-exit -- abandoned uploads hold sockets open until their own timeouts.
+  process.exit();
+}

@@ -141,7 +141,8 @@ const startUpstream = async (options: UpstreamOptions = {}): Promise<Upstream> =
   const counts = { gets: 0, puts: 0, parts: 0, partsInFlight: 0, maxPartsInFlight: 0, aborts: 0 };
   const wait = async (hash: string): Promise<void> =>
     new Promise((resolve) => {
-      setTimeout(resolve, options.putDelayMilliseconds?.(hash) ?? 0);
+      // Unreferenced, so an upload the guard abandoned does not keep this process alive.
+      setTimeout(resolve, options.putDelayMilliseconds?.(hash) ?? 0).unref();
     });
   const putEntry = async ({ hash, body, reply }: Exchange): Promise<void> => {
     counts.puts += 1;
@@ -287,7 +288,7 @@ const runGuard = async ({
     });
   });
   const lines = stdout.split('\n');
-  const tallyLine = /^nx-guard: remote cache: (.*)$/m.exec(stderr)?.[1] ?? '';
+  const tallyLine = /^nx-guard: remote cache: (\d+ hits, .*)$/m.exec(stderr)?.[1] ?? '';
   return {
     code,
     milliseconds: performance.now() - started,
@@ -329,6 +330,8 @@ void test('should store an entry through the relay, read it back and print the t
       oversize: 0,
       refused: 0,
       faults: 0,
+      behind: 0,
+      abandoned: 0,
     });
     assert.match(
       run.timing ?? '',
@@ -340,18 +343,21 @@ void test('should store an entry through the relay, read it back and print the t
   }
 });
 
-void test('should answer 409 for an entry already stored', async () => {
+void test('should answer 409 for an entry already stored, and count it as an accepted write', async () => {
   const upstream = await startUpstream();
+  upstream.store.set('a1', new Uint8Array(10));
   try {
     const run = await runGuard({
       server: upstream.url,
       plan: [
         { put: 'a1', bytes: 10 },
-        { put: 'a1', bytes: 10 },
+        { put: 'b2', bytes: 10 },
       ],
     });
-    assert.deepEqual(statuses(run), [200, 409]);
+    assert.deepEqual(statuses(run), [409, 200]);
     assert.equal(run.tally.present, 1);
+    assert.equal(run.tally.behind, 1);
+    assert.equal(upstream.store.get('b2')?.byteLength, 10);
   } finally {
     await upstream.close();
   }
@@ -396,6 +402,7 @@ void test('should stop uploading after the first refused write', async () => {
     assert.equal(upstream.counts.puts, 1);
     assert.equal(run.tally.refused, 3);
     assert.equal(run.tally.faults, 0);
+    assert.equal(run.tally.behind, 0);
   } finally {
     await upstream.close();
   }
@@ -527,4 +534,151 @@ void test('should run Nx without a relay when the remote cache is off', async ()
   assert.equal(run.code, 0);
   assert.deepEqual(run.starts, ['']);
   assert.doesNotMatch(run.stderr, /nx-guard:/);
+});
+
+// Write-behind (header, 4). The upstream takes 1500 ms per upload; Nx waiting for one takes at least that long.
+const slowUpload = 1500;
+/** How long Nx waited for each write's answer. */
+const writeWaits = (run: GuardRun): number[] => run.runs[0]?.results.map((result) => result.milliseconds) ?? [];
+const waited = (milliseconds: number | undefined): boolean => (milliseconds ?? 0) >= slowUpload - 100;
+const answeredAtOnce = (milliseconds: number | undefined): boolean => (milliseconds ?? slowUpload) < slowUpload / 2;
+
+void test('should answer the first write after its upload, later ones at once, and drain them at exit', async () => {
+  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [
+        { put: 'a1', bytes: 10 },
+        { put: 'b2', bytes: 10 },
+        { put: 'c3', bytes: 10 },
+      ],
+    });
+    assert.equal(run.code, 0);
+    assert.deepEqual(statuses(run), [200, 200, 200]);
+    const [first, second, third] = writeWaits(run);
+    assert.ok(waited(first), `first write answered after ${first} ms`);
+    assert.ok(answeredAtOnce(second), `second write answered after ${second} ms`);
+    assert.ok(answeredAtOnce(third), `third write answered after ${third} ms`);
+    assert.deepEqual([...upstream.store.keys()].sort(), ['a1', 'b2', 'c3']);
+    assert.equal(run.tally.stored, 3);
+    assert.equal(run.tally.behind, 2);
+    assert.equal(run.tally.abandoned, 0);
+    assert.match(run.stderr, /nx-guard: remote cache: waiting for 2 background upload\(s\)/);
+    assert.match(run.stderr, /nx-guard: remote cache: background uploads drained after \d+\.\d\d s/);
+    assert.doesNotMatch(run.stderr, /::warning/);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should keep every write synchronous while the token is refused', async () => {
+  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      token: readToken,
+      plan: [
+        { put: 'a1', bytes: 10 },
+        { put: 'b2', bytes: 10 },
+      ],
+    });
+    assert.deepEqual(statuses(run), [403, 403]);
+    assert.equal(run.tally.behind, 0);
+    assert.equal(run.tally.refused, 2);
+    assert.doesNotMatch(run.stderr, /background/);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should wait for a write that would take the pending bytes over the cap', async () => {
+  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      limits: { maxPendingBytes: 1500 },
+      plan: [
+        { put: 'a1', bytes: 1000 },
+        { put: 'b2', bytes: 1000 },
+        { put: 'c3', bytes: 1000 },
+      ],
+    });
+    assert.deepEqual(statuses(run), [200, 200, 200]);
+    const [first, second, third] = writeWaits(run);
+    assert.ok(waited(first), `first write answered after ${first} ms`);
+    assert.ok(answeredAtOnce(second), `second write answered after ${second} ms`);
+    assert.ok(waited(third), `third write, over the cap, answered after ${third} ms`);
+    assert.equal(run.tally.behind, 1);
+    assert.equal(run.tally.stored, 3);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should latch a refusal that arrives for a background upload, and warn', async () => {
+  const upstream = await startUpstream({
+    override: (method, path) => (method === 'PUT' && path.endsWith('/b2') ? 403 : undefined),
+  });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ put: 'a1', bytes: 10 }, { put: 'b2', bytes: 10 }, { sleep: 300 }, { put: 'c3', bytes: 10 }],
+    });
+    assert.deepEqual(statuses(run), [200, 200, 403]);
+    assert.deepEqual([...upstream.store.keys()], ['a1']);
+    assert.equal(run.tally.behind, 1);
+    assert.equal(run.tally.refused, 2);
+    assert.match(
+      run.stderr,
+      /::warning title=Nx remote cache background uploads failed::1 entr\(ies\) answered 200 to Nx were not stored/,
+    );
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should warn when a background upload faults', async () => {
+  const upstream = await startUpstream({
+    override: (method, path) => (method === 'PUT' && path.endsWith('/b2') ? 500 : undefined),
+  });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [
+        { put: 'a1', bytes: 10 },
+        { put: 'b2', bytes: 10 },
+      ],
+    });
+    assert.equal(run.code, 0);
+    assert.deepEqual(statuses(run), [200, 200]);
+    assert.equal(run.tally.faults, 1);
+    assert.match(run.stderr, /::warning title=Nx remote cache faults::1 /);
+    assert.match(run.stderr, /::warning title=Nx remote cache background uploads failed::1 /);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should abandon uploads still running at the drain limit, warn, and exit with Nx status at once', async () => {
+  const upstream = await startUpstream({ putDelayMilliseconds: (hash) => (hash === 'b2' ? 60_000 : 0) });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      limits: { drainMilliseconds: 300 },
+      plan: [{ put: 'a1', bytes: 10 }, { put: 'b2', bytes: 10 }, { exit: 4 }],
+    });
+    assert.equal(run.code, 4);
+    // The upload's own timeout is 300 s; without `process.exit()` the guard would wait for it.
+    assert.ok(run.milliseconds < 10_000, `guard exited after ${run.milliseconds} ms`);
+    assert.equal(run.tally.behind, 1);
+    assert.equal(run.tally.abandoned, 1);
+    assert.match(run.stderr, /background uploads abandoned after 0\.\d\d s/);
+    assert.match(
+      run.stderr,
+      /::warning title=Nx remote cache uploads abandoned::1 background upload\(s\) were still running after the drain limit/,
+    );
+  } finally {
+    await upstream.close();
+  }
 });

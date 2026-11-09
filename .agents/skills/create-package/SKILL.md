@@ -25,6 +25,8 @@ Create a new `@taucad/*` workspace project using the custom package generator.
 
 Use `scope:ui` for UI-only app-libs. Use `scope:shared` only with named UI and API consumers. See `docs/policy/workspace-project-policy.md`.
 
+Before choosing `--scope=packages`, apply Rule 0 of `docs/policy/workspace-project-policy.md`; a helper shared by publishables is a core package only under the shared-package or singleton exception, and a `runtime` subpath is preferred when `runtime` can carry it.
+
 ## Usage
 
 ```bash

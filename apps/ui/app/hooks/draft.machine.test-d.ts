@@ -4,7 +4,7 @@ import type { ActorRefFrom, EmittedFrom, EventFromLogic } from 'xstate';
 import type { DraftPersistenceActors } from '#hooks/composer-record.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachment, DraftMachineContext } from '#hooks/draft.machine.js';
-import type { StoredAttachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
 
 type DraftEvent = EventFromLogic<typeof draftMachine>;
 type DraftEmitted = EmittedFrom<typeof draftMachine>;

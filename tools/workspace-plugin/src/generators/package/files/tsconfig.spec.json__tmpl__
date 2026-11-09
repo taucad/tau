@@ -5,6 +5,9 @@
     "types": ["node", "vitest/importMeta", "vitest"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+<% if (typeof react !== 'undefined' && react) { -%>
+    "jsx": "react-jsx",
+<% } -%>
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext"
   },

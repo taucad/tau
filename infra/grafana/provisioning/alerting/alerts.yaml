@@ -1157,25 +1157,55 @@ groups:
         isPaused: true
       - uid: alerting-rule-health
         title: TauAlertingRuleHealth
-        condition: rule_health
+        condition: rule_health_threshold
         data:
-          - refId: rule_health
+          - refId: rule_health_logs
+            queryType: range
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: alert-state-history
+            model:
+              expr: 'sum(count_over_time({from="state-history", folderUID="tau-local"} | json | current=~"Error.*" | ruleTitle!="TauAlertingRuleHealth" [30m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: rule_health_logs
+          - refId: rule_health_reduce
             queryType: ''
             relativeTimeRange:
-              from: 900
+              from: 0
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: __expr__
             model:
-              expr: sum(increase(grafana_alerting_rule_evaluation_failures_total{app=~".*"}[15m])) > 0
-              intervalMs: 15000
-              maxDataPoints: 20
-              refId: rule_health
+              type: reduce
+              reducer: last
+              expression: rule_health_logs
+              refId: rule_health_reduce
+          - refId: rule_health_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: rule_health_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: rule_health_threshold
         noDataState: OK
         execErrState: OK
         for: 15m
         annotations:
           runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
-          summary: Grafana failed to evaluate an alert rule in the last 15 min. The series name is Grafana's own and is unverified on the hosted Prometheus datasource (package.md §12.2); added paused until W4 confirms it or replaces it with an operator check of rule state. Rules that fail to evaluate also report through their execution-error state.
+          summary: 'Some rule in this environment''s folder entered an Error state in the last 30 min, by Grafana''s own alert state history (Loki, logical datasource alert-state-history; folderUID="tau-local" binds to tau-<environment>). Lines carry ruleTitle, ruleUID and error: query {from="state-history", folderUID="tau-<environment>"} | json | current=~"Error.*" to see which rule failed and why. Excludes its own title so its own evaluation error cannot keep it firing. Locally the datasource maps to the local Loki, which has no state-history streams; the local copy stays paused.'
         labels:
           severity: warning
           service: tau-api
@@ -3043,3 +3073,284 @@ groups:
           kind: trigger
           trigger: Q-1
           package: plan and pricing review
+  - orgId: 1
+    name: tau-storage-integrity
+    folder: Tau Alerts
+    interval: 60s
+    rules:
+      - uid: storage-dependency-deleted
+        title: 'P0: Dependency Object Deleted'
+        condition: dependency_deleted_threshold
+        data:
+          - refId: dependency_deleted_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.dependency_deleted" [10m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: dependency_deleted_logs
+          - refId: dependency_deleted_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: dependency_deleted_logs
+              refId: dependency_deleted_reduce
+          - refId: dependency_deleted_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: dependency_deleted_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: dependency_deleted_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          summary: An R2 event notification reported an object-delete (DeleteObject or LifecycleDeletion) on the locked dependency bucket in the last 10 minutes, so the bucket lock failed or was removed. The line names the bucket, key and eTag; notifications carry no actor, so read the Data Access Logs (r2 dataset) for who.
+        labels:
+          severity: critical
+          service: tau-r2-audit
+          component: dependencies
+      - uid: storage-dependency-overwritten
+        title: 'P0: Dependency Object Overwritten'
+        condition: dependency_overwritten_threshold
+        data:
+          - refId: dependency_overwritten_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event=~"r2_audit.dependency_overwritten|r2_audit.dependency_layout_breach" [10m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: dependency_overwritten_logs
+          - refId: dependency_overwritten_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: dependency_overwritten_logs
+              refId: dependency_overwritten_reduce
+          - refId: dependency_overwritten_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: dependency_overwritten_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: dependency_overwritten_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          summary: An R2 event notification reported an object-create on the dependency bucket for a key the audit Worker had already recorded (an overwrite the lock should refuse; previousEtag is the first eTag), or for a key outside blobs/sha256/<64 hex> (a layout breach), in the last 10 minutes.
+        labels:
+          severity: critical
+          service: tau-r2-audit
+          component: dependencies
+      - uid: storage-dependency-bulk-delete
+        title: 'P0: Dependency Bulk Delete Attempted'
+        condition: dependency_bulk_delete_threshold
+        data:
+          - refId: dependency_bulk_delete_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.dependency_delete_attempt" [10m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: dependency_bulk_delete_logs
+          - refId: dependency_bulk_delete_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: dependency_bulk_delete_logs
+              refId: dependency_bulk_delete_reduce
+          - refId: dependency_bulk_delete_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: dependency_bulk_delete_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: dependency_bulk_delete_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          summary: R2 Data Access Logs show DeleteObjects or DeleteObjectsByPrefix on the dependency bucket. The lock refuses each key inside a 200 response, so the attempt is logged where a refused single delete (409) is not; the line names the actor's accessKeyId, interface and scriptName.
+        labels:
+          severity: critical
+          service: tau-r2-audit
+          component: dependencies
+      - uid: storage-unexpected-writer
+        title: 'P0: Unexpected R2 Writer'
+        condition: unexpected_writer_threshold
+        data:
+          - refId: unexpected_writer_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.unexpected_writer" [10m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: unexpected_writer_logs
+          - refId: unexpected_writer_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: unexpected_writer_logs
+              refId: unexpected_writer_reduce
+          - refId: unexpected_writer_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: unexpected_writer_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: unexpected_writer_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          summary: R2 Data Access Logs show a write or delete (PutObject, CopyObject, CompleteMultipartUpload, DeleteObject, DeleteObjects, DeleteObjectsByPrefix) whose accessKeyId, interface or scriptName is not in the bucket's expected writers (AUDIT_EXPECTED_WRITERS), or any interface = API write. reason is api-interface, unknown-bucket or unknown-actor.
+        labels:
+          severity: critical
+          service: tau-r2-audit
+          component: r2
+      - uid: storage-audit-silent
+        title: R2 Audit Worker Silent
+        condition: audit_silent_threshold
+        data:
+          - refId: audit_silent_logs
+            queryType: range
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.heartbeat" | pass="scheduled" [15m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: audit_silent_logs
+          - refId: audit_silent_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: audit_silent_logs
+              refId: audit_silent_reduce
+          - refId: audit_silent_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: audit_silent_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: lt
+                    params:
+                      - 1
+                  operator:
+                    type: and
+              refId: audit_silent_threshold
+        noDataState: Alerting
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          summary: "No scheduled heartbeat from the tau-r2-audit Worker for 15 minutes (it writes one every 5). The write alarms are blind: check the Worker, its cron trigger and the Workers Observability OTLP logs destination. A heartbeat with poll=skipped means the Data Access Log poll has no query token; poll=failed carries pollDetail. Paused in local Grafana, which has no audit Worker; Tau Cloud's rule policy sets the hosted pause state."
+        labels:
+          severity: warning
+          service: tau-r2-audit
+          component: r2
+        isPaused: true

@@ -6,7 +6,7 @@ vi.mock('#routes/w.$workspace.$project/chat-editor-code-viewer.js', () => ({ Cha
 vi.mock('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js', () => ({
   ChatEditorMarkdownViewer: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-editor-binary-warning.js', () => ({
+vi.mock('@taucad/project-workspace/components/chat-editor-binary-warning', () => ({
   ChatEditorBinaryWarning: () => null,
 }));
 

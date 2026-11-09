@@ -21,7 +21,7 @@ import type { UIMessage, UIMessageChunk } from 'ai';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
-import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
+import { projectAgentHostEvent, runFailureText } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   chatProjectionLogic,
   chunksOf,

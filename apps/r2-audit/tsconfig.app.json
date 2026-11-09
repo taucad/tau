@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/app",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "WebWorker"],
+    "types": [],
+    "target": "ES2024"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

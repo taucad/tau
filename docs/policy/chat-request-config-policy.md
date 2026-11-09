@@ -66,13 +66,13 @@ A run in flight on one device holds its chat on every other device. A run is nev
 
 ### 7. Use the browser placement transport for CAD
 
-`apps/ui/app/chat-clients/_internal/shared-chat-transport.ts` owns the shared `BrowserPlacementChatTransport` and one AI SDK `Chat` per CAD session. `useCadChatClient` supplies an asynchronous latest-body factory through `setLatestAgentBody`.
+`apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts` owns the shared `BrowserPlacementChatTransport` and one AI SDK `Chat` per CAD session. `useCadChatClient` supplies an asynchronous latest-body factory through `setLatestAgentBody`.
 
 That factory must remain valid after the initiating component unmounts. It must return the durable agent, admission, and execution facts for retry, resume, or reconnect.
 
 ### 8. Limit API chat placement
 
-`apps/api/app/api/chat/chat.controller.ts` accepts `project_name` and `commit_name` requests. A `cad` request to that HTTP endpoint must fail with `CHAT_CAD_NOT_API_PLACED`; the API must not reconstruct the removed server-side CAD executor.
+`apps/libs/api-chat/src/chat.controller.ts` accepts `project_name` and `commit_name` requests. A `cad` request to that HTTP endpoint must fail with `CHAT_CAD_NOT_API_PLACED`; the API must not reconstruct the removed server-side CAD executor.
 
 Name-generation clients may use AI SDK `DefaultChatTransport` against the API. CAD clients may not.
 
@@ -94,8 +94,8 @@ Assert parsed values and transport bodies. Avoid duplicate test fixtures that ca
 
 - Agent profiles: `libs/chat/src/schemas/agent-config.schema.ts`
 - Turn envelope and relational validation: `libs/chat/src/schemas/chat-turn-request.schema.ts`
-- API binding and placement refusal: `apps/api/app/api/chat/chat.dto.ts`, `apps/api/app/api/chat/chat.controller.ts`
+- API binding and placement refusal: `apps/libs/api-chat/src/chat.dto.ts`, `apps/libs/api-chat/src/chat.controller.ts`
 - CAD assembler: `apps/ui/app/hooks/use-cad-agent-config.ts`
 - CAD client and durable body factory: `apps/ui/app/chat-clients/use-cad-chat-client.ts`
-- Browser placement transport: `apps/ui/app/chat-clients/_internal/shared-chat-transport.ts`
+- Browser placement transport: `apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts`
 - API name clients: `apps/ui/app/chat-clients/_internal/name-generator-client.ts`

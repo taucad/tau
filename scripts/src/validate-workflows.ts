@@ -81,7 +81,11 @@ const subcommands = new Set([
 const isComputed = (value: string): boolean => /^["']?\$/u.test(value);
 
 /** A value that resolves through the graph rather than naming a project. */
-const isSelector = (value: string): boolean => value.startsWith('tag:') || value.includes('*') || isComputed(value);
+const isSelector = (value: string): boolean => {
+  // `!tag:…` (a negated selector) is still a selector; a negated project name is still a name.
+  const bare = value.replace(/^!/u, '');
+  return bare.startsWith('tag:') || bare.includes('*') || isComputed(value);
+};
 
 /**
  * Split a `run:` script into the shell commands it runs.
@@ -124,7 +128,8 @@ const flagValues = (args: readonly string[], flags: ReadonlySet<string>): string
     const rest = args.slice(index + 1);
     const next = rest.findIndex((value) => value.startsWith('-'));
     const values = equals === -1 ? rest.slice(0, next === -1 ? rest.length : next) : [token.slice(equals + 1)];
-    return values.flatMap((value) => value.split(','));
+    // A quoted list (`'*,!tag:x'`, quoted so the shell leaves the glob alone) is unquoted first.
+    return values.flatMap((value) => value.replace(/^(['"])(.*)\1$/su, '$2').split(','));
   });
 
 /**

@@ -16,7 +16,7 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from '#components/ui/combobox.js';
+} from '@taucad/ui-kit/components/combobox';
 import { Field, FieldContent, FieldError, FieldLabel } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';

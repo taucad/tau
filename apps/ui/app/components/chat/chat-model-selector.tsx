@@ -6,9 +6,9 @@ import { useModels, type Model, type ResolvedModel } from '#hooks/use-models.js'
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Badge } from '@taucad/ui/components/badge';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { groupModels } from '#utils/model-groups.js';
+import { groupModels } from '@taucad/chat-ui/utils/model-groups';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { cn } from '@taucad/ui/utils/cn';

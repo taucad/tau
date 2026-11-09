@@ -53,7 +53,7 @@ const sha256File = async (path: string): Promise<string> => {
 const run = async (
   file: string,
   args: readonly string[],
-  options: { env: Record<string, string>; /** Milliseconds. */ killAfter: number },
+  options: { env: Record<string, string>; /** Milliseconds. */ killAfter: number; cwd?: string },
 ): Promise<{ status: number; stdout: string; stderr: string }> =>
   new Promise((resolve) => {
     execFile(
@@ -61,8 +61,8 @@ const run = async (
       [...args],
       {
         env: { ...process.env, ...options.env },
-        // The consumer's own home: a clean consumer cannot read the admin checkout the agent was started from.
-        cwd: homedir(),
+        // The consumer's own home unless the caller names a directory (the renderer resolves its loader from the checkout).
+        cwd: options.cwd ?? homedir(),
         timeout: options.killAfter,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
@@ -116,7 +116,12 @@ const consumerResidue = async (home: string): Promise<string[]> => {
   await walk(home, 3);
   return found.sort();
 };
-/** The consumer's own main processes (no Chromium `--type=` child) whose executable matches `pattern`. */
+/**
+ * The consumer's own main processes whose executable matches `pattern`: not a Chromium `--type=` child, and not a
+ * child of a process with the same executable. Chromium rewrites a child's /proc cmdline into one space-joined
+ * title, so its `--type=` switch is no longer a separate NUL-delimited argument (run 42655454144: two zygotes read
+ * as main processes); the parent rule holds whatever the title says.
+ */
 const mainProcesses = async (pattern: string): Promise<Array<{ pid: number; uid: number; executable: string }>> => {
   const expression = new RegExp(pattern, 'u');
   const uid = process.getuid?.();
@@ -136,8 +141,13 @@ const mainProcesses = async (pattern: string): Promise<Array<{ pid: number; uid:
       const executable = await readlink(`/proc/${name}/exe`);
       // oxlint-disable-next-line no-await-in-loop -- Same bounded scan.
       const rawCommandLine = await readFile(`/proc/${name}/cmdline`, 'utf8');
-      const commandLine = rawCommandLine.split('\0');
-      if (expression.test(executable) && !commandLine.some((argument) => argument.startsWith('--type='))) {
+      if (!expression.test(executable) || /(?:^|[\0 ])--type=/u.test(rawCommandLine)) {
+        continue;
+      }
+      const parent = /^PPid:\s+(\d+)/mu.exec(status)?.[1];
+      // oxlint-disable-next-line no-await-in-loop -- Same bounded scan; an unreadable parent is not this executable.
+      const parentExecutable = parent ? await readlink(`/proc/${parent}/exe`).catch(() => undefined) : undefined;
+      if (parentExecutable !== executable) {
         found.push({ pid: Number(name), uid: owner, executable });
       }
     } catch {
@@ -239,15 +249,16 @@ const handlers = {
     return null;
   },
   exec: async (params: unknown) => {
-    const { file, args, env, timeout } = z
+    const { file, args, env, timeout, cwd } = z
       .strictObject({
         file: z.string(),
         args: z.array(z.string()),
         env: envSchema,
         timeout: z.number().int().positive().max(1_800_000),
+        cwd: z.string().startsWith('/').optional(),
       })
       .parse(params);
-    return run(file, args, { env, killAfter: timeout });
+    return run(file, args, { env, killAfter: timeout, cwd });
   },
   spawn: async (params: unknown) => {
     const { file, args, env } = z
@@ -483,6 +494,7 @@ export const startLinuxConsumer = async (options: { name: string; repository: st
           args: [...args],
           env: options.env ?? {},
           timeout: options.killAfter ?? 180_000,
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         }),
       ),
     spawn: async (file, args, env) => pidSchema.parse(await call('spawn', { file, args: [...args], env })),

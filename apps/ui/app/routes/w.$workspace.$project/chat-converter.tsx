@@ -28,9 +28,9 @@ import {
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import {

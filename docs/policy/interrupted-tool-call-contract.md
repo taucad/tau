@@ -87,7 +87,7 @@ A Tau host's tool that asks for approval pauses the run on a native `interrupt.r
 - UI-message normalization: `libs/chat/src/schemas/message.schema.ts`
 - UI lifecycle helpers: `libs/chat/src/utils/tool-part.utils.ts`
 - Tail finalization: `apps/ui/app/utils/chat.utils.ts`
-- Settled-call ledger: `apps/ui/app/services/rpc-ledger.ts`
+- Settled-call ledger: `apps/libs/chat-ui/src/services/rpc-ledger.ts`
 - UI transcript projection: `apps/ui/app/machines/chat-projection.logic.ts`
 - Refused-command persistence: `apps/ui/app/services/chat-session-store.ts`
 - Portable recovery: `packages/agent-host/src/harness/interrupt-recovery.ts`

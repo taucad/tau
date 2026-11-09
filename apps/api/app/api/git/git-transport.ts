@@ -5,7 +5,7 @@ import type { NestMiddleware } from '@nestjs/common';
 import type { FastifyInstance } from 'fastify';
 import { attachHostDevice } from '@taucad/api-auth';
 import { DatabaseService } from '@taucad/api-database';
-import { projectIdFromRepository } from '#api/git/git.constants.js';
+import { projectIdFromRepository } from '@taucad/api-git-core/git.constants';
 import { hostGitCredentialPrefix, resolveHostGitCredential } from '@taucad/api-hosts';
 
 /**

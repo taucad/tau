@@ -7,6 +7,8 @@ name: UI asset integrity
 
 on:
   pull_request:
+    # `ready_for_review` so a draft, which requests no macOS runner, gets its WebKit leg once it is ready.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - apps/ui/asset-integrity.vite-plugin.ts
       - apps/ui/scripts/check-asset-integrity.mts
@@ -20,9 +22,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request's head branch cancels its outdated run; a dispatch is never cancelled.
 concurrency:
-  group: ui-asset-integrity-${{ github.ref }}
-  cancel-in-progress: true
+  group: ui-asset-integrity-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integrity:
@@ -30,18 +33,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      # The three browsers on Linux; X44: Linux WebKit must refuse every tamper, and its overhead is
+      # recorded as information only. WebKit on macOS, the engine Safari ships, is measured beside it
+      # for the X31 line. A draft pull request runs the Linux leg only and requests no macOS runner;
+      # marking it ready for review runs both.
       matrix:
-        include:
-          - label: three browsers
-            runner: ubuntu-latest
-            engines: chromium,firefox,webkit
-            # X44: Linux WebKit must refuse every tamper; its overhead is recorded as information only.
-            timed: chromium,firefox
-          # WebKit on macOS, the engine Safari ships, measured beside Linux WebKit for the X31 line.
-          - label: WebKit on macos-26
-            runner: macos-26
-            engines: webkit
-            timed: webkit
+        include: >-
+          ${{ fromJSON(github.event.pull_request.draft
+          && '[{"label":"three browsers","runner":"ubuntu-latest","engines":"chromium,firefox,webkit","timed":"chromium,firefox"}]'
+          || '[{"label":"three browsers","runner":"ubuntu-latest","engines":"chromium,firefox,webkit","timed":"chromium,firefox"},{"label":"WebKit on macos-26","runner":"macos-26","engines":"webkit","timed":"webkit"}]') }}
     timeout-minutes: 60
     env:
       NX_DAEMON: 'false'

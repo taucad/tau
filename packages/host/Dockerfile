@@ -11,7 +11,7 @@
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
 #   runtime : minimal `node:26-slim` running as non-root `tau` (uid 1001).
 #   tau-store : empty by default; `scripts/build-native-image.sh` replaces it
-#             with a payload store it prepared using the runtime image itself.
+#             with a dependency store it prepared using the runtime image itself.
 #   native  : runtime plus that baked store, so build123d is `ready` with no
 #             network (charter D37, W19).
 #
@@ -135,7 +135,7 @@ VOLUME ["/workspace"]
 
 ENTRYPOINT ["/usr/local/bin/tau-host-entrypoint"]
 
-# ── Store: replaced at build time by a prepared payload store ─────────────
+# ── Store: replaced at build time by a prepared dependency store ─────────────
 # `docker buildx build --build-context tau-store=<dir>` overrides this empty
 # stage. Preparing needs the native sandbox (it compiles the closure's Python
 # bytecode inside it), which a build step cannot create, so the store is

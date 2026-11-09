@@ -14,7 +14,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldSeparator } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Label } from '@taucad/ui/components/label';

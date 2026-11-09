@@ -38,7 +38,7 @@ export type NativeKernelDeployment<
   readonly ecosystem: 'pypi' | 'nuget' | 'none';
   /** The package's unparsed `tau-plugin.json`, imported statically so a bundled host carries it. */
   readonly manifest: unknown;
-  /** `file:` URL of the package root, with a trailing slash; payloads shipped inside the package resolve against it. */
+  /** `file:` URL of the package root, with a trailing slash; dependency files shipped inside the package resolve against it. */
   readonly packageRoot: string;
   /**
    * `file:` URL of the module that exports this deployment. It imports no kernel code, so a parent process that

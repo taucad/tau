@@ -17,7 +17,7 @@ const picogkKernelDefinition = createPicogkKernelDefinition({
   // kernel then offers none rather than an export it cannot serve.
   authoredOutputs: true,
   async initialize(options, services) {
-    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the dependency store gives. An
     // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
     const { options: bound } = await bindDotnetKernel({ adopter: picogkNative, options });
     const mirror = await createDotnetWorkspaceMirror({

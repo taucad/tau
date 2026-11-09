@@ -121,7 +121,7 @@ const publishFacet = (facet: Partial<(typeof revisionStatusHarness)['status']['p
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     success: (...args: unknown[]) => {
       toastSuccessMock(...args);

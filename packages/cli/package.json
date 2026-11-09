@@ -119,11 +119,9 @@
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "catalog:",
     "@agentclientprotocol/codex-acp": "catalog:",
-    "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*",
     "@types/proper-lockfile": "catalog:",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

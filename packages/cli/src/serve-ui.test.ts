@@ -117,7 +117,7 @@ describe('serveUiDeployment', () => {
 
     expect(deployment.kernels).toEqual({});
     expect(deployment.dependencies['ui']?.map(({ target }) => target)).toHaveLength(6);
-    expect(new Set(deployment.dependencies['ui']?.map(({ payloads }) => JSON.stringify(payloads)))).toEqual(
+    expect(new Set(deployment.dependencies['ui']?.map(({ files }) => JSON.stringify(files)))).toEqual(
       new Set([
         JSON.stringify([
           {
@@ -184,8 +184,8 @@ describe('prepareServeUi', () => {
     await writeFile(join(root, 'mirror', 'blobs', 'sha256', hex), bytes);
     await mkdir(join(root, 'seed'));
     vi.stubEnv('TAU_CONFIG_DIR', join(root, 'config'));
-    vi.stubEnv('TAU_PAYLOAD_MIRROR', `file://${join(root, 'mirror')}/`);
-    vi.stubEnv('TAU_PAYLOAD_DIR', join(root, 'seed'));
+    vi.stubEnv('TAU_DEPENDENCY_MIRROR', `file://${join(root, 'mirror')}/`);
+    vi.stubEnv('TAU_DEPENDENCY_DIR', join(root, 'seed'));
     try {
       const outcome = await prepareServeUi({ signal, pin });
 

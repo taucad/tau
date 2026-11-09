@@ -3,7 +3,7 @@
  *
  * Every CAD tool stays read-only and never downloads: a file whose native kernel is not prepared answers
  * `KERNEL_NOT_PREPARED`, naming this tool and its input. This tool prepares the kernel's runtime closure (an
- * interpreter and wheels, or a .NET runtime) into the payload store every Tau host on the computer shares, in the
+ * interpreter and wheels, or a .NET runtime) into the dependency store every Tau host on the computer shares, in the
  * host process, with best-effort progress; the client's approval of the call is the consent (Q31).
  *
  * @module
@@ -28,7 +28,7 @@ const kernelList = (kernels: readonly PreparableKernel[]): string =>
  * @public
  */
 export const prepareKernelDescription = (kernels: readonly PreparableKernel[]): string =>
-  `Download, verify and unpack a native CAD kernel's runtime into this computer's shared payload store, so Tau can evaluate its files${kernels.length === 0 ? '' : `: ${kernelList(kernels)}`}. Call it when a tool answers KERNEL_NOT_PREPARED, with the kernel that answer names, then repeat the call that refused. It downloads only pinned, digest-checked files, can take several minutes, and reports progress. A cancelled or failed call keeps every verified file, so the next call downloads only the rest; a prepared kernel answers ready at once.`;
+  `Download, verify and unpack a native CAD kernel's runtime into this computer's shared dependency store, so Tau can evaluate its files${kernels.length === 0 ? '' : `: ${kernelList(kernels)}`}. Call it when a tool answers KERNEL_NOT_PREPARED, with the kernel that answer names, then repeat the call that refused. It downloads only pinned, digest-checked files, can take several minutes, and reports progress. A cancelled or failed call keeps every verified file, so the next call downloads only the rest; a prepared kernel answers ready at once.`;
 
 /**
  * Its input schema, as the registry publishes it.

@@ -12,7 +12,7 @@
  *   TAU_GEOSPEC_WARMUPS  Unmeasured repetitions (default: 1)
  *   TAU_GEOSPEC_OUTPUT   Report path, absolute or repository-relative
  *   TAU_EXAMPLE_PATTERN  Regular expression selecting `<kernel>.<name>` example rows (default: all)
- *   TAU_CONFIG_DIR       Payload store root; native example rows run from the closures `tau prepare` sealed there
+ *   TAU_CONFIG_DIR       Dependency store root; native example rows run from the closures `tau prepare` sealed there
  *
  * Usage:
  *   pnpm nx run runtime-e2e:benchmark-example-health

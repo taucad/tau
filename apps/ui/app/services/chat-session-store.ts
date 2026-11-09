@@ -66,21 +66,21 @@ import {
   stopWhenWritesSettle,
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { readChatPlacementsShared, writeChatPlacement } from '#db/chat-placements.js';
-import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
-import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
-import { createChatAttachmentStore } from '#db/attachment-store.js';
-import { attachmentReferenceOf } from '#utils/attachment.utils.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
+import { readChatPlacementsShared, writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
+import type { ComposerRecord, ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';
+import { createChatAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
+import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
-import { resizeImageActor } from '#hooks/resize-image.actor.js';
-import { clearLedger } from '#services/rpc-ledger.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
+import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
-import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
-import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { createChatInstance } from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
+import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -110,11 +110,15 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { createChatMessageQueueStore, chatMessageQueuePath } from '#db/chat-message-queue-store.js';
-import type { ChatMessageQueueIntent, ChatMessageQueueStore, QueueLock } from '#db/chat-message-queue-store.js';
+import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
+import type {
+  ChatMessageQueueIntent,
+  ChatMessageQueueStore,
+  QueueLock,
+} from '@taucad/chat-ui/db/chat-message-queue-store';
 import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
 import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
-import { commandInvocation } from '#utils/at-reference.utils.js';
+import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 
 /** Describe a failed SDK frame without exposing tool inputs, outputs, or exception payloads. */
 const presentationErrorFacts = (

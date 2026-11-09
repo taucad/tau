@@ -28,9 +28,12 @@ const providerWireFor = (
 let adapterExecutions = 0;
 
 const capture = async (input: {
-  providerKind: Extract<ModelProviderKind, 'openai' | 'anthropic' | 'vertexai'>;
+  providerKind: ModelProviderKind;
   modelId: string;
   messages: readonly ProviderMessage[];
+  chatId?: string;
+  invocationPurpose?: 'generation' | 'compaction';
+  systemPromptBlocks?: Parameters<ReturnType<typeof createGatewayModelTransport>['stream']>[0]['systemPromptBlocks'];
 }): Promise<unknown> => {
   let body: unknown;
   const transport = createGatewayModelTransport({
@@ -55,11 +58,13 @@ const capture = async (input: {
   await expect(async () => {
     for await (const _event of transport.stream({
       attemptId: `attempt-${input.providerKind}`,
-      invocationPurpose: 'generation',
+      ...(input.chatId === undefined ? {} : { chatId: input.chatId }),
+      invocationPurpose: input.invocationPurpose ?? 'generation',
       modelId: input.modelId,
       providerKind: input.providerKind,
       maxTokens: 16,
       systemPrompt: 'fixture-system',
+      ...(input.systemPromptBlocks === undefined ? {} : { systemPromptBlocks: input.systemPromptBlocks }),
       messages: input.messages,
       tools: [
         {
@@ -202,6 +207,57 @@ describe('billable model request contract', () => {
     },
   );
 
+  /*
+   * The prompt-cache controls the host sets per provider — a one-hour lifetime on
+   * every Anthropic breakpoint, five minutes for a compaction, and a hashed
+   * routing key on the Responses wire — are admitted for every provider kind the
+   * browser gateway speaks, and no Completions body carries the key it refuses.
+   */
+  it.each([
+    { providerKind: 'anthropic', providerWire: 'anthropic' },
+    { providerKind: 'openai', providerWire: 'openai-responses' },
+    { providerKind: 'xai', providerWire: 'openai-responses' },
+    { providerKind: 'vertexai', providerWire: 'openai-completions' },
+    { providerKind: 'cerebras', providerWire: 'openai-completions' },
+    { providerKind: 'together', providerWire: 'openai-completions' },
+    { providerKind: 'morph', providerWire: 'openai-completions' },
+    { providerKind: 'moonshot', providerWire: 'openai-completions' },
+  ] as const)(
+    'admits the installed Pi $providerKind turn and compaction bodies with their cache controls',
+    async ({ providerKind, providerWire }) => {
+      for (const invocationPurpose of ['generation', 'compaction'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one captured request at a time keeps the body unambiguous.
+        const body = await capture({
+          providerKind,
+          modelId: `${providerKind}-fixture`,
+          messages: initialMessages,
+          chatId: 'chat_fixture',
+          invocationPurpose,
+          // The browser's shape: a cached static prompt, then the uncached dynamic one.
+          systemPromptBlocks: [
+            { type: 'text', text: 'static', cacheControl: { type: 'ephemeral' } },
+            { type: 'text', text: 'dynamic' },
+          ],
+        });
+        /* Pi's Together codec always sends `reasoning: { enabled }`, which this
+         * schema refuses whatever the cache controls are. That is its own gap,
+         * outside the cache controls under test here, so it is set aside. */
+        const admitted =
+          providerKind === 'together' ? { ...(body as Record<string, unknown>), reasoning: undefined } : body;
+        const parsed = safeParseBillableModelRequest(admitted, providerWire);
+        expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+        const serialized = JSON.stringify(body);
+        if (providerKind === 'anthropic') {
+          expect(serialized).toContain(invocationPurpose === 'generation' ? '"ttl":"1h"' : '"cache_control"');
+          expect(serialized.includes('"ttl":"1h"')).toBe(invocationPurpose === 'generation');
+        }
+        expect((body as Record<string, unknown>)['prompt_cache_key'] !== undefined).toBe(
+          providerWire === 'openai-responses',
+        );
+      }
+    },
+  );
+
   it('rejects unsupported chargeable fields and non-data image URLs', () => {
     const base = {
       model: 'gpt-5.6-luna',
@@ -246,7 +302,7 @@ describe('billable model request contract', () => {
                 {
                   type: 'text',
                   text: 'fixture',
-                  cache_control: { type: 'ephemeral', ttl: '1h' },
+                  cache_control: { type: 'ephemeral', ttl: '24h' },
                 },
               ],
             },
@@ -320,6 +376,40 @@ describe('billable model request contract', () => {
         'openai-responses',
       ).success,
     ).toBe(true);
+  });
+
+  /*
+   * A Responses conversation routes to one OpenAI or xAI server by a hashed key so its
+   * prefix cache is found again. The key is bounded at OpenAI's documented 64 characters,
+   * and the retention controls stay refused because no route prices a longer lifetime.
+   */
+  it('admits a bounded Responses prompt cache key and still refuses the retention controls', () => {
+    const base = {
+      model: 'gpt-5.6-luna',
+      stream: true,
+      store: false,
+      max_output_tokens: 64,
+      input: 'fixture',
+    };
+    const parse = (extra: Record<string, unknown>): boolean =>
+      safeParseBillableModelRequest({ ...base, ...extra }, 'openai-responses').success;
+    expect(parse({ prompt_cache_key: 'a'.repeat(32) })).toBe(true);
+    expect(parse({ prompt_cache_key: 'a'.repeat(64) })).toBe(true);
+    expect(parse({ prompt_cache_key: 'a'.repeat(65) })).toBe(false);
+    expect(parse({ prompt_cache_key: '' })).toBe(false);
+    expect(parse({ prompt_cache_key: 'a'.repeat(32), prompt_cache_retention: '24h' })).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        {
+          model: 'gemini-3.5-flash',
+          stream: true,
+          max_completion_tokens: 16,
+          messages: [{ role: 'user', content: 'fixture' }],
+          prompt_cache_key: 'a'.repeat(32),
+        },
+        'openai-completions',
+      ).success,
+    ).toBe(false);
   });
 
   it('admits only the catalog-owned Anthropic and Gemini reasoning controls', () => {
@@ -629,7 +719,7 @@ describe('document block admission', () => {
    * Refusing the marker would refuse the turn; dropping it would forfeit the
    * cache on the most expensive turns there are.
    */
-  it('admits the cache breakpoint on an Anthropic document block, and only a well-formed one', () => {
+  it('admits the cache breakpoint on an Anthropic document block at either documented lifetime, and only a well-formed one', () => {
     expect(
       safeParseBillableModelRequest(
         anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral' } }),
@@ -639,6 +729,12 @@ describe('document block admission', () => {
     expect(
       safeParseBillableModelRequest(
         anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral', ttl: '1h' } }),
+        'anthropic',
+      ).success,
+    ).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral', ttl: '24h' } }),
         'anthropic',
       ).success,
     ).toBe(false);

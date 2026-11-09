@@ -1,0 +1,25 @@
+{
+  "name": "r2-audit",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/r2-audit/src",
+  "projectType": "application",
+  "metadata": {
+    "description": "The tau-r2-audit-<env> Cloudflare Worker (R2 storage blast-radius blueprint, phase 9). Deployed by tau-cloud's Terraform (modules/cloudflare-r2-audit) from the bundle this project builds, never by CI: it carries no deploy:staging tag."
+  },
+  "tags": ["scope:api", "type:app"],
+  "targets": {
+    "bundle": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["production", "^production", "{workspaceRoot}/pnpm-lock.yaml"],
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "command": "node apps/r2-audit/scripts/bundle.mts"
+      }
+    },
+    "build": {
+      "executor": "nx:noop",
+      "dependsOn": ["bundle"]
+    }
+  }
+}

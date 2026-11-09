@@ -43,7 +43,7 @@ installZooProxyCredential((listener) => {
 });
 
 /**
- * A closure resolver that asks the daemon: this child cannot read the payload store, so each kernel's request goes
+ * A closure resolver that asks the daemon: this child cannot read the dependency store, so each kernel's request goes
  * over the IPC channel with its package's unparsed `tau-plugin.json` and root (no kernel code), and the daemon answers
  * from the store's launch index. An answer that does not parse, or a daemon that could not answer, is not prepared.
  * @returns The resolver.
@@ -134,7 +134,7 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (host) {
     throw new Error('Tau Host runtime child was started more than once.');
   }
-  /* This child never reads the payload store and may not spawn (D37, North Star S2): with `native`, the daemon answers
+  /* This child never reads the dependency store and may not spawn (D37, North Star S2): with `native`, the daemon answers
    * each native kernel's closure request, starts its workers on this child's behalf and re-verifies a closure whose
    * worker exited before its handshake (D8, X35). Without it, every native kernel refuses as not prepared. */
   const native = 'native' in message && message.native === true;

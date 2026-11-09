@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
 
 describe('preview parameter lifetime', () => {
   it('keeps the service alive through Strict Mode and closes after leaving Preview', async () => {

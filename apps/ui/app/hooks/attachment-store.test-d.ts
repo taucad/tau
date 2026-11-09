@@ -4,11 +4,15 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { AttachmentStore } from '#db/attachment-store.js';
+import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import type { EventFrom } from 'xstate';
 import type { DraftAttachment, draftMachine } from '#hooks/draft.machine.js';
 import { buildDraftMessage } from '#hooks/draft.machine.js';
-import type { AttachmentReference, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
+import type {
+  AttachmentReference,
+  StoredAttachment,
+  StoredAttachmentRef,
+} from '@taucad/chat-ui/utils/attachment.utils';
 import { buildUserMessage } from '#utils/chat.utils.js';
 
 declare const plain: AttachmentReference;

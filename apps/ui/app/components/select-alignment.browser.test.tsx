@@ -29,7 +29,7 @@ const { WorkspaceUnavailableRecovery } =
   await import('#routes/w.$workspace.$project/workspace-unavailable-recovery.js');
 const { PublicationAccessPanel } = await import('#components/publish/publication-access-panel.js');
 const { AdditionalField } = await import('#components/auth/additional-field.js');
-const { DataTablePagination } = await import('#components/ui/data-table.js');
+const { DataTablePagination } = await import('@taucad/ui-kit/components/data-table');
 
 function Pagination(): React.JSX.Element {
   const table = useReactTable({

@@ -29,7 +29,7 @@ import {
   keepsNodePtyPath,
   markNodePtySpawnHelperExecutable,
   nodePtySpawnHelper,
-  packagePathPayloads,
+  packagePathDependencyFiles,
   runtimeAsarOptions,
   runtimePlatformPackages,
   stageNativePackageFiles,
@@ -365,7 +365,7 @@ try {
     const manifest: unknown = JSON.parse(
       readFileSync(join(workspaceRoot, `packages/plugins/${name}/tau-plugin.json`), 'utf8'),
     );
-    for (const path of packagePathPayloads(manifest)) {
+    for (const path of packagePathDependencyFiles(manifest)) {
       assert.ok(
         statSync(join(nativeResources, 'native-packages', `@taucad/${name}`, path)).isFile(),
         `@taucad/${name} ${path} is staged`,
@@ -373,11 +373,11 @@ try {
     }
   }
   assert.ok(
-    packagePathPayloads(
+    packagePathDependencyFiles(
       JSON.parse(readFileSync(join(workspaceRoot, 'packages/plugins/build123d/tau-plugin.json'), 'utf8')),
     ).includes('python/worker.py'),
   );
 } finally {
   await rm(nativeResources, { recursive: true, force: true });
 }
-console.log("✓ the app ships each native package's own payload files for first-use preparation");
+console.log("✓ the app ships each native package's own dependency files for first-use preparation");

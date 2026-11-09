@@ -12,7 +12,7 @@ Keep local MinIO behavior compatible with the application storage contract. Publ
 
 Object storage is also where Tau Cloud's git repositories durably live: packs plus one manifest per repository under `tenants/<ownerId>/`, with LFS objects beside them and leases held only in a Machine's own temporary directory. No volume, no `TAU_GIT_ROOT` (boot refuses it) and no nightly bundle. The local bootstrap must create every bucket the suites need, including `tau-content-restore` for the restore path; a bucket that exists only because an old dev volume kept it is not bootstrapped. The public contract is [revisions cloud architecture](../docs/architecture/revisions-cloud-handbook.md); operating the deployed substrate is `docs/handbooks/cloud/system/services/revisions-maintenance.md` and `operate/storage-maintenance.md`.
 
-Storage namespace changes must reconcile `apps/api/app/storage/storage.constants.ts`, cache-rule prefixes and seeding/readiness checks. Keep the health probe uncached. Readiness must exercise the actual object-storage capability, not just environment-variable presence.
+Storage namespace changes must reconcile `apps/libs/api-object-storage/src/storage.constants.ts`, cache-rule prefixes and seeding/readiness checks. Keep the health probe uncached. Readiness must exercise the actual object-storage capability, not just environment-variable presence.
 
 ## Deployment topology
 

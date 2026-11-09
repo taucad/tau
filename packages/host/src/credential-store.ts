@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { homedir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { defaultPayloadStore as storePayloadRoot } from '@taucad/native-process-core/store';
+import { defaultDependencyStore as storeDependencyRoot } from '@taucad/native-process-core/store';
 import { z } from 'zod';
 
 const credentialSchema = z.object({
@@ -36,13 +36,13 @@ export const defaultConfigDirectory = (): string => {
 };
 
 /**
- * Resolve the digest-keyed payload store shared by the CLI, `tau mcp`, the daemon and the desktop. It has one
- * definition, the native store machinery's: the per-OS data root, or `<TAU_CONFIG_DIR>/payloads` when the one override
+ * Resolve the digest-keyed dependency store shared by the CLI, `tau mcp`, the daemon and the desktop. It has one
+ * definition, the native store machinery's: the per-OS data root, or `<TAU_CONFIG_DIR>/dependency files` when the one override
  * is set.
  * @returns Absolute store root.
  * @public
  */
-export const defaultPayloadStore = (): string => storePayloadRoot();
+export const defaultDependencyStore = (): string => storeDependencyRoot();
 
 export const hostCredentialPath = (): string => join(defaultConfigDirectory(), 'host.json');
 

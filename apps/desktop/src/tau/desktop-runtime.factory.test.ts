@@ -11,7 +11,7 @@ import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
 import { kernelConfigurations } from '@taucad/types/constants';
 
-import { fixturePayloadStore, nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
+import { fixtureDependencyStore, nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
 import { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import type { NativeKernelsFrame } from '#tau/native-kernels-frame.js';
@@ -125,7 +125,7 @@ describe('desktop runtime kernels', () => {
     const refusal = 'The @taucad/build123d closure in this app differs from its receipt (python/bin/python3).';
     const { kernels } = await resolveDesktopRuntime({
       type: 'tau:native-kernels',
-      store: fixturePayloadStore,
+      store: fixtureDependencyStore,
       kernels: [{ kernel: 'build123d', package: '@taucad/build123d', extensions: ['py'], refusal }],
     });
     const build123dKernel = kernels.find((kernel) => kernel.id === 'build123d')!;

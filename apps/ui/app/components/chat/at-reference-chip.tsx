@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import type { ComponentProps } from 'react';
 import type { FileEntry } from '@taucad/types';
 import { parseCadReferenceTokens } from '@taucad/chat/references';
-import { ContextChip } from '#components/chat/context-chip.js';
+import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
 import { FileLink } from '#components/files/file-link.js';
-import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
-import { resolveAtReference } from '#utils/at-reference.utils.js';
-import type { ResolvedAtReference } from '#utils/at-reference.utils.js';
+import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
+import { resolveAtReference } from '@taucad/chat-ui/utils/at-reference.utils';
+import type { ResolvedAtReference } from '@taucad/chat-ui/utils/at-reference.utils';
 
 type AtReferenceChipProps = ComponentProps<'mark'> & {
   readonly 'data-at-reference'?: string;

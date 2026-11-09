@@ -13,7 +13,7 @@ import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
 import { useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
 
 type ProjectActionDropdownProps = {

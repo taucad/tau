@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TelemetrySpanRecord } from '@taucad/runtime';
-import type { SpanNode } from '#routes/w.$workspace.$project/chat-kernel-types.js';
+import type { SpanNode } from '@taucad/project-workspace/utils/chat-kernel-types';
 import {
   applyVisibility,
   buildPipelineLanes,

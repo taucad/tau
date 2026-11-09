@@ -7,11 +7,11 @@ import { DatabaseService } from '@taucad/api-database';
 import { assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
 import { withOwnerLock } from '@taucad/api-database/owner-lock';
 import { projectGitLfsObject } from '@taucad/api-database/schema';
-import { FileLinksService } from '#storage/file-links.service.js';
-import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
-import type { LfsObjectLocation } from '#api/git/lfs-keys.js';
-import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import { projectFileLimitBytes, quotaRefusalSentence } from '#api/git/git.constants.js';
+import { FileLinksService } from '@taucad/api-object-storage/file-links';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
+import type { LfsObjectLocation } from '@taucad/api-git-core/lfs-keys';
+import { resolveLfsObjectLocation, tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
+import { projectFileLimitBytes, quotaRefusalSentence } from '@taucad/api-git-core/git.constants';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 

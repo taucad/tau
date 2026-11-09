@@ -13,7 +13,7 @@
  * A `pre-receive` refusal carries no HTTP status, so this sentence is the only
  * thing that distinguishes "this repository is full" from "that ref was
  * refused". The server prints it from `ceilingRefusalMarker` in
- * `apps/api/app/api/git/git.constants.ts`, which carries the same string
+ * `apps/libs/api-git-core/src/git.constants.ts`, which carries the same string
  * because the API does not depend on this package; those two copies — both
  * tested — are the only ones.
  */
@@ -24,7 +24,7 @@ export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
  *
  * The same kind of answer as {@link ceilingRefusalMarker}, from the same hook:
  * the owner's plan has no room for what this push brings. The server prints
- * it from `quotaRefusalMarker` in `apps/api/app/api/git/git.constants.ts`;
+ * it from `quotaRefusalMarker` in `apps/libs/api-git-core/src/git.constants.ts`;
  * those two copies, both tested, are the only ones.
  */
 export const quotaRefusalMarker = 'Tau: storage quota exceeded';
@@ -65,7 +65,7 @@ export const isCeilingRefusal = (message: string | undefined): boolean =>
  * the repository; only an operator restore can. A leg that reads the JSON
  * envelope keys on its body `code`; stock git sees only the `text/plain`
  * sentence, so this marker is the other half. The server prints it from
- * `incompleteRepositoryMarker` in `apps/api/app/api/git/git.constants.ts`;
+ * `incompleteRepositoryMarker` in `apps/libs/api-git-core/src/git.constants.ts`;
  * those two copies, both tested, are the only ones.
  */
 export const incompleteRepositoryMarker = "Tau: this project's cloud copy is damaged";

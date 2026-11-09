@@ -5,7 +5,6 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging", "ci:browser", "ci:standalone"],
   "targets": {
-    "formal:lean": {},
     "formal": {},
     "render-calibration": {
       "executor": "nx:run-commands",
@@ -106,6 +105,9 @@
         },
         {
           "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
+          "env": "PICOGK_BROWSER_MIRROR_BASE"
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
@@ -268,14 +270,6 @@
       "options": {
         "cwd": "{projectRoot}",
         "command": "node --import @oxc-node/core/register scripts/bench-section-cap-boolean-backends.mts"
-      }
-    },
-    "generate-svg-sprite": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register scripts/generate-svg-sprite.mts"
       }
     },
     "generate-configuration-icons": {

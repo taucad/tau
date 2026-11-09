@@ -215,7 +215,13 @@ describe('package generator', () => {
     expect(vitestConfig).toContain("setupFiles: ['./vitest.setup.ts']");
     expect(vitestConfig).toContain("exclude: ['src/**/*.{test,spec,test-d}.ts']");
     expect(vitestConfig).not.toContain('thresholds:');
-    expect(readText(tree, `${root}/vitest.setup.ts`)).toContain('@testing-library/jest-dom/vitest');
+    const setup = readText(tree, `${root}/vitest.setup.ts`);
+    expect(setup).toContain("import * as matchers from '@testing-library/jest-dom/matchers';");
+    expect(setup).toContain('afterEach(cleanup);');
+    // Test files render JSX too, so the spec program needs the same JSX transform as the library.
+    expect(
+      readJson<{ compilerOptions: { jsx?: string } }>(tree, `${root}/tsconfig.spec.json`).compilerOptions.jsx,
+    ).toBe('react-jsx');
     expect(tsconfig.compilerOptions).toMatchObject({
       jsx: 'react-jsx',
       lib: ['ES2024', 'DOM', 'DOM.Iterable'],

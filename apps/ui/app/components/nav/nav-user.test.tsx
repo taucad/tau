@@ -76,7 +76,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: ({ children }: { readonly children?: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({ SvgIcon: () => <span aria-hidden /> }));
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span aria-hidden /> }));
 
 vi.mock('#components/tier-badge.js', () => ({
   ProBadge: () => <span>Pro</span>,

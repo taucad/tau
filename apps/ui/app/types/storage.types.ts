@@ -69,7 +69,7 @@ export type StorageProvider = {
  *    `softDeleteChat`) mutate only the named slot.
  *
  * The composer — draft, message edits, unread — is not a chat field; it lives
- * in this device's composer records (`#db/composer-record-store.js`).
+ * in this device's composer records (`@taucad/chat-ui/db/composer-record-store`).
  *  - Concurrent callers for the same id must not lose writes.
  */
 export type ChatStorage = {

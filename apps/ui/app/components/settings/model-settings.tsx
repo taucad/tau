@@ -3,13 +3,13 @@ import { Bot, SearchX } from 'lucide-react';
 import type { Model } from '#hooks/use-models.js';
 import { Button } from '@taucad/ui/components/button';
 import { SwitchRow } from '@taucad/ui/components/switch';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { useModels } from '#hooks/use-models.js';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
-import { ModelPinButton } from '#components/chat/model-pin-button.js';
+import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
 
 export function ModelSettings(): React.JSX.Element {
   const {

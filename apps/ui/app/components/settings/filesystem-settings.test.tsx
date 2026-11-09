@@ -112,7 +112,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
 const plan = vi.hoisted(() => ({ isResolved: true, canSyncFiles: true }));
 vi.mock('#cloud/commercial-features.js', () => ({ useCommercialFeatures: () => plan }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     error: mockToastError,
     info: mockToastInfo,

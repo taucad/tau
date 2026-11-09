@@ -303,7 +303,13 @@ export type LinuxCleanHostConsumer = LinuxProcessAccess & {
   exec(
     file: string,
     args: readonly string[],
-    options?: { env?: Record<string, string>; /** Milliseconds; three minutes when absent. */ killAfter?: number },
+    options?: {
+      env?: Record<string, string>;
+      /** Milliseconds; three minutes when absent. */
+      killAfter?: number;
+      /** Working directory; the consumer's home when absent. */
+      cwd?: string;
+    },
   ): Promise<{ status: number; stdout: string; stderr: string }>;
   spawn(file: string, args: readonly string[], env: Record<string, string>): Promise<number>;
   /** The consumer's own main (non `--type=`) processes whose executable matches `pattern`. */
@@ -884,7 +890,21 @@ export const createLinuxAptQualificationDriver = (
     }
     const [main] = started;
     if (started.length !== 1 || !main || (spawned !== undefined && main.pid !== spawned)) {
-      throw new QualificationUnavailable('Consumer launch did not start exactly one installed main process');
+      // Name what was seen, from root's own /proc view: the parent and argument vector of every new main process.
+      const seen = await Promise.all(
+        started.map(async ({ pid, executable }) => {
+          const [status, rawCommandLine] = await Promise.all([
+            readFile(`/proc/${pid}/status`, 'utf8').catch(() => ''),
+            readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => ''),
+          ]);
+          const parent = /^PPid:\s+(\d+)/mu.exec(status)?.[1] ?? 'exited';
+          return `${pid} (parent ${parent}) ${executable} ${JSON.stringify(rawCommandLine.replaceAll('\0', ' ').trim())}`;
+        }),
+      );
+      throw new QualificationUnavailable(
+        `Consumer ${stage} launch did not start exactly one installed main process` +
+          `${spawned === undefined ? '' : ` (spawned ${spawned})`}: ${seen.length === 0 ? 'none within 120 s' : seen.join('; ')}`,
+      );
     }
     // Independent of the consumer agent's reply: the kernel's owner of the process and root's view of its executable.
     const status = await readFile(`/proc/${main.pid}/status`, 'utf8');

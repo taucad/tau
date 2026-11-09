@@ -18,7 +18,7 @@ import { Input } from '@taucad/ui/components/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
 import { Label } from '@taucad/ui/components/label';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { authErrorMessage } from '#utils/auth-error.utils.js';
 

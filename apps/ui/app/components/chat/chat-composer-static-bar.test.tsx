@@ -6,7 +6,7 @@ import { ChatComposerStaticBar, staticReasoningLevelNames } from '#components/ch
 import {
   chatComposerGhostPillClassName,
   chatComposerModelTriggerClassName,
-} from '#components/chat/chat-input-styles.js';
+} from '@taucad/chat-ui/components/chat-input-styles';
 import { ghostPillClass, reasoningLevelNames } from '#components/chat/chat-agent-sheet.js';
 
 const composer = vi.hoisted((): { value: Record<string, unknown> } => ({ value: {} }));

@@ -337,6 +337,17 @@ export const environmentSchemaBase = z.object({
   TAU_CLOUDFLARE_ANALYTICS_TOKEN: unsetWhenEmpty(z.string().optional()).describe(
     'Cloudflare API token with Account Analytics read, for R2 usage in Grafana (W14 OB3); unset leaves the R2 task off',
   ),
+  /*
+   * Analytics only: the API holds no credential to either bucket. They name the `downloads` and
+   * `dependencies` roles of `tau.r2.bucket` (R2 storage blast-radius blueprint, phase 8); unset, that
+   * bucket counts as `other`.
+   */
+  TAU_CLOUDFLARE_DOWNLOADS_BUCKET: unsetWhenEmpty(z.string().optional()).describe(
+    "The environment's desktop downloads bucket, reported as the `downloads` role in R2 usage (analytics only)",
+  ),
+  TAU_CLOUDFLARE_DEPENDENCIES_BUCKET: unsetWhenEmpty(z.string().optional()).describe(
+    "The environment's locked dependency bucket, reported as the `dependencies` role in R2 usage (analytics only)",
+  ),
 
   /*
    * Files service (docs/research/files-service-blueprint.md §3, §6.2). With both set, LFS batch downloads

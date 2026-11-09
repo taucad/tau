@@ -3,7 +3,7 @@ import { Trash2, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   Dialog,
   DialogContent,

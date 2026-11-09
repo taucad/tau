@@ -15,12 +15,12 @@ import { appendFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { isPlaceholderIntegrity, pinnedUrls } from '#check-payload-urls.js';
-import type { PinnedUrl } from '#check-payload-urls.js';
+import { isPlaceholderIntegrity, pinnedUrls } from '#check-dependency-urls.js';
+import type { PinnedUrl } from '#check-dependency-urls.js';
 
 /** One observation of one pin. */
 export type FreshnessRow = {
-  /** `<dependency>/<payload>`, as `check-payload-urls` names it. */
+  /** `<dependency>/<payload>`, as `check-dependency-urls` names it. */
   readonly payload: string;
   readonly check: 'content-length' | 'pypi' | 'pbs-sha256sums' | 'dotnet-releases';
   readonly status: 'fresh' | 'drift';

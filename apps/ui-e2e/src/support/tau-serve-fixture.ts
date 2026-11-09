@@ -9,7 +9,7 @@
  * `HttpOnly` cookie rides along.
  *
  * Two stubs stand in for the network, exactly as
- * `packages/cli/src/serve-agent.integration.test.ts` does: a relay that only
+ * `apps/cli-e2e/src/serve-agent.integration.test.ts` does: a relay that only
  * accepts the daemon's control socket, and a gateway whose turns are released
  * by the test rather than by a timer.
  */

@@ -1,4 +1,4 @@
-import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
+import { Tags, TagsTrigger } from '@taucad/ui-kit/components/input-tags';
 import { Label } from '@taucad/ui/components/label';
 import { cn } from '@taucad/ui/utils/cn';
 

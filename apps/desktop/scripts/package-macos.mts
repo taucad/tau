@@ -43,7 +43,7 @@ import { createMacosDmg } from './macos-dmg.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyTree } from '@taucad/nx/runtime-closure';
 import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
-import { uploadDesktopSourceMaps } from './desktop-sourcemaps.mjs';
+import { uploadDesktopSourceMaps, uploadRendererSourceMaps } from './desktop-sourcemaps.mjs';
 import {
   desktopManifestFields,
   desktopPackageChannel,
@@ -362,6 +362,13 @@ await Promise.all([
     copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
   ),
 ]);
+if (release && process.env['SENTRY_DSN']) {
+  await uploadRendererSourceMaps(
+    uiClientRoot,
+    resolve(resources, 'ui/client'),
+    resolve(workspaceRoot, 'scripts/node_modules/.bin/sentry-cli'),
+  );
+}
 console.log(`Retained ${machArchitecture} slices in ${String(await thinOtherSlices(appPath))} bundled Mach-O files`);
 
 /* Before the first signature: flipping rewrites the Electron Framework binary.

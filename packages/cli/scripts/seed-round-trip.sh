@@ -92,7 +92,7 @@ code=$(run_b b-audit -- "${tau_cli[@]}" prepare --audit --json)
   record FAIL "B: tau prepare --audit exit $code: $(head -c 1200 "$evidence/b-audit.out")"
 
 # --- Identical receipts (S26) ---------------------------------------------------------------------------------
-if node --input-type=module - "$work/a/payloads" "$work/b/payloads" >"$evidence/receipts.json" <<'NODE'; then
+if node --input-type=module - "$work/a/dependencies" "$work/b/dependencies" >"$evidence/receipts.json" <<'NODE'; then
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -112,7 +112,7 @@ const rows = a.map((receipt) => {
     treeIntegrity: receipt.treeIntegrity,
     files: receipt.files.length,
     identical: other !== undefined && identity(other) === identity(receipt),
-    acquiredFrom: [...new Set((other?.payloads ?? []).map(({ acquiredFrom }) => acquiredFrom.kind))],
+    acquiredFrom: [...new Set((other?.dependencyFiles ?? []).map(({ acquiredFrom }) => acquiredFrom.kind))],
   };
 });
 console.log(JSON.stringify({ a: a.length, b: b.length, rows }, undefined, 2));

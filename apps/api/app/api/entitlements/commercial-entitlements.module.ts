@@ -4,8 +4,8 @@ import { BillingModule, BillingService } from '@taucad/api-billing';
 import type {
   CommercialEntitlements,
   CommercialEntitlementsService,
-} from '#api/entitlements/commercial-entitlements.js';
-import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
+} from '@taucad/api-projects/entitlements/commercial-entitlements';
+import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import { storageLimitBytesByTier } from '@taucad/billing';
 
 @Injectable()

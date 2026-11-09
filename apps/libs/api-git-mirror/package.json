@@ -1,0 +1,72 @@
+{
+  "name": "@taucad/api-git-mirror",
+  "version": "0.1.0-beta.0",
+  "description": "API git mirror and maintenance: the off-site mirror, restore drills, purge and lifecycle jobs",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/api-git-mirror"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/api-git-mirror#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./maintenance/blob-collector": "./src/maintenance/blob-collector.ts",
+    "./maintenance/lfs-relocation": "./src/maintenance/lfs-relocation.ts",
+    "./maintenance/liveness": "./src/maintenance/liveness.ts",
+    "./maintenance/project-purge": "./src/maintenance/project-purge.ts",
+    "./maintenance/purge": "./src/maintenance/purge.ts",
+    "./maintenance/restore": "./src/maintenance/restore.ts",
+    "./maintenance/restore-copy": "./src/maintenance/restore-copy.ts",
+    "./maintenance/singleton": "./src/maintenance/singleton.ts",
+    "./maintenance/standby": "./src/maintenance/standby.ts",
+    "./maintenance/worker": "./src/maintenance/worker.ts",
+    "./mirror/config": "./src/mirror/config.ts",
+    "./mirror/copier": "./src/mirror/copier.ts",
+    "./mirror/destination": "./src/mirror/destination.ts",
+    "./mirror/drill": "./src/mirror/drill.ts",
+    "./mirror/metrics": "./src/mirror/metrics.ts",
+    "./mirror/reconcile": "./src/mirror/reconcile.ts",
+    "./mirror/retention": "./src/mirror/retention.ts",
+    "./mirror/source": "./src/mirror/source.ts",
+    "./mirror/watermark": "./src/mirror/watermark.ts",
+    "./mirror/worker": "./src/mirror/worker.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@opentelemetry/api": "catalog:",
+    "@taucad/api-database": "workspace:*",
+    "@taucad/api-git-core": "workspace:*",
+    "@taucad/api-object-storage": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/testing": "catalog:",
+    "@taucad/api-core": "workspace:*",
+    "dotenv": "catalog:",
+    "postgres": "^3.4.9",
+    "reflect-metadata": "^0.2.2",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  }
+}

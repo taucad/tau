@@ -33,8 +33,8 @@ import {
   createAgentHostCapabilityReport,
   parseAgentHostWorkerConnect,
 } from '#workers/agent-host.contract.js';
-import type { AgentHostTransport } from '#services/agent-host-transport.js';
-import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-transport';
+import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */

@@ -65,7 +65,7 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-vi.mock('#components/ui/collection-empty-state.js', () => ({
+vi.mock('@taucad/ui-kit/components/collection-empty-state', () => ({
   CollectionEmptyState: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 

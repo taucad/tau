@@ -4,7 +4,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
 import { Link } from 'react-router';
-import { TauTextWordmark } from '#components/icons/tau-text-wordmark.js';
+import { TauTextWordmark } from '@taucad/ui-kit/icons/tau-text-wordmark';
 import { cn } from '@taucad/ui/utils/cn';
 
 type BrowserNavigation = EventTarget & {

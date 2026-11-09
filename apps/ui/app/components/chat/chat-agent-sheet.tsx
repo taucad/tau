@@ -48,9 +48,9 @@ import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { IconId } from '#components/icons/svg-icon.js';
-import { Tau } from '#components/icons/tau.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import type { IconId } from '@taucad/ui-kit/icons/svg-icon';
+import { Tau } from '@taucad/ui-kit/icons/tau';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
@@ -68,9 +68,9 @@ import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/exter
 import type { ExternalAgentHostShell } from '#lib/external-agent.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { groupModels } from '#utils/model-groups.js';
-import { ModelPinButton } from '#components/chat/model-pin-button.js';
-import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
+import { groupModels } from '@taucad/chat-ui/utils/model-groups';
+import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
+import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
 
 /** How a level reads, everywhere a person sees one. @public */

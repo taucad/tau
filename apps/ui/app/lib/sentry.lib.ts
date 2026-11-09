@@ -7,6 +7,7 @@ import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
 import { decorateForNetworkFailure } from '#lib/network-failure.js';
+import { setKillContextSink } from '#lib/memory-kill-signal.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
   decorateForStaleBuild,
@@ -237,6 +238,10 @@ export const initSentry = (): void => {
     Sentry.init(options);
   } else {
     initElectronRenderer(options, Sentry.init);
+    // Scope tags sync to main, which keeps them on this renderer's minidump if it dies (D13).
+    setKillContextSink((tags) => {
+      Sentry.setTags(tags);
+    });
   }
   if (sampleRate !== undefined) {
     nameSpansByRoute();

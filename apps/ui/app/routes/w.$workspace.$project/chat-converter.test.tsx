@@ -24,7 +24,7 @@ import type * as RjsfCore from '@rjsf/core';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
@@ -290,7 +290,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => mockFileManager,
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 

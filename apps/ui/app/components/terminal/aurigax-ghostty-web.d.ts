@@ -79,6 +79,13 @@ export type SearchAddon = {
 export declare const SearchAddon: new () => SearchAddon;
 
 export type Terminal = {
+  /** Assigning a key applies it to the open terminal and repaints every row. */
+  readonly options: {
+    theme: TerminalTheme;
+    textBlending?: 'native' | 'linear' | 'linear-corrected';
+    textWeight?: number;
+    minimumContrastRatio?: number;
+  };
   readonly cols: number;
   readonly rows: number;
   readonly rendererType: 'webgl' | 'canvas';

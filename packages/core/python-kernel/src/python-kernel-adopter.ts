@@ -10,7 +10,7 @@ import type { PythonKernelWorker } from '#python-kernel.js';
 
 /**
  * A Python kernel's deployment: the native deployment contract, with the seal step every Python closure runs and
- * what the shared payload and project template generators read from it.
+ * what the shared dependency file and project template generators read from it.
  * @public
  */
 export type PythonKernelAdopter<Package extends string = string> = NativeKernelDeployment<

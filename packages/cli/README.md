@@ -42,7 +42,7 @@ tau test
 tau test ./bracket --file=bracket.geospec.ts --testNamePattern='holes' --json
 ```
 
-Neither command downloads anything: native kernels come from the payload store that `tau prepare` fills.
+Neither command downloads anything: native kernels come from the dependency store that `tau prepare` fills.
 
 ### GeoSpec outside Tau
 
@@ -101,7 +101,7 @@ Which extensions and export routes exist remains owned by the plugin packages.
 
 ## PicoGK
 
-Prepare the PicoGK kernel once, then export C# entry points natively. `tau prepare picogk` downloads Microsoft's .NET runtime archive and the Tau PicoGK layer that `@taucad/picogk`'s `tau-plugin.json` pins, verifies both and seals them as one closure in the payload store; `tau export` then launches the worker from that closure with no environment variable. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
+Prepare the PicoGK kernel once, then export C# entry points natively. `tau prepare picogk` downloads Microsoft's .NET runtime archive and the Tau PicoGK layer that `@taucad/picogk`'s `tau-plugin.json` pins, verifies both and seals them as one closure in the dependency store; `tau export` then launches the worker from that closure with no environment variable. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
 
 ```bash
 tau prepare picogk
@@ -113,7 +113,7 @@ An export of a `.cs` file before `tau prepare picogk` exits 3 with `KERNEL_NOT_P
 
 ## Machines without network access
 
-`tau prepare --bundle <dir>` prepares a kernel (every kernel this host runs when none is named) and exports its closure as a seed directory: the payload archives under `blobs/sha256/<hex>`, the plugin's `tau-plugin.json`, an audit unit per closure under `notices/<hex>/` (its receipt, its CycloneDX SBOM and its licence notices) and the `tau-seed.json` index. Copy the directory to a machine with no network, check it, prepare from it and audit the result there:
+`tau prepare --bundle <dir>` prepares a kernel (every kernel this host runs when none is named) and exports its closure as a seed directory: the dependency archives under `blobs/sha256/<hex>`, the plugin's `tau-plugin.json`, an audit unit per closure under `notices/<hex>/` (its receipt, its CycloneDX SBOM and its licence notices) and the `tau-seed.json` index. Copy the directory to a machine with no network, check it, prepare from it and audit the result there:
 
 ```bash
 tau prepare build123d --bundle ./tau-seed            # online
@@ -122,13 +122,13 @@ TAU_ACQUISITION=locked tau prepare --seed ./tau-seed # offline: prepares every k
 tau prepare --audit                                  # offline: files, SBOM and notices of every closure
 ```
 
-A seed file is used only when it hashes to its name, so a bundle from an untrusted party can at worst be refused. `--verify-seed`, `--seed` and `--audit` exit 3 when anything is missing or differs. The same directory served over HTTP is a `TAU_PAYLOAD_MIRROR`.
+A seed file is used only when it hashes to its name, so a bundle from an untrusted party can at worst be refused. `--verify-seed`, `--seed` and `--audit` exit 3 when anything is missing or differs. The same directory served over HTTP is a `TAU_DEPENDENCY_MIRROR`.
 
 `tau ui verify <dir>` re-hashes a deployed copy of the Tau UI build against the `tau-asset-receipt.json` the build writes at its client root, and exits 3 naming every file that is missing or altered. `tau serve --ui` hands the served page the daemon's `TAU_ACQUISITION`, so a locked daemon's UI acquires no types from a CDN.
 
 ## Serve and open
 
-`tau serve [dir]` serves a project folder on this machine. Without `--relay` it is local-first: it binds loopback only, pairs with no server and needs no account. It also serves the Tau UI: by default the digest-pinned UI layer, downloaded into the payload store once and verified against the pin the CLI ships, or with `--ui=<dir>` a prebuilt Tau UI build. `--no-ui` serves agents only; when the layer cannot be prepared (offline, unsupported platform, not yet published) the daemon serves agents only and says why.
+`tau serve [dir]` serves a project folder on this machine. Without `--relay` it is local-first: it binds loopback only, pairs with no server and needs no account. It also serves the Tau UI: by default the digest-pinned UI layer, downloaded into the dependency store once and verified against the pin the CLI ships, or with `--ui=<dir>` a prebuilt Tau UI build. `--no-ui` serves agents only; when the layer cannot be prepared (offline, unsupported platform, not yet published) the daemon serves agents only and says why.
 
 ```bash
 tau serve . --ui=./tau-ui                 # http://127.0.0.1:7180, opened in the browser
@@ -201,7 +201,7 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 
 Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one. Finished builds are kept in the same durable compute store `tau serve` uses (`compute` in the Tau config folder, one file per project), so a restarted server reuses a model it, or `tau serve`, already built; `--compute-mode memory` keeps them for this process only and `off` disables reuse.
 
-Native kernels (every one the runtime lists, `--plugin` and `--config` included) bind their closures from the payload store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it — a download of about 162 MB for build123d and 49 MB for PicoGK, which an agent host that approves tools without asking starts without a prompt — in the server's process with progress and cancellation. The kernel binds the sealed closure on its next operation, with no thread replaced, so a runtime `tau prepare` sealed meanwhile is picked up the same way. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
+Native kernels (every one the runtime lists, `--plugin` and `--config` included) bind their closures from the dependency store, never downloaded by a CAD tool: a `.py` or `.cs` file whose runtime is not prepared answers `KERNEL_NOT_PREPARED`, and the `prepare_kernel` tool prepares it — a download of about 162 MB for build123d and 49 MB for PicoGK, which an agent host that approves tools without asking starts without a prompt — in the server's process with progress and cancellation. The kernel binds the sealed closure on its next operation, with no thread replaced, so a runtime `tau prepare` sealed meanwhile is picked up the same way. Worker threads start with an allowlisted environment: the platform's variables, proxy and CA settings, and the `TAU_*` acquisition profile.
 
 ```bash
 tau mcp --project ./bracket

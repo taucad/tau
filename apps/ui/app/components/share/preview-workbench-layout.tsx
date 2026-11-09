@@ -8,7 +8,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
+import { ChatContextInsertionProvider } from '@taucad/chat-ui/components/chat-context-insertion';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 

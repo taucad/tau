@@ -3,7 +3,7 @@
 /**
  * Purpose: Measure the shipped Build123d process protocol and native CAD workload.
  * Why: Release thresholds need a repeatable baseline from the exact bundled interpreter.
- * Environment: Node 24+, macOS/Linux, and the payload seed for the host target (`pnpm nx run build123d:seed`); the
+ * Environment: Node 24+, macOS/Linux, and the dependency seed for the host target (`pnpm nx run build123d:seed`); the
  * benchmark runs the sealed closure `tau prepare build123d` installs, prepared offline from that seed.
  * Usage: node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts [--iterations 200]
  * Exit codes: 0 when every workload and cancellation completes; non-zero on integrity or runtime failure.

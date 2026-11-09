@@ -3,8 +3,8 @@
  *
  * The app ships no kernel closure: a native kernel refuses with `KERNEL_NOT_PREPARED` until main prepares it here, the
  * first time a model needs it. Main prepares through `openNativePreparation`, the same preparation `tau mcp` and
- * `tau serve` run behind `prepare_kernel`: pinned, digest-checked payloads from each package's `tau-plugin.json`,
- * the package's seal step, and the channel's payload store, in this process with its own `fetch` (D4). It never
+ * `tau serve` run behind `prepare_kernel`: pinned, digest-checked dependency files from each package's `tau-plugin.json`,
+ * the package's seal step, and the channel's dependency store, in this process with its own `fetch` (D4). It never
  * downloads through Electron's download manager, which would quarantine every file (Gatekeeper assesses quarantined
  * files only). The renderer and the services utility ask by kernel name; a ready kernel binds on its next operation,
  * since the kernel utility reads the store for every kernel its launch frame has no closure for.
@@ -40,7 +40,7 @@ export type DesktopKernelPreparer = {
 };
 
 /**
- * Open the desktop's preparation over the channel's payload store.
+ * Open the desktop's preparation over the channel's dependency store.
  * @param input - The store root (the one main inspects at startup), the installation its link names (the app's
  *   executable, as the startup collection reads it), the environment the managed profile is read from, where progress
  *   goes, a log, and for tests the deployments and transport.

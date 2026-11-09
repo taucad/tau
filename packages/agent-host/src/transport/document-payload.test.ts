@@ -41,7 +41,7 @@ const gatewayDocumentSchemas = {
         })
         .strict(),
       cache_control: z
-        .object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() })
+        .object({ type: z.literal('ephemeral'), ttl: z.enum(['5m', '1h']).optional() })
         .strict()
         .optional(),
     })
@@ -554,7 +554,7 @@ describe('gateway transport document rewrite (D21, D22)', () => {
       type: 'document',
       title: 'bracket-spec.pdf',
       source: { type: 'base64', media_type: 'application/pdf', data: pdfData },
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     });
     expect(gatewayDocumentSchemas['anthropic-messages'].safeParse(content.at(-1)).success).toBe(true);
     expect(content[0]).not.toHaveProperty('cache_control');

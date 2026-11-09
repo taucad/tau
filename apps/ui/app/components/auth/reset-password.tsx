@@ -10,7 +10,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/components/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { Label } from '@taucad/ui/components/label';
 

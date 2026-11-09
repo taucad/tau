@@ -143,10 +143,9 @@ export const classifyBoundary = (previous: CanonicalRequest, next: CanonicalRequ
   };
 };
 
-/** One scripted assistant reply: a tool call or a closing text. */
-export type ScriptedReply =
-  | Readonly<{ tool: string; input: Readonly<Record<string, unknown>> }>
-  | Readonly<{ text: string }>;
+/** One scripted assistant reply: a tool call or a closing text, with the input tokens the provider reports for it. */
+export type ScriptedReply = Readonly<{ inputTokens?: number | undefined }> &
+  (Readonly<{ tool: string; input: Readonly<Record<string, unknown>> }> | Readonly<{ text: string }>);
 
 /**
  * The Anthropic SSE frames for one scripted reply.
@@ -166,7 +165,12 @@ export const anthropicReply = (reply: ScriptedReply, index: number): string => {
       model: 'fixture',
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 3, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      usage: {
+        input_tokens: reply.inputTokens ?? 3,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
     },
   })}\n\n`;
   const body =

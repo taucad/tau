@@ -209,21 +209,30 @@ const providerHistory = (
  *
  * @public
  */
-export type CommittedTurnContext = Readonly<{ anchorId: string; context: TurnContextSnapshot }>;
+export type CommittedTurnContext = Readonly<{
+  anchorId: string;
+  context: TurnContextSnapshot;
+  /**
+   * The summaries the turn's own run recorded after its commit, oldest first: once compaction has evicted the turn's
+   * message, its context rides after the last of these the history still holds, where that run's requests placed it.
+   */
+  summaryIds: readonly string[];
+}>;
 
 /**
  * Every turn the chat committed, read over every device's rows.
  *
  * The rows are read by the history's own rule (XD3, `turnSaidAgain` in the reducer): a run's commit of a turn another
  * device already said for it changes nothing, and a later run's commit of the same message (a Retry after a rewind)
- * replaces the earlier one.
+ * replaces the earlier one. Each turn also names the summaries its run recorded after the commit.
  *
  * @param events - The chat's rows in the history's order.
  * @returns The committed turns.
  * @internal
  */
 export const committedTurnContexts = (events: readonly AgentLogEvent[]): readonly CommittedTurnContext[] => {
-  const byAnchor = new Map<string, TurnContextSnapshot>();
+  type Turn = { readonly context: TurnContextSnapshot; readonly runId: string; readonly summaryIds: string[] };
+  const byAnchor = new Map<string, Turn>();
   const known = new Set<string>();
   const copied = new Set<string>();
   const copiedKey = (runId: string, messageId: string): string => JSON.stringify([runId, messageId]);
@@ -247,13 +256,25 @@ export const committedTurnContexts = (events: readonly AgentLogEvent[]): readonl
           break;
         }
         known.add(event.message.id);
-        byAnchor.set(event.message.id, event.context);
+        byAnchor.set(event.message.id, { context: event.context, runId: event.runId, summaryIds: [] });
+        break;
+      }
+      case 'history.compacted': {
+        for (const turn of byAnchor.values()) {
+          if (turn.runId === event.runId) {
+            turn.summaryIds.push(event.summary.id);
+          }
+        }
         break;
       }
       default:
     }
   }
-  return [...byAnchor].map(([anchorId, context]) => ({ anchorId, context }));
+  return [...byAnchor].map(([anchorId, turn]) => ({
+    anchorId,
+    context: turn.context,
+    summaryIds: turn.summaryIds,
+  }));
 };
 
 /**
@@ -288,7 +309,9 @@ const opensTurn = (message: ProviderMessage): boolean =>
  * it, so every later request reproduces the earlier request's bytes through its last message (I1). A context whose
  * bytes equal the last one emitted is skipped, which bounds growth and says nothing stale: the newest snapshot sits
  * next to the newest message, and an unchanged one still describes the project. A turn committed after a compaction
- * summary rides with its post-compaction context (RA-S10).
+ * summary rides with its post-compaction context (RA-S10). A turn whose user message compaction evicted rides right
+ * after the last summary its own run recorded that the history still holds, where that run's requests placed it; a
+ * turn whose message a later run's compaction evicted is summarised, and keeps no context.
  *
  * @param history - The durable history, as the request carries it.
  * @param turns - The chat's committed turns.
@@ -299,7 +322,19 @@ export const attachTurnContexts = (
   history: readonly ProviderMessage[],
   turns: readonly CommittedTurnContext[],
 ): ProviderMessage[] => {
-  const byAnchor = new Map(turns.map((turn) => [turn.anchorId, turn.context]));
+  const present = new Set(history.map((message) => message.id));
+  const byAnchor = new Map<string, TurnContextSnapshot>();
+  const bySummary = new Map<string, TurnContextSnapshot>();
+  for (const turn of turns) {
+    if (present.has(turn.anchorId)) {
+      byAnchor.set(turn.anchorId, turn.context);
+      continue;
+    }
+    const summaryId = turn.summaryIds.findLast((id) => present.has(id));
+    if (summaryId !== undefined) {
+      bySummary.set(summaryId, turn.context);
+    }
+  }
   const out: ProviderMessage[] = [];
   let lastEmitted: string | undefined;
   let summarySeen = false;
@@ -319,6 +354,10 @@ export const attachTurnContexts = (
     if (isCompactionSummaryRow(message)) {
       summarySeen = true;
       out.push(message);
+      const evictedTurn = bySummary.get(message.id);
+      if (evictedTurn !== undefined) {
+        emit(evictedTurn, out.length);
+      }
       continue;
     }
     const context = message.role === 'user' ? byAnchor.get(message.id) : undefined;

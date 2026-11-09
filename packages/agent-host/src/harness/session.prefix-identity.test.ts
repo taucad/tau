@@ -13,9 +13,9 @@ import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
 import { canonicalize, classifyBoundary, fixtureTools, recordingFetch } from '#harness/prefix-identity.fixture.js';
 import type { CapturedBody, ScriptedReply } from '#harness/prefix-identity.fixture.js';
 import { createSessionRecord } from '#harness/session-record.js';
-import { createAgentSession } from '#harness/session.js';
+import { attachTurnContexts, createAgentSession } from '#harness/session.js';
 import { failureMarkerClearance } from '#host/run-history.js';
-import type { UserProviderMessage } from '#log/event-types.js';
+import type { ProviderMessage, TurnContextSnapshot, UserProviderMessage } from '#log/event-types.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import type {
@@ -64,6 +64,10 @@ type Turn = Readonly<{
   resume?: boolean | undefined;
   /** How the run ends; a turn whose model stops answering (a lost reply) fails and is resumed next. */
   expectOutcome?: 'completed' | 'failed' | undefined;
+  /** A small window, so a reply's reported input tokens drive compaction. */
+  contextWindow?: number | undefined;
+  /** The summary compaction writes; the placeholder when absent. */
+  summarize?: string | undefined;
 }>;
 
 const contextMessagesOf = (turn: Turn): UserProviderMessage[] | undefined =>
@@ -139,13 +143,14 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
       systemPromptBlocks: createCachedSystemPromptBlocks({ staticPrompt: prompt, dynamicPrompt }),
       model: {
         id: turn.modelId ?? 'anthropic-claude-haiku-4.5',
-        contextWindow: 200_000,
+        contextWindow: turn.contextWindow ?? 200_000,
         maxTokens: 8192,
         providerKind: 'anthropic',
       },
       modelTransport: transport,
       toolRegistry: turn.tools === undefined ? toolRegistry : { ...toolRegistry, list: () => turn.tools! },
       eventLog: log,
+      ...(turn.summarize === undefined ? {} : { summarize: async () => turn.summarize! }),
       contextMessages: contextMessagesOf(turn),
       clientContext: turn.clientContext,
       recentSkills: { load: async () => turn.recent ?? [] },
@@ -346,6 +351,50 @@ describe('I1 request prefix identity across consecutive user turns', () => {
       expect(run.turns[1]![0]!['model']).toBe('anthropic-claude-sonnet-4.5');
       expectIdentical(run);
     });
+
+    it('should diverge only at the compaction summary, and keep identity within the run before and after it', async () => {
+      /* Turn one's second reply reports a context past the window's budget, so compaction runs before the third request
+       * and summarises the turn's head; the turn's own message stays, and its context stays before it. */
+      const run = await runChat([
+        {
+          ...turnOne,
+          contextWindow: 8192,
+          summarize: 'Earlier work.',
+          replies: [
+            { ...readFile, inputTokens: 3000 },
+            { ...readFile, inputTokens: 7000 },
+            { ...done, inputTokens: 200 },
+          ],
+        },
+        {
+          ...turnTwo,
+          snapshot: snapshotText('README.md', ['main.scad', 'README.md']),
+          contextWindow: 8192,
+          summarize: 'Earlier work.',
+        },
+      ]);
+      const steps = run.turns[0]!.map((body) => canonicalize(body));
+      expect(steps).toHaveLength(3);
+      const compacted = run.requests[0]![2]!;
+      const summaryIndex = compacted.messages.findIndex((message) =>
+        JSON.stringify(message.content).includes('<summary>'),
+      );
+      expect(summaryIndex).toBeGreaterThan(0);
+      /* Before the compaction, each request reproduces the previous one through its last message. */
+      expect(classifyBoundary(steps[0]!, steps[1]!).identicalThroughHistory).toBe(true);
+      /* The compaction rewrites the history from the summary on, and nothing before it: the named exception. */
+      const across = classifyBoundary(steps[1]!, steps[2]!);
+      expect(across.identicalThroughHistory).toBe(false);
+      expect(across.lcp).toBeGreaterThanOrEqual(steps[1]!.systemEnd);
+      expect(across.divergence?.label.startsWith(`messages[${String(summaryIndex)}]`)).toBe(true);
+      const ids = compacted.messages.map((message) => message.id);
+      expect(ids.indexOf('tau:snapshot-context:run-1')).toBe(ids.indexOf('user-run-1') - 1);
+      /* After it, the next turn reproduces the compacted request through its last message. */
+      expectIdentical(run);
+      const next = run.requests[1]![0]!.messages.map((message) => message.id);
+      expect(next.slice(0, ids.length)).toEqual(ids);
+      expect(next.indexOf('tau:snapshot-context:run-2')).toBe(next.indexOf('user-run-2') - 1);
+    });
   });
 });
 
@@ -377,5 +426,42 @@ describe('committed turn contexts in the durable log', () => {
       contextMessagesOf({ ...turnOne, snapshot: baseSnapshot }),
     );
     expect(reduceEventLog(events).map((message) => message.id)).toEqual(['user-run-1', expect.any(String)]);
+  });
+
+  it('should keep the context of a turn whose message compaction evicted right after that run’s summary', () => {
+    /* A turn split by its own run's compaction: the summary replaced its message, and that run's requests carried the
+     * context right after the summary. The next turn's request reproduces those bytes (I1). */
+    const summary: ProviderMessage = { id: 'sum', role: 'user', content: '<summary>\nold\n</summary>' };
+    const kept: ProviderMessage = { id: 'a1', role: 'assistant', content: 'kept' };
+    const contextOf = (tag: string): TurnContextSnapshot => ({
+      version: 1,
+      systemPrompt: 's',
+      initialMessages: [{ id: `ctx-${tag}`, role: 'user', content: `init ${tag}` }],
+      postCompactionMessages: [{ id: `ctx-${tag}`, role: 'user', content: `post ${tag}` }],
+    });
+    const turns = [{ anchorId: 'u1', context: contextOf('1'), summaryIds: ['sum'] }];
+    const duringTurnOne = attachTurnContexts([summary, kept], turns);
+    expect(duringTurnOne.map((message) => message.id)).toEqual(['sum', 'ctx-1', 'a1']);
+    const nextUser: ProviderMessage = { id: 'u2', role: 'user', content: 'next' };
+    const turnTwo = attachTurnContexts(
+      [summary, kept, nextUser],
+      [...turns, { anchorId: 'u2', context: contextOf('2'), summaryIds: [] }],
+    );
+    const bytes = (messages: readonly ProviderMessage[]): string[] =>
+      messages.map((message) => JSON.stringify({ role: message.role, content: message.content }));
+    expect(bytes(turnTwo).slice(0, duringTurnOne.length)).toEqual(bytes(duringTurnOne));
+    expect(turnTwo.map((message) => message.id)).toEqual(['sum', 'ctx-1', 'a1', 'ctx-2', 'u2']);
+  });
+
+  it('should drop the context of a turn a later run’s compaction evicted, which its summary covers', () => {
+    const summary: ProviderMessage = { id: 'sum-2', role: 'user', content: '<summary>\nboth\n</summary>' };
+    const context: TurnContextSnapshot = {
+      version: 1,
+      systemPrompt: 's',
+      initialMessages: [{ id: 'ctx-1', role: 'user', content: 'init 1' }],
+      postCompactionMessages: [{ id: 'ctx-1', role: 'user', content: 'post 1' }],
+    };
+    const attached = attachTurnContexts([summary], [{ anchorId: 'u1', context, summaryIds: ['sum-1'] }]);
+    expect(attached.map((message) => message.id)).toEqual(['sum-2']);
   });
 });

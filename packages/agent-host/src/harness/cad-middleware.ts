@@ -249,7 +249,7 @@ const resolveRecentSkills = async (options: {
 const contextMessage = (input: {
   readonly id: string;
   readonly content: string;
-  readonly kind: 'client-memory' | 'recent-skills';
+  readonly kind: 'client-memory' | 'recent-skills' | 'skills-update';
   readonly anchorId?: string | undefined;
 }): UserProviderMessage => ({
   id: input.id,
@@ -264,7 +264,48 @@ const contextMessage = (input: {
   },
 });
 
-/** Resolve the exact browser-safe system/client context committed with one turn. @internal */
+/** The skills catalog block of a system prompt starts here, in block and string form alike. */
+const skillsBlockHead = '\n## Skills System\n';
+
+/**
+ * The skills catalog block a committed context carries in its system prefix, or `undefined` when that turn ran
+ * without one.
+ *
+ * @param context - A turn's committed context.
+ * @returns The block's exact text.
+ * @internal
+ */
+export const pinnedSkillsBlock = (context: TurnContextSnapshot): string | undefined => {
+  if (context.systemPromptBlocks !== undefined) {
+    return context.systemPromptBlocks.find((block) => block.text.startsWith(skillsBlockHead))?.text;
+  }
+  const index = context.systemPrompt.indexOf(`\n\n${skillsBlockHead}`);
+  return index === -1 ? undefined : context.systemPrompt.slice(index + 2);
+};
+
+/** The id of the tail note that carries a catalog the pinned system prefix does not. @internal */
+export const skillsUpdateMessageId = 'tau:skills-update';
+
+const skillsUpdateNote = (skills: readonly ClientSkill[]): string => `<system-reminder>
+The skills catalog changed after this chat began. The listing in the system prompt is kept as it was; the catalog now is:
+${
+  skills.length === 0
+    ? 'empty: no skill can be activated.'
+    : skills
+        .map((skill) => `- **${skill.name}**: ${skill.description} → \`use_skill({ skillName: "${skill.name}" })\``)
+        .join('\n')
+}
+</system-reminder>`;
+
+/**
+ * Resolve the exact browser-safe system/client context committed with one turn.
+ *
+ * The skills catalog is pinned per chat (prompt-cache identity I1): the block the chat's previous turn carried in its
+ * cached system prefix is kept byte for byte, whether or not the catalog has since been read or changed, and a
+ * catalog that differs from the pinned one rides as a note in the turn's context messages instead.
+ *
+ * @internal
+ */
 export const createTurnContextSnapshot = async (options: {
   readonly chatId: string;
   readonly systemPrompt: string;
@@ -276,9 +317,18 @@ export const createTurnContextSnapshot = async (options: {
   readonly contextMessages?: readonly UserProviderMessage[] | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
+  /** The chat's last committed context, whose skills block this turn pins; `undefined` on the chat's first turn. */
+  readonly previousContext?: TurnContextSnapshot | undefined;
 }): Promise<TurnContextSnapshot> => {
   const skills = options.clientContext?.skills ?? [];
   const memory = options.clientContext?.memory ?? {};
+  const currentSkillsBlock = skills.length === 0 ? undefined : skillsPrompt(skills);
+  const skillsBlock =
+    options.previousContext === undefined ? currentSkillsBlock : pinnedSkillsBlock(options.previousContext);
+  const skillsNote =
+    currentSkillsBlock === skillsBlock
+      ? undefined
+      : contextMessage({ id: skillsUpdateMessageId, kind: 'skills-update', content: skillsUpdateNote(skills) });
   const recent = await resolveRecentSkills({
     chatId: options.chatId,
     store: options.recentSkills,
@@ -306,9 +356,9 @@ export const createTurnContextSnapshot = async (options: {
   const systemPromptBlocks = options.systemPromptBlocks
     ? [
         ...options.systemPromptBlocks.slice(0, -1),
-        ...(skills.length === 0
+        ...(skillsBlock === undefined
           ? []
-          : ([{ type: 'text', text: skillsPrompt(skills), cacheControl: { type: 'ephemeral' } }] as const)),
+          : ([{ type: 'text', text: skillsBlock, cacheControl: { type: 'ephemeral' } }] as const)),
         ...options.systemPromptBlocks.slice(-1),
       ]
     : undefined;
@@ -316,20 +366,23 @@ export const createTurnContextSnapshot = async (options: {
     version: 1,
     systemPrompt: systemPromptBlocks
       ? systemPromptBlocks.map((block) => block.text).join('\n\n')
-      : skills.length === 0
+      : skillsBlock === undefined
         ? options.systemPrompt
-        : `${options.systemPrompt}\n\n${skillsPrompt(skills)}`,
+        : `${options.systemPrompt}\n\n${skillsBlock}`,
     ...(systemPromptBlocks ? { systemPromptBlocks } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
-    initialMessages: [initialRecent, memoryMessage, ...(options.contextMessages ?? [])].filter(
+    initialMessages: [initialRecent, memoryMessage, skillsNote, ...(options.contextMessages ?? [])].filter(
       (message): message is UserProviderMessage => message !== undefined,
     ),
-    postCompactionMessages: [postCompactionRecent, memoryMessage, ...(options.contextMessages ?? [])].filter(
-      (message): message is UserProviderMessage => message !== undefined,
-    ),
+    postCompactionMessages: [
+      postCompactionRecent,
+      memoryMessage,
+      skillsNote,
+      ...(options.contextMessages ?? []),
+    ].filter((message): message is UserProviderMessage => message !== undefined),
   };
 };
 

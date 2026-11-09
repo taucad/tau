@@ -4,7 +4,10 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import {
   createClientContextMiddleware,
   createRecentSkillsMiddleware,
+  createTurnContextSnapshot,
   latexDelimiterMiddleware,
+  pinnedSkillsBlock,
+  skillsUpdateMessageId,
   trimToolResultContext,
 } from '#harness/cad-middleware.js';
 import { toPiToolContent } from '#harness/tools.js';
@@ -335,5 +338,71 @@ describe('RecentSkills', () => {
 
     expect(seen?.messages).toEqual([]);
     expect(remove).toHaveBeenCalledWith('chat-1', 'unversioned');
+  });
+});
+
+describe('TurnContextSnapshot skills pin', () => {
+  const blocks = [
+    { type: 'text', text: 'static', cacheControl: { type: 'ephemeral' } },
+    { type: 'text', text: 'dynamic' },
+  ] as const;
+  const brep = { name: 'brep', description: 'Build native BRep geometry', fingerprint: 'a' };
+  const gears = { name: 'gears', description: 'Involute gears', fingerprint: 'b' };
+  const snapshot = async (
+    skills: ReadonlyArray<typeof brep> | undefined,
+    previous?: Awaited<ReturnType<typeof createTurnContextSnapshot>>,
+  ): ReturnType<typeof createTurnContextSnapshot> =>
+    createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static\n\ndynamic',
+      systemPromptBlocks: blocks,
+      clientContext: skills === undefined ? undefined : { skills },
+      previousContext: previous,
+    });
+
+  it("should keep the first turn's skills block byte for byte when the catalog changes, and note the change", async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep, gears], first);
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    const note = second.initialMessages.find((message) => message.id === skillsUpdateMessageId);
+    expect(note?.content).toContain('**gears**');
+    expect(second.postCompactionMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(true);
+  });
+
+  it('should keep a chat that began without a catalog free of a skills block, and carry the catalog as a note', async () => {
+    const first = await snapshot(undefined);
+    const second = await snapshot([brep], first);
+    expect(pinnedSkillsBlock(first)).toBeUndefined();
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
+      '**brep**',
+    );
+  });
+
+  it('should add no note while the catalog matches the pinned block', async () => {
+    const first = await snapshot([brep]);
+    const second = await snapshot([brep], first);
+    expect(second.systemPromptBlocks).toEqual(first.systemPromptBlocks);
+    expect(second.initialMessages.some((message) => message.id === skillsUpdateMessageId)).toBe(false);
+  });
+
+  it('should pin the catalog in string-prompt form too', async () => {
+    const first = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { skills: [brep] },
+    });
+    const second = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { skills: [gears] },
+      previousContext: first,
+    });
+    expect(pinnedSkillsBlock(first)).toContain('**brep**');
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
+      '**gears**',
+    );
   });
 });

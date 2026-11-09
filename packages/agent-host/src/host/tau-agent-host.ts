@@ -13,7 +13,13 @@ import type { ClientContext } from '#harness/cad-middleware.js';
 import { codedFailureDetail } from '#harness/coded-failure.js';
 import { createInterruptRecoveryMessage, interruptedToolOutput } from '#harness/interrupt-recovery.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
-import { createAgentSession, fundingPrincipal, settledInvocation, settledRowOf } from '#harness/session.js';
+import {
+  createAgentSession,
+  fundingPrincipal,
+  lastCommittedTurnContext,
+  settledInvocation,
+  settledRowOf,
+} from '#harness/session.js';
 import type {
   AgentRunOutcome,
   AgentSession,
@@ -2567,6 +2573,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         contextMessages: config.contextMessages,
         clientContext,
         recentSkills: options.recentSkills,
+        previousContext: lastCommittedTurnContext(events),
       });
       /* The chat's last run ended on answers no attempt was told (a denial, a Stop): this run is told first. */
       const lastRunId = events.findLast(

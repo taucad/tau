@@ -228,6 +228,18 @@ export const committedTurnContexts = (events: readonly AgentLogEvent[]): readonl
   return [...byAnchor].map(([anchorId, context]) => ({ anchorId, context }));
 };
 
+/**
+ * The chat's last committed turn context on this log: the one the next turn pins its skills catalog to.
+ *
+ * @param events - The log's rows in append order.
+ * @returns The context, or `undefined` before the chat's first commit.
+ * @internal
+ */
+export const lastCommittedTurnContext = (events: readonly AgentLogEvent[]): TurnContextSnapshot | undefined => {
+  const row = events.findLast((event) => event.type === 'turn.history-projection-committed');
+  return row?.type === 'turn.history-projection-committed' ? row.context : undefined;
+};
+
 /** The bytes of a context that reach a provider: role and content, never ids or metadata. */
 const contextKey = (messages: readonly UserProviderMessage[]): string =>
   JSON.stringify(messages.map(({ role, content }) => ({ role, content })));
@@ -2109,6 +2121,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               contextMessages: options.contextMessages,
               clientContext: options.clientContext,
               recentSkills: options.recentSkills,
+              previousContext: lastCommittedTurnContext(await record.events()),
             }));
           if (!(await prepareStartOfTurn())) {
             return false;

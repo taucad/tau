@@ -225,6 +225,19 @@ describe('I1 request prefix identity across consecutive user turns', () => {
     );
   });
 
+  it('should keep the system blocks when the skills catalog arrives after the first turn (S3)', async () => {
+    /* Turn one ran before the catalog was read; the catalog the chat pins is turn one's, and the newer listing rides
+     * as a note before turn two's message instead of rewriting the cached system prefix. */
+    const run = await runChat([{ ...turnOne, clientContext: undefined }, turnTwo]);
+    expectIdentical(run);
+    const previous = canonicalize(run.turns[0]!.at(-1)!);
+    const next = canonicalize(run.turns[1]![0]!);
+    expect(next.bytes.slice(0, previous.systemEnd)).toEqual(previous.bytes.slice(0, previous.systemEnd));
+    const note = run.requests[1]![0]!.messages.find((message) => message.id.startsWith('tau:skills-update'));
+    expect(note, 'the newer catalog rides as a tail note').toBeDefined();
+    expect(JSON.stringify(note?.content)).toContain('openscad-basics');
+  });
+
   it('should keep the prefix when agent memory was edited between turns (S4)', async () => {
     expectIdentical(
       await runChat([

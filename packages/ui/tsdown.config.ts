@@ -27,6 +27,8 @@ const baseConfig: UserConfig = {
     'src/components/drawer.tsx',
     'src/components/dropdown-menu.tsx',
     'src/components/field.tsx',
+    'src/components/heading.tsx',
+    'src/components/heading.variants.ts',
     'src/components/highlight-text.tsx',
     'src/components/hover-card.tsx',
     'src/components/info-tooltip.tsx',

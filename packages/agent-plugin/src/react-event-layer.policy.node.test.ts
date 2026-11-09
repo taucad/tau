@@ -7,6 +7,9 @@
  * its line with it (charter D21). The counter is `@taucad/oxlint/react-event-layer`.
  */
 
+// Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not mark this
+// project affected; nx.json lists the helper as a `test` input instead.
+// nx-ignore-next-line
 import { checkReactEventLayerCeiling } from '@taucad/oxlint/react-event-layer';
 import { describe, expect, it } from 'vitest';
 

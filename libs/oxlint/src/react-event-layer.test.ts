@@ -69,8 +69,14 @@ const stop = () => { actor.send({ type: 'stop' }); };
 useEffect(start, []);
 useEffect(stop, []);
 useEffect(imported, []);
+const flush = useCallback(() => { actor.send({ type: 'flush' }); }, []);
+const measure = React.useCallback(() => { requestAnimationFrame(run); }, []);
+const idle = useCallback(() => { document.title = name; }, []);
+useEffect(flush, [flush]);
+useEffect(measure, [measure]);
+useEffect(idle, [idle]);
 `),
-    ).toEqual(['4 effect .subscribe', '5 effect .send']);
+    ).toEqual(['4 effect .subscribe', '5 effect .send', '10 effect .send', '11 effect requestAnimationFrame']);
   });
 
   it('counts getSnapshot() calls outside select* helpers', () => {
@@ -155,6 +161,9 @@ describe('checkReactEventLayerCeiling', () => {
     writeFileSync(join(source, 'nested', 'counted.tsx'), effect);
     writeFileSync(join(source, 'counted.test.tsx'), effect);
     writeFileSync(join(source, 'types.d.ts'), effect);
+    writeFileSync(join(source, 'viewer.test-utils.ts'), effect);
+    writeFileSync(join(source, 'status.test-harness.ts'), effect);
+    writeFileSync(join(source, 'project.fixture.tsx'), effect);
     writeFileSync(join(source, 'react-event-layer.ceiling.json'), '{}\n');
 
     expect(

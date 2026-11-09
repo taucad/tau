@@ -14,6 +14,8 @@
  *   such calls it holds; or
  * - one `getSnapshot()` call that is not inside a `select*` helper.
  *
+ * Tests, type tests, declarations and test-support modules are not counted.
+ *
  * Calls reached only through a function declared outside the effect are not
  * seen: the counter is lexical, like the source scanners it is modelled on.
  */
@@ -46,7 +48,9 @@ const eventMethods = new Set(['on', 'send', 'subscribe']);
 const timerFunctions = new Set(['requestAnimationFrame', 'setInterval', 'setTimeout']);
 const selectHelperPrefix = 'select';
 const sourcePattern = /\.(?:ts|tsx)$/;
-const excludedPattern = /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|\.test-d\.ts|\.d\.ts)$/;
+/** Tests, type tests, declarations and test-support modules (`*.test-utils`, `*.test-harness`, `*.fixture(s)`). */
+const excludedPattern =
+  /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|\.(?:test-utils|test-harness|test-helpers|fixtures?)\.(?:ts|tsx)|\.d\.ts)$/;
 
 /** Names a function-like node is known by: its own name or the binding it initializes. */
 function functionNames(node: ts.Node): string[] {
@@ -116,7 +120,21 @@ function isEffectCall(node: ts.CallExpression, aliases: ReadonlySet<string>): bo
   return ts.isPropertyAccessExpression(callee) && effectHooks.has(callee.name.text);
 }
 
-/** The function a top-level identifier names in this file, if it is declared as one. */
+/** The first argument of a `useCallback(fn, deps)` call, bare or as `React.useCallback`. */
+function callbackHookArgument(node: ts.Expression): ts.Expression | undefined {
+  if (!ts.isCallExpression(node)) {
+    return undefined;
+  }
+  const callee = node.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+      ? callee.name.text
+      : undefined;
+  return name === 'useCallback' ? node.arguments[0] : undefined;
+}
+
+/** The function an identifier names in this file: a declaration, a function binding or a `useCallback` binding. */
 function localFunction(sourceFile: ts.SourceFile, name: string): ts.Node | undefined {
   let found: ts.Node | undefined;
   const visit = (node: ts.Node): void => {
@@ -132,9 +150,11 @@ function localFunction(sourceFile: ts.SourceFile, name: string): ts.Node | undef
       ts.isIdentifier(node.name) &&
       node.name.text === name &&
       node.initializer !== undefined &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+      (ts.isArrowFunction(node.initializer) ||
+        ts.isFunctionExpression(node.initializer) ||
+        callbackHookArgument(node.initializer) !== undefined)
     ) {
-      found = node.initializer;
+      found = callbackHookArgument(node.initializer) ?? node.initializer;
       return;
     }
     node.forEachChild(visit);

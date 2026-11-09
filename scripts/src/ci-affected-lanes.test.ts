@@ -205,8 +205,9 @@ describe('ci.yml affected-only lanes', () => {
     const steps = lane?.steps ?? [];
     const suites = steps.filter((step) => /\bnx\s+(?:run-many|affected)\s+-t\s+test(?:\s|$)/u.test(step.run ?? ''));
     // One step runs `test`, selected by `nx affected` over the tag: never every API suite with `run-many`.
+    // `nx affected` ignores `--projects`; excluding every project but the tag is what narrows it.
     expect(suites.map((step) => step.run?.trim())).toEqual([
-      'pnpm nx affected -t test --projects tag:scope:api --parallel=1',
+      "pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1",
     ]);
     // `nx affected` needs the base `nx-set-shas` finds: two commits in a queue run, full history otherwise.
     const checkout = steps.find((step) => step.name === 'Checkout');

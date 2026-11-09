@@ -978,6 +978,8 @@ jobs:
       # excludes the tag). `nx affected` diffs against the same NX_BASE/NX_HEAD as the
       # affected lanes, so a change to one API library runs that library's suites and its
       # dependents' (`api` and `api-e2e` depend on every one), not every API suite.
+      # `nx affected` ignores `--projects`, so the tag is selected by excluding every
+      # project but it: `--exclude '*,!tag:scope:api'`.
       # `--parallel=1`: the suites share this lane's one PostgreSQL, and concurrent suites
       # contend on it (DC-2 measured a 70,000-row purge suite going from 60 s to 120 s
       # beside two others); one at a time keeps each suite's timing its own. `DATABASE_URL`
@@ -1002,7 +1004,7 @@ jobs:
           TAU_S3_CONFORMANCE_BUCKET: ${{ secrets.TAU_S3_CONFORMANCE_BUCKET }}
           TAU_S3_CONFORMANCE_ACCESS_KEY_ID: ${{ secrets.TAU_S3_CONFORMANCE_ACCESS_KEY_ID }}
           TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: ${{ secrets.TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY }}
-        run: pnpm nx affected -t test --projects tag:scope:api --parallel=1
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
 
       - name: Qualify API development and production servers
         run: pnpm nx run-many -t test:server-modes

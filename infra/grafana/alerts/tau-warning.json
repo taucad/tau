@@ -1150,7 +1150,7 @@
       "for": "15m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Some rule in this environment's folder entered an Error state in the last 30 min, by Grafana's own alert state history (Loki, logical datasource alert-state-history; folderUID=\"tau-local\" binds to tau-<environment>). Lines carry ruleTitle, ruleUID and error: query {from=\"state-history\", folderUID=\"tau-<environment>\"} | json | current=~\"Error.*\" to see which rule failed and why. Excludes its own title so its own evaluation error cannot keep it firing. Local Grafana has no alert-state-history datasource, so the local copy stays paused."
+        "summary": "Some rule in this environment's folder entered an Error state in the last 30 min, by Grafana's own alert state history (Loki, logical datasource alert-state-history; folderUID=\"tau-local\" binds to tau-<environment>). Lines carry ruleTitle, ruleUID and error: query {from=\"state-history\", folderUID=\"tau-<environment>\"} | json | current=~\"Error.*\" to see which rule failed and why. Excludes its own title so its own evaluation error cannot keep it firing. Locally the datasource maps to the local Loki, which has no state-history streams; the local copy stays paused."
       },
       "labels": {
         "severity": "warning",

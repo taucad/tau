@@ -22,7 +22,8 @@ pinned commit in the deployment repository.
   (Loki). Its streams carry the rule folder, not an app, so a selector on it is
   exactly `{from="state-history", folderUID="tau-local"}`; deployment binds
   `tau-local` to the environment's folder and refuses any other selector. Local
-  Grafana provisions no such datasource; rules on it stay paused locally.
+  Grafana maps it to the local Loki, which has no state-history streams, so the
+  rule provisions and reads no data; it stays paused locally.
 - Local collector metrics (`postgresql_*`, `redis_*` except
   `redis_connection_state`, and `system_*`) need the corresponding collectors.
   A deployment without them must exclude those panels explicitly.

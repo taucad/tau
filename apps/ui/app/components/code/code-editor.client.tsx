@@ -111,30 +111,40 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       }
     }
   }, []);
+  /* The runtime and the syntax are requested from one idle gap, so the syntax reaches a mounted view
+   * no later than it did when both were requested from one microtask: a syntax that lands after the
+   * view mounts reconfigures it under whatever the user has already started, such as a completion. */
+  const runtimeRequested = useRef(false);
+  const languageId = useRef(props.languageId);
   useEffect(() => {
     markCodeEditorMilestone('code-pane-admission', props.viewId);
     let active = true;
+    runtimeRequested.current = false;
     const cancel = whenIdle(() => {
       if (active) {
+        runtimeRequested.current = true;
         void loadRuntime();
+        void loadSyntax(languageId.current);
       }
     });
     return () => {
       active = false;
       cancel();
       runtimeLoadSequence.current += 1;
+      syntaxController.current?.abort();
     };
-  }, [loadRuntime, props.viewId]);
+  }, [loadRuntime, loadSyntax, props.viewId]);
   useEffect(() => {
-    let active = true;
-    const cancel = whenIdle(() => {
+    languageId.current = props.languageId;
+    // Until the idle gap requests the runtime, that gap requests this language with it.
+    let active = runtimeRequested.current;
+    queueMicrotask(() => {
       if (active) {
         void loadSyntax(props.languageId);
       }
     });
     return () => {
       active = false;
-      cancel();
       syntaxController.current?.abort();
     };
   }, [loadSyntax, props.languageId]);

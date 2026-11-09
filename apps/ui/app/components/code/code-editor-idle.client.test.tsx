@@ -34,7 +34,8 @@ it('requests the editor runtime and its syntax from a bounded idle gap, not from
 
   expect(runtime.imported).not.toHaveBeenCalled();
   expect(syntax.loaded).not.toHaveBeenCalled();
-  expect(callbacks).toHaveLength(2);
+  // One gap requests both, so the syntax never lands on a view that mounted without it.
+  expect(callbacks).toHaveLength(1);
   for (const { options } of callbacks) {
     expect(options?.timeout).toBe(2000);
   }

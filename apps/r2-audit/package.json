@@ -1,0 +1,16 @@
+{
+  "name": "@taucad/r2-audit",
+  "version": "0.0.1",
+  "description": "The tau-r2-audit-<env> Cloudflare Worker: R2 write alarms from the dependency bucket's event notifications and R2 Data Access Logs",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "imports": {
+    "#scripts/*": "./scripts/*",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "esbuild": "catalog:"
+  }
+}

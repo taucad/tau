@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatService } from '#api/chat/chat.service.js';
+import { ChatService } from '@taucad/api-chat/chat.service';
 import {
   DirectModelInvocationService,
   LlmGatewayError,

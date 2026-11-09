@@ -35,10 +35,16 @@
       "path": "./packages/units"
     },
     {
+      "path": "./apps/libs/api-agent-observability"
+    },
+    {
       "path": "./apps/libs/api-auth"
     },
     {
       "path": "./apps/libs/api-billing"
+    },
+    {
+      "path": "./apps/libs/api-chat"
     },
     {
       "path": "./apps/libs/api-core"
@@ -69,6 +75,9 @@
     },
     {
       "path": "./apps/libs/api-observability"
+    },
+    {
+      "path": "./apps/libs/api-projects"
     },
     {
       "path": "./apps/libs/api-redis"

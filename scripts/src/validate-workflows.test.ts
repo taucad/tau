@@ -17,7 +17,7 @@ describe('validateWorkflows', () => {
     const { violations, invocations } = validateWorkflows(resolved, [fixture('clean.yml')]);
 
     expect(violations).toEqual([]);
-    expect(invocations).toBe(10);
+    expect(invocations).toBe(11);
   });
 
   it('rejects every project a workflow names, whatever names it', () => {
@@ -29,6 +29,7 @@ describe('validateWorkflows', () => {
       'bare-project.yml (job packages): `react` is a project name — use a target, a tag: selector, or nx affected',
       'bare-project.yml (job packages): `events` is a project name — use a target, a tag: selector, or nx affected',
       'bare-project.yml (job packages): `filesystem` is a project name — use a target, a tag: selector, or nx affected',
+      'bare-project.yml (job packages): `!filesystem` is a project name — use a target, a tag: selector, or nx affected',
       'bare-project.yml (job services): `api` is a project name — use a target, a tag: selector, or nx affected',
       'bare-project.yml (job services): `runtime` is a project name — use a target, a tag: selector, or nx affected',
       'bare-project.yml (job services): `react` is a project name — use a target, a tag: selector, or nx affected',

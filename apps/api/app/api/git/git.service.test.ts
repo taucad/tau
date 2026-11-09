@@ -36,9 +36,9 @@ import {
   incompleteRepositoryMarker,
 } from '@taucad/api-git-core/git.constants';
 import type { DatabaseService } from '@taucad/api-database';
-import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import type { CommercialEntitlementsService } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import { MemoryOwnerInFlightCap, OwnerInFlightGate } from '@taucad/api-git-core/admission/owner-in-flight';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { StorageGitService } from '@taucad/api-git-core/worker/storage-git.service';

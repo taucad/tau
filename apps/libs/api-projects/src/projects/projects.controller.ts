@@ -1,0 +1,258 @@
+/* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Param,
+  NotFoundException,
+  Put,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Environment } from '@taucad/api-core';
+import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
+import { withOwnerLock } from '@taucad/api-database/owner-lock';
+import { and, count, desc, eq, or, isNull } from 'drizzle-orm';
+import { UseAuth, User } from '@taucad/api-auth';
+import { DatabaseService } from '@taucad/api-database';
+import { project, projectCollaborator, projectDeletion } from '@taucad/api-database/schema';
+import { ProjectAccessService } from '#collaboration/project-access.service.js';
+import type { ProjectRole } from '#collaboration/project-access.service.js';
+import type { CommercialEntitlementsService } from '#entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#entitlements/commercial-entitlements.js';
+import {
+  isProjectRepositoryId,
+  projectRegistrationsPerOwnerPerDay,
+  registeredProjectLimitPerOwner,
+} from '@taucad/api-git-core/git.constants';
+import { PublicationRateLimiterService } from '@taucad/api-redis';
+import { RegisterProjectDto } from '#projects/projects.dto.js';
+
+/**
+ * Registering a project on Tau Cloud (ruling P51, W18 DEF-1).
+ *
+ * *Connect Tau Cloud* is the verb that makes a project exist on the remote.
+ * Until this route existed, the only production writer of the `project` table
+ * was `PublicationsService`, which runs **after** a successful push — so a
+ * project that had never been published answered `404` on both git
+ * advertisements and could never be connected at all.
+ *
+ * Publication stays a separate, later writer: it re-points the same row with
+ * the name and description a publication carries.
+ */
+@Controller({ path: 'projects', version: '1' })
+@UseAuth()
+export class ProjectsController {
+  public constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly rateLimiter: PublicationRateLimiterService,
+    @Inject(commercialEntitlementsKey)
+    private readonly entitlementsService: CommercialEntitlementsService,
+    private readonly access: ProjectAccessService,
+    private readonly config: ConfigService<Environment, true>,
+  ) {}
+
+  /**
+   * The caller's own projects, so a second device can name one (W18 DEF-2).
+   *
+   * A device that has never held a project cannot open it from the Tau Hosted
+   * Remote without learning its id, and the id is the repository path. This is
+   * the one route that answers with more than one: authenticated, filtered to
+   * the caller's own rows, and carrying nothing a project page does not already
+   * show. `git.service.ts`'s rule that a *git* client must not learn which
+   * repositories exist is about the unauthenticated git surface and is untouched.
+   *
+   * Since D27 this is also where a collaboration is named: the same shape with
+   * the caller's `role` on each row, so a second device can open a project
+   * somebody else owns exactly as it opens its own.
+   *
+   * @param userId - The signed-in caller.
+   * @returns Every project this account owns or collaborates on, most recently changed first.
+   */
+  @Get()
+  public async list(@User('id') userId: string): Promise<
+    ReadonlyArray<{
+      id: string;
+      name: string;
+      updatedAt: string;
+      role: ProjectRole;
+      canDeleteCloud: boolean;
+      cloudState: 'active' | 'deleting';
+    }>
+  > {
+    const { database } = this.databaseService;
+    const rows = await database
+      .select({
+        id: project.id,
+        name: project.name,
+        updatedAt: project.updatedAt,
+        ownerId: project.ownerId,
+        role: projectCollaborator.role,
+        deletionRequestedAt: projectDeletion.requestedAt,
+      })
+      .from(project)
+      .leftJoin(
+        projectCollaborator,
+        and(eq(projectCollaborator.projectId, project.id), eq(projectCollaborator.userId, userId)),
+      )
+      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
+      .where(
+        and(
+          or(eq(project.ownerId, userId), eq(projectCollaborator.userId, userId)),
+          isNull(projectDeletion.deletedAt),
+          or(isNull(projectDeletion.requestedAt), eq(project.ownerId, userId)),
+        ),
+      )
+      .orderBy(desc(project.updatedAt));
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      updatedAt: row.updatedAt.toISOString(),
+      role: row.ownerId === userId ? 'owner' : row.role === 'write' ? 'write' : 'read',
+      canDeleteCloud: row.ownerId === userId && this.config.get('TAU_PROJECT_DELETION_ENABLED', false, { infer: true }),
+      cloudState: row.deletionRequestedAt ? 'deleting' : 'active',
+    }));
+  }
+
+  /**
+   * Claim an active project identity for the caller. The first push creates its manifest.
+   *
+   * Idempotent: a second call from the owner is a no-op. A
+   * collaborator's call on the project is the same answer with no side effect
+   * at all: no field, no plan check, no budget (FX2).
+   *
+   * Bounded twice (review R5), because this route is what made repository
+   * creation reachable without a publish: a per-account ceiling on how many
+   * projects may exist, and a daily ceiling on how often the owner may
+   * register, spent only by a call that passed the ownership and plan checks.
+   *
+   * @param projectId - The project id, which is also its repository name.
+   * @param body - The name to record when the row is created.
+   * @param userId - The signed-in caller, who becomes the owner.
+   * @returns The registered project's id.
+   * @throws BadRequestException When the id cannot name a repository.
+   * @throws NotFoundException When the id belongs to an account the caller has no relation to (P55).
+   * @throws ForbiddenException When the plan does not entitle syncing (N5), or when the account is at its project ceiling.
+   * @throws HttpException When the account is over its daily registration budget.
+   */
+  @Put(':projectId')
+  public async register(
+    @Param('projectId') projectId: string,
+    @Body() body: RegisterProjectDto,
+    @User('id') userId: string,
+  ): Promise<{ id: string }> {
+    if (!isProjectRepositoryId(projectId)) {
+      throw new BadRequestException({
+        code: 'PROJECT_ID_INVALID',
+        message: 'Not a project id',
+      });
+    }
+
+    const { database } = this.databaseService;
+    /* D27: the id's existence is this route's question — it may have to create
+       the row — but *whose* it is belongs to `ProjectAccessService`, the single
+       authority. A caller with no relation to the id gets the ruling-P55 `404`.
+
+       A member is answered as registered and nothing else happens (FX2): the
+       client's *Connect* always registers, so a collaborator opening a shared
+       project lands here. Their body is ignored, their plan is not asked (a
+       collaborator needs none, D27), and no budget is spent, because nothing
+       was registered. The git surface enforces what their role may do next. */
+    await assertProjectActive(database, projectId, userId);
+    const exists = await this.projectExists(projectId);
+    if (exists) {
+      const { role } = await this.access.authorize(projectId, userId, 'read');
+      if (role !== 'owner') {
+        return { id: projectId };
+      }
+    }
+
+    /* Before the row and before the repository (N5). Registration is the write
+       *Connect Tau Cloud* makes, and every subsequent push is refused with this
+       same sentence at `git.service.ts` — so without this guard a free account
+       connected successfully, got a `project` row and a bare repository with
+       hooks on the shared volume, and then could never use either. Four such
+       orphans exist on the operator's own account; each one spends a slot of
+       the 200-project ceiling that a later paid plan would want.
+
+       After the ownership check, not before it: ruling P55 says an id that is
+       somebody else's answers `404` on every surface, and a plan refusal that
+       preceded it would replace that answer for an un-entitled caller. */
+    const entitlements = await this.entitlementsService.getEntitlements(userId);
+    if (!entitlements.canSyncFiles) {
+      throw new ForbiddenException({
+        code: 'GIT_SYNC_NOT_ENTITLED',
+        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      });
+    }
+
+    /* After the ownership and entitlement checks (D22, L6-F15): a refused call
+       is not a registration, so it spends nothing. The key is the caller's own
+       id, so the order only decides whether a refused caller drains its own
+       budget; both checks are cheap reads. */
+    const budget = await this.rateLimiter.consumeDailyBudget({
+      key: `project:register:${userId}`,
+      limit: projectRegistrationsPerOwnerPerDay,
+    });
+    if (!budget.allowed) {
+      throw new HttpException(
+        { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    await withOwnerLock(database, userId, async (transaction) => {
+      await assertActiveProjectLocked(transaction, projectId, userId);
+      const [current] = await transaction.select().from(project).where(eq(project.id, projectId)).limit(1);
+      if (current) {
+        if (current.ownerId !== userId) {
+          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
+        }
+        return;
+      }
+      const [counted] = await transaction
+        .select({ value: count() })
+        .from(project)
+        .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
+        .where(and(eq(project.ownerId, userId), isNull(projectDeletion.deletedAt)))
+        .limit(1);
+      if ((counted?.value ?? 0) >= registeredProjectLimitPerOwner) {
+        throw new ForbiddenException({
+          code: 'PROJECT_LIMIT_REACHED',
+          message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
+        });
+      }
+      await transaction
+        .insert(project)
+        .values({ id: projectId, ownerId: userId, name: body.name ?? 'Untitled project', origin: 'local-mirror' });
+    });
+
+    /* No repository is created here any more (charter D1). A repository *is*
+       its manifest, and the first manifest is written by the first push's
+       commit — so registration is the row and nothing else. `isProjectRepositoryId`
+       above still bounds the id, because that id becomes a storage key. */
+    return { id: projectId };
+  }
+
+  /**
+   * Whether any row holds this project id.
+   *
+   * Existence only: *whose* it is, and the ruling-P55 `404` that follows from
+   * that, is `ProjectAccessService.authorize`'s answer and not this route's.
+   *
+   * @param projectId - The id to look up.
+   * @returns Whether the id is taken.
+   */
+  private async projectExists(projectId: string): Promise<boolean> {
+    const [row] = await this.databaseService.database
+      .select({ id: project.id })
+      .from(project)
+      .where(eq(project.id, projectId))
+      .limit(1);
+    return row !== undefined;
+  }
+}

@@ -843,18 +843,21 @@ const lokiSources = (root: string): LokiSource[] => [
   ),
 ];
 
-/** The exact selector body Tau Cloud rewrites and requires, per Loki source. */
-const lokiSelectors: Readonly<Record<LokiSource['where'], string>> = {
-  dashboard: 'service_name=~"$service"',
-  alert: 'service_name="tau-api"',
+/** The exact selector bodies Tau Cloud rewrites and requires, per Loki source. */
+const lokiSelectors: Readonly<Record<LokiSource['where'], readonly string[]>> = {
+  dashboard: ['service_name=~"$service"'],
+  // Tau Cloud binds tau-r2-audit, the R2 audit Worker's OTLP service, to tau-r2-audit-<environment>.
+  alert: ['service_name="tau-api"', 'service_name="tau-r2-audit"'],
   // Tau Cloud binds folderUID="tau-local" to the environment's folder, tau-<environment>.
-  'state-history': 'from="state-history", folderUID="tau-local"',
+  'state-history': ['from="state-history", folderUID="tau-local"'],
 };
 
 /**
  * T32 (FR-27, FR-28): Tau Cloud rewrites exactly `service_name=~"$service"` (dashboards) and
  * `service_name="tau-api"` (alerts) to the environment's `fly_app_name`, and refuses at plan an alert
  * selector without it, so every Loki selector is written exactly so and none names `fly_app_name`.
+ * The R2 audit Worker exports over OTLP, so its alerts select `service_name="tau-r2-audit"`, which
+ * Tau Cloud binds to the environment's `tau-r2-audit-<environment>` service.
  * Alert state-history selectors are bound by `folderUID="tau-local"` instead, which Tau Cloud rewrites
  * to the environment's folder.
  * Every Prometheus rule selector carries the `service_name` of the app it binds (binding contract v2:
@@ -872,8 +875,11 @@ const selectorSourceProblems = (root: string): string[] => [
   ...lokiSources(root).flatMap(({ file, query, where }) => {
     const expected = lokiSelectors[where];
     return [...query.matchAll(/\{(?<body>[^{}]*)\}/gu)]
-      .filter(({ groups }) => groups?.['body']?.trim() !== expected)
-      .map(({ groups }) => `${file}: Loki selector {${groups?.['body'] ?? ''}} must be exactly {${expected}}`);
+      .filter(({ groups }) => !expected.includes(groups?.['body']?.trim() ?? ''))
+      .map(
+        ({ groups }) =>
+          `${file}: Loki selector {${groups?.['body'] ?? ''}} must be exactly ${expected.map((body) => `{${body}}`).join(' or ')}`,
+      );
   }),
   ...[...jsonFiles(root, 'dashboards'), ...jsonFiles(root, 'alerts')]
     .filter((file) => readFileSync(file, 'utf8').includes('fly_app_name'))
@@ -976,7 +982,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     ]);
     expect(selectorSourceProblems(seeded)).toEqual([
       'dashboards/runtime-product.json: Loki selector {fly_app_name="tau-api-staging"} must be exactly {service_name=~"$service"}',
-      'alerts/runtime-unbound.json: Loki selector {service_name=~"$service"} must be exactly {service_name="tau-api"}',
+      'alerts/runtime-unbound.json: Loki selector {service_name=~"$service"} must be exactly {service_name="tau-api"} or {service_name="tau-r2-audit"}',
       'alerts/runtime-unbound.json: Loki selector {from="state-history"} must be exactly {from="state-history", folderUID="tau-local"}',
       "dashboards/runtime-product.json: names fly_app_name, which bypasses Tau Cloud's rewrite",
       'alerts/runtime-unbound.json: tau_telemetry_ingest_entries_total{app=~".*",disposition="recorded"} lacks service_name="tau-api"',

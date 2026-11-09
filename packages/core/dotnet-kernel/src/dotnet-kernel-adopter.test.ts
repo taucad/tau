@@ -1,10 +1,10 @@
 // @vitest-environment node
-import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, InstalledFile } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
 import { defineDotnetKernelAdopter } from '#adopter.js';
 
-const row = (path: string, digit: string): ReceiptFile => ({
+const row = (path: string, digit: string): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digit.repeat(64),

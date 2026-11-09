@@ -269,7 +269,7 @@ const build123dKernelDefinition = defineKernel({
   },
 
   async initialize(options, runtime) {
-    // Late binding: an explicit closure, else the sealed closure the host's resolver or the payload store gives. An
+    // Late binding: an explicit closure, else the sealed closure the host's resolver or the dependency store gives. An
     // unprepared kernel throws KERNEL_NOT_PREPARED here, and the runtime retries on the next operation.
     const { options: bound } = await bindPythonKernel({ adopter: build123dNative, options });
     const mirror = await createPythonWorkspaceMirror(build123dWorker);

@@ -35,7 +35,7 @@ export const desktopRuntimeConfigSchema = z.object({
 export type DesktopRuntimeOptions = {
   readonly withSourceMapping?: boolean;
   /**
-   * The native closures main posts once it has read the payload store (W6); default the frame this utility receives.
+   * The native closures main posts once it has read the dependency store (W6); default the frame this utility receives.
    * The runtime composes only once it arrives, and its native kernels bind to the closures it names.
    */
   readonly nativeKernels?: () => Promise<NativeKernelsFrame>;

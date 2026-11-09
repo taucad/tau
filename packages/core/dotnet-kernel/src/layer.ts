@@ -91,39 +91,39 @@ export type DotnetLayerRule = {
    */
   readonly urls: (record: Pick<DotnetLayerRecord, 'sha256' | 'asset'>) => [string, string];
   /**
-   * The `worker` payload of the record's target variant.
-   * @returns The payload, in manifest field order.
+   * The `worker` dependency file of the record's target variant.
+   * @returns The dependency file, in manifest field order.
    */
-  readonly payload: (record: DotnetLayerRecord) => Readonly<LayerJson>;
+  readonly dependencyFile: (record: DotnetLayerRecord) => Readonly<LayerJson>;
   /**
-   * Replace the `worker` payload of the record's `runtime` variant and keep every other byte of the manifest. When the
+   * Replace the `worker` dependency file of the record's `runtime` variant and keep every other byte of the manifest. When the
    * manifest has no variant for the record's target and `staged` holds one under that target (its `target` and its
-   * `payloads` without the worker), that variant is appended with the record's worker pin.
+   * `files` without the worker), that variant is appended with the record's worker pin.
    * @returns The new manifest.
-   * @throws When the manifest has no `runtime` variant for the record's target with a `worker` payload and `staged`
+   * @throws When the manifest has no `runtime` variant for the record's target with a `worker` dependency file and `staged`
    *   stages none.
    */
   readonly composeManifest: (manifest: LayerJson, record: DotnetLayerRecord, staged?: LayerJson) => LayerJson;
   /**
-   * The CycloneDX 1.6 SBOM of the closure a manifest pins (charter D26): one component per payload and target, with
+   * The CycloneDX 1.6 SBOM of the closure a manifest pins (charter D26): one component per dependency file and target, with
    * its purl, its pinned hash, its licence where the publisher states one, and a `distribution` reference to each URL.
    * The layer's own inventory is the SBOM inside the layer, which the layer component names.
    * @returns The SBOM document.
-   * @throws When a payload is neither Microsoft's runtime archive nor a layer published by this rule.
+   * @throws When a dependency file is neither Microsoft's runtime archive nor a layer published by this rule.
    */
   readonly composeSbom: (manifest: LayerJson) => LayerJson;
 };
 
-/** Digest-addressed public base of Tau-authored payloads (`tau-prod-content` behind `cdn.tau.new`). @public */
-export const payloadCdnBase = 'https://cdn.tau.new/';
+/** Digest-addressed public base of Tau-authored dependency files (`tau-prod-content` behind `cdn.tau.new`). @public */
+export const dependencyBaseUrl = 'https://cdn.tau.new/';
 
 /**
- * The bucket key of a payload: the D25 mirror layout, so `cdn.tau.new` also serves as a `TAU_PAYLOAD_MIRROR`.
+ * The bucket key of a dependency file: the D25 mirror layout, so `cdn.tau.new` also serves as a `TAU_DEPENDENCY_MIRROR`.
  * @param sha256 - Lowercase hex digest of the bytes.
  * @returns `blobs/sha256/<hex>`.
  * @public
  */
-export const payloadKey = (sha256: string): string => `blobs/sha256/${sha256}`;
+export const dependencyKey = (sha256: string): string => `blobs/sha256/${sha256}`;
 
 /**
  * The canonical text of a manifest or SBOM: two-space JSON and one trailing newline.
@@ -196,11 +196,11 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
     });
 
   const urls = (record: Pick<DotnetLayerRecord, 'sha256' | 'asset'>): [string, string] => [
-    `${payloadCdnBase}${payloadKey(record.sha256)}`,
+    `${dependencyBaseUrl}${dependencyKey(record.sha256)}`,
     `https://github.com/taucad/tau/releases/download/${releaseTag(record.sha256)}/${record.asset}`,
   ];
 
-  const payload = (record: DotnetLayerRecord): Readonly<LayerJson> => ({
+  const dependencyFile = (record: DotnetLayerRecord): Readonly<LayerJson> => ({
     name: 'worker',
     integrity: `sha256-${Buffer.from(record.sha256, 'hex').toString('base64')}`,
     byteLength: record.byteLength,
@@ -218,22 +218,24 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
     );
     const stagedVariant = staged?.[record.target] as LayerJson | undefined;
     if (variant === undefined && Array.isArray(variants) && stagedVariant !== undefined) {
-      const stagedPayloads = stagedVariant['payloads'];
-      if (targetOf(stagedVariant) !== record.target || !Array.isArray(stagedPayloads)) {
-        throw new Error(`The staged ${record.target} variant names another target or no payloads.`);
+      const stagedFiles = stagedVariant['files'];
+      if (targetOf(stagedVariant) !== record.target || !Array.isArray(stagedFiles)) {
+        throw new Error(`The staged ${record.target} variant names another target or no dependency files.`);
       }
       variant = {
         target: structuredClone(stagedVariant['target']),
-        payloads: [...structuredClone(stagedPayloads as LayerJson[]), { name: 'worker' }],
+        files: [...structuredClone(stagedFiles as LayerJson[]), { name: 'worker' }],
       };
       (variants as LayerJson[]).push(variant);
     }
-    const payloads = variant?.['payloads'];
-    const index = Array.isArray(payloads) ? (payloads as LayerJson[]).findIndex(({ name }) => name === 'worker') : -1;
+    const dependencyFiles = variant?.['files'];
+    const index = Array.isArray(dependencyFiles)
+      ? (dependencyFiles as LayerJson[]).findIndex(({ name }) => name === 'worker')
+      : -1;
     if (index === -1) {
-      throw new Error(`tau-plugin.json has no ${record.target} runtime variant with a worker payload.`);
+      throw new Error(`tau-plugin.json has no ${record.target} runtime variant with a worker dependency file.`);
     }
-    (payloads as LayerJson[])[index] = payload(record);
+    (dependencyFiles as LayerJson[])[index] = dependencyFile(record);
     return next;
   };
 
@@ -243,7 +245,7 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
     for (const variant of Array.isArray(variants) ? (variants as LayerJson[]) : []) {
       const target = variant['target'] as LayerJson;
       const targetName = `${String(target['os'])}-${String(target['arch'])}`;
-      for (const entry of (variant['payloads'] as LayerJson[] | undefined) ?? []) {
+      for (const entry of (variant['files'] as LayerJson[] | undefined) ?? []) {
         const entryUrls = ((entry['origin'] as LayerJson | undefined)?.['urls'] as string[] | undefined) ?? [];
         const { algorithm, hex } = hexOf(String(entry['integrity']));
         const shared = {
@@ -254,7 +256,7 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
         if (entry['name'] === 'dotnet') {
           const version = dotnetVersionPattern.exec(entryUrls[0] ?? '')?.groups?.['version'];
           if (version === undefined) {
-            throw new Error(`The dotnet payload URL ${String(entryUrls[0])} names no runtime version.`);
+            throw new Error(`The dotnet dependency file URL ${String(entryUrls[0])} names no runtime version.`);
           }
           components.push({
             'bom-ref': hex,
@@ -270,7 +272,7 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
         }
         const release = entryUrls.map((url) => tagPattern.exec(url)?.groups).find((groups) => groups !== undefined);
         if (entry['name'] !== 'worker' || release === undefined) {
-          throw new Error(`The SBOM rule does not describe the ${String(entry['name'])} payload.`);
+          throw new Error(`The SBOM rule does not describe the ${String(entry['name'])} dependency file.`);
         }
         components.push({
           'bom-ref': hex,
@@ -303,7 +305,7 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
     };
   };
 
-  return { recordSchema, releaseTag, urls, payload, composeManifest, composeSbom };
+  return { recordSchema, releaseTag, urls, dependencyFile, composeManifest, composeSbom };
 };
 
 /**
@@ -404,7 +406,7 @@ export const runComposeTauPlugin = async (input: ComposeTauPluginInput): Promise
           `sha256=${record.sha256}`,
           `byte-length=${String(record.byteLength)}`,
           `asset=${record.asset}`,
-          `key=${payloadKey(record.sha256)}`,
+          `key=${dependencyKey(record.sha256)}`,
           `tag=${rule.releaseTag(record.sha256)}`,
           `cdn-url=${cdnUrl}`,
           `release-url=${releaseUrl}`,

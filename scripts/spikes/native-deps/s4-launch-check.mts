@@ -32,7 +32,7 @@ import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 
 /* oxlint-disable no-restricted-imports -- spike-only: the siblings and the native deployments are imported by relative path; deleted with W21. */
 // eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the native store.
-import { defaultPayloadStore, inspectNativeKernels } from '../../../packages/core/native-process/src/store.ts';
+import { defaultDependencyStore, inspectNativeKernels } from '../../../packages/core/native-process/src/store.ts';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
 import { build123dNative } from '../../../packages/plugins/build123d/src/native.ts';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: scripts does not depend on the kernels.
@@ -88,7 +88,7 @@ const measure = async (): Promise<void> => {
   const started = performance.now();
   const inspection = await inspectNativeKernels({
     deployments: [build123dNative, picogkNative],
-    store: defaultPayloadStore(),
+    store: defaultDependencyStore(),
     managed: readManagedPreparation(process.env),
   });
   const closureOf = (kernel: string) => {
@@ -138,7 +138,7 @@ type Sample = {
 const sampleOnce = (configDirectory: string): Sample => {
   const env: Record<string, string | undefined> = { ...process.env };
   env['TAU_CONFIG_DIR'] = configDirectory;
-  env['TAU_PAYLOAD_DIR'] = '';
+  env['TAU_DEPENDENCY_DIR'] = '';
   const result = spawnSync(
     process.execPath,
     ['--import', '@oxc-node/core/register', import.meta.filename, '--measure', configDirectory],
@@ -191,7 +191,7 @@ const briefReport = (stdout: string): unknown => {
   try {
     const report = JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as {
       kind?: string;
-      closures?: ReadonlyArray<{ package: string; status: string; payloads?: unknown[]; files?: unknown[] }>;
+      closures?: ReadonlyArray<{ package: string; status: string; dependencyFiles?: unknown[]; files?: unknown[] }>;
       code?: string;
       message?: string;
     };
@@ -199,7 +199,7 @@ const briefReport = (stdout: string): unknown => {
       return (report.closures ?? []).map((closure) => ({
         package: closure.package,
         status: closure.status,
-        payloads: closure.payloads,
+        dependencyFiles: closure.dependencyFiles,
         files: closure.files?.slice(0, 5),
       }));
     }
@@ -249,7 +249,7 @@ const main = async (): Promise<void> => {
   mkdirSync(work, { recursive: true });
   mkdirSync(out, { recursive: true });
   const configDirectory = join(realpathSync(work), 'config');
-  const store = join(configDirectory, 'payloads');
+  const store = join(configDirectory, 'dependencies');
   const project = join(realpathSync(work), 'project');
   writeModels(project);
   const summary = new Summary(join(out, 's4-summary.txt'));
@@ -504,8 +504,8 @@ const main = async (): Promise<void> => {
       step: async () => {
         const seededConfig = join(realpathSync(work), `seed-${label}`);
         rmSync(seededConfig, { recursive: true, force: true });
-        mkdirSync(join(seededConfig, 'payloads'), { recursive: true });
-        seedClosures(join(seededConfig, 'payloads'));
+        mkdirSync(join(seededConfig, 'dependencies'), { recursive: true });
+        seedClosures(join(seededConfig, 'dependencies'));
         const run = await runTau(['prepare', '--verify', '--offline', '--json'], {
           configDirectory: seededConfig,
           killTimeout: 15 * 60_000,

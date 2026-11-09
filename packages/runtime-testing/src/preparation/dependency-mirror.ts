@@ -1,7 +1,7 @@
-// A loopback payload mirror over a seed directory: the one `node:http` server a surface's mirror test starts. It serves
+// A loopback dependency mirror over a seed directory: the one `node:http` server a surface's mirror test starts. It serves
 // the seed layout (`blobs/sha256/<hex>`, `tau-seed.json`) on `127.0.0.1:0`, records every request, and can answer a
 // path with a redirect or an error, so mirror order, no-fallback and redirect handling are observable from outside the
-// process under test. Point `TAU_PAYLOAD_MIRROR` (or a host's `mirror.baseUrl`) at `url`, and put `127.0.0.1` in
+// process under test. Point `TAU_DEPENDENCY_MIRROR` (or a host's `mirror.baseUrl`) at `url`, and put `127.0.0.1` in
 // `NO_PROXY`: a runner's proxy would otherwise carry the loopback request.
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -32,7 +32,7 @@ export type MirrorOverride =
  * A running loopback mirror.
  * @public
  */
-export type PayloadMirror = {
+export type DependencyMirror = {
   /** Base URL with a trailing slash, such as `http://127.0.0.1:53124/`. */
   readonly url: string;
   /** Every request, in arrival order. */
@@ -56,7 +56,7 @@ const servedPath = /^(?:blobs\/sha256\/[\da-f]{64}|tau-seed\.json)$/u;
  * @returns The running mirror; close it in `afterEach` or with `await using`.
  * @public
  */
-export const startPayloadMirror = async (seed: string): Promise<PayloadMirror> => {
+export const startDependencyMirror = async (seed: string): Promise<DependencyMirror> => {
   const requests: MirrorRequest[] = [];
   const overrides = new Map<string, MirrorOverride>();
   const answer = (method: string, path: string, status: number): number => {

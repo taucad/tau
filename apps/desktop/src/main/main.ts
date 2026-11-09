@@ -51,7 +51,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
-  defaultPayloadStore,
+  defaultDependencyStore,
   discoverAcpAgents,
   externalAgentDescriptors,
   keepAwakeWhileStreaming,
@@ -949,7 +949,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* W6: tell the kernel utilities which sealed closure each prepared native kernel runs from; a utility composes its
    * runtime once that frame arrives, and reads the store for every other kernel, which main prepares on first use
    * (`nativeKernels` below). The staging channel keeps its own store beside its own config. Collected at startup (D21). */
-  const nativeStorePath = desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore();
+  const nativeStorePath =
+    desktopChannel === 'staging' ? join(tauConfigDirectory, 'dependencies') : defaultDependencyStore();
   const nativeStoreAbort = new AbortController();
   const nativeStore = startNativeStore({
     store: nativeStorePath,

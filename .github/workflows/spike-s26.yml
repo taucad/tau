@@ -59,7 +59,7 @@ jobs:
             const manifest = JSON.parse(readFileSync("packages/plugins/build123d/tau-plugin.json", "utf8"));
             const pins = Object.values(manifest.dependencies).flat()
               .filter(({ target }) => target.os === "darwin" && target.arch === "arm64")
-              .flatMap(({ payloads }) => payloads.map(({ integrity }) => integrity))
+              .flatMap(({ files }) => files.map(({ integrity }) => integrity))
               .toSorted();
             console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
           ')

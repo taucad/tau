@@ -8,7 +8,7 @@
  * link, redeeming its code and listing the daemon) in the `apps/desktop` and `apps/ui` unit tests, T8 in
  * `apps/ui-e2e` and `apps/desktop-e2e`, T9 in `apps/ui-e2e/src/support/serve-ui-build.test.ts`, the published
  * closure of T1 in `scripts/src/check-pack-install.ts`, and the prepare-then-export half of T6 in
- * `build123d-export.integration.test.ts` (each payload fetched once from a no-fallback mirror).
+ * `build123d-export.integration.test.ts` (each dependency file fetched once from a no-fallback mirror).
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -81,8 +81,8 @@ const isolated = (extra: Readonly<Record<string, string>> = {}): Record<string, 
   env['XDG_CACHE_HOME'] = join(scratch, 'home', '.cache');
   env['XDG_DATA_HOME'] = join(scratch, 'home', '.local', 'share');
   env['TAU_ACQUISITION'] = '';
-  env['TAU_PAYLOAD_DIR'] = '';
-  env['TAU_PAYLOAD_MIRROR'] = '';
+  env['TAU_DEPENDENCY_DIR'] = '';
+  env['TAU_DEPENDENCY_MIRROR'] = '';
   env['TAU_HOST_RELAY_URL'] = '';
   env['TAU_HOST_UI_DIR'] = '';
   env['TAU_HOST_AGENT_PORT'] = '';

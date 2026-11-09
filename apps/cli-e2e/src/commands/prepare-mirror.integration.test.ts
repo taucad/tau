@@ -1,7 +1,7 @@
 /**
  * `tau prepare` as a child process against a loopback `node:http` mirror (charter D27: one mirror test per surface;
  * this is the CLI's). A fixture PicoGK closure, built with `@taucad/runtime-testing/preparation` and pinned to
- * origins under `payloads.invalid`, is written as a seed directory that the mirror serves; a sync loader hook points
+ * origins under `dependencies.invalid`, is written as a seed directory that the mirror serves; a sync loader hook points
  * `@taucad/picogk/tau-plugin.json` at the fixture manifest in the child only. Under no-fallback the mirror is the
  * only source: every blob is requested once, a missing blob fails the command naming the mirror URL, and an offline
  * cold store refuses before any request.
@@ -12,8 +12,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createFixtureClosure, startPayloadMirror, tarGz } from '@taucad/runtime-testing/preparation';
-import type { FixtureClosure, PayloadMirror } from '@taucad/runtime-testing/preparation';
+import { createFixtureClosure, startDependencyMirror, tarGz } from '@taucad/runtime-testing/preparation';
+import type { FixtureClosure, DependencyMirror } from '@taucad/runtime-testing/preparation';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +28,7 @@ type Run = { readonly code: number | undefined; readonly stdout: string; readonl
 describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
   let scratch = '';
   let closure: FixtureClosure;
-  let mirror: PayloadMirror;
+  let mirror: DependencyMirror;
   let rosterHook = '';
 
   const run = async (configDirectory: string, extra: readonly string[] = []): Promise<Run> =>
@@ -36,11 +36,11 @@ describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
       /* Built by assignment so no environment key is a source literal. */
       const env: Record<string, string> = { ...(process.env as Record<string, string>) };
       env['TAU_CONFIG_DIR'] = configDirectory;
-      env['TAU_PAYLOAD_MIRROR'] = mirror.url;
-      env['TAU_PAYLOAD_MIRROR_NO_FALLBACK'] = '1';
-      env['TAU_PAYLOAD_TARGET'] = 'darwin-arm64';
+      env['TAU_DEPENDENCY_MIRROR'] = mirror.url;
+      env['TAU_DEPENDENCY_MIRROR_NO_FALLBACK'] = '1';
+      env['TAU_DEPENDENCY_TARGET'] = 'darwin-arm64';
       env['TAU_ACQUISITION'] = '';
-      env['TAU_PAYLOAD_DIR'] = '';
+      env['TAU_DEPENDENCY_DIR'] = '';
       /* A loopback mirror must bypass any proxy the runner sets (S7). */
       env['NO_PROXY'] = '127.0.0.1,localhost';
       env['no_proxy'] = '127.0.0.1,localhost';
@@ -83,7 +83,7 @@ describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
       dependency: 'runtime',
       kernel: { name: 'picogk', extensions: ['cs'] },
       targets: [{ runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '14.0' }],
-      payloads: [
+      dependencyFiles: [
         {
           name: 'dotnet',
           bytes: tarGz(
@@ -94,7 +94,7 @@ describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
           ),
           format: 'tar.gz',
           destination: 'dotnet',
-          urls: ['https://payloads.invalid/dotnet.tar.gz'],
+          urls: ['https://dependencies.invalid/dotnet.tar.gz'],
         },
         {
           name: 'worker',
@@ -106,14 +106,14 @@ describe('tau prepare against a loopback mirror (W15, the CLI surface)', () => {
           ),
           format: 'tar.gz',
           destination: 'tau-worker',
-          urls: ['https://payloads.invalid/worker.tar.gz'],
+          urls: ['https://dependencies.invalid/worker.tar.gz'],
         },
       ],
     });
     const manifest = join(scratch, 'picogk-tau-plugin.json');
     await closure.writeManifest(manifest);
     await closure.writeSeed(join(scratch, 'seed'));
-    mirror = await startPayloadMirror(join(scratch, 'seed'));
+    mirror = await startDependencyMirror(join(scratch, 'seed'));
     rosterHook = join(scratch, 'native-roster.mjs');
     await writeFile(
       rosterHook,
@@ -153,13 +153,15 @@ registerHooks({
       kernel: 'picogk',
       closureIntegrity: closure.closureIntegrity,
     });
-    expect(requested.toSorted()).toEqual(closure.payloads.map(({ sha256 }) => `blobs/sha256/${sha256} 200`).toSorted());
+    expect(requested.toSorted()).toEqual(
+      closure.dependencyFiles.map(({ sha256 }) => `blobs/sha256/${sha256} 200`).toSorted(),
+    );
     expect(second.code, second.stderr).toBe(0);
     expect(blobRequests()).toEqual(requested);
   }, 120_000);
 
   it('should fail naming the mirror URL when the mirror misses a blob, and never fall back to the origin', async () => {
-    const worker = `blobs/sha256/${closure.payloads[1]!.sha256}`;
+    const worker = `blobs/sha256/${closure.dependencyFiles[1]!.sha256}`;
     mirror.override(worker, { status: 404 });
     const before = mirror.requests.length;
 
@@ -167,7 +169,7 @@ registerHooks({
 
     expect(result.code).toBe(3);
     expect(`${result.stdout}${result.stderr}`).toContain(`${mirror.url}${worker}`);
-    expect(`${result.stdout}${result.stderr}`).not.toContain('payloads.invalid/worker');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('dependencies.invalid/worker');
     expect(mirror.requests.slice(before)).toContainEqual({ method: 'GET', path: worker, status: 404 });
   }, 120_000);
 });

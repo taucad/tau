@@ -8,7 +8,7 @@ import { parsePluginDeployment, targetKey, wheelDataDestination } from '#prepara
 import { PreparationError } from '#preparation/preparation-error.js';
 
 type Manifest = Record<string, unknown> & {
-  dependencies: Record<string, Array<{ target: Record<string, unknown>; payloads: Array<Record<string, unknown>> }>>;
+  dependencies: Record<string, Array<{ target: Record<string, unknown>; files: Array<Record<string, unknown>> }>>;
   kernels: Record<string, Record<string, unknown>>;
 };
 
@@ -43,7 +43,7 @@ describe('parsePluginDeployment', () => {
 
       expect(deployment.kernels).toEqual({ build123d: { requires: ['engine'], extensions: ['py'] } });
       expect(
-        deployment.dependencies['engine']?.[0]?.payloads.map(({ name, format, destination, stripComponents }) => [
+        deployment.dependencies['engine']?.[0]?.files.map(({ name, format, destination, stripComponents }) => [
           name,
           format,
           destination,
@@ -69,7 +69,7 @@ describe('parsePluginDeployment', () => {
       const deployment = parsePluginDeployment(readFixture('picogk.tau-plugin.json'));
 
       expect(
-        deployment.dependencies['runtime']?.[0]?.payloads.map(({ name, integrity, destination, origin }) => ({
+        deployment.dependencies['runtime']?.[0]?.files.map(({ name, integrity, destination, origin }) => ({
           name,
           algorithm: integrity.slice(0, 6),
           destination,
@@ -98,11 +98,11 @@ describe('parsePluginDeployment', () => {
         'entries',
       ],
       [
-        'an unknown payload field',
+        'an unknown dependency file field',
         edited((manifest) => {
-          engine(manifest).payloads[2]!['sha256'] = 'abc';
+          engine(manifest).files[2]!['sha256'] = 'abc';
         }),
-        'dependencies.engine[0].payloads[2].sha256',
+        'dependencies.engine[0].files[2].sha256',
       ],
       [
         'a CPU-feature target axis',
@@ -114,101 +114,101 @@ describe('parsePluginDeployment', () => {
       [
         'a hex integrity in the North Star spelling',
         edited((manifest) => {
-          engine(manifest).payloads[2]!['integrity'] = `sha256:${'0'.repeat(64)}`;
+          engine(manifest).files[2]!['integrity'] = `sha256:${'0'.repeat(64)}`;
         }),
-        'dependencies.engine[0].payloads[2].integrity',
+        'dependencies.engine[0].files[2].integrity',
       ],
       [
         'an integrity of the wrong digest length',
         edited((manifest) => {
-          engine(manifest).payloads[0]!['integrity'] =
+          engine(manifest).files[0]!['integrity'] =
             'sha256-6WqKgQjVo7cOgnVnskk+3lQPNwXBIJ5/NHNrpqo5jdTQ0V8x62Z8nMo9vNMK2DsxWobV6aE/0sNw4vwM7OckNg==';
         }),
-        'dependencies.engine[0].payloads[0].integrity',
+        'dependencies.engine[0].files[0].integrity',
       ],
       [
         'unpadded base64',
         edited((manifest) => {
-          engine(manifest).payloads[0]!['integrity'] = 'sha256-uQVKnT1U9MtVc9RJB/3bKYdLCJCb3nPynyhoz4ciI+4';
+          engine(manifest).files[0]!['integrity'] = 'sha256-uQVKnT1U9MtVc9RJB/3bKYdLCJCb3nPynyhoz4ciI+4';
         }),
-        'dependencies.engine[0].payloads[0].integrity',
+        'dependencies.engine[0].files[0].integrity',
       ],
       [
         'a sha1 integrity',
         edited((manifest) => {
-          engine(manifest).payloads[0]!['integrity'] = 'sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=';
+          engine(manifest).files[0]!['integrity'] = 'sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=';
         }),
-        'dependencies.engine[0].payloads[0].integrity',
+        'dependencies.engine[0].files[0].integrity',
       ],
       [
         'a destination that escapes the closure root',
         edited((manifest) => {
-          engine(manifest).payloads[3]!['destination'] = '../outside';
+          engine(manifest).files[3]!['destination'] = '../outside';
         }),
-        'dependencies.engine[0].payloads[3].destination',
+        'dependencies.engine[0].files[3].destination',
       ],
       [
         'an absolute destination',
         edited((manifest) => {
-          engine(manifest).payloads[3]!['destination'] = '/usr/local/bin';
+          engine(manifest).files[3]!['destination'] = '/usr/local/bin';
         }),
-        'dependencies.engine[0].payloads[3].destination',
+        'dependencies.engine[0].files[3].destination',
       ],
       [
         'a Windows drive destination',
         edited((manifest) => {
-          engine(manifest).payloads[3]!['destination'] = 'C:/Windows';
+          engine(manifest).files[3]!['destination'] = 'C:/Windows';
         }),
-        'dependencies.engine[0].payloads[3].destination',
+        'dependencies.engine[0].files[3].destination',
       ],
       [
-        '"." on a non-raw payload',
+        '"." on a non-raw dependency file',
         edited((manifest) => {
-          engine(manifest).payloads[0]!['destination'] = '.';
+          engine(manifest).files[0]!['destination'] = '.';
         }),
-        'dependencies.engine[0].payloads[0].destination',
+        'dependencies.engine[0].files[0].destination',
       ],
       [
         'a wheel outside site-packages',
         edited((manifest) => {
-          engine(manifest).payloads[1]!['destination'] = 'python/lib';
+          engine(manifest).files[1]!['destination'] = 'python/lib';
         }),
-        'dependencies.engine[0].payloads[1].destination',
+        'dependencies.engine[0].files[1].destination',
       ],
       [
         'stripComponents on a wheel',
         edited((manifest) => {
-          engine(manifest).payloads[1]!['stripComponents'] = 1;
+          engine(manifest).files[1]!['stripComponents'] = 1;
         }),
-        'dependencies.engine[0].payloads[1].stripComponents',
+        'dependencies.engine[0].files[1].stripComponents',
       ],
       [
         'an escaping package path',
         edited((manifest) => {
-          engine(manifest).payloads[3]!['origin'] = { kind: 'packagePath', path: '../../secrets' };
+          engine(manifest).files[3]!['origin'] = { kind: 'packagePath', path: '../../secrets' };
         }),
-        'dependencies.engine[0].payloads[3].origin.path',
+        'dependencies.engine[0].files[3].origin.path',
       ],
       [
         'a plain-http origin',
         edited((manifest) => {
-          engine(manifest).payloads[2]!['origin'] = { kind: 'url', urls: ['http://files.pythonhosted.org/numpy.whl'] };
+          engine(manifest).files[2]!['origin'] = { kind: 'url', urls: ['http://files.pythonhosted.org/numpy.whl'] };
         }),
-        'dependencies.engine[0].payloads[2].origin.urls[0]',
+        'dependencies.engine[0].files[2].origin.urls[0]',
       ],
       [
         'an origin without its canonical URL',
         edited((manifest) => {
-          engine(manifest).payloads[2]!['origin'] = { kind: 'url', urls: [] };
+          engine(manifest).files[2]!['origin'] = { kind: 'url', urls: [] };
         }),
-        'dependencies.engine[0].payloads[2].origin.urls',
+        'dependencies.engine[0].files[2].origin.urls',
       ],
       [
-        'a repeated payload name',
+        'a repeated dependency file name',
         edited((manifest) => {
-          engine(manifest).payloads[2]!['name'] = 'python';
+          engine(manifest).files[2]!['name'] = 'python';
         }),
-        'dependencies.engine[0].payloads[2].name',
+        'dependencies.engine[0].files[2].name',
       ],
       [
         'an undeclared requires',
@@ -282,6 +282,21 @@ describe('parsePluginDeployment', () => {
       expect(error.message).toMatch(/The package is broken; report it or pin another version\.$/u);
     });
 
+    it('should refuse a variant that still lists payloads, naming files as its replacement', () => {
+      const error = refusal(
+        edited((manifest) => {
+          const { files, ...variant } = engine(manifest);
+          manifest.dependencies['engine'] = [{ ...variant, payloads: files } as unknown as ReturnType<typeof engine>];
+        }),
+      );
+
+      expect({ code: error.code, field: error.field }).toEqual({
+        code: 'MANIFEST_INVALID',
+        field: 'dependencies.engine[0].payloads',
+      });
+      expect(error.message).toContain('dependencies.engine[0].payloads was renamed to "files"');
+    });
+
     it('should accept two variants that differ only by floor', () => {
       const manifest = edited((draft) => {
         const newer = structuredClone(engine(draft));
@@ -292,12 +307,12 @@ describe('parsePluginDeployment', () => {
       expect(parsePluginDeployment(manifest).dependencies['engine']).toHaveLength(2);
     });
 
-    it('should accept "." on a raw payload', () => {
+    it('should accept "." on a raw dependency file', () => {
       const manifest = edited((draft) => {
-        engine(draft).payloads[3]!['destination'] = '.';
+        engine(draft).files[3]!['destination'] = '.';
       });
 
-      expect(parsePluginDeployment(manifest).dependencies['engine']?.[0]?.payloads[3]?.destination).toBe('.');
+      expect(parsePluginDeployment(manifest).dependencies['engine']?.[0]?.files[3]?.destination).toBe('.');
     });
 
     it('should accept a Linux target with libc and a libc floor', () => {

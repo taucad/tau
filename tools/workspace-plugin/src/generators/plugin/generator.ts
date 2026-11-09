@@ -76,8 +76,8 @@ const capabilityTemplate = (role: CapabilityRole, propertyName: string, sourceNa
 });
 
 /**
- * The payload targets of a Python kernel: `@taucad/python-kernel-core`'s `tau-python-kernel` command, run for this
- * package, writes its `tau-plugin.json` and project template, fills the payload seed, records the golden receipt and
+ * The dependency-file targets of a Python kernel: `@taucad/python-kernel-core`'s `tau-python-kernel` command, run for this
+ * package, writes its `tau-plugin.json` and project template, fills the dependency seed, records the golden receipt and
  * runs the worker's Python tests.
  */
 const pythonKernelTargets = (projectRoot: string): Record<string, TargetConfiguration> => {

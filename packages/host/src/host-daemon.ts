@@ -262,7 +262,7 @@ export type HostDaemonOptions = {
     readonly args?: readonly string[];
     /**
      * The native kernels the runtime children's definitions list (D37): each child reports its deployments and asks
-     * this daemon for each kernel's sealed closure, since it cannot read the payload store. The child may not spawn,
+     * this daemon for each kernel's sealed closure, since it cannot read the dependency store. The child may not spawn,
      * so this daemon starts each native worker on its behalf, only from a closure it answered and only through the OS
      * sandbox. Absent, every native kernel in a child refuses as not prepared.
      */

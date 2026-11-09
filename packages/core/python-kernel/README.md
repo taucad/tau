@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/npm/l/@taucad/python-kernel-core)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue)](https://docs.npmjs.com/generating-provenance-statements)
 
-Shared Python language-kernel worker, session, closure and payload-generator helpers for Tau's native Python kernels
+Shared Python language-kernel worker, session, closure and dependency-manifest generator helpers for Tau's native Python kernels
 
 ## Why @taucad/python-kernel-core?
 
@@ -48,20 +48,20 @@ The kernel registration carries it (`withNativeDeployment(defineKernel(...), exa
 `@taucad/native-process-core/adopter`), so a host discovers it from the runtime definition alone. The kernel's options
 are `{ closure?, requestTimeout, maxArtifactBytes }`: its `initialize()` calls
 `bindPythonKernel({ adopter: exampleNative, options })`, which takes an explicit `closure` as given and otherwise
-resolves the prepared closure from the host's resolver or the local payload store, then opens a session over the same
+resolves the prepared closure from the host's resolver or the local dependency store, then opens a session over the same
 worker with `createPythonWorkspaceMirror` and `createPythonSession`. Its `python/example_worker.py` serves requests
 with `tau_kernel.protocol.run_worker`.
 
 ### The `tau-python-kernel` command
 
-The generators a Python kernel's payloads come from ship as a bin, so a kernel outside the Tau repository keeps its
+The generators a Python kernel's dependency files come from ship as a bin, so a kernel outside the Tau repository keeps its
 files current without a Tau checkout. Each command takes `--package <dir>`; relative paths resolve against the working
 directory. A TypeScript `/native` entry needs a loader (`node --import @oxc-node/core/register`).
 
 | Command                 | Effect                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------ |
 | `generate` / `check`    | Write, or fail on any difference in, `tau-plugin.json`, the pylocks, SBOM and `tau_kernel` |
-| `seed [--target <key>]` | Fill the payload seed                                                                      |
+| `seed [--target <key>]` | Fill the dependency seed                                                                   |
 | `golden`                | Record this host's golden receipt                                                          |
 | `template [--check]`    | Write, or check, the project template                                                      |
 | `test [--python <exe>]` | The Python unit tests under the 100% coverage gate (without `--package`: `tau_kernel`'s)   |
@@ -88,7 +88,7 @@ directory. A TypeScript `/native` entry needs a loader (`node --import @oxc-node
 ### Python modules
 
 `python/tau_kernel/` holds the worker side, which each kernel package's generator copies into its own
-`python/tau_kernel/` and pins in its `tau-plugin.json` as raw payloads under `tau-worker/tau_kernel/`:
+`python/tau_kernel/` and pins in its `tau-plugin.json` as raw dependency files under `tau-worker/tau_kernel/`:
 
 | Module        | Purpose                                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,7 +98,7 @@ directory. A TypeScript `/native` entry needs a loader (`node --import @oxc-node
 | `glb.py`      | `write_glb` over plain mesh arrays, with topology and PBR material extensions.                                                                       |
 
 The `python/interpreter.json` CPython pin is every Python kernel's default, so their closures share one interpreter
-payload by digest; a kernel may ship its own `python/interpreter.json` to override it.
+dependency file by digest; a kernel may ship its own `python/interpreter.json` to override it.
 
 ## Environment
 

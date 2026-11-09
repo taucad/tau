@@ -1,5 +1,5 @@
-// Where a payload's bytes come from: the store, the seed, the mirror, then the manifest's own origins, in that order.
-// A payload the package ships inside itself comes from the store, the seed or the package, never the mirror.
+// Where a dependency file's bytes come from: the store, the seed, the mirror, then the manifest's own origins, in that order.
+// A dependency file the package ships inside itself comes from the store, the seed or the package, never the mirror.
 // The digest is the only key; every source's bytes are verified before anything is written.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -14,20 +14,20 @@ import { ArchiveError, fetchVerified, integrityMatches, integrityToHex } from '@
 import { PreparationError } from '#preparation/preparation-error.js';
 import { blobKey, publishBlob, writeAtomically } from '#preparation/preparation-store.js';
 import type { StoreLayout } from '#preparation/preparation-store.js';
-import type { DependencyPayload, Integrity, PayloadAcquisition } from '#preparation/preparation.types.js';
+import type { DependencyFile, Integrity, DependencyFileAcquisition } from '#preparation/preparation.types.js';
 
 const maximumRedirects = 5;
 const blobPathPattern = /^blobs\/sha256\/(?<hex>[\da-f]{64})$/u;
 
 /**
- * The bytes of one payload and where they came from.
+ * The bytes of one dependency file and where they came from.
  * @internal
  */
-export type AcquiredPayload = {
+export type AcquiredDependencyFile = {
   readonly bytes: Uint8Array<ArrayBuffer>;
   /** Lowercase hex sha256 of the bytes: the blob's store key. */
   readonly key: string;
-  readonly acquiredFrom: PayloadAcquisition;
+  readonly acquiredFrom: DependencyFileAcquisition;
 };
 
 /**
@@ -53,7 +53,7 @@ export type AcquisitionContext = {
   readonly indexes: Map<string, Promise<ReadonlyMap<string, string>>>;
 };
 
-/** No source the host may use holds the payload. */
+/** No source the host may use holds the dependency file. */
 export class OfflineMiss extends Error {
   public override readonly name = 'OfflineMiss';
 }
@@ -84,11 +84,11 @@ const readIndex = async (text: string | undefined): Promise<ReadonlyMap<string, 
   try {
     const parsed = JSON.parse(text) as {
       readonly closures?: ReadonlyArray<{
-        readonly payloads?: ReadonlyArray<{ readonly integrity?: unknown; readonly blob?: unknown }>;
+        readonly dependencyFiles?: ReadonlyArray<{ readonly integrity?: unknown; readonly blob?: unknown }>;
       }>;
     };
     for (const closure of parsed.closures ?? []) {
-      for (const { integrity, blob } of closure.payloads ?? []) {
+      for (const { integrity, blob } of closure.dependencyFiles ?? []) {
         const hex = typeof blob === 'string' ? blobPathPattern.exec(blob)?.groups?.['hex'] : undefined;
         if (typeof integrity === 'string' && hex !== undefined) {
           index.set(integrity, hex);
@@ -157,9 +157,9 @@ const insidePackage = (directory: string, path: string): string => {
   return target;
 };
 
-const candidatesOf = async (payload: DependencyPayload, context: AcquisitionContext): Promise<Candidate[]> => {
+const candidatesOf = async (dependencyFile: DependencyFile, context: AcquisitionContext): Promise<Candidate[]> => {
   const candidates: Candidate[] = [];
-  const stored = await blobKey(context.layout, payload.integrity);
+  const stored = await blobKey(context.layout, dependencyFile.integrity);
   if (stored !== undefined) {
     candidates.push({ kind: 'store', key: stored });
   }
@@ -168,15 +168,15 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
     const key = await indexedKey(
       context,
       { location: `seed:${seed}`, load: async () => readOptional(join(seed, 'tau-seed.json')) },
-      payload.integrity,
+      dependencyFile.integrity,
     );
     if (key !== undefined) {
       candidates.push({ kind: 'seed', path: join(seed, 'blobs', 'sha256', key), key });
     }
   }
-  const { origin } = payload;
+  const { origin } = dependencyFile;
   const shippedInPackage = origin.kind === 'packagePath' || origin.kind === 'packageAsset';
-  // A payload the package ships is never asked of the mirror: the request could only miss, and a warm prepare makes
+  // A dependency file the package ships is never asked of the mirror: the request could only miss, and a warm prepare makes
   // none (X51, I10).
   if (context.mirror !== undefined && !shippedInPackage) {
     const base = mirrorBase(context.mirror.baseUrl);
@@ -189,7 +189,7 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
           load: async () =>
             network ? fetchText(context, `${base}tau-seed.json`) : readOptional(fileURLToPath(`${base}tau-seed.json`)),
         },
-        payload.integrity,
+        dependencyFile.integrity,
       );
       if (key !== undefined) {
         candidates.push({ kind: 'mirror', url: `${base}blobs/sha256/${key}`, key, network });
@@ -200,7 +200,7 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
     if (context.directory === undefined) {
       throw new PreparationError(
         'MANIFEST_INVALID',
-        `Payload ${payload.name} is read from its npm package, but the host was given no directory for that package.`,
+        `Dependency file ${dependencyFile.name} is read from its npm package, but the host was given no directory for that package.`,
       );
     }
     const path =
@@ -224,15 +224,18 @@ const readable = async (path: string): Promise<boolean> => {
 };
 
 /**
- * Whether a payload can be acquired without a network request: from the store, the seed, a `file://` mirror or its
+ * Whether a dependency file can be acquired without a network request: from the store, the seed, a `file://` mirror or its
  * own npm package. Existence only; the bytes are still verified when they are read.
  * @internal
- * @param payload - A manifest payload.
+ * @param dependencyFile - A manifest dependency file.
  * @param context - The attempt's sources (`offline` is assumed).
  * @returns `true` when some local source names it.
  */
-export const locallyAvailable = async (payload: DependencyPayload, context: AcquisitionContext): Promise<boolean> => {
-  const candidates = await candidatesOf(payload, { ...context, offline: true });
+export const locallyAvailable = async (
+  dependencyFile: DependencyFile,
+  context: AcquisitionContext,
+): Promise<boolean> => {
+  const candidates = await candidatesOf(dependencyFile, { ...context, offline: true });
   for (const candidate of candidates) {
     const path =
       candidate.kind === 'store'
@@ -277,7 +280,7 @@ const countingFetch =
 
 const readVerified = async (
   file: { readonly path: string; readonly expectedKey?: string },
-  payload: DependencyPayload,
+  dependencyFile: DependencyFile,
   context: AcquisitionContext,
 ): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly key: string }> => {
   const { path, expectedKey } = file;
@@ -285,11 +288,11 @@ const readVerified = async (
   context.onPhase('verifying');
   const key = sha256Hex(bytes);
   if (
-    bytes.byteLength !== payload.byteLength ||
+    bytes.byteLength !== dependencyFile.byteLength ||
     (expectedKey !== undefined && key !== expectedKey) ||
-    !(await integrityMatches(bytes, payload.integrity))
+    !(await integrityMatches(bytes, dependencyFile.integrity))
   ) {
-    throw new ArchiveError('INTEGRITY_MISMATCH', `${path} does not match the pin of ${payload.name}.`, {
+    throw new ArchiveError('INTEGRITY_MISMATCH', `${path} does not match the pin of ${dependencyFile.name}.`, {
       reason: 'digest',
       path,
     });
@@ -302,15 +305,15 @@ const download = async (
     readonly url: string;
     readonly redirect: { readonly maximum: number; readonly allow: (url: URL) => boolean };
   },
-  payload: DependencyPayload,
+  dependencyFile: DependencyFile,
   context: AcquisitionContext,
 ): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly key: string }> => {
   context.onPhase('downloading');
   const { url, redirect } = request;
   const bytes = await fetchVerified({
     url,
-    integrity: payload.integrity,
-    byteLength: payload.byteLength,
+    integrity: dependencyFile.integrity,
+    byteLength: dependencyFile.byteLength,
     redirect,
     fetch: countingFetch(context.fetch, context.onBytes),
     signal: context.signal,
@@ -321,12 +324,12 @@ const download = async (
 
 const fromCandidate = async (
   candidate: Candidate,
-  payload: DependencyPayload,
+  dependencyFile: DependencyFile,
   context: AcquisitionContext,
 ): Promise<{
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly key: string;
-  readonly acquiredFrom: PayloadAcquisition;
+  readonly acquiredFrom: DependencyFileAcquisition;
 }> => {
   switch (candidate.kind) {
     case 'store': {
@@ -334,7 +337,7 @@ const fromCandidate = async (
       return {
         ...(await readVerified(
           { path: join(context.layout.blobs, candidate.key), expectedKey: candidate.key },
-          payload,
+          dependencyFile,
           context,
         )),
         acquiredFrom: { kind: 'store', location: `blobs/sha256/${candidate.key}` },
@@ -342,7 +345,7 @@ const fromCandidate = async (
     }
     case 'seed': {
       return {
-        ...(await readVerified({ path: candidate.path, expectedKey: candidate.key }, payload, context)),
+        ...(await readVerified({ path: candidate.path, expectedKey: candidate.key }, dependencyFile, context)),
         acquiredFrom: { kind: 'seed', location: candidate.path },
       };
     }
@@ -350,14 +353,14 @@ const fromCandidate = async (
       if (!candidate.network) {
         const path = fileURLToPath(candidate.url);
         return {
-          ...(await readVerified({ path, expectedKey: candidate.key }, payload, context)),
+          ...(await readVerified({ path, expectedKey: candidate.key }, dependencyFile, context)),
           acquiredFrom: { kind: 'mirror', location: candidate.url },
         };
       }
       const { origin } = new URL(candidate.url);
       const fetched = await download(
         { url: candidate.url, redirect: { maximum: maximumRedirects, allow: (url) => url.origin === origin } },
-        payload,
+        dependencyFile,
         context,
       );
       if (fetched.key !== candidate.key) {
@@ -370,13 +373,13 @@ const fromCandidate = async (
     }
     case 'origin': {
       return {
-        ...(await download({ url: candidate.url, redirect: originRedirect }, payload, context)),
+        ...(await download({ url: candidate.url, redirect: originRedirect }, dependencyFile, context)),
         acquiredFrom: { kind: 'origin', location: candidate.url },
       };
     }
     case 'package': {
       return {
-        ...(await readVerified({ path: candidate.path }, payload, context)),
+        ...(await readVerified({ path: candidate.path }, dependencyFile, context)),
         acquiredFrom: { kind: 'origin', location: candidate.path },
       };
     }
@@ -390,12 +393,12 @@ const locationOf = (candidate: Candidate): string =>
       ? candidate.path
       : candidate.url;
 
-const failure = (payload: DependencyPayload, failures: readonly Failure[]): PreparationError => {
+const failure = (dependencyFile: DependencyFile, failures: readonly Failure[]): PreparationError => {
   const mismatch = failures.find(({ error }) => error instanceof ArchiveError && error.code === 'INTEGRITY_MISMATCH');
   if (mismatch !== undefined) {
     return new PreparationError(
       'INTEGRITY_MISMATCH',
-      `${payload.name} from ${mismatch.location} does not match its pinned integrity. Nothing was written; the mirror, the seed or the pin is wrong.`,
+      `${dependencyFile.name} from ${mismatch.location} does not match its pinned integrity. Nothing was written; the mirror, the seed or the pin is wrong.`,
       { cause: mismatch.error },
     );
   }
@@ -407,39 +410,39 @@ const failure = (payload: DependencyPayload, failures: readonly Failure[]): Prep
     .join(', ');
   return new PreparationError(
     'DOWNLOAD_FAILED',
-    `Could not download ${payload.name} (${megabytes(payload.byteLength)}) from ${attempts}. Verified payloads are kept, so preparing again fetches only what is missing.`,
+    `Could not download ${dependencyFile.name} (${megabytes(dependencyFile.byteLength)}) from ${attempts}. Verified dependency files are kept, so preparing again fetches only what is missing.`,
     { cause: failures.at(-1)?.error },
   );
 };
 
 /**
- * Acquire one payload's verified bytes and publish them as a blob: the store first, then the seed, the mirror and
+ * Acquire one dependency file's verified bytes and publish them as a blob: the store first, then the seed, the mirror and
  * the manifest's origins. A source whose bytes do not match is skipped, never trusted.
  * @internal
- * @param payload - A manifest payload.
+ * @param dependencyFile - A manifest dependency file.
  * @param context - The attempt's sources.
  * @returns The verified bytes, their sha256 key and their source.
- * @throws {OfflineMiss} When no permitted source holds the payload and no network source was tried.
+ * @throws {OfflineMiss} When no permitted source holds the dependency file and no network source was tried.
  * @throws {PreparationError} `DOWNLOAD_FAILED` naming every URL tried and the size; `INTEGRITY_MISMATCH` when a
  * source served other bytes and none served the pinned ones.
  */
-export const acquirePayload = async (
-  payload: DependencyPayload,
+export const acquireDependencyFile = async (
+  dependencyFile: DependencyFile,
   context: AcquisitionContext,
-): Promise<AcquiredPayload> => {
+): Promise<AcquiredDependencyFile> => {
   const failures: Failure[] = [];
-  for (const candidate of await candidatesOf(payload, context)) {
+  for (const candidate of await candidatesOf(dependencyFile, context)) {
     context.signal.throwIfAborted();
     try {
       // oxlint-disable-next-line no-await-in-loop -- sources are tried in order; the first verified one wins
-      const acquired = await fromCandidate(candidate, payload, context);
+      const acquired = await fromCandidate(candidate, dependencyFile, context);
       const { acquiredFrom } = acquired;
       if (candidate.kind !== 'store') {
         // oxlint-disable-next-line no-await-in-loop -- publish before extraction so a later attempt reuses it
         await publishBlob(context.layout, {
           bytes: acquired.bytes,
           key: acquired.key,
-          integrity: payload.integrity,
+          integrity: dependencyFile.integrity,
           staging: context.staging,
         });
         // oxlint-disable-next-line no-await-in-loop -- ditto
@@ -458,7 +461,7 @@ export const acquirePayload = async (
   }
   const mismatched = failures.some(({ error }) => error instanceof ArchiveError && error.code === 'INTEGRITY_MISMATCH');
   if (context.offline && !mismatched) {
-    throw new OfflineMiss(`${payload.name} is in no source this host may use without the network.`);
+    throw new OfflineMiss(`${dependencyFile.name} is in no source this host may use without the network.`);
   }
   if (failures.length === 0) {
     // Only a no-fallback mirror that does not index a sha384 or sha512 pin leaves nothing to try.
@@ -470,5 +473,5 @@ export const acquirePayload = async (
       }),
     });
   }
-  throw failure(payload, failures);
+  throw failure(dependencyFile, failures);
 };

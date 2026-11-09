@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.6.0 (2026-11-09)
+
+### Features
+
+- feat(telemetry): Report agent-loop safeguards and compactions from the Pi host (R9) (#1623) (1ab6c548e)
+- feat(agent-tools): Restore web search and web browsing on the Pi agent host (#1605) (79bbd572f)
+- feat(api): record free accounts by default until they opt out (#1543) (9dba60326)
+- feat(api-billing): Label open cases by attribution and add age gauge (#1607) (195e6fa92)
+- feat(filesystem, desktop): Import a desktop folder or opened file by copying it host-side (W7.4) (#1584) (2305062c9)
+- feat(api): Measure gateway upload, admission and first-step prompt-cache hits (#1578) (5321d3e8a)
+- feat(ui): Match the Terminal's colours, text weight and spacing to the editor (#1531) (753d87fc8)
+- feat(ui): attach each deploy's commits to its Sentry release (#1546) (f9ce9c8ce)
+
+### Fixes
+
+- fix(agent-host): Keep the prompt prefix identical across turns and steps (#1629) (5fbe770fb)
+- fix(ui): Reject ambiguous project slug routes (#1620) (052b0fc55)
+- fix(ui): start every new project from Home and quiet the sidebar's project list (#1595) (0b779a208)
+- fix(desktop): Desktop Sentry release commits, PostHog CSP, API otel map and lighter page-load traces (#1615) (d577b7b7b)
+- fix(ui): Light the Terminal's text on macOS and turn on ls colours (#1592) (a25024279)
+- fix(ui): Keep a view's own camera save from snapping a newer orbit back (#1602) (7fc58da51)
+- fix(ui): Render the selected model's name on the server (#1560) (dd0e63268)
+- fix(ui): Reserve the remembered project list shape and trim library chrome (#1559) (e307f65cf)
+- fix: report a failed Linux sandbox setup as not started, give shell cleanup a realistic deadline, and stop the location chip loop from #1558 (#1586) (595c1737d)
+- fix(ui): paint Home's composer whole and keep its outline through the swap (#1563) (4b5cc4b69)
+- fix(ui): read the pending model name without comparing a boolean (#1583) (91a59fbbc)
+- fix(revisions): Give the compute worker realm its own Buffer global (#1505) (5476c70ba)
+- fix(ui): report unstarted observations as registering; move skills recovery into the bar (#1556) (b44721742)
+- fix(ui): refresh the Terminal screen mirror from parsed output (#1557) (787c52a6e)
+- fix(ui): Paint the application shell at its final geometry (R4, R7, R10) (#1554) (715f01902)
+
+### Performance
+
+- perf(ui): Add the project-open User Timing probe and its fixture (#1619) (2ebe5a074)
+
+### Other changes
+
+- test(telemetry): Stop kernel-plugin changes from selecting telemetry, host and agent-tools (#1639) (6c5f87c2e)
+- refactor(picovoxel): Remove the meshRelax option from PicoVoxel and PicoGK (#1622) (d42494722)
+- docs(www): simplify legal documents and describe agent recording (#1457) (d2d039df7)
+- refactor(api): Split the API into ten module libraries and run only affected package tests (#1576) (735d178dc)
+- ci(root): Run the standalone oracles only when they are affected, plus nightly (#1549) (6fc04b8d6)
+- refactor(chat): share the model catalog wire schema so the UI stops importing the API (#1568) (cb1b424f4)
+
 ## 0.5.0 (2026-11-08)
 
 ### Features

@@ -85,7 +85,7 @@ describe('validateModelImageInputSupport', () => {
     expect(() => {
       validateModelImageInputSupport({
         messages,
-        modelName: 'together-glm-5.2',
+        modelName: 'together-glm-5.3',
         supportsImageInput: false,
       });
     }).not.toThrow();
@@ -98,10 +98,10 @@ describe('validateModelImageInputSupport', () => {
     expect(() => {
       validateModelImageInputSupport({
         messages,
-        modelName: 'together-glm-5.2',
+        modelName: 'together-glm-5.3',
         supportsImageInput: false,
       });
-    }).toThrow('together-glm-5.2 cannot read image attachments');
+    }).toThrow('together-glm-5.3 cannot read image attachments');
   });
 
   it('should reject screenshot tool image outputs for a text-only model', () => {
@@ -118,7 +118,7 @@ describe('validateModelImageInputSupport', () => {
     expect(() => {
       validateModelImageInputSupport({
         messages,
-        modelName: 'together-glm-5.2',
+        modelName: 'together-glm-5.3',
         supportsImageInput: false,
       });
     }).toThrow('Switch to a vision-capable model or remove the image');

@@ -236,6 +236,27 @@ describe('validateTags()', () => {
       'fixture/named-ui-lib: unexpected tag "api:core" (api: is only for scope:api type:app-lib projects)',
     ]);
   });
+
+  it('allows one valid shell role on a private library and refuses it on every other project', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('sandbox', ['scope:shared', 'type:lib', 'shell:sandbox'], undefined),
+          project('terminal', ['scope:ui', 'type:app-lib', 'layer:feature', 'shell:terminal'], undefined),
+          project('unshelled-lib', ['scope:shared', 'type:lib'], undefined),
+          project('unknown-role', ['scope:shared', 'type:lib', 'shell:kernel'], undefined),
+          project('two-roles', ['scope:shared', 'type:lib', 'shell:sandbox', 'shell:service'], undefined),
+          project('shell-package', ['scope:shared', 'type:package', 'shell:service'], undefined),
+          project('shell-app', ['scope:ui', 'type:app', 'shell:terminal'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-role: unknown tag "shell:kernel" (shell: must be one of sandbox, service, terminal)',
+      'fixture/two-roles: expected exactly one shell: tag, found shell:sandbox, shell:service',
+      'fixture/shell-package: unexpected tag "shell:service" (shell: is only for type:lib or type:app-lib projects)',
+      'fixture/shell-app: unexpected tag "shell:terminal" (shell: is only for type:lib or type:app-lib projects)',
+    ]);
+  });
 });
 
 describe('bundledLibraries()', () => {

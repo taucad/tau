@@ -20,12 +20,6 @@ import { BillingJournalReconciliationService } from '#billing-journal-reconcilia
 import { BillingCashReconciliationService } from '#billing-cash-reconciliation.service.js';
 import { BillingPurchaseReconciliationService } from '#billing-purchase-reconciliation.service.js';
 import { BillingRoutePauseService, parseRoutePauseArguments } from '#billing-route-pause.service.js';
-import {
-  createSupplierLegacyStore,
-  deleteSupplierLegacy,
-  exportSupplierLegacy,
-  parseSupplierLegacyArguments,
-} from '#billing-supplier-legacy-export.js';
 import { registerBillableModelMeterContracts } from '#billable-model-qualification.js';
 import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#billing-policy.command.js';
 import { installBillingProtections } from '@taucad/api-database/billing-protections';
@@ -131,15 +125,8 @@ async function main(): Promise<void> {
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
   };
-  // The login (owner) identity: DDL, the tariff bootstrap, and the operator's route and legacy-row commands.
-  const ownerCommands = new Set([
-    'protect',
-    'migrate',
-    'sync',
-    'pause-route',
-    'resume-route',
-    'export-supplier-legacy',
-  ]);
+  // The login (owner) identity: DDL, the tariff bootstrap, and the operator's route commands.
+  const ownerCommands = new Set(['protect', 'migrate', 'sync', 'pause-route', 'resume-route']);
   const command = args[0] ?? '';
   const role = ownerCommands.has(command) ? undefined : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
   const client = postgres(databaseUrl, {
@@ -269,33 +256,6 @@ async function main(): Promise<void> {
           JSON.stringify({
             event: action === 'pause-route' ? 'billing.route_paused' : 'billing.route_resumed',
             ...pause,
-          }),
-        );
-        break;
-      }
-      case 'export-supplier-legacy': {
-        const options = parseSupplierLegacyArguments(args);
-        const store = createSupplierLegacyStore(client, options.environment);
-        const target = { store, environment: options.environment, outDirectory: options.outDirectory, now: new Date() };
-        if (options.delete) {
-          const deletion = await deleteSupplierLegacy(target);
-          console.log(
-            JSON.stringify({
-              event: 'billing.supplier_legacy_deleted',
-              environment,
-              outDirectory: options.outDirectory,
-              ...deletion,
-            }),
-          );
-          break;
-        }
-        const manifest = await exportSupplierLegacy(target);
-        console.log(
-          JSON.stringify({
-            event: 'billing.supplier_legacy_exported',
-            environment,
-            outDirectory: options.outDirectory,
-            files: manifest.files,
           }),
         );
         break;

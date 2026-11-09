@@ -575,6 +575,33 @@ describe('Grafana dashboards and alert rules', () => {
   });
 });
 
+describe('Agent latency and prompt cache dashboards', () => {
+  const panelNames = (file: string): Set<string> =>
+    new Set(
+      promqlSources()
+        .filter((source) => source.kind === 'panel' && source.file === `dashboards/${file}`)
+        .flatMap(({ query }) => metricNames(query)),
+    );
+
+  it('should keep the latency and prompt cache programs on their own dashboards', () => {
+    const uids = jsonFiles(grafanaRoot, 'dashboards').map((file) => [
+      path.basename(file),
+      read<{ uid: string }>(file).uid,
+    ]);
+    expect(uids).toContainEqual(['agent-latency.json', 'tau-agent-latency']);
+    expect(uids).toContainEqual(['agent-prompt-cache.json', 'tau-agent-prompt-cache']);
+  });
+
+  it('should not repeat a latency series on the prompt cache dashboard', () => {
+    const latency = panelNames('agent-latency.json');
+    const cache = panelNames('agent-prompt-cache.json');
+
+    expect(cache.size).toBeGreaterThan(0);
+    expect([...cache].filter((name) => latency.has(name))).toEqual([]);
+    expect([...cache].filter((name) => name.startsWith('tau_llm_gateway_'))).toEqual([]);
+  });
+});
+
 describe('Grafana environment binding', () => {
   it('should give every dashboard a local app binding without hosted app names', () => {
     for (const file of jsonFiles(grafanaRoot, 'dashboards')) {

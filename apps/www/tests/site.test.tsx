@@ -217,14 +217,15 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(heroLink).toContain('href="/download/"');
   expect(heroLink).toContain('data-host-download="page"');
   expect(html).toContain('Download Tau');
-  const agentPrompt = /<div class="agent-prompt">.*?<\/div>/u.exec(html)?.[0];
+  const agentPrompt = /<div class="agent-prompt-field">.*?<\/div>/u.exec(html)?.[0];
   expect(agentPrompt).toContain('Install the Tau plugin from https://tau.new/llms.txt</code>');
   // The UI edge function names staging's agent page by matching this exact element: one text node, no markers.
   expect(renderToString(<MemoryRouter>{home()}</MemoryRouter>)).toContain(
     '<code id="agent-prompt-text">Install the Tau plugin from https://tau.new/llms.txt</code>',
   );
-  expect(agentPrompt).toMatch(/<button[^>]*type="button"[^>]*data-placement="hero-agent"[^>]*hidden=""/u);
-  expect(agentPrompt).toContain('role="status"');
+  // The copy control mounts after hydration; until then its slot holds the field's width.
+  expect(html).not.toContain('data-placement="hero-agent"');
+  expect(html).toContain('class="agent-prompt-slot"');
   const downloads = renderToStaticMarkup(<MemoryRouter>{download()}</MemoryRouter>);
   for (const platform of ['mac', 'macIntel', 'windows', 'linux'] as const) {
     expect(downloads).toContain(desktopDownloadHref(platform));

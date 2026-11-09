@@ -151,11 +151,11 @@ jobs:
           run_api=$api
           run_billing=$billing
           # The queue run already ran the formal, browser, GeoSpec and CLI end-to-end lanes on
-          # this tree, and
-          # the API tests and billing contracts where it concluded them `success`: both run
-          # every suite of their target, not an affected subset, so that verdict holds for
-          # this commit whatever base this push diffs against. A service lane the queue run
-          # skipped or failed runs here when this plan selects it.
+          # this tree, and the API tests and billing contracts where it concluded them
+          # `success`. The API lane's suites are the affected `tag:scope:api` projects of that
+          # queue run, which is the verdict the affected lanes reuse too: every earlier commit
+          # carries its own. A service lane the queue run skipped or failed runs here when this
+          # plan selects it.
           if [ -n "$REUSED" ]; then
             formal=false
             browser=false
@@ -869,7 +869,7 @@ jobs:
         run: docker rm -f tau-api-smoke || true
 
   # Service lane: the suites that need Postgres + Redis + MinIO. Since the git
-  # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
+  # storage substrate landed, that is `test` for the affected `tag:scope:api` projects —
   # the `affected` lane above excludes the tag rather than trying to guess which
   # files reach a service — plus the service-backed targets (`test:models`,
   # `test:server-modes`, `test:git`) and the API's billing composition suites. Billing contracts
@@ -940,11 +940,19 @@ jobs:
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
     steps:
+      # Two commits in a queue run, full history otherwise (see `plan`): the suites step
+      # selects its projects with `nx affected`.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -966,7 +974,15 @@ jobs:
       - name: Apply the protected migration job
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
 
-      # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
+      # The default suite of every affected `tag:scope:api` project (the `affected` lane
+      # excludes the tag). `nx affected` diffs against the same NX_BASE/NX_HEAD as the
+      # affected lanes, so a change to one API library runs that library's suites and its
+      # dependents' (`api` and `api-e2e` depend on every one), not every API suite.
+      # `nx affected` ignores `--projects`, so the tag is selected by excluding every
+      # project but it: `--exclude '*,!tag:scope:api'`.
+      # `--parallel=1`: the suites share this lane's one PostgreSQL, and concurrent suites
+      # contend on it (DC-2 measured a 70,000-row purge suite going from 60 s to 120 s
+      # beside two others); one at a time keeps each suite's timing its own. `DATABASE_URL`
       # is named here rather than left to `apps/api/.env` — which the step above
       # copies from `.env.example` and which carries the same URL — so the database
       # these suites talk to is stated at the place they run, not inherited from a
@@ -988,7 +1004,7 @@ jobs:
           TAU_S3_CONFORMANCE_BUCKET: ${{ secrets.TAU_S3_CONFORMANCE_BUCKET }}
           TAU_S3_CONFORMANCE_ACCESS_KEY_ID: ${{ secrets.TAU_S3_CONFORMANCE_ACCESS_KEY_ID }}
           TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: ${{ secrets.TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY }}
-        run: pnpm nx run-many -t test --projects tag:scope:api
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
 
       - name: Qualify API development and production servers
         run: pnpm nx run-many -t test:server-modes

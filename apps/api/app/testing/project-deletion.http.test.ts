@@ -13,7 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import type postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
+import { ProjectDeletionController } from '@taucad/api-projects/projects/project-deletion.controller';
 import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
 import { startStorageHop } from '@taucad/api-git-core/testing/storage-hop';

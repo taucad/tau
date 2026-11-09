@@ -318,7 +318,7 @@ export const storyMarkup = (): React.JSX.Element => (
   </section>
 );
 export const principleStrip = (): React.JSX.Element => (
-  <section className='band principles' aria-label='Design, verify, make'>
+  <section className='band principles' aria-label='Design, verify, build'>
     {principles.map((item, index) => (
       <article key={item.id} className='cell principle'>
         <p className='kicker'>
@@ -476,7 +476,7 @@ export const planCards = (compact = false): React.JSX.Element => (
 export const closing = (): React.JSX.Element => (
   <section className='band closing' aria-labelledby='closing-title'>
     <div className='cell closing-copy'>
-      {kicker('Design. Verify. Make.')}
+      {kicker('Design. Verify. Build.')}
       <h2 id='closing-title'>
         Get started
         <br />

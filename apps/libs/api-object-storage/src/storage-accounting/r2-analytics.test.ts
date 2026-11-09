@@ -176,6 +176,17 @@ describe('readR2Analytics', () => {
     expect(figures.r2StoredBytes).toHaveLength(3);
   });
 
+  it('should accept a successful answer whose `errors` member is null, as Cloudflare sends it', async () => {
+    const fetcher: typeof fetch = async () => Response.json({ ...r2AnalyticsFixture, errors: null });
+
+    const figures = await readR2Analytics(
+      { accountId: 'acct-1', token: 'token-1', buckets, fetch: fetcher },
+      Date.parse('2026-10-28T21:17:05Z'),
+    );
+
+    expect(figures.r2StoredBytes).toHaveLength(3);
+  });
+
   it('should fail the pass on a GraphQL error without echoing the token', async () => {
     const fetcher: typeof fetch = async () =>
       Response.json({

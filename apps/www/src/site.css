@@ -5,6 +5,9 @@
 @source '../../../packages/ui/src/components/badge.tsx';
 @source '../../../packages/ui/src/components/card.tsx';
 @source '../../libs/ui-kit/src/components/plan-cards.tsx';
+@source '../../../packages/ui/src/components/copy-button.tsx';
+@source '../../../packages/ui/src/components/tooltip.tsx';
+@source '../../../packages/ui/src/components/popover.variants.ts';
 
 @font-face {
   font-family: 'Geist Sans';
@@ -402,24 +405,35 @@ main > .band:not(.band ~ .band)::before {
 /* The prompt sits close under the download, and the hero keeps its 1440 × 900 fit. */
 .agent-prompt {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
   margin-top: -0.75rem;
 }
-.agent-prompt .fine {
-  flex-basis: 100%;
-}
-.agent-prompt code {
-  min-width: 0;
-  font: 400 var(--fine) / 1.5 var(--font-mono);
-  color: var(--foreground);
-  padding: 0.25rem 0.5rem;
+/* One field: the monospace prompt, then the shared copy control at its end. */
+.agent-prompt-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0.25rem 0.25rem 0.25rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--background);
+  background: var(--muted);
+}
+.agent-prompt-field code {
+  min-width: 0;
+  /* A step under --fine so the prompt and its copy control share one line in the desktop hero column. */
+  font: 400 0.75rem / 1.5 var(--font-mono);
+  color: var(--foreground);
   overflow-wrap: anywhere;
   user-select: all;
+}
+.agent-prompt-field > button,
+.agent-prompt-slot {
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 /* ── Hero ─────────────────────────────────────────────────────────────────────────────── */

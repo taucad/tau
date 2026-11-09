@@ -42,7 +42,7 @@ The solution uses two layers:
 
 ### Layer 1: Abort-Shaped Branded ChatAbortError
 
-**File:** `apps/api/app/api/chat/utils/chat-abort.ts`
+**File:** `apps/libs/api-chat/src/utils/chat-abort.ts`
 
 A `ChatAbortError` class carries a module-private `unique symbol` as a runtime brand. The brand cannot be forged from outside the module because the symbol is created with `Symbol()` (non-global), not `Symbol.for()`.
 
@@ -73,7 +73,7 @@ catch (error: unknown) {
 
 ### Layer 2: Expected Cancellation Predicate
 
-**Files:** `apps/api/app/api/chat/utils/chat-abort.ts`, `apps/api/app/main.ts`, `apps/api/app/api-dev-vite-node-lifecycle.ts`
+**Files:** `apps/libs/api-chat/src/utils/chat-abort.ts`, `apps/api/app/main.ts`, `apps/api/app/api-dev-vite-node-lifecycle.ts`
 
 The process-level `unhandledRejection` handler usually does not have access to the request `AbortSignal`. It must use a narrow predicate that distinguishes Tau-branded chat cancellation from generic transport aborts.
 
@@ -145,10 +145,10 @@ LangGraph propagates abort to internal operations
 
 | File                                                   | Role                                                                                           |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `apps/api/app/api/chat/utils/chat-abort.ts`            | `ChatAbortError`, `isChatAbortError`, `isExpectedChatCancellationRejection`, tracker utilities |
-| `apps/api/app/api/chat/utils/chat-abort.test.ts`       | Tests for all abort utilities                                                                  |
+| `apps/libs/api-chat/src/utils/chat-abort.ts`           | `ChatAbortError`, `isChatAbortError`, `isExpectedChatCancellationRejection`, tracker utilities |
+| `apps/libs/api-chat/src/utils/chat-abort.test.ts`      | Tests for all abort utilities                                                                  |
 | `apps/api/app/api-unhandled-rejection-handler.ts`      | Process-level unhandled-rejection handler                                                      |
 | `apps/api/app/api-unhandled-rejection-handler.test.ts` | Process-boundary cancellation tests                                                            |
-| `apps/api/app/api/chat/chat.controller.ts`             | Controller catch block (Layer 1)                                                               |
+| `apps/libs/api-chat/src/chat.controller.ts`            | Controller catch block (Layer 1)                                                               |
 | `apps/api/app/main.ts`                                 | Standalone process handler installation (Layer 2)                                              |
 | `apps/api/app/api-dev-vite-node-lifecycle.ts`          | Vite dev SSR-loaded process handler installation                                               |

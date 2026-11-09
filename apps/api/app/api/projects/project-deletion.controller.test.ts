@@ -7,7 +7,7 @@ import { Test } from '@nestjs/testing';
 import type { Auth } from 'better-auth';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
+import { ProjectDeletionController } from '@taucad/api-projects/projects/project-deletion.controller';
 import {
   completeProjectDeletion,
   readOwnedProjectDeletion,

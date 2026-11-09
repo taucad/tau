@@ -1345,6 +1345,10 @@ const syncMachineDefinition = setup({
       if (context.remote !== undefined && context.remote !== '') {
         enq.sendTo('remoteMoves', { type: 'unwatch' });
         enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote });
+        /* A fresh watch reports only what lands after its tail, so the remote
+         * is pulled as a move would be: an idle state fetches, a busy one
+         * remembers it. A remote with no stream is read the same way. */
+        enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
       }
       return {};
     },

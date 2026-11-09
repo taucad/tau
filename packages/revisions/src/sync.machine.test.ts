@@ -2713,6 +2713,20 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
+  it('pulls a backed-up project when the session changes (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+
+    harness.stop();
+  });
+
   it('opens a failed project again when the session changes, whatever the refusal (audit R6)', async () => {
     const harness = start();
     await openCleanly(harness);

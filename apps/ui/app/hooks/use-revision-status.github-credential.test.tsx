@@ -529,7 +529,7 @@ describe('an identity change on the open client (audit R6)', () => {
     expect(scripted.client.open).toHaveBeenCalledOnce();
   });
 
-  it('should send nothing for a project with no GitHub binding when the person signs out', async () => {
+  it('should withdraw on the open connection for a project with no GitHub binding when the person signs out', async () => {
     githubProjectBinding.remove(projectId);
     const scripted = mountBound();
     await vi.waitFor(() => {
@@ -539,7 +539,7 @@ describe('an identity change on the open client (audit R6)', () => {
     setRevisionSessionUser(undefined);
     await Promise.resolve();
 
-    expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }]);
+    expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }, { apiBaseUrl }]);
     expect(scripted.client.close).not.toHaveBeenCalled();
   });
 

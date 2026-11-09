@@ -960,9 +960,10 @@ const revisionIdentityCommands = (
     unsubscribe ??= client().subscribe(recover);
     const bound = githubProjectBinding.get(projectId) !== undefined;
     if (next === undefined || !bound) {
-      /* Only a bound project's credential depends on who is signed in; an
-       * unbound one keeps the frame its last *Connect* sent. */
-      if (opening || bound) {
+      /* A bound project's credential depends on who is signed in. An unbound
+       * one is withdrawn too when a person leaves, since a *Connect* still
+       * waiting to bind may have handed the root that person's credential. */
+      if (opening || bound || previous !== undefined) {
         await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
       }
       if (!opening && asked === generation) {

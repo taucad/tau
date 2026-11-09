@@ -25,6 +25,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `ready_for_review` so a draft, which requests no macOS runner, gets its rows once it is ready.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches-ignore:
       - production
   schedule:
@@ -102,7 +104,8 @@ jobs:
   native-darwin:
     name: Native kernels on darwin-arm64
     needs: [plan]
-    if: needs.plan.outputs.projects != ''
+    # Not on a draft pull request: the row runs once it is marked ready for review.
+    if: needs.plan.outputs.projects != '' && !github.event.pull_request.draft
     runs-on: macos-26
     timeout-minutes: 60
     env:

@@ -155,6 +155,8 @@ jobs:
   workspace:
     name: Validate workspace
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     permissions:
       contents: read
       actions: read
@@ -325,6 +327,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.browser == 'true'
     runs-on: ubuntu-24.04
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     timeout-minutes: 20
     env:
       WWW_LAUNCH: 'true'
@@ -408,6 +412,8 @@ jobs:
   formal:
     name: Formal models
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
     timeout-minutes: 15
@@ -452,6 +458,8 @@ jobs:
   geospec-examples:
     name: GeoSpec example contracts
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.geospec-examples == 'true'
     timeout-minutes: 30
@@ -825,6 +833,8 @@ jobs:
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
     steps:
@@ -925,6 +935,8 @@ jobs:
   billing-e2e:
     name: Billing contracts (no Stripe credentials)
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes only, like the affected lanes; pull requests and the merge queue read.
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
     timeout-minutes: 30
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}

@@ -7,6 +7,7 @@ import type { SectionAxis, SectionPlane } from '#graphics/section-cuts.js';
 import type { ViewportGizmoStyle } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { viewportRenderTiers } from '#graphics/three/utils/render-order.utils.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
+import { timeViewerCanvas2d } from '#lib/viewer-load-timing.js';
 
 /*
  * The section plane picker: three tiles on the faces of a small exploded cube, each parallel to the plane it makes.
@@ -187,7 +188,7 @@ const readTextContext = (canvas: HTMLCanvasElement): CanvasRenderingContext2D | 
 };
 
 /** A label printed in the cube's font and weight, on a transparent ground. */
-const createLabelTexture = (text: string, color: string, font: string): THREE.CanvasTexture => {
+const drawLabelTexture = (text: string, color: string, font: string): THREE.CanvasTexture => {
   const canvas = document.createElement('canvas');
   canvas.width = labelCanvasWidth;
   canvas.height = labelCanvasHeight;
@@ -205,6 +206,10 @@ const createLabelTexture = (text: string, color: string, font: string): THREE.Ca
   texture.anisotropy = 4;
   return texture;
 };
+
+/** One tile label, timed as a viewer 2D context. */
+const createLabelTexture = (text: string, color: string, font: string): THREE.CanvasTexture =>
+  timeViewerCanvas2d('section.label', () => drawLabelTexture(text, color, font));
 
 /** The higher-contrast neutral for a label on `color`, as the cube chooses its hover label. */
 const contrastingLabel = (color: THREE.Color): THREE.Color => {

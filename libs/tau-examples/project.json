@@ -4,6 +4,7 @@
   "sourceRoot": "libs/tau-examples",
   "projectType": "library",
   "tags": ["scope:shared", "type:example", "ci:standalone"],
+  "implicitDependencies": ["viewer", "image"],
   "targets": {
     "generate-manifest": {
       "command": "tsx scripts/generate-manifest.mts",

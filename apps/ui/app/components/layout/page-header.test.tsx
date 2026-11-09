@@ -33,7 +33,9 @@ describe('PageHeader', () => {
     );
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
+    const section = screen.getByRole('heading', { level: 2, name: 'Projects' });
+    expect(section).toHaveClass('text-2xl', 'font-semibold', 'tracking-tight');
+    expect(section).not.toHaveClass('text-4xl');
   });
 
   it('should hide only the heading below md while the phone bar shows it, keeping the h1 and count', () => {

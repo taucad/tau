@@ -16,7 +16,7 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
     <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
       <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
         <div className='mb-12 text-center'>
-          <h1 className='mx-auto max-w-[16ch] text-3xl font-semibold tracking-tight text-balance md:max-w-[20ch] md:text-5xl'>
+          <h1 className='mx-auto max-w-[16ch] text-3xl font-medium tracking-tight text-balance md:max-w-[20ch] md:text-5xl'>
             What do you want to build?
           </h1>
         </div>
@@ -24,7 +24,7 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
         <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>
           <Separator />
-          <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>
+          <div className='mx-4 text-sm text-muted-foreground'>or</div>
           <Separator />
         </div>
         <div className='flex justify-center'>

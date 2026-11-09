@@ -825,24 +825,50 @@ describe('ProjectLibrary', () => {
     expect(screen.queryByText('Build from code')).not.toBeInTheDocument();
   });
 
-  it('shows the host empty content only while the library is known to have no projects', () => {
+  describe('host empty content', () => {
     const renderLibrary = (): ReturnType<typeof render> =>
       render(
         <TestRouter>
           <TooltipProvider>
-            <ProjectLibrary emptyContent={<div>community builds</div>} />
+            <ProjectLibrary headingLevel={2} emptyContent={<div>community builds</div>} />
           </TooltipProvider>
         </TestRouter>,
       );
 
-    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
-    const empty = renderLibrary();
-    expect(screen.getByText('community builds')).toBeInTheDocument();
-    empty.unmount();
+    it('replaces the whole section when the library is empty', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
+      renderLibrary();
 
-    mockUseProjectsResult = createUseProjectsResult();
-    renderLibrary();
-    expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByText('community builds')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Projects' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Project controls' })).not.toBeInTheDocument();
+      expect(screen.queryByText('No projects yet. Your first project appears here.')).not.toBeInTheDocument();
+    });
+
+    it('stands in for the skeleton while the count is unknown, not while projects are remembered', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      const unknown = renderLibrary();
+      expect(screen.getByText('community builds')).toBeInTheDocument();
+      unknown.unmount();
+
+      mockRememberedShape = { count: 3 };
+      renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Loading projects' })).toBeInTheDocument();
+    });
+
+    it('keeps the section once a project exists or a listing failure needs a retry', () => {
+      mockUseProjectsResult = createUseProjectsResult();
+      const listed = renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+      listed.unmount();
+
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], error: new Error('listing failed') };
+      renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
+    });
   });
 
   /* R5: a remembered empty list is known before the worker lists, so no skeleton stands in for it. */

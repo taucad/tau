@@ -162,7 +162,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               <Fragment key={project.id}>
                 {earlierFromId === project.id ? (
                   <SidebarMenuItem>
-                    <div className='flex h-6 items-center px-1.5 text-xs text-muted-foreground/70'>Earlier</div>
+                    <div className='flex h-6 items-center px-1.5 text-xs text-muted-foreground'>Earlier</div>
                   </SidebarMenuItem>
                 ) : null}
                 <ProjectNavigationItem
@@ -548,7 +548,7 @@ function ProjectsLabel(): React.JSX.Element {
   return (
     <div className='group/label flex h-7 items-center gap-1 pr-0.5'>
       {/* As quiet as the "Earlier" divider below it: the nav row above already says "Projects". */}
-      <SidebarGroupLabel className='min-w-0 flex-1 text-xs font-normal text-muted-foreground/70'>
+      <SidebarGroupLabel className='min-w-0 flex-1 text-xs font-normal text-muted-foreground'>
         Recents
         {projects > 0 ? <span className='ml-1.5 tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>

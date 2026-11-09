@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { MetaFunction } from 'react-router';
 import { useSearchParams } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { BuiltWithTau } from '#routes/_index/built-with-tau.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
@@ -24,7 +25,14 @@ export default function WebHome(): React.JSX.Element {
   return (
     <div className='pb-10'>
       <HomepageChatHero />
-      <ProjectLibrary headingLevel={2} emptyContent={<BuiltWithTau className='pt-4' />} />
+      <ProjectLibrary
+        headingLevel={2}
+        emptyContent={
+          <PageContent>
+            <BuiltWithTau />
+          </PageContent>
+        }
+      />
     </div>
   );
 }

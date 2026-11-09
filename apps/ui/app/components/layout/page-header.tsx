@@ -36,8 +36,8 @@ type PageHeaderProps = Omit<React.ComponentProps<'div'>, 'title'> & {
 };
 
 /**
- * Title row of a page or embedded section at 36 px weight 500, an optional
- * muted count and one action slot, wrapping on narrow viewports.
+ * Title row of a page (36 px weight 500) or embedded section (24 px weight 600),
+ * an optional muted count and one action slot, wrapping on narrow viewports.
  */
 export function PageHeader({
   title,
@@ -55,7 +55,12 @@ export function PageHeader({
       <div data-slot='page-header-title' className='flex items-baseline gap-3'>
         {/* Below `md` the bar shows the title; the heading stays in the outline and the count stays visible. */}
         <Heading
-          className={cn('text-4xl leading-[1.1] font-medium tracking-tight', isTitleInPhoneBar && 'max-md:sr-only')}
+          className={cn(
+            headingLevel === 1
+              ? 'text-4xl leading-[1.1] font-medium tracking-tight'
+              : 'text-2xl font-semibold tracking-tight',
+            isTitleInPhoneBar && 'max-md:sr-only',
+          )}
         >
           {title}
         </Heading>

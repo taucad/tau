@@ -212,9 +212,9 @@ export function ProjectLibrary({
   emptyContent,
 }: {
   readonly headingLevel?: 1 | 2;
-  /** Host-owned content under the empty line, while the library is known to have no projects. */
+  /** Replaces the whole section while the library has nothing to show or say. */
   readonly emptyContent?: ReactNode;
-}): React.JSX.Element {
+}): React.ReactNode {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -522,6 +522,23 @@ export function ProjectLibrary({
     </DropdownMenu>
   );
 
+  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
+  const isCatalogUnavailable = !showDeleted && auth === 'authed' && (cloudPending || isCloudFailed);
+  /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
+     whenever it has something to say: the Trash, a failure, a repair, or Tau Cloud still listing. An
+     unknown count counts as empty, so a first visit does not paint cards that then vanish. */
+  const hasNotice = Boolean(listingError) || workspaceBindingRepairs.length + conflicts.length + recoveries.length > 0;
+  if (
+    emptyContent !== undefined &&
+    rows.length === 0 &&
+    !showDeleted &&
+    !isCatalogUnavailable &&
+    !hasNotice &&
+    (!isLoading || (rememberedCount ?? 0) === 0)
+  ) {
+    return emptyContent;
+  }
+
   return (
     <PageContent className='flex flex-col gap-4 pb-4'>
       <PageHeader
@@ -718,10 +735,9 @@ export function ProjectLibrary({
         </div>
       ) : (
         <UnifiedProjectList
-          rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
-          isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
+          rows={rows}
+          isCatalogUnavailable={isCatalogUnavailable}
           controls={viewControls}
-          emptyContent={emptyContent}
           isShowingDeleted={showDeleted}
           onShowDeletedChange={handleToggleDeleted}
           isLoading={isLoading && projects.length === 0}
@@ -791,7 +807,6 @@ export function ProjectLibrary({
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
   readonly controls: ReactNode;
-  readonly emptyContent?: ReactNode;
   /** Whether the list is the Trash; its toggle lives in the sort menu (R15). */
   readonly isShowingDeleted: boolean;
   readonly onShowDeletedChange: (isShowing: boolean) => void;
@@ -864,7 +879,6 @@ function UnifiedProjectList({
   onOpenCloudProject,
   isCatalogUnavailable,
   controls,
-  emptyContent,
   isShowingDeleted,
   onShowDeletedChange,
   isLoading,
@@ -956,12 +970,9 @@ function UnifiedProjectList({
 
       {isEmpty ? (
         isCatalogUnavailable ? null : (
-          <>
-            <p className='text-sm text-muted-foreground'>
-              {isShowingDeleted ? 'Trash is empty.' : 'No projects yet. Your first project appears here.'}
-            </p>
-            {isShowingDeleted ? null : emptyContent}
-          </>
+          <p className='text-sm text-muted-foreground'>
+            {isShowingDeleted ? 'Trash is empty.' : 'No projects yet. Your first project appears here.'}
+          </p>
         )
       ) : isAwaitingRows && viewMode === 'table' ? (
         <div role='status' aria-label='Loading projects' aria-busy='true'>

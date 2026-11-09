@@ -303,7 +303,13 @@ export type LinuxCleanHostConsumer = LinuxProcessAccess & {
   exec(
     file: string,
     args: readonly string[],
-    options?: { env?: Record<string, string>; /** Milliseconds; three minutes when absent. */ killAfter?: number },
+    options?: {
+      env?: Record<string, string>;
+      /** Milliseconds; three minutes when absent. */
+      killAfter?: number;
+      /** Working directory; the consumer's home when absent. */
+      cwd?: string;
+    },
   ): Promise<{ status: number; stdout: string; stderr: string }>;
   spawn(file: string, args: readonly string[], env: Record<string, string>): Promise<number>;
   /** The consumer's own main (non `--type=`) processes whose executable matches `pattern`. */

@@ -600,6 +600,8 @@ const main = async (): Promise<void> => {
                   TAU_QUALIFICATION_REPORT_GL_RENDERER: '1',
                 },
                 killAfter: 1_200_000,
+                // `--import @oxc-node/core/register` resolves from the working directory: run in this checkout.
+                cwd: process.cwd(),
               });
               for (const suffix of ['', '.png', '.failure.json', '.failure.png']) {
                 const bytes = await linuxConsumer.readFile(join(consumerRenderer, `${fileName}${suffix}`));

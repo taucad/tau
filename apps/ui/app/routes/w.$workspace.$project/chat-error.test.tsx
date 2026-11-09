@@ -18,6 +18,7 @@ import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-l
 import {
   modelPendingAutoResumeBoundMilliseconds,
   modelPendingPollMilliseconds,
+  recordProviderUnavailableAutoResume,
   resetAutoResumes,
 } from '#utils/run-auto-resume.js';
 
@@ -442,6 +443,27 @@ describe('ChatError', () => {
     expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 2 seconds');
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should return a provider outage to the paused card once its automatic resume is spent', () => {
+    resetAutoResumes();
+    recordProviderUnavailableAutoResume('run_1', 1);
+    projected({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: 'The model provider is temporarily unavailable.',
+      code: 'PROVIDER_UNAVAILABLE',
+      httpStatus: 503,
+    });
+
+    render(<ChatErrorBanner />);
+
+    // The paused card, which carries the Tau Debug details, rather than the countdown card.
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Service Temporarily Unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('The model provider is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    resetAutoResumes();
   });
 
   it('should keep Try again for a service refusal the host rules unrecoverable', () => {

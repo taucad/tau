@@ -35,7 +35,7 @@ export default {
    *
    * Lazy discovery only learns a route from a `<Link>` already in the DOM. On a phone the
    * sidebar is a sheet whose links mount on open, and its discovery request is debounced
-   * until the sheet stops mutating, so a tap on a project row often went out first and the
+   * until the sheet stops mutating, so a tap on a sidebar row often went out first and the
    * navigation fetched `/__manifest` for itself before it could start: 11 of 20 taps from
    * the editor on main, 0 of 20 with this mode (Brain `phone-nav-discovery`, 2026-11-09).
    * The whole manifest ships as one hashed, immutable `manifest-<version>.js`

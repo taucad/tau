@@ -29,18 +29,19 @@ const nxBin = join(repoRoot, 'node_modules/.bin/nx');
  * `tau-ci-cache`). So a failure with the remote cache on is rerun once with it off;
  * tasks that already succeeded replay from the local cache. */
 const nx = (...args: string[]): void => {
-  const run = (env: NodeJS.ProcessEnv = process.env) => {
-    let outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit', env });
+  const run = () => {
+    let outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
     if (outcome.signal === 'SIGSEGV') {
       console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
-      outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit', env });
+      outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
     }
     return outcome;
   };
   let result = run();
   if (result.status !== 0 && process.env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']) {
-    console.warn(`nx ${args.join(' ')} failed with the remote cache on; rerunning once with it off`);
-    result = run({ ...process.env, NX_SELF_HOSTED_REMOTE_CACHE_SERVER: '' });
+    console.warn(`nx ${args.join(' ')} failed with the remote cache on; rerunning with it off from here on`);
+    process.env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER'] = '';
+    result = run();
   }
   if (result.status !== 0) {
     throw new Error(`nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);

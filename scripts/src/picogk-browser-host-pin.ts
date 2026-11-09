@@ -30,7 +30,9 @@
  *   check --pin <pin.json> [--environment <name> | --base <url>]
  *                                                         prove every pinned blob is served with its digest by both
  *                                                         hosts, or by one environment's (`production`, `staging`)
- * Exit codes: 0 success; 1 a refusal or failed check; 2 usage.
+ *   served --pin <pin.json>                               `served=` line for $GITHUB_OUTPUT: whether both hosts already
+ *                                                         serve every blob, probing an unserved manifest with one HEAD
+ * Exit codes: 0 success (`served=false` included); 1 a refusal or failed check; 2 usage.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -522,11 +524,84 @@ export const checkPinnedBlobs = async (options: {
   return failures.sort();
 };
 
+/** Whether a pin's blobs are already served on both hosts, and why: the producer's publish decision (D31). */
+export type ServedDecision = { readonly served: boolean; readonly reason: string };
+
+/**
+ * Whether every blob a freshly written pin names is already served, with its digest, by both hosts (charter D31: the
+ * inputs key decides whether to build; the output digest names what is published). A rebuilt host whose manifest digest
+ * both hosts already serve updates the pin record and publishes nothing.
+ *
+ * The probes stay minimal, since the digest may never have been published: one `HEAD` of the manifest per host, once
+ * and without a retry, production then staging, and the first that is not `200` (a `404` is "not served") ends the
+ * decision with no further request. Only when both hosts answer `200` is each proven in full with
+ * {@link checkPinnedBlobs}; any failure there also reads as not served, so the producer falls back to tagging and
+ * publishing, which writes whatever is missing.
+ * @param options - The pin, the transport and the full check's retry policy and concurrency.
+ * @param options.pin - The pin just written from the verified bundle.
+ * @param options.transport - The `fetch` to use.
+ * @param options.retry - How the full check retries a blob that is not served yet.
+ * @param options.concurrency - How many blobs the full check fetches at once.
+ * @returns Whether both hosts serve every blob, and a one-line reason.
+ */
+export const pinServed = async (options: {
+  readonly pin: PicogkBrowserHostPin;
+  readonly transport: typeof fetch;
+  readonly retry?: RetryPolicy;
+  readonly concurrency?: number;
+}): Promise<ServedDecision> => {
+  const { pin, transport } = options;
+  const bases = Object.values(blobBases);
+  for (const base of bases) {
+    const url = `${base}${pin.manifest.sha256}`;
+    let response: Response;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- the first host that does not serve the manifest ends the probes
+      response = await transport(url, { method: 'HEAD', redirect: 'error' });
+    } catch (error) {
+      return {
+        served: false,
+        reason: `${url} could not be probed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (response.status === 404) {
+      return { served: false, reason: `${url} is not served (HTTP 404)` };
+    }
+    if (response.status !== 200) {
+      return { served: false, reason: `${url} answered HTTP ${String(response.status)}` };
+    }
+    const length = response.headers.get('content-length');
+    if (length !== null && length !== String(pin.manifest.byteLength)) {
+      return {
+        served: false,
+        reason: `${url} is ${length} bytes, not the pinned ${String(pin.manifest.byteLength)}`,
+      };
+    }
+  }
+  for (const base of bases) {
+    // oxlint-disable-next-line no-await-in-loop -- one host is proven at a time, and the first failure ends the decision
+    const failures = await checkPinnedBlobs({
+      pin,
+      base,
+      transport,
+      ...(options.retry === undefined ? {} : { retry: options.retry }),
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    });
+    if (failures.length > 0) {
+      return { served: false, reason: failures.join('; ') };
+    }
+  }
+  return {
+    served: true,
+    reason: `manifest ${pin.manifest.sha256} and its ${String(pin.files.count)} files are already served with their digests at ${bases.join(' and ')}`,
+  };
+};
+
 /** Where the command line writes. */
 export type Io = { readonly out: (line: string) => void; readonly err: (line: string) => void };
 
 const usage =
-  'Usage: node scripts/src/picogk-browser-host-pin.ts status --pin <pin> --key <key> | compare <bundle> <bundle> | write --key <key> --bundle <dir> --out <pin> | plan --pin <pin> --key <key> --bundle <dir> --tag <tag> --out <tsv> | check --pin <pin> [--environment production|staging | --base <url>]';
+  'Usage: node scripts/src/picogk-browser-host-pin.ts status --pin <pin> --key <key> | compare <bundle> <bundle> | write --key <key> --bundle <dir> --out <pin> | plan --pin <pin> --key <key> --bundle <dir> --tag <tag> --out <tsv> | check --pin <pin> [--environment production|staging | --base <url>] | served --pin <pin>';
 
 const flags = (args: readonly string[], names: readonly string[], optional: readonly string[] = []) => {
   const values = new Map<string, string>();
@@ -539,6 +614,22 @@ const flags = (args: readonly string[], names: readonly string[], optional: read
     values.set(name, value);
   }
   return names.every((name) => values.has(name)) ? values : undefined;
+};
+
+// The `served` command: a `served=` step output, with its reason on stderr so the output file holds one line.
+const reportServed = async (
+  path: string,
+  io: Io,
+  network: { readonly transport: typeof fetch; readonly retry: RetryPolicy },
+): Promise<number> => {
+  const pin = await readPin(path);
+  if (pin === undefined) {
+    throw new Error(`${path} does not exist; write the pin before asking whether it is served.`);
+  }
+  const { served, reason } = await pinServed({ pin, ...network });
+  io.err(served ? `Already served: ${reason}.` : `Not served: ${reason}.`);
+  io.out(`served=${String(served)}`);
+  return 0;
 };
 
 /**
@@ -557,6 +648,7 @@ export const run = async (
   network?: { readonly transport: typeof fetch; readonly retry: RetryPolicy },
 ): Promise<number> => {
   const [command, ...args] = argv;
+  const { transport, retry } = network ?? { transport: fetch, retry: defaultRetry };
   try {
     if (command === 'compare' && args.length === 2) {
       const differences = await compareBundles(args[0]!, args[1]!);
@@ -576,7 +668,9 @@ export const run = async (
             ? flags(args, ['pin', 'key', 'bundle', 'tag', 'out'])
             : command === 'check'
               ? flags(args, ['pin'], ['environment', 'base'])
-              : undefined;
+              : command === 'served'
+                ? flags(args, ['pin'])
+                : undefined;
     const environment = options?.get('environment');
     // `--environment` names one known host and cannot be combined with an explicit `--base`.
     const environmentBase =
@@ -597,6 +691,9 @@ export const run = async (
       await writeFile(value('out'), serializePin(pin));
       io.out(`Pinned manifest ${pin.manifest.sha256} (${String(pin.files.count)} files) for ${pin.inputsKey}.`);
       return 0;
+    }
+    if (command === 'served') {
+      return await reportServed(value('pin'), io, { transport, retry });
     }
     if (command === 'plan') {
       const rows = publishPlan({
@@ -622,7 +719,8 @@ export const run = async (
       const missing = await checkPinnedBlobs({
         pin,
         base: each,
-        ...(network ?? { transport: fetch, retry: defaultRetry }),
+        transport,
+        retry,
       });
       failures.push(...missing);
       if (missing.length === 0) {

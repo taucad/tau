@@ -72,6 +72,9 @@
         },
         {
           "env": "SENTRY_DSN"
+        },
+        {
+          "env": "SENTRY_RELEASE"
         }
       ],
       "dependsOn": [

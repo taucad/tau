@@ -32,6 +32,7 @@ import {
   expectCount,
   expectSignedIn,
   expectVisible,
+  pressModelTreeShortcut,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -224,7 +225,7 @@ test('[completed-artifact] downloads Build123d on first use, renders the model, 
     await expectFirstNativeRender(page);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0);
-    await page.keyboard.press('Control+a');
+    await pressModelTreeShortcut(page);
     await expectVisible(page.getByText('Model', { exact: true }), 30_000);
     await expectVisible(page.getByRole('button', { name: 'Left', exact: true }), 60_000);
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);

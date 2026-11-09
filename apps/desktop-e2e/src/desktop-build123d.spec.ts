@@ -29,6 +29,7 @@ import {
   expectVisible,
   fileTreeItemOf,
   openViewerIssues,
+  pressModelTreeShortcut,
   renderCycleCount,
   selectChatModel,
   selectKernel,
@@ -487,7 +488,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectRenderCycleSince(page, beforeParameter);
     await expectGeometryFramed(page);
 
-    await page.keyboard.press('Control+a');
+    await pressModelTreeShortcut(page);
     await expectVisible(page.getByText('Model', { exact: true }), 30_000);
     await expectVisible(page.getByRole('button', { name: 'Left', exact: true }), 60_000);
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);
@@ -681,7 +682,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await radius.press('Tab');
     await expectRenderCycleSince(page, beforeParameter);
 
-    await page.keyboard.press('Control+a');
+    await pressModelTreeShortcut(page);
     const body = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 1', exact: true });
     const sphere = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 2', exact: true });
     await expectVisible(body, 60_000);

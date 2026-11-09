@@ -110,8 +110,15 @@ describe('release publish workflow', () => {
     ).toBe(true);
   });
 
-  it('reads the Nx Cloud cache the CI run wrote', () => {
-    expect(workflow).toContain(`NX_CLOUD_ACCESS_TOKEN: \${{ secrets.NX_CLOUD_ACCESS_TOKEN }}`);
+  it('reads the Nx remote cache the CI run wrote, with the read token only', () => {
+    expect(workflow).toContain(
+      `NX_SELF_HOSTED_REMOTE_CACHE_SERVER: \${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}`,
+    );
+    expect(workflow).toContain(
+      `NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: \${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}`,
+    );
+    expect(workflow).not.toContain('nx-cache-write');
+    expect(workflow).not.toContain('NX_CLOUD_ACCESS_TOKEN');
   });
 
   it('gives every publishable an ordered, pkgcheck-gated publish target', async () => {

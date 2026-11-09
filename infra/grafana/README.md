@@ -71,7 +71,7 @@ also enforces three storage-family rules for `tau.sync`, `tau.storage`,
 - No label admits a free-form string.
 - Every instrument is read by at least one dashboard panel.
 
-Pending exceptions are listed in `grafana-contract.test.ts` with the package that
+Pending exceptions are listed in `scripts/src/telemetry-grafana-contract.test.ts` with the package that
 removes them. `node scripts/src/validate-grafana.ts --log-sample <file>...`
 checks a captured storage log sample for grant headers, receipt signatures and
 `X-Amz-Signature` values. It reports the line and field, never the value.

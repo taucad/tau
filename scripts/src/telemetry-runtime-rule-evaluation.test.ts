@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /* The oracle lives in `scripts/` beside the other test-only derivations, outside the library and its coverage. */
-const oracle = await import('../scripts/promql-oracle.mts');
+const oracle = await import('./telemetry-promql-oracle.mts');
 type Oracle = typeof oracle;
 const { assertSupported, parseDuration, SeriesStore, simulateAlert } = oracle;
 type AlertRule = Parameters<Oracle['simulateAlert']>[1];
@@ -19,12 +19,12 @@ const near = (value: number, digits = 6): number => expect.closeTo(value, digits
 
 /**
  * T13 (runtime alert and panel query correctness): the checked-in runtime rules and dashboard panels are evaluated
- * against synthetic series, offline, by the oracle in `scripts/promql-oracle.mts` (no PromQL engine is in the
- * dependency tree; the oracle documents the subset it implements). `grafana-contract.test.ts` pins the selectors
+ * against synthetic series, offline, by the oracle in `telemetry-promql-oracle.mts` (no PromQL engine is in the
+ * dependency tree; the oracle documents the subset it implements). `telemetry-grafana-contract.test.ts` pins the selectors
  * statically; this file asserts the numbers, the minimum-traffic guards, missing versus zero data, the
  * Pending → Alerting → Normal sequence per rule, and that series from two releases are not counted twice.
  */
-const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
+const grafanaRoot = path.resolve(import.meta.dirname, '../../infra/grafana');
 
 type RuleJson = Readonly<{
   uid: string;

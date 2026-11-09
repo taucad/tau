@@ -3,17 +3,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineCounter, defineGauge, defineHistogram } from '#define-metric.js';
-import type { MetricDefinition } from '#define-metric.js';
-import { toPrometheusName } from '#prometheus.js';
-import { TauMetrics } from '#registry.js';
+import { defineCounter, defineGauge, defineHistogram, TauMetrics, toPrometheusName } from '@taucad/telemetry';
+import type { MetricDefinition } from '@taucad/telemetry';
 
 /**
  * The dashboards and alert rules query Tau's own series by their exported Prometheus names. This
  * pins those names to the registry, so a renamed or undeclared instrument fails here instead of
  * leaving a panel or rule silently empty.
  */
-const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
+const grafanaRoot = path.resolve(import.meta.dirname, '../../infra/grafana');
 
 /** Seeded Grafana trees: `bad` breaks each binding rule once, `v2` is what Tau Cloud's binding contract v2 renders. */
 const fixtureRoot = path.resolve(import.meta.dirname, 'fixtures/grafana-contract');
@@ -29,10 +27,9 @@ const pendingDeclaration: Readonly<Record<string, string>> = {};
  * `process.*` and need no reporter), so their names are read from that source.
  */
 const processInstruments = [
-  ...readFileSync(
-    path.resolve(import.meta.dirname, '../../../apps/libs/api-observability/src/otel.ts'),
-    'utf8',
-  ).matchAll(/createObservable(?<kind>Counter|Gauge)\(\s*'(?<name>process\.[\w.]+)'/gu),
+  ...readFileSync(path.resolve(import.meta.dirname, '../../apps/libs/api-observability/src/otel.ts'), 'utf8').matchAll(
+    /createObservable(?<kind>Counter|Gauge)\(\s*'(?<name>process\.[\w.]+)'/gu,
+  ),
 ].map(({ groups }) => toPrometheusName(groups!['name']!, groups!['kind'] === 'Counter' ? 'counter' : 'gauge'));
 
 const declared = new Set([

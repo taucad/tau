@@ -164,10 +164,14 @@ describe('the desktop packaging workflow', () => {
     );
   });
 
-  it.each(['assembly', 'dmg-window-preview'])('should run %s unless the selection said false', (name) => {
+  // The DMG preview also needs a macOS runner, so it skips a draft pull request as well (AF-2).
+  it.each([
+    ['assembly', "!cancelled() && needs.select.outputs.run != 'false'"],
+    ['dmg-window-preview', "!cancelled() && needs.select.outputs.run != 'false' && !github.event.pull_request.draft"],
+  ])('should run %s unless the selection said false', (name, condition) => {
     const job = parsed.jobs[name];
     expect(job?.needs).toEqual(['select']);
     // A dispatch skips the selection, and a failed selection sets nothing: both run packaging.
-    expect(job?.if).toBe(expression("!cancelled() && needs.select.outputs.run != 'false'"));
+    expect(job?.if).toBe(expression(condition));
   });
 });

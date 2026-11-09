@@ -583,3 +583,86 @@ describe('a copy of an external agent’s turn (XD3)', () => {
     expect(ledger.runs['run-1']?.externalPrompted).toBeUndefined();
   });
 });
+
+describe('agent-loop decisions (R9)', () => {
+  const nudge = (safeguardId: string) => ({
+    type: 'safeguard.recorded',
+    safeguardId,
+    action: 'nudge',
+    reason: 'Stop repeating the call.',
+    message: { id: `tau:safeguard:${safeguardId}`, role: 'user', content: 'Stop repeating the call.' },
+  });
+  const trace = (lane: string, tier: string, extra: Record<string, unknown> = {}) => ({
+    lane,
+    tier,
+    tokensBefore: 10,
+    tokensAfter: 5,
+    cleared: 1,
+    evicted: 0,
+    summarizerAttempts: 0,
+    summarizerUsage: null,
+    ...extra,
+  });
+  const rows = term([
+    life('admitted'),
+    committed,
+    life('running'),
+    nudge('read_file:abc:any-result'),
+    { type: 'safeguard.recorded', safeguardId: 'ping_pong:a:b', action: 'terminate', reason: 'Looping.' },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'tool-1',
+      replacement: { id: 'tool-1', role: 'user', content: 'cleared' },
+      details: trace('start_of_turn', 'tool_result_clearing'),
+    },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'tool-2',
+      replacement: { id: 'tool-2', role: 'user', content: 'cleared' },
+    },
+    {
+      type: 'history.compacted',
+      evictedMessageIds: ['turn-1'],
+      summary: { id: 'summary-1', role: 'user', content: 'Summary.' },
+      details: trace('overflow', 'summarization', { summary: 'placeholder' }),
+    },
+    life('completed'),
+  ]);
+
+  it('should record each safeguard intervention by pattern and action, and each compaction decision once', () => {
+    const run = foldChatLedger(emptyChatLedger, rows).runs['run-1'];
+    expect(run?.safeguards).toEqual([
+      { pattern: 'identical_call', action: 'nudge' },
+      { pattern: 'ping_pong', action: 'terminate' },
+    ]);
+    expect(run?.compactions).toEqual([
+      { lane: 'start_of_turn', tier: 'tool_result_clearing', outcome: 'cleared' },
+      { lane: 'overflow', tier: 'summarization', outcome: 'placeholder' },
+    ]);
+  });
+
+  it('should fold the same decisions from compact facts and skip a redelivery', () => {
+    const whole = foldChatLedger(emptyChatLedger, rows);
+    expect(foldChatLedger(whole, rows.slice(3, 8))).toBe(whole);
+    const facts = rows.map((row) => {
+      const classified = classifyLogRow(row);
+      if (classified.class === 'quarantined') {
+        throw new Error('Expected kept fixture row');
+      }
+      return projectLogRow({ event: classified.event, opaque: classified.class === 'opaque' });
+    });
+    const compact = foldProjectionFacts({
+      ledger: emptyChatLedger,
+      answer: {
+        status: 'batch',
+        chatId: 'chat-1',
+        sourceGeneration: 'source-1',
+        cursor: 0,
+        nextCursor: facts.length,
+        endCursor: facts.length,
+        facts,
+      },
+    });
+    expect(compact.kind === 'folded' ? compact.ledger.runs['run-1'] : undefined).toEqual(whole.runs['run-1']);
+  });
+});

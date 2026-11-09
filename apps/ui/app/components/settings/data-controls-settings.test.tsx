@@ -266,6 +266,13 @@ describe('DataControlsSettings', () => {
     expect(mockDecide).not.toHaveBeenCalled();
   });
 
+  it('should not offer the desktop analytics switch on the web, where cookie preferences decide analytics', () => {
+    render(<DataControlsSettings />);
+
+    expect(screen.queryByRole('switch', { name: 'Analytics' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Cookie preferences' })).toBeInTheDocument();
+  });
+
   it('keeps data controls to four rows, with account closure last', () => {
     render(<DataControlsSettings />);
 

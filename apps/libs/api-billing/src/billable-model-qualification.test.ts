@@ -23,8 +23,8 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['openai-gpt-5.6-sol', adapter],
     ['openai-gpt-5.5', adapter],
     ['anthropic-claude-opus-5', adapter],
-    ['together-glm-5.2', adapter],
-    ['morph-kimi-k3.1-pro', adapter],
+    ['together-glm-5.3', adapter],
+    ['morph-deepseek-v4.1-flash', adapter],
     ['google-gemini-3.5-flash', adapter],
     ['xai-grok-4.6', adapter],
   ]),
@@ -43,11 +43,11 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(29);
-    expect(new Set(billableModelRouteIds).size).toBe(29);
+    expect(billableModelRouteIds).toHaveLength(30);
+    expect(new Set(billableModelRouteIds).size).toBe(30);
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
-    expect(billableModelRouteIds).toContain('morph-kimi-k3.1-pro');
+    expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');
   });
 
   it('should qualify a configured provider without a manual account map', () => {
@@ -255,7 +255,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should accept the authoritative OpenAI-compatible host stream options and strict function shape', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'together-glm-5.2',
+        model: 'together-glm-5.3',
         messages: [
           { role: 'developer', content: 'static\n\nworkspace\n\ndynamic' },
           { role: 'user', content: 'hello' },
@@ -279,7 +279,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       providerWire: 'openai-completions',
     });
 
-    expect(result.routeId).toBe('together-glm-5.2');
+    expect(result.routeId).toBe('together-glm-5.3');
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
@@ -393,7 +393,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should qualify Morph as uncached input, cache read and output within its combined context', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'morph-kimi-k3.1-pro',
+        model: 'morph-deepseek-v4.1-flash',
         messages: [{ role: 'user', content: 'hello' }],
         stream: true,
         max_tokens: 512,
@@ -402,8 +402,8 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
 
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 4269n },
-      { dimension: 'cache_read', tier: null, quantity: 4269n },
+      { dimension: 'uncached_input', tier: null, quantity: 4275n },
+      { dimension: 'cache_read', tier: null, quantity: 4275n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
   });
@@ -411,7 +411,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should carry a supplier valuation for Together routes so their usage is metered', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'together-glm-5.2',
+        model: 'together-glm-5.3',
         messages: [{ role: 'user', content: 'hello' }],
         max_completion_tokens: 16,
         stream: true,
@@ -422,7 +422,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(result.providerId).toBe('together');
     expect(result.invocation.supplierValuation).toEqual({
       version: 'supplier-valuation-v1',
-      sourceRevision: 'official-pricing:2026-09-06:together-glm-5.2',
+      sourceRevision: 'official-pricing:2026-11-09:together-glm-5.3',
       longContextMinimumInputTokens: null,
       longContextRates: null,
       baseRates: result.invocation.supplierRates,
@@ -523,6 +523,36 @@ describe('catalog route vocabulary', () => {
       { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: amounts[2], denominatorUnits: '1000000' },
       { dimension: 'output', tier: null, numeratorPicoUsd: amounts[3], denominatorUnits: '1000000' },
     ]);
+  });
+
+  /* The transport may mark any Anthropic breakpoint with a one-hour lifetime, which
+   * Anthropic bills at 2× base input against 1.25× for five minutes. Every Anthropic
+   * contract prices both tiers so a split usage report always settles. */
+  it('should price both cache-write lifetimes on every Anthropic meter contract', () => {
+    const anthropicMeters = billableModelRouteMeters.filter((meter) => meter.routeId.startsWith('anthropic-'));
+    expect(anthropicMeters.length).toBeGreaterThan(0);
+    for (const meter of anthropicMeters) {
+      const rate = (key: string): bigint | undefined =>
+        meter.rates.find((entry) => `${entry.dimension}:${entry.tier ?? ''}` === key)?.numeratorPicoUsd;
+      const input = rate('uncached_input:');
+      expect(input, meter.routeId).toBeDefined();
+      expect(rate('cache_write:5m'), meter.routeId).toBe(((input ?? 0n) * 5n) / 4n);
+      expect(rate('cache_write:1h'), meter.routeId).toBe((input ?? 0n) * 2n);
+    }
+  });
+
+  it('should stamp the one-hour tariff reading on the Anthropic valuation', () => {
+    const result = qualifyRoute('anthropic-claude-opus-5.5');
+
+    expect(result.invocation.supplierValuation?.sourceRevision).toBe(
+      'official-pricing:2026-11-08:anthropic-claude-opus-5.5',
+    );
+    expect(result.invocation.supplierRates).toContainEqual({
+      dimension: 'cache_write',
+      tier: '1h',
+      numeratorPicoUsd: '8000000000000',
+      denominatorUnits: '1000000',
+    });
   });
 
   it('should resolve every funded route id and forward the supplier model id', () => {

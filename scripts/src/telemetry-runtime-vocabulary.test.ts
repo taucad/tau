@@ -6,13 +6,20 @@
  * series, and every registry capability is named by both.
  */
 import { describe, expect, it } from 'vitest';
-import { kernelIds } from '#ingest.js';
-import { capabilityOf, codeClassOf, errorTypes, fileFormatOf, pluginUsageIds, usageCoverage } from '#runtime-ingest.js';
-import type { PluginCapability } from '#runtime-ingest.js';
-import { runtimeMetrics } from '#runtime-metrics.js';
-import * as generated from '#runtime-vocabulary.js';
+import {
+  capabilityOf,
+  codeClassOf,
+  errorTypes,
+  fileFormatOf,
+  kernelIds,
+  pluginUsageIds,
+  runtimeMetrics,
+  usageCoverage,
+} from '@taucad/telemetry';
+import type { PluginCapability } from '@taucad/telemetry';
+import * as generated from '@taucad/telemetry/runtime-vocabulary';
 
-/** The parts of `scripts/runtime-registry.mts` this test reads. */
+/** The parts of `libs/telemetry/scripts/runtime-registry.mts` this test reads. */
 type RegistryModule = Readonly<{
   capabilityKinds: readonly string[];
   declaredCapabilityKinds: () => readonly string[];
@@ -31,8 +38,11 @@ type RegistryModule = Readonly<{
   >;
 }>;
 
-/* The derivation lives in `scripts/` (it imports the plugins, which this library must not depend on). */
-const registryModule = '../scripts/runtime-registry.mts';
+/*
+ * The derivation lives beside the telemetry generator (it imports the plugins, which that library must not depend on);
+ * this test lives here, in the workspace-wide `scripts` project, so the plugin sources are not `telemetry:test` inputs.
+ */
+const registryModule = new URL('../../libs/telemetry/scripts/runtime-registry.mts', import.meta.url).href;
 const registry = (await import(/* @vite-ignore */ registryModule)) as RegistryModule;
 const derived = await registry.deriveRuntimeVocabulary();
 

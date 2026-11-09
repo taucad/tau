@@ -24,3 +24,4 @@ export * from '#providers/provider.service.js';
 export * from '#providers/xai-responses.adapter.js';
 export * from '#chat.schema.js';
 export * from '#billable-model-request.js';
+export * from '#web-research/web-research.controller.js';

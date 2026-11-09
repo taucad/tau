@@ -87,8 +87,18 @@ runs:
         restore-keys: |
           ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
 
+    # Postinstall scripts fetch release binaries (Vale, Electron) from GitHub, which can answer 504 for
+    # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile
+      run: |
+        for attempt in 1 2 3; do
+          pnpm install --frozen-lockfile && exit 0
+          if [ "$attempt" -lt 3 ]; then
+            echo "::warning title=pnpm install failed::attempt $attempt failed; retrying" >&2
+            sleep $((attempt * 30))
+          fi
+        done
+        exit 1
       shell: bash
 
     # Every `pnpm nx` call goes through `nx-guard.ts`: it reruns a command once

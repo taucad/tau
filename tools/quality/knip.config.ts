@@ -134,6 +134,9 @@ const config: KnipConfig = {
         // `open-to-frame-observation.test.ts` spawn the other two.
         'apps/ui-e2e/production-server.ts',
         'apps/ui-e2e/src/support/{host-fixture,open-to-frame}.ts',
+        // Serialized into page and worker realms by the project-open measurement harness in Brain
+        // (`installProjectOpenCounters.toString()`), so nothing in the repository imports it.
+        'apps/ui-e2e/src/support/project-open-counters.ts',
         // The isolated deletion race target selects this nested Vitest configuration.
         'apps/api-e2e/src/git/project-deletion-race.vitest.config.ts',
       ],
@@ -300,6 +303,8 @@ const config: KnipConfig = {
         'app/lib/browser-stubs/resvg-js.ts',
         // The deletion component browser suite selects this nested config with --config.
         'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
+        // The project-open browser suite selects this nested config with --config.
+        'app/machines/project-open.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,

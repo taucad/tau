@@ -61,6 +61,8 @@ const run = async (
       [...args],
       {
         env: { ...process.env, ...options.env },
+        // The consumer's own home: a clean consumer cannot read the admin checkout the agent was started from.
+        cwd: homedir(),
         timeout: options.killAfter,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
@@ -253,6 +255,7 @@ const handlers = {
       .parse(params);
     const child = spawn(file, args, {
       env: { ...process.env, ...env },
+      cwd: homedir(),
       detached: true,
       // Keep native loader/FUSE/sandbox startup errors in the disposable job log.
       stdio: ['ignore', 'ignore', 'inherit'],
@@ -498,8 +501,9 @@ export const startLinuxConsumer = async (options: { name: string; repository: st
           uid: z.number().int(),
         })
         .parse(await call('download', download)),
-    measureSecurity: async (processes: QualificationProcesses) =>
-      (await call('measureSecurity', processes)) as QualificationSecurity,
+    // The agent accepts exactly these fields; the admin-side nativeAncestry stays on this side.
+    measureSecurity: async ({ mainPid, rendererPids, nativeChildPids }: QualificationProcesses) =>
+      (await call('measureSecurity', { mainPid, rendererPids, nativeChildPids })) as QualificationSecurity,
     discoverProcesses: async (mainPid, rendererPid) =>
       (await call('discoverProcesses', { mainPid, rendererPid })) as ReturnType<typeof discoverQualificationProcesses>,
     runtime: async (pid, resource, image): Promise<LinuxRuntimeFacts> => {

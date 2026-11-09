@@ -3,9 +3,9 @@ import type { AccountingFigures, AccountingObservation } from '#storage-accounti
 /**
  * R2 usage from Cloudflare's GraphQL Analytics API (W14 OB3, catalogue N50–N53, source X1).
  *
- * R2 reports per bucket only, so Tau's buckets are named by role: the environment's public and private
- * buckets, and `other` for every other bucket in the account (another environment's included). A bucket
- * name never becomes a label value.
+ * R2 reports per bucket only, so Tau's buckets are named by role: the environment's public, private,
+ * downloads and dependency buckets, and `other` for every other bucket in the account (another
+ * environment's included). A bucket name never becomes a label value.
  */
 
 const graphqlEndpoint = 'https://api.cloudflare.com/client/v4/graphql';
@@ -18,13 +18,19 @@ const hourMilliseconds = 60 * 60 * 1000;
 /** One response page per dataset; Tau's account has a handful of buckets, so this is never reached. */
 const rowLimit = 10_000;
 
-type R2Role = 'public' | 'private' | 'other';
+type R2Role = 'public' | 'private' | 'downloads' | 'dependencies' | 'other';
 type R2Window = 'hour' | 'month';
 
-/** The environment's two buckets (`TAU_S3_BUCKET`, `TAU_S3_PRIVATE_BUCKET`). */
+/**
+ * The environment's buckets by role: the two the API stores in (`TAU_S3_BUCKET`, `TAU_S3_PRIVATE_BUCKET`)
+ * and the two it only reports on (`TAU_CLOUDFLARE_DOWNLOADS_BUCKET`, `TAU_CLOUDFLARE_DEPENDENCIES_BUCKET`),
+ * which are absent when unset and then count as `other`.
+ */
 export type R2BucketRoles = {
   readonly public: string;
   readonly private: string;
+  readonly downloads?: string;
+  readonly dependencies?: string;
 };
 
 type OperationsRow = {
@@ -145,10 +151,11 @@ const actionOf = (action: string): R2RequestAttributes['tau.r2.action'] =>
 const statusOf = (status: string): R2RequestAttributes['tau.r2.status'] =>
   status === 'success' || status === 'userError' || status === 'internalError' ? status : 'other';
 
-const roleOf = (bucketName: string, buckets: R2BucketRoles): R2Role =>
-  bucketName === buckets.public ? 'public' : bucketName === buckets.private ? 'private' : 'other';
+/** The roles in label order; the first whose bucket matches names a bucket, and none matching is `other`. */
+const roles: readonly R2Role[] = ['public', 'private', 'downloads', 'dependencies', 'other'];
 
-const roles: readonly R2Role[] = ['public', 'private', 'other'];
+const roleOf = (bucketName: string, buckets: R2BucketRoles): R2Role =>
+  roles.find((role) => role !== 'other' && buckets[role] === bucketName) ?? 'other';
 
 /** Sums values under equal attributes, so every non-allow-listed bucket folds into one `other` series. */
 const summed = <Attributes extends Readonly<Record<string, string>>>(
@@ -174,7 +181,7 @@ const summed = <Attributes extends Readonly<Record<string, string>>>(
  * Maps one GraphQL answer to the `tau.r2.*` gauges.
  *
  * @param response - Cloudflare's answer to {@link r2AnalyticsQuery}.
- * @param buckets - The environment's public and private bucket names.
+ * @param buckets - The environment's bucket names by role.
  * @returns The four R2 gauges' figures.
  * @throws When the answer holds no account.
  */

@@ -244,3 +244,37 @@ Agent prompt cache › First-Step Token Mix
 Agent prompt cache › First-Step TTFT p50 by Cache Outcome
 Agent prompt cache › 1-Hour Cache Writes, All Steps
 Agent prompt cache › Turn Header Coverage
+
+# R2 buckets (R2 storage blast-radius blueprint phase 8): every panel reads the same Cloudflare analytics,
+# so each fills only where the analytics token is set; the downloads and dependency rows also need their
+# TAU_CLOUDFLARE_*_BUCKET settings.
+R2 buckets › Dependencies: objects
+R2 buckets › Dependencies: stored bytes
+R2 buckets › Dependencies: growth per day
+R2 buckets › Dependencies: write operations last hour
+R2 buckets › Dependencies: origin egress last hour
+R2 buckets › Dependencies: request errors last hour
+R2 buckets › Public content: objects
+R2 buckets › Public content: stored bytes
+R2 buckets › Public content: growth per day
+R2 buckets › Public content: write operations last hour
+R2 buckets › Public content: origin egress last hour
+R2 buckets › Public content: request errors last hour
+R2 buckets › Private content: objects
+R2 buckets › Private content: stored bytes
+R2 buckets › Private content: growth per day
+R2 buckets › Private content: write operations last hour
+R2 buckets › Private content: origin egress last hour
+R2 buckets › Private content: request errors last hour
+R2 buckets › Downloads: objects
+R2 buckets › Downloads: stored bytes
+R2 buckets › Downloads: growth per day
+R2 buckets › Downloads: write operations last hour
+R2 buckets › Downloads: origin egress last hour
+R2 buckets › Downloads: request errors last hour
+R2 buckets › Other buckets: objects
+R2 buckets › Other buckets: stored bytes
+R2 buckets › Other buckets: growth per day
+R2 buckets › Other buckets: write operations last hour
+R2 buckets › Other buckets: origin egress last hour
+R2 buckets › Other buckets: request errors last hour

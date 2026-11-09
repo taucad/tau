@@ -6,15 +6,17 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 
-const { initialize, isInitialized, captureMessage } = vi.hoisted(() => ({
+const { initialize, isInitialized, captureMessage, addEventProcessor } = vi.hoisted(() => ({
   initialize: vi.fn(),
   isInitialized: vi.fn(() => false),
   captureMessage: vi.fn(),
+  addEventProcessor: vi.fn(),
 }));
 vi.mock('@sentry/electron/main', () => ({
   init: initialize,
   isInitialized,
   captureMessage,
+  addEventProcessor,
   IPCMode: { Classic: 1, Protocol: 2, Both: 3 },
 }));
 afterEach(() => {
@@ -23,6 +25,7 @@ afterEach(() => {
   initialize.mockReset();
   isInitialized.mockReset();
   captureMessage.mockReset();
+  addEventProcessor.mockReset();
 });
 
 it('imports inertly, admits a pristine profile, then lets crash reporting create its files', async () => {

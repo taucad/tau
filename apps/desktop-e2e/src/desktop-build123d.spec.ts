@@ -489,7 +489,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectGeometryFramed(page);
 
     await pressModelTreeShortcut(page);
-    await expectVisible(page.getByText('Model', { exact: true }), 30_000);
+    await expectVisible(page.getByText('Model tree', { exact: true }), 30_000);
     await expectVisible(page.getByRole('button', { name: 'Left', exact: true }), 60_000);
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);
 

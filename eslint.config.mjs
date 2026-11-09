@@ -140,12 +140,6 @@ const namingConventionBase = [
   },
   { selector: 'typeLike', format: ['StrictPascalCase'] },
   {
-    selector: 'variable',
-    types: ['boolean'],
-    format: ['StrictPascalCase'],
-    prefix: ['is', 'has', 'can', 'should', 'will', 'did'],
-  },
-  {
     selector: 'interface',
     filter: '^(?!I)[A-Z]',
     format: ['StrictPascalCase'],
@@ -639,27 +633,11 @@ const config = [
     ],
   },
 
-  {
-    ...tseslint.configs.base,
-    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-    languageOptions: {
-      ...tseslint.configs.base.languageOptions,
-      // oxlint-disable-next-line typescript/no-unsafe-assignment -- parserOptions is a runtime-resolved object
-      parserOptions: {
-        ...tseslint.configs.base.languageOptions?.parserOptions,
-        projectService: {
-          allowDefaultProject: [
-            'eslint.config.mjs',
-            'examples/electron/electron.vite.config.ts',
-            'apps/api/vitest.config.ts',
-            'packages/runtime/src/nextjs/package-assets-loader.mjs',
-            'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
-          ],
-        },
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
+  /*
+   * Parser only, no type information: every type-aware rule runs once, in oxlint (tsgolint). No ESLint rule
+   * here reads parser services, so a `projectService` program would only repeat that type-check.
+   */
+  tseslint.configs.base,
 
   {
     plugins: { '@nx': nxEslintPlugin },

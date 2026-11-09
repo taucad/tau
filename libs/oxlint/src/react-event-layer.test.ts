@@ -83,7 +83,7 @@ useEffect(idle, [idle]);
     ).toEqual(['4 effect .subscribe', '5 effect .send', '10 effect .send', '11 effect requestAnimationFrame']);
   });
 
-  it('counts getSnapshot() calls outside select* helpers', () => {
+  it('counts getSnapshot() calls outside module-level select* helpers', () => {
     expect(
       summary(
         `const value = actor.getSnapshot().context.value;
@@ -92,10 +92,36 @@ const selectOther = (actor) => actor.getSnapshot();
 const helpers = { selectThird: (actor) => actor.getSnapshot() };
 class Store { getSnapshot() { return this.inner.getSnapshot(); } }
 const read = getSnapshot();
+const bridge = { selectSectionCut(id) { graphicsActor.getSnapshot(); } };
+function Panel() { const selectTab = () => actor.getSnapshot(); }
+function selection(actor) { return actor.getSnapshot(); }
 `,
         'fixture.ts',
       ),
-    ).toEqual(['1 getSnapshot', '5 getSnapshot', '6 getSnapshot']);
+    ).toEqual([
+      '1 getSnapshot',
+      '4 getSnapshot',
+      '5 getSnapshot',
+      '6 getSnapshot',
+      '7 getSnapshot',
+      '8 getSnapshot',
+      '9 getSnapshot',
+    ]);
+  });
+
+  it('resolves a named effect callback in its own scope, not the first binding in the file', () => {
+    expect(
+      summary(`import { useCallback, useEffect } from 'react';
+function First() {
+  const cb = useCallback(() => { document.title = 'x'; }, []);
+  useEffect(cb, [cb]);
+}
+function Second() {
+  const cb = useCallback(() => { actor.send({ type: 'a' }); }, []);
+  useEffect(cb, [cb]);
+}
+`),
+    ).toEqual(['8 effect .send']);
   });
 });
 
@@ -118,12 +144,12 @@ describe('reactEventLayerViolations', () => {
   it('names each site of a file over its ceiling, and treats an absent line as 0', () => {
     expect(reactEventLayerViolations(measured, { 'app/a.tsx': 1 }, 'm.json')).toEqual([
       [
-        'app/a.tsx: 2 React event-layer site(s) exceeds its ceiling of 1 in m.json. Move the work into an actor (charter I10).',
+        'app/a.tsx: 2 React event-layer site(s) exceeds its ceiling of 1 in m.json. Move the work into an actor.',
         '  3:1 effect calls .send',
         '  9:5 getSnapshot()',
       ].join('\n'),
       [
-        'app/b.tsx: 1 React event-layer site(s) has no line in m.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor (charter I10).',
+        'app/b.tsx: 1 React event-layer site(s) has no line in m.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
         '  1:1 effect calls setTimeout',
       ].join('\n'),
     ]);
@@ -140,7 +166,7 @@ describe('reactEventLayerManifestProblems', () => {
       reactEventLayerManifestProblems({ 'app/b.tsx': 1, 'app/a.tsx': 0, 'app/c.tsx': 1.5, 'other/d.tsx': 1 }, ['app']),
     ).toEqual([
       'app/a.tsx: ceiling must be a positive integer; delete the line when it reaches 0',
-      'app/a.tsx: lines must be sorted by path and unique',
+      'app/a.tsx: lines must be sorted by path',
       'app/c.tsx: ceiling must be a positive integer; delete the line when it reaches 0',
       "other/d.tsx: outside this manifest's scope (app)",
     ]);
@@ -167,6 +193,10 @@ describe('checkReactEventLayerCeiling', () => {
     writeFileSync(join(source, 'types.d.ts'), effect);
     writeFileSync(join(source, 'viewer.test-utils.ts'), effect);
     writeFileSync(join(source, 'status.test-harness.ts'), effect);
+    writeFileSync(join(source, 'store.test-helpers.ts'), effect);
+    writeFileSync(join(source, 'xstate-test.utils.ts'), effect);
+    writeFileSync(join(source, 'types.test-d.ts'), effect);
+    writeFileSync(join(source, 'data.fixture.ts'), effect);
     writeFileSync(join(source, 'react-event-layer.ceiling.json'), '{}\n');
 
     expect(
@@ -176,17 +206,35 @@ describe('checkReactEventLayerCeiling', () => {
       }),
     ).toEqual([
       [
-        'pkg/src/nested/counted.tsx: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor (charter I10).',
+        'pkg/src/data.fixture.ts: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
+        '  2:1 effect calls .send',
+      ].join('\n'),
+      [
+        'pkg/src/nested/counted.tsx: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
         '  2:1 effect calls .send',
       ].join('\n'),
     ]);
 
-    writeFileSync(join(source, 'react-event-layer.ceiling.json'), '{ "pkg/src/nested/counted.tsx": 1 }\n');
+    writeFileSync(
+      join(source, 'react-event-layer.ceiling.json'),
+      '{ "pkg/src/data.fixture.ts": 1, "pkg/src/nested/counted.tsx": 1 }\n',
+    );
     expect(
       checkReactEventLayerCeiling({
         manifest: pathToFileURL(join(source, 'react-event-layer.ceiling.json')),
         directories: [pathToFileURL(source)],
       }),
     ).toEqual([]);
+
+    writeFileSync(
+      join(source, 'react-event-layer.ceiling.json'),
+      '{ "pkg/src/data.fixture.ts": 1, "pkg/src/nested/counted.tsx": 0, "pkg/src/nested/counted.tsx": 1 }\n',
+    );
+    expect(
+      checkReactEventLayerCeiling({
+        manifest: pathToFileURL(join(source, 'react-event-layer.ceiling.json')),
+        directories: [pathToFileURL(source)],
+      }),
+    ).toEqual(['pkg/src/nested/counted.tsx: listed more than once']);
   });
 });

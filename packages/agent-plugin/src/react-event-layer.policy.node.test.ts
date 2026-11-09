@@ -1,14 +1,14 @@
 // @vitest-environment node
 /*
- * Guards charter invariant I10 for packages/agent-plugin/src and app: React effects never send, subscribe or
- * time, and `getSnapshot()` stays inside `select*` helpers. Today's sites are
+ * Holds the React event layer in packages/agent-plugin/src and app: effects that send, subscribe or
+ * run timers, and `getSnapshot()` reads outside `select*` helpers, move to actors. Today's sites are
  * held per file in react-event-layer.ceiling.json, which only goes down. Remove
  * a site and lower its line (delete it at 0); a file moved elsewhere carries
  * its line with it (charter D21). The counter is `@taucad/oxlint/react-event-layer`.
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not mark this
-// project affected; nx.json lists the helper as a `test` input instead.
+// project affected; nx.json lists the helper as a `test` and `typecheck` input instead.
 // nx-ignore-next-line
 import { checkReactEventLayerCeiling } from '@taucad/oxlint/react-event-layer';
 import { describe, expect, it } from 'vitest';

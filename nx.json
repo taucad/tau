@@ -179,7 +179,8 @@
       "!{projectRoot}/**/*.test-d.*",
       "!{projectRoot}/vitest.config.*",
       "!{projectRoot}/**/*.md",
-      "!{projectRoot}/specs/**/*"
+      "!{projectRoot}/specs/**/*",
+      "!{projectRoot}/**/react-event-layer.ceiling.json"
     ]
   },
   "release": {
@@ -190,7 +191,8 @@
         "**/*.spec.ts",
         "**/*.test.ts",
         "**/*.md",
-        "packages/plugins/picogk/browser-host.pin.json"
+        "packages/plugins/picogk/browser-host.pin.json",
+        "**/react-event-layer.ceiling.json"
       ]
     },
     "version": {

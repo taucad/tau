@@ -1,8 +1,9 @@
 /**
  * Shared counter behind every `react-event-layer.policy.node.test.ts`.
  *
- * Charter invariant I10 says React effects never send, subscribe or time; that
- * work belongs to actors. Until each capability moves, a per-file ceiling holds
+ * React effects should not send events, subscribe or run timers, and components
+ * should not read actor snapshots imperatively; that work belongs to actors
+ * (the graphics charter's lint ratchet, scoped UI-wide by its D17). Until each capability moves, a per-file ceiling holds
  * today's sites and may only go down. One thin test per Nx project calls
  * {@link checkReactEventLayerCeiling}, so Nx reruns the check whenever that
  * project's own files change.
@@ -13,7 +14,8 @@
  *   `subscribe(`), `setTimeout(`,
  *   `setInterval(` or `requestAnimationFrame(`, counted once however many
  *   such calls it holds; or
- * - one `getSnapshot()` call that is not inside a `select*` helper.
+ * - one `getSnapshot()` call that is not inside a module-level `select*` helper
+ *   (`function selectFoo` or `const selectFoo = (...) =>`).
  *
  * Tests, type tests, declarations and test-support modules are not counted.
  *
@@ -48,44 +50,40 @@ const effectHooks = new Set(['useEffect', 'useInsertionEffect', 'useLayoutEffect
 const eventMethods = new Set(['on', 'send', 'subscribe']);
 const bareEventFunctions = new Set(['send', 'subscribe']);
 const timerFunctions = new Set(['requestAnimationFrame', 'setInterval', 'setTimeout']);
-const selectHelperPrefix = 'select';
+const selectHelperPattern = /^select[A-Z]/;
 const sourcePattern = /\.(?:ts|tsx)$/;
 /**
- * Tests, type tests, declarations and test-support modules (`*.test-utils`, `*.test-harness`, `*.test-helpers`).
+ * Tests, type tests, declarations and test-support modules (`*.test-utils`, `*-test.utils`, `*.test-harness`, `*.test-helpers`).
  * Fixtures are counted: some, such as `printer-manifest.fixture.ts`, are imported by production code.
  */
 const excludedPattern =
-  /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|\.(?:test-utils|test-harness|test-helpers)\.(?:ts|tsx)|\.d\.ts)$/;
+  /(?:\.(?:test|spec)(?:-d)?\.(?:ts|tsx)|[.-]test[.-](?:utils|harness|helpers)\.(?:ts|tsx)|\.d\.ts)$/;
 
-/** Names a function-like node is known by: its own name or the binding it initializes. */
-function functionNames(node: ts.Node): string[] {
-  const names: string[] = [];
+/** The name of a module-level function: `function name` or `const name = () =>` at the top of the file. */
+function moduleLevelFunctionName(node: ts.Node): string | undefined {
+  if (ts.isFunctionDeclaration(node) && ts.isSourceFile(node.parent)) {
+    return node.name?.text;
+  }
+  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
+    return undefined;
+  }
+  const declaration = node.parent;
   if (
-    (ts.isFunctionDeclaration(node) ||
-      ts.isFunctionExpression(node) ||
-      ts.isMethodDeclaration(node) ||
-      ts.isGetAccessorDeclaration(node)) &&
-    node.name !== undefined &&
-    (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
+    ts.isVariableDeclaration(declaration) &&
+    declaration.initializer === node &&
+    ts.isIdentifier(declaration.name) &&
+    ts.isVariableStatement(declaration.parent.parent) &&
+    ts.isSourceFile(declaration.parent.parent.parent)
   ) {
-    names.push(node.name.text);
+    return declaration.name.text;
   }
-  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-    const { parent } = node;
-    if (
-      (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) &&
-      parent.initializer === node &&
-      (ts.isIdentifier(parent.name) || ts.isStringLiteral(parent.name))
-    ) {
-      names.push(parent.name.text);
-    }
-  }
-  return names;
+  return undefined;
 }
 
 function isInsideSelectHelper(node: ts.Node): boolean {
   for (let current = node.parent; !ts.isSourceFile(current); current = current.parent) {
-    if (ts.isFunctionLike(current) && functionNames(current).some((name) => name.startsWith(selectHelperPrefix))) {
+    const name = moduleLevelFunctionName(current);
+    if (name !== undefined && selectHelperPattern.test(name)) {
       return true;
     }
   }
@@ -139,33 +137,42 @@ function callbackHookArgument(node: ts.Expression): ts.Expression | undefined {
   return name === 'useCallback' ? node.arguments[0] : undefined;
 }
 
-/** The function an identifier names in this file: a declaration, a function binding or a `useCallback` binding. */
-function localFunction(sourceFile: ts.SourceFile, name: string): ts.Node | undefined {
-  let found: ts.Node | undefined;
-  const visit = (node: ts.Node): void => {
-    if (found !== undefined) {
-      return;
+/** The function a statement binds to `name`: a declaration, a function binding or a `useCallback` binding. */
+function boundFunction(statement: ts.Statement, name: string): ts.Node | undefined {
+  if (ts.isFunctionDeclaration(statement)) {
+    return statement.name?.text === name ? statement : undefined;
+  }
+  if (!ts.isVariableStatement(statement)) {
+    return undefined;
+  }
+  for (const declaration of statement.declarationList.declarations) {
+    const { initializer } = declaration;
+    if (!ts.isIdentifier(declaration.name) || declaration.name.text !== name || initializer === undefined) {
+      continue;
     }
-    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
-      found = node;
-      return;
+    if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+      return initializer;
     }
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === name &&
-      node.initializer !== undefined &&
-      (ts.isArrowFunction(node.initializer) ||
-        ts.isFunctionExpression(node.initializer) ||
-        callbackHookArgument(node.initializer) !== undefined)
-    ) {
-      found = callbackHookArgument(node.initializer) ?? node.initializer;
-      return;
+    return callbackHookArgument(initializer);
+  }
+  return undefined;
+}
+
+/** Resolves `identifier` through the blocks enclosing it, innermost first. */
+function localFunction(identifier: ts.Identifier): ts.Node | undefined {
+  for (let scope: ts.Node = identifier.parent; ; scope = scope.parent) {
+    if (ts.isBlock(scope) || ts.isSourceFile(scope)) {
+      for (const statement of scope.statements) {
+        const found = boundFunction(statement, identifier.text);
+        if (found !== undefined) {
+          return found;
+        }
+      }
     }
-    node.forEachChild(visit);
-  };
-  visit(sourceFile);
-  return found;
+    if (ts.isSourceFile(scope)) {
+      return undefined;
+    }
+  }
 }
 
 /** The name an effect-relevant call is reported under, or undefined when it is not one. */
@@ -238,9 +245,7 @@ export function countReactEventLayerSites(fileName: string, sourceText: string):
       if (isEffectCall(node, aliases)) {
         const [callback] = node.arguments;
         const body =
-          callback !== undefined && ts.isIdentifier(callback)
-            ? (localFunction(sourceFile, callback.text) ?? callback)
-            : callback;
+          callback !== undefined && ts.isIdentifier(callback) ? (localFunction(callback) ?? callback) : callback;
         const calls = body === undefined ? [] : eventLayerCalls(body);
         if (calls.length > 0) {
           sites.push({ kind: 'effect', ...position(node), calls });
@@ -343,7 +348,7 @@ export function reactEventLayerViolations(
       : `has no line in ${manifestName}, so its ceiling is 0 (a moved file carries its old line, charter D21)`;
     violations.push(
       [
-        `${path}: ${sites.length} React event-layer site(s) ${hint}. Move the work into an actor (charter I10).`,
+        `${path}: ${sites.length} React event-layer site(s) ${hint}. Move the work into an actor.`,
         ...sites.map((site) => `  ${describeSite(site)}`),
       ].join('\n'),
     );
@@ -376,8 +381,22 @@ export function reactEventLayerManifestProblems(
     }
     const previous = keys[index - 1];
     if (previous !== undefined && previous >= key) {
-      problems.push(`${key}: lines must be sorted by path and unique`);
+      problems.push(`${key}: lines must be sorted by path`);
     }
+  }
+  return problems;
+}
+
+/** Keys a manifest names more than once; `JSON.parse` keeps only the last, so read the raw text. */
+function duplicateManifestKeys(manifestText: string): string[] {
+  const seen = new Set<string>();
+  const problems: string[] = [];
+  for (const match of manifestText.matchAll(/"((?:[^"\\]|\\.)*)"\s*:/g)) {
+    const key = match[1] ?? '';
+    if (seen.has(key)) {
+      problems.push(`${key}: listed more than once`);
+    }
+    seen.add(key);
   }
   return problems;
 }
@@ -405,9 +424,11 @@ export function checkReactEventLayerCeiling(check: ReactEventLayerCheck): string
   const directories = check.directories.map((directory) => fileURLToPath(directory).replace(/[/\\]$/, ''));
   const workspaceRoot = findWorkspaceRoot(dirname(manifestPath));
   const manifestName = toPosix(relative(workspaceRoot, manifestPath));
-  const ceiling = JSON.parse(readFileSync(manifestPath, 'utf8')) as ReactEventLayerCeiling;
+  const manifestText = readFileSync(manifestPath, 'utf8');
+  const ceiling = JSON.parse(manifestText) as ReactEventLayerCeiling;
   const prefixes = directories.map((directory) => toPosix(relative(workspaceRoot, directory)));
   return [
+    ...duplicateManifestKeys(manifestText),
     ...reactEventLayerManifestProblems(ceiling, prefixes),
     ...reactEventLayerViolations(measureReactEventLayer(directories, workspaceRoot), ceiling, manifestName),
   ];

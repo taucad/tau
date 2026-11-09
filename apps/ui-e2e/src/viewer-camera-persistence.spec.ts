@@ -4,10 +4,11 @@ import * as target from '#support/external-target.js';
 
 /*
  * The orbit snap-back regression (incident 2026-11-06-viewer-orbit-snap-back, fixed by #1602).
- * Two quick orbit drags: about 250 ms after the first drag settles the view record saves its pose,
- * and before #1602 the store published that save back as a foreign edit, which the sync hook
- * applied once the second drag settled. The camera then jumped back to where drag 1 ended.
- * The rows mirror the bisect harness, `viewer-orbit-snap-back-regression/repro.cjs` in Tau Brain.
+ * About 250 ms after an orbit drag settles the view record saves its pose. Before #1602 the store
+ * published that save back as a foreign edit, and the sync hook applied it: the camera jumped back
+ * to where drag 1 ended, either after drag 2 settled or, when the echo landed mid-drag, during
+ * drag 2 so that drag 2 never moved the camera. The rows mirror the bisect harness,
+ * `viewer-orbit-snap-back-regression/repro.cjs` in Tau Brain, and assert both outcomes.
  */
 
 type Vector3 = readonly [number, number, number];
@@ -29,7 +30,6 @@ const previewCanvasSelector = 'canvas[data-engine]';
 const birdhouseFixtureRoute = '/__e2e/example-fixture?locator=replicad.birdhouse&graphicsBackend=webgl';
 const dragDistancePixels = 120;
 const dragSteps = 20;
-const dragStepMilliseconds = 25;
 /** Long enough for an earlier drag's pose save and its watch echoes to finish before a row starts. */
 const quietBeforeRowMilliseconds = 2500;
 /** The snap landed about 250 ms after drag 2 settled; 1.5 s covers it with margin, as the harness did. */
@@ -64,17 +64,15 @@ async function canvasCenter(): Promise<{ x: number; y: number }> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** One orbit drag, moved in discrete steps so camera-controls sees a person's drag, not a jump. */
+/**
+ * One orbit drag in discrete steps, so camera-controls sees a person's drag, not a jump. The steps
+ * go in one command: each browser-mode command round trip costs far more than the harness's 25 ms
+ * step, so pacing them from the test would stretch the drag several times over.
+ */
 async function orbitDrag(center: { x: number; y: number }): Promise<void> {
   await target.mouseMove(center.x, center.y);
   await target.mouseDown();
-  /* oxlint-disable no-await-in-loop -- A drag is an ordered pointer stream with a pause between moves. */
-  for (let step = 1; step <= dragSteps; step += 1) {
-    await target.mouseMove(center.x + (dragDistancePixels * step) / dragSteps, center.y);
-    await target.delay(dragStepMilliseconds);
-  }
-  /* oxlint-enable no-await-in-loop */
-
+  await target.mouseMove(center.x + dragDistancePixels, center.y, { steps: dragSteps });
   await target.mouseUp();
 }
 
@@ -93,11 +91,6 @@ test.describe('Viewer camera persistence', () => {
       const beforeFirstDrag = await readCameraPose();
       await orbitDrag(center);
       const endOfFirstDrag = await readCameraPose();
-      expect(
-        distance(endOfFirstDrag.position, beforeFirstDrag.position),
-        'the first drag should orbit the camera',
-      ).toBeGreaterThan(0);
-
       await target.delay(gapMilliseconds);
       await orbitDrag(center);
       const endOfSecondDrag = await readCameraPose();
@@ -105,16 +98,24 @@ test.describe('Viewer camera persistence', () => {
       const settled = await readCameraPose();
 
       /* The harness's snap threshold: 1% of the orbit radius, at least 1 cm. It absorbs the
-       * controls' own settle after the button is released; a snap back to drag 1 moves far more. */
+       * controls' own settle after the button is released; a 120 px orbit moves far more. */
       const tolerance = 0.01 * Math.max(1, Math.hypot(...beforeFirstDrag.position));
-      const evidence = JSON.stringify({ beforeFirstDrag, endOfFirstDrag, endOfSecondDrag, settled });
+      const evidence = JSON.stringify({ gapMilliseconds, beforeFirstDrag, endOfFirstDrag, endOfSecondDrag, settled });
+      expect(
+        distance(endOfFirstDrag.position, beforeFirstDrag.position),
+        `the first drag should orbit the camera: ${evidence}`,
+      ).toBeGreaterThan(tolerance);
+      expect(
+        distance(endOfSecondDrag.position, endOfFirstDrag.position),
+        `the second drag should orbit the camera, not be held at drag 1's pose: ${evidence}`,
+      ).toBeGreaterThan(tolerance);
       expect(
         distance(settled.position, endOfSecondDrag.position),
         `the camera should stay where drag 2 ended, not snap back toward drag 1: ${evidence}`,
       ).toBeLessThanOrEqual(tolerance);
       expect(
         distance(settled.target, endOfSecondDrag.target),
-        `the orbit target should not move: ${evidence}`,
+        `the orbit target should stay where drag 2 left it: ${evidence}`,
       ).toBeLessThanOrEqual(tolerance);
     },
     120_000,

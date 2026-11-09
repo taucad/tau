@@ -12,8 +12,7 @@ import {
   planCards,
   closing,
 } from '#www/page-components.js';
-import { Button } from '@taucad/ui/components/button';
-import { appOrigin } from '#www/environment.js';
+import { AgentPrompt } from '#www/agent-prompt.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -39,23 +38,7 @@ export const content = (): React.JSX.Element => (
         </div>
         <div className='agent-prompt'>
           <p className='fine'>Using Claude Code or Codex? Paste this into your agent:</p>
-          {/* One text node, so the UI edge function can name staging's own agent page before React hydrates it. */}
-          <code id='agent-prompt-text' suppressHydrationWarning>
-            {`Install the Tau plugin from ${appOrigin}/llms.txt`}
-          </code>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            data-copy='agent-prompt-text'
-            data-event='cta'
-            data-placement='hero-agent'
-            aria-label='Copy the agent prompt'
-            hidden
-          >
-            Copy
-          </Button>
-          <span role='status' className='sr-only' />
+          <AgentPrompt />
         </div>
       </div>
       {heroStage()}

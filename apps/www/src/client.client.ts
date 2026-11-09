@@ -7,46 +7,6 @@ import { environmentHref } from '#www/environment.js';
 import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
 import type { ConsentDecision } from '@taucad/consent';
 
-/**
- * Offer the copy control for the hero's agent prompt, whose text the server already names for the host serving it.
- * Without the script the prompt stays selectable text and the control stays hidden.
- * @param signal - Aborts the click listener when the page changes.
- * @returns Clears a pending label restore.
- */
-function initializeCopyPrompt(signal: AbortSignal): () => void {
-  let restore: ReturnType<typeof setTimeout> | undefined;
-  const button = document.querySelector('button[data-copy]');
-  const text = button instanceof HTMLButtonElement ? document.querySelector(`#${button.dataset['copy']}`) : null;
-  const status = button?.parentElement?.querySelector('[role="status"]');
-  if (!(button instanceof HTMLButtonElement) || !text || !status) {
-    return () => undefined;
-  }
-  button.hidden = false;
-  button.addEventListener(
-    'click',
-    async () => {
-      clearTimeout(restore);
-      try {
-        await navigator.clipboard.writeText(text.textContent);
-        status.textContent = 'Copied to clipboard';
-        button.textContent = 'Copied';
-        restore = setTimeout(() => {
-          status.textContent = '';
-          button.textContent = 'Copy';
-        }, 1500);
-      } catch {
-        // No clipboard permission or API: leave the prompt selected for a manual copy.
-        getSelection()?.selectAllChildren(text);
-        status.textContent = 'Copy failed. Select the text and copy it.';
-      }
-    },
-    { signal },
-  );
-  return () => {
-    clearTimeout(restore);
-  };
-}
-
 export function initializePage(signal: AbortSignal): () => void {
   const cleanups: Array<() => void> = [];
   document.body.dataset['page'] = location.pathname;
@@ -57,7 +17,6 @@ export function initializePage(signal: AbortSignal): () => void {
 
   // async-iife: bootstrap -- The page signal owns the bounded optional catalog enhancement.
   void initializeInstallerCatalog(signal);
-  cleanups.push(initializeCopyPrompt(signal));
 
   const mobileMenu = document.querySelector('.mobile-menu');
   document.addEventListener(

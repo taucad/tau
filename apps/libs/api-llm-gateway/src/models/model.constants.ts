@@ -999,19 +999,20 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   together: {
-    'kimi-k3': {
+    'kimi-k3.1-pro': {
       enabled: true,
-      id: 'together-kimi-k3',
+      id: 'together-kimi-k3.1-pro',
       providerKind: 'tau-hosted',
-      name: 'Kimi K3',
-      slug: 'kimi-k3',
+      name: 'Kimi K3.1 Pro',
+      slug: 'kimi-k3.1-pro',
       recommended: true,
-      description: 'Long-context multimodal reasoning model for complex agentic CAD design and multi-file work.',
+      description:
+        'Strong long-context open reasoning model with vision for complex agentic CAD design and multi-file work.',
       provider: {
         id: 'together',
         name: 'Together AI',
       },
-      model: 'moonshotai/Kimi-K3',
+      model: 'moonshotai/Kimi-K3.1-Pro',
       support: {
         tools: true,
         toolChoice: false,
@@ -1020,12 +1021,12 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'kimi',
         families: ['kimi'],
-        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        contextWindow: 200_000, // Together serves about 1M tokens; Tau caps the effective chat budget for cost and compaction reliability.
         maxTokens: 200_000,
         cost: {
-          inputTokens: 3,
-          outputTokens: 15,
-          cacheReadTokens: 0.3,
+          inputTokens: 2,
+          outputTokens: 10,
+          cacheReadTokens: 0.2,
           cacheWriteTokens: 0,
         },
       },
@@ -1033,116 +1034,19 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
       },
     },
-    'deepseek-v3.1': {
-      enabled: false,
-      id: 'together-deepseek-v3.1',
+    'glm-5.3': {
+      enabled: true,
+      id: 'together-glm-5.3',
       providerKind: 'tau-hosted',
-      name: 'DeepSeek V3.1',
-      slug: 'deepseek-v3.1',
-      description: 'Best open-source coder with native thinking-in-tool-use, great for complex CAD code generation.',
+      name: 'GLM 5.3',
+      slug: 'glm-5.3',
+      recommended: false,
+      description: 'Strong text-only open coder for long-horizon CAD code generation and complex geometry planning.',
       provider: {
         id: 'together',
         name: 'Together AI',
       },
-      model: 'deepseek-ai/DeepSeek-V3.1',
-      support: {
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'deepseek',
-        families: ['deepseek'],
-        contextWindow: 128_000,
-        maxTokens: 64_000,
-        knowledgeCutoff: '2024-07',
-        cost: {
-          inputTokens: 0.6,
-          outputTokens: 1.7,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'deepseek-r1': {
-      enabled: false,
-      id: 'together-deepseek-r1',
-      providerKind: 'tau-hosted',
-      name: 'DeepSeek R1',
-      slug: 'deepseek-r1',
-      description: 'Best open-source reasoning model for complex geometry and multi-step assembly design.',
-      provider: {
-        id: 'together',
-        name: 'Together AI',
-      },
-      model: 'deepseek-ai/DeepSeek-R1',
-      support: {
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'deepseek',
-        families: ['deepseek'],
-        contextWindow: 128_000,
-        maxTokens: 64_000,
-        knowledgeCutoff: '2024-07',
-        cost: {
-          inputTokens: 3,
-          outputTokens: 7,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'glm-5.1': {
-      enabled: false,
-      id: 'together-glm-5.1',
-      providerKind: 'tau-hosted',
-      name: 'GLM-5.1',
-      slug: 'glm-5.1',
-      description: 'Flagship open-source model for long-horizon agentic coding and complex engineering tasks.',
-      provider: {
-        id: 'together',
-        name: 'Together AI',
-      },
-      model: 'zai-org/GLM-5.1',
-      support: {
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'glm',
-        families: ['glm'],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        cost: {
-          inputTokens: 1.4,
-          outputTokens: 4.4,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'glm-5.2': {
-      id: 'together-glm-5.2',
-      providerKind: 'tau-hosted',
-      name: 'GLM-5.2',
-      slug: 'glm-5.2',
-      description:
-        'Strong text-only open reasoning model for long-horizon CAD code generation and complex geometry planning.',
-      provider: {
-        id: 'together',
-        name: 'Together AI',
-      },
-      model: 'zai-org/GLM-5.2',
+      model: 'zai-org/GLM-5.3',
       support: {
         tools: true,
         toolChoice: false,
@@ -1151,7 +1055,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'glm',
         families: ['glm'],
-        contextWindow: 200_000,
+        contextWindow: 200_000, // Together serves about 1M tokens; Tau caps the effective chat budget for cost and compaction reliability.
         maxTokens: 131_072,
         cost: {
           inputTokens: 1.4,
@@ -1164,31 +1068,33 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
       },
     },
-    'qwen-3.5-397b': {
-      enabled: false,
-      id: 'together-qwen-3.5-397b',
+    'glm-5.3-flash': {
+      enabled: true,
+      id: 'together-glm-5.3-flash',
       providerKind: 'tau-hosted',
-      name: 'Qwen 3.5 397B',
-      slug: 'qwen-3.5-397b',
-      description: 'Long-context capable native multimodal model, strong for large CAD projects.',
+      name: 'GLM 5.3 Flash',
+      slug: 'glm-5.3-flash',
+      recommended: false,
+      description: 'Fast, low-cost open coder with vision for quick design iterations and small changes.',
       provider: {
         id: 'together',
         name: 'Together AI',
       },
-      model: 'Qwen/Qwen3.5-397B-A17B',
+      model: 'zai-org/GLM-5.3-Flash',
       support: {
+        tools: true,
         toolChoice: false,
         modalities: imageInputModalities,
       },
       details: {
-        family: 'qwen',
-        families: ['qwen'],
-        contextWindow: 200_000,
-        maxTokens: 64_000,
+        family: 'glm',
+        families: ['glm'],
+        contextWindow: 200_000, // Together serves about 1M tokens; Tau caps the effective chat budget for cost and compaction reliability.
+        maxTokens: 131_072,
         cost: {
-          inputTokens: 0.6,
-          outputTokens: 3.6,
-          cacheReadTokens: 0,
+          inputTokens: 0.15,
+          outputTokens: 0.5,
+          cacheReadTokens: 0.03,
           cacheWriteTokens: 0,
         },
       },
@@ -1196,32 +1102,68 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
       },
     },
-    'llama-4-maverick': {
-      enabled: false,
-      id: 'together-llama-4-maverick',
+    'minimax-m3.1-flash': {
+      enabled: true,
+      id: 'together-minimax-m3.1-flash',
       providerKind: 'tau-hosted',
-      name: 'Llama 4 Maverick',
-      slug: 'llama-4-maverick',
-      description: 'Strong long-context capable general-purpose and coding model with massive ecosystem support.',
+      name: 'MiniMax M3.1 Flash',
+      slug: 'minimax-m3.1-flash',
+      recommended: false,
+      description: 'Low-cost open coder with vision for long agentic tool loops and multi-step design changes.',
       provider: {
         id: 'together',
         name: 'Together AI',
       },
-      model: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+      model: 'MiniMaxAI/MiniMax-M3.1-Flash',
       support: {
+        tools: true,
         toolChoice: false,
         modalities: imageInputModalities,
       },
       details: {
-        family: 'llama',
-        families: ['llama'],
-        contextWindow: 200_000,
-        maxTokens: 64_000,
-        knowledgeCutoff: '2024-08',
+        family: 'minimax',
+        families: ['minimax'],
+        contextWindow: 200_000, // Together serves about 1M tokens; Tau caps the effective chat budget for cost and compaction reliability.
+        maxTokens: 131_072,
         cost: {
-          inputTokens: 0.27,
-          outputTokens: 0.85,
-          cacheReadTokens: 0,
+          inputTokens: 0.15,
+          outputTokens: 0.6,
+          cacheReadTokens: 0.015,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
+    'deepseek-v4-pro': {
+      enabled: true,
+      id: 'together-deepseek-v4-pro',
+      providerKind: 'tau-hosted',
+      name: 'DeepSeek V4 Pro',
+      slug: 'deepseek-v4-pro',
+      recommended: false,
+      description:
+        'Strong text-only open reasoning model for complex geometry planning and multi-step CAD code generation.',
+      provider: {
+        id: 'together',
+        name: 'Together AI',
+      },
+      model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: textOnlyModalities,
+      },
+      details: {
+        family: 'deepseek',
+        families: ['deepseek'],
+        contextWindow: 200_000, // Together serves about 1M tokens; Tau caps the effective chat budget for cost and compaction reliability.
+        maxTokens: 131_072,
+        cost: {
+          inputTokens: 1.32,
+          outputTokens: 3.96,
+          cacheReadTokens: 0.13,
           cacheWriteTokens: 0,
         },
       },
@@ -1232,118 +1174,6 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   morph: {
-    'kimi-k3.1-pro': {
-      enabled: true,
-      id: 'morph-kimi-k3.1-pro',
-      providerKind: 'tau-hosted',
-      name: 'Kimi K3.1 Pro',
-      slug: 'kimi-k3.1-pro',
-      recommended: true,
-      description:
-        'Strong long-context open reasoning model with vision for complex agentic CAD design and multi-file work.',
-      provider: {
-        id: 'morph',
-        name: 'Morph',
-      },
-      model: 'morph-kimik31',
-      support: {
-        tools: true,
-        toolChoice: false,
-        modalities: imageInputModalities,
-      },
-      details: {
-        family: 'kimi',
-        families: ['kimi'],
-        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 2.5,
-          outputTokens: 14,
-          cacheReadTokens: 0.29,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        reasoning: {
-          effort: 'high',
-        },
-      },
-    },
-    'glm-5.3': {
-      enabled: false,
-      id: 'morph-glm-5.3',
-      providerKind: 'tau-hosted',
-      name: 'GLM 5.3',
-      slug: 'glm-5.3',
-      recommended: false,
-      description: 'Strong text-only open coder for long-horizon CAD code generation and complex geometry planning.',
-      provider: {
-        id: 'morph',
-        name: 'Morph',
-      },
-      model: 'morph-glm53-744b',
-      support: {
-        tools: true,
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'glm',
-        families: ['glm'],
-        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 1.19,
-          outputTokens: 6,
-          cacheReadTokens: 0.1955,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        reasoning: {
-          effort: 'high',
-        },
-      },
-    },
-    'glm-5.3-flash': {
-      enabled: true,
-      id: 'morph-glm-5.3-flash',
-      providerKind: 'tau-hosted',
-      name: 'GLM 5.3 Flash',
-      slug: 'glm-5.3-flash',
-      recommended: false,
-      description: 'Fast, low-cost open coder with vision for quick design iterations and small changes.',
-      provider: {
-        id: 'morph',
-        name: 'Morph',
-      },
-      model: 'morph-glm53flash',
-      support: {
-        tools: true,
-        toolChoice: false,
-        modalities: imageInputModalities,
-      },
-      details: {
-        family: 'glm',
-        families: ['glm'],
-        contextWindow: 200_000, // Morph serves 1,048,576 tokens; Tau caps the effective chat budget for cost and compaction reliability.
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 0.2,
-          outputTokens: 0.7,
-          cacheReadTokens: 0.04,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        reasoning: {
-          effort: 'high',
-        },
-      },
-    },
     'deepseek-v4.1-flash': {
       enabled: true,
       id: 'morph-deepseek-v4.1-flash',

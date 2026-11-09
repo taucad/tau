@@ -364,6 +364,21 @@ describe('createGatewayModelTransport', () => {
     }
   });
 
+  it('sends no Together reasoning object the gateway completions boundary would refuse', async () => {
+    let body: unknown;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return fixtureResponse();
+      }),
+    });
+
+    await collect(transport.stream(request({ providerKind: 'together' })));
+
+    expect(body).not.toHaveProperty('reasoning');
+  });
+
   it('posts pi-ai OpenAI Chat Completions bytes and maps a fragmented gateway SSE stream', async () => {
     let body: BodyInit | undefined;
     let credentials: string | undefined;

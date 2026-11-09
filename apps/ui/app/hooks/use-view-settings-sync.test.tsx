@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* oxlint-disable typescript/no-confusing-void-expression -- Testing Library waitFor callbacks are assertions. */
 import { act, render, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
@@ -742,5 +742,251 @@ describe('view record owner synchronization', () => {
     });
     pane.unmount();
     graphicsRef.stop();
+  });
+});
+
+// ── Characterisation under fake timers (graphics event-driven state charter, G0.3) ─────────────────
+/* These rows lock today's settle-window behaviour before the view binding moves into a machine (charter D14).
+ * Rows named "today" describe behaviour a later package changes on purpose: G3 drops a foreign pose that arrives
+ * during a drag (D15), and G6b stops saving an automatic refit (D20). Every other row is kept as written. */
+describe('useViewSettingsSync settle-window characterisation', () => {
+  const settle = 250;
+  const advance = (ms: number): void => {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  };
+  const pose = (direction: [number, number, number], verticalSpan: number) =>
+    ({
+      kind: 'pose',
+      frameId: 'tau:root',
+      target: [0, 0, 0],
+      direction,
+      up: [0, 0, 1],
+      verticalSpan,
+      perspectiveZoom: 1,
+    }) as const;
+  const poseWrites = (writeRecord: ReturnType<typeof vi.fn<(next: WorkbenchView) => Promise<boolean>>>) =>
+    writeRecord.mock.calls.map(([next]) => next.camera).filter((camera) => camera.kind === 'pose');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function mount(record: WorkbenchView) {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const draw = (next: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          record={next}
+          recordLocalPatch={recordLocalPatch}
+          writeRecord={writeRecord}
+        />
+      </GraphicsProvider>
+    );
+    const view = render(draw(record));
+    const session = getViewCameraSession(graphicsRef)!;
+    return {
+      graphicsRef,
+      writeRecord,
+      session,
+      rig: session.rig.actorRef,
+      rerender: (next: WorkbenchView, recordLocalPatch?: ViewRecordPatch) => {
+        view.rerender(draw(next, recordLocalPatch));
+      },
+      dispose: () => {
+        view.unmount();
+        graphicsRef.stop();
+      },
+    };
+  }
+
+  it('today waits for the drag to go quiet, then applies a foreign pose and loses the drag pose (G3 flips, D15)', () => {
+    const base = initial();
+    const harness = mount(base);
+    harness.session.framing.initialized = true;
+    advance(settle * 4);
+    harness.writeRecord.mockClear();
+    const drag = (step: number) => {
+      act(() => {
+        harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4 + step / 10) });
+      });
+    };
+    drag(0);
+    advance(50);
+    const foreign = workbenchRecords.view.schema.parse({ ...base, camera: pose([0, 1, 0], 9) });
+    harness.rerender(foreign);
+    for (let step = 1; step <= 10; step += 1) {
+      advance(50);
+      drag(step);
+      expect(harness.rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    }
+    advance(settle - 1);
+    expect(harness.rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]);
+    advance(1);
+    expect(harness.rig.getSnapshot().context.view).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
+    advance(settle * 4);
+    expect(harness.rig.getSnapshot().context.view.direction).toEqual([0, 1, 0]);
+    expect(poseWrites(harness.writeRecord).filter((camera) => camera.direction[0] === 1)).toEqual([]);
+    harness.dispose();
+  });
+
+  it('should apply a foreign pose at once while the camera is idle', () => {
+    const base = initial();
+    const harness = mount(base);
+    harness.session.framing.initialized = true;
+    advance(settle * 4);
+    const foreign = workbenchRecords.view.schema.parse({ ...base, camera: pose([0, 1, 0], 9) });
+    harness.rerender(foreign);
+    expect(harness.rig.getSnapshot().context.view).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
+    harness.dispose();
+  });
+
+  it('should never write an adopted pose back over the foreign instruction it came from', () => {
+    const base = initial();
+    const harness = mount(base);
+    harness.session.framing.initialized = true;
+    advance(settle * 4);
+    harness.writeRecord.mockClear();
+    const foreign = workbenchRecords.view.schema.parse({ ...base, camera: { kind: 'preset', preset: 'front' } });
+    harness.rerender(foreign);
+    expect(harness.rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    advance(settle * 4);
+    /* The adoption moved the rig, so the settle callback ran and wrote; it kept the instruction, not the pose. */
+    expect(harness.writeRecord).toHaveBeenCalled();
+    expect(harness.writeRecord.mock.calls.map(([next]) => next.camera)).toEqual(
+      harness.writeRecord.mock.calls.map(() => foreign.camera),
+    );
+    harness.dispose();
+  });
+
+  it('should never apply an own echo while a newer local pose is live', () => {
+    const base = initial();
+    const harness = mount(base);
+    harness.session.framing.initialized = true;
+    advance(settle * 4);
+    act(() => {
+      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4) });
+    });
+    advance(settle);
+    const echoed = harness.writeRecord.mock.calls.findLast(
+      ([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4,
+    )?.[0];
+    expect(echoed).toBeDefined();
+    act(() => {
+      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 2) });
+    });
+    harness.rerender(echoed!, { camera: echoed!.camera });
+    for (let elapsed = 0; elapsed < settle * 4; elapsed += 50) {
+      advance(50);
+      expect(harness.rig.getSnapshot().context.view.verticalSpan).toBe(2);
+    }
+    harness.dispose();
+  });
+
+  it('should leave a live pose alone when a foreign grid-only edit arrives during a drag', () => {
+    const base = workbenchRecords.view.schema.parse({ ...initial(), camera: pose([0, 1, 0], 9) });
+    const harness = mount(base);
+    harness.session.framing.initialized = true;
+    advance(settle * 4);
+    act(() => {
+      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4) });
+    });
+    harness.rerender({ ...base, grid: { unit: 'in' } });
+    expect(harness.graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+    for (let elapsed = 0; elapsed < settle * 4; elapsed += 50) {
+      advance(50);
+      expect(harness.rig.getSnapshot().context.view).toMatchObject({ direction: [1, 0, 0], verticalSpan: 4 });
+    }
+    expect(poseWrites(harness.writeRecord).some((camera) => camera.verticalSpan === 4)).toBe(true);
+    harness.dispose();
+  });
+
+  describe('framing', () => {
+    const smallBounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
+    const largeBounds = new Box3(new Vector3(-8, -8, -8), new Vector3(8, 8, 8));
+
+    function mountFramed(record: WorkbenchView) {
+      const graphicsRef = graphics();
+      const editorRef = editor();
+      const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+      function Frame({ radius, bounds }: { readonly radius: number; readonly bounds: Box3 }): React.JSX.Element {
+        useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
+        return <div />;
+      }
+      const draw = (radius: number, bounds: Box3) => (
+        <GraphicsProvider graphicsRef={graphicsRef}>
+          <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+          <Frame radius={radius} bounds={bounds} />
+        </GraphicsProvider>
+      );
+      const view = render(draw(0, smallBounds));
+      const session = getViewCameraSession(graphicsRef)!;
+      return {
+        graphicsRef,
+        writeRecord,
+        session,
+        rig: session.rig.actorRef,
+        frame: (radius: number, bounds: Box3) => {
+          view.rerender(draw(radius, bounds));
+        },
+        dispose: () => {
+          view.unmount();
+          graphicsRef.stop();
+        },
+      };
+    }
+
+    it('should never write the first automatic frame', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      expect(harness.session.framing.initialized).toBe(true);
+      expect(harness.session.framing.firstFrameView).toBeDefined();
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord)).toEqual([]);
+      harness.dispose();
+    });
+
+    it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      advance(settle * 4);
+      const firstFrame = harness.rig.getSnapshot().context.view;
+      harness.frame(16, largeBounds);
+      const refit = harness.rig.getSnapshot().context.view;
+      expect(refit.verticalSpan).toBeGreaterThan(firstFrame.verticalSpan);
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: refit.verticalSpan });
+      harness.dispose();
+    });
+
+    it('should save a Fit view the person commanded (kept by D20)', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      advance(settle * 4);
+      act(() => {
+        harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 40) });
+      });
+      advance(settle * 4);
+      harness.writeRecord.mockClear();
+      act(() => {
+        harness.graphicsRef.send({ type: 'fitView' });
+      });
+      const fitted = harness.rig.getSnapshot().context.view;
+      expect(fitted.verticalSpan).toBeLessThan(40);
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: fitted.verticalSpan });
+      harness.dispose();
+    });
   });
 });

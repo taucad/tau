@@ -127,7 +127,7 @@ Avoid:
 
 `gateway-model-transport.ts` then applies it: Anthropic gets `thinkingEnabled` plus budget/display/effort, the Responses providers get `reasoningEffort`/`reasoningSummary`, and Vertex gets `samplingParams.extra_body.google`.
 
-The self-host helper (`project_name`, `commit_name` with Tau Cloud off) reads the same `configuration` in `helper-wire.ts`: the Responses `reasoning` block, Anthropic `thinking` and `output_config`, Vertex `thinkingLevel` as `extra_body.google.thinking_config.thinking_level`, Moonshot's `reasoning_effort` (with no ceiling or temperature), and `temperature` where the row sets one. The helper's own 64-token ceiling replaces the row's. A new reasoning control a helper must forward is a codec change there, with a `helper-wire.test.ts` case.
+The self-host helper (`project_name`, `commit_name` with Tau Cloud off) maps the row's `configuration` in `helper-wire.ts`, but asks for the least reasoning each wire accepts, so a short name fits its 64-token ceiling: OpenAI gets `reasoning.effort: 'none'`; xAI and Moonshot get the row's lowest level; Vertex gets the row's lowest level as `extra_body.google.thinking_config.thinking_level`; Together Kimi and GLM get `reasoning.enabled: false`; Anthropic gets no `thinking` and no `output_config`. The row's `temperature` is forwarded where set, except on Moonshot Kimi, which fixes its own. A new reasoning control a helper must forward is a codec change there, with a `helper-wire.test.ts` case.
 
 ## Vertex Wire Facts
 

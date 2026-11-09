@@ -49,12 +49,13 @@ const routeOf = (model: Model): HelperModelRoute => {
 const bodyFor = (model: Model, prompt: HelperPrompt = textPrompt): Record<string, unknown> =>
   helperRequestBody(routeOf(model), model, prompt);
 
-const ollamaModel = {
+const ollamaModel: Model = {
+  ...catalogRow('openai', 'gpt-5.6-luna'),
   id: 'llama3.2:latest',
   model: 'llama3.2:latest',
   provider: { id: 'ollama', name: 'Ollama' },
   configuration: { streaming: true, temperature: 0 },
-} as unknown as Model;
+};
 
 describe('helperModelRoute', () => {
   it.each([
@@ -399,6 +400,23 @@ describe('readHelperStream', () => {
     await expect(failed).rejects.toBeInstanceOf(HelperStreamFailure);
     await expect(failed).rejects.toThrow('Provider stream failed (server_error)');
     await expect(failed).rejects.not.toThrow('Quoted request text.');
+  });
+
+  it('should refuse a provider stream whose frame never ends', async () => {
+    const unterminated = new TextEncoder().encode(`data: ${'x'.repeat(1_048_577)}`);
+    const failed = collect(
+      readHelperStream(
+        'openai-completions',
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(unterminated);
+            controller.close();
+          },
+        }),
+      ),
+    );
+
+    await expect(failed).rejects.toThrow('Provider stream failed (frame_too_large)');
   });
 
   it('should read Anthropic text, skip thinking, and total input with cache reads and writes', async () => {

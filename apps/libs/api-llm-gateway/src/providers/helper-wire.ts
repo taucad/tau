@@ -291,6 +291,9 @@ export const helperRequestBody = (route: HelperModelRoute, row: HelperModelRow, 
   }
 };
 
+/** The longest unterminated SSE frame kept before the stream is refused, as in `provider-stream-facts.ts`. */
+const maximumFrameCharacters = 1_048_576;
+
 /** Each SSE event's `data` payload; `[DONE]` and comments are skipped. */
 async function* sseData(body: ReadableStream<Uint8Array<ArrayBuffer>>): AsyncGenerator {
   const decoder = new TextDecoder();
@@ -314,6 +317,9 @@ async function* sseData(body: ReadableStream<Uint8Array<ArrayBuffer>>): AsyncGen
     buffer += decoder.decode(chunk, { stream: true });
     const blocks = buffer.split(/\r?\n\r?\n/u);
     buffer = blocks.pop() ?? '';
+    if (buffer.length > maximumFrameCharacters) {
+      throw new HelperStreamFailure('frame_too_large', { error: { code: 'frame_too_large' } });
+    }
     for (const block of blocks) {
       const event = parse(block);
       if (event !== undefined) {

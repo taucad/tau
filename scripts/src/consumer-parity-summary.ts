@@ -66,6 +66,16 @@ const ciTests = (proves: string): Oracle => ({
   proves,
 });
 
+/** The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected. */
+const cliE2e = (proves: string): Oracle => ({
+  kind: 'job',
+  workflow: 'ci.yml',
+  job: 'CLI end-to-end',
+  match: 'exact',
+  scope: 'main',
+  proves,
+});
+
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'native-darwin.yml',
@@ -114,21 +124,22 @@ export const consumers: readonly Consumer[] = [
   {
     name: 'MCP under Claude Code',
     oracles: [
-      ciTests('`mcp.integration.test.ts` with `CLAUDE_PROJECT_DIR` and the Claude Code client shape'),
+      cliE2e('`mcp.integration.test.ts` with `CLAUDE_PROJECT_DIR` and the Claude Code client shape'),
       nativeDarwin('`tau mcp` tier 4b: real Build123d and PicoGK, warm-store G1 under locked'),
     ],
   },
   {
     name: 'MCP under Codex',
     oracles: [
-      ciTests('`mcp.integration.test.ts` with Codex `_meta` folders and the Codex client shapes'),
+      cliE2e('`mcp.integration.test.ts` with Codex `_meta` folders and the Codex client shapes'),
       nativeDarwin('`tau mcp` tier 4b, started as Codex starts it (no project variable)'),
     ],
   },
   {
     name: 'CLI binary',
     oracles: [
-      ciTests('`cli-scenarios.integration.test.ts` T1–T12, `check-pack-install` tests'),
+      cliE2e('`cli-scenarios.integration.test.ts` T1–T12'),
+      ciTests('`check-pack-install` tests'),
       nativeDarwin('the built `tau` exports `main.cs` with no Tau variable set'),
       {
         kind: 'job',
@@ -144,7 +155,8 @@ export const consumers: readonly Consumer[] = [
   {
     name: 'Daemon (`tau serve`)',
     oracles: [
-      ciTests('`serve.integration.test.ts`, `runtime-child-supervisor.test.ts`'),
+      cliE2e('`serve.integration.test.ts`'),
+      ciTests('`runtime-child-supervisor.test.ts`'),
       nativeDarwin('`tau serve` tier 4b: `.py` and `.cs` evaluate after preparation'),
     ],
   },

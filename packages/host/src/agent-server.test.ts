@@ -2,7 +2,7 @@
  * Admission and serve-mode behaviour of the `/agent` channel host.
  *
  * The channel's *vocabulary* is proved end-to-end where a real daemon runs
- * (`packages/cli/src/serve-agent.integration.test.ts`); what only this level can
+ * (`apps/cli-e2e/src/serve-agent.integration.test.ts`); what only this level can
  * prove is the upgrade guard — path, origin, secret — and that the served UI
  * carries the isolation headers and the session cookie that later admits the
  * same-origin upgrade with no token in the page.

@@ -1,0 +1,29 @@
+{
+  "name": "@taucad/cli-e2e",
+  "version": "0.0.1",
+  "description": "End-to-end suites for the Tau CLI: the built binary, its daemon, MCP server and agent client, spawned against real kernels.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/functions": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/build123d": "workspace:*",
+    "@taucad/cli": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/host": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "@types/ws": "^8.18.1",
+    "citty": "catalog:",
+    "geospec": "catalog:",
+    "ws": "catalog:",
+    "zod": "catalog:"
+  }
+}

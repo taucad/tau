@@ -24,7 +24,7 @@
  *     reports leadership — so no new client option was needed: the long-poll
  *     `read` *is* the read-only window, and `createAgentChannelClient` speaks it.
  *
- * Gated behind `TAU_DS3_TAIL_RELAY=1` so `cli:test` stays a unit suite: this one
+ * Gated behind `TAU_DS3_TAIL_RELAY=1` so `cli-e2e:test:scenarios` stays affordable: this one
  * spawns two API processes, a daemon and a stub gateway, and runs for minutes.
  */
 

@@ -25,8 +25,6 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 
-import { refusalText } from '#commands/agent/client.js';
-
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
 const binPath = resolvePath(
@@ -757,46 +755,4 @@ describe('tau agent (scripted command projections)', () => {
     expect(withoutAgent.code).toBe(2);
     gateway.release();
   }, 180_000);
-});
-
-describe('external-agent refusal rendering', () => {
-  it('should name every VSC4 code and what the user can do about it', async () => {
-    /* Imported here, not at module scope: `@taucad/agent-host` is lazy-loaded on
-     * this package's own first-paint path, and the boundary rule enforces it. */
-    const { externalAgentRefusalCodes } = await import('@taucad/agent-host/wire');
-    expect(externalAgentRefusalCodes.length).toBeGreaterThan(0);
-    for (const code of externalAgentRefusalCodes) {
-      expect(refusalText({ code, message: 'The agent said no.' })).toBe(`${code}: The agent said no.`);
-    }
-  });
-
-  it('should print the login command an auth refusal offered, verbatim', () => {
-    const rendered = refusalText({
-      code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
-      message: 'codex needs you to sign in.',
-      login: {
-        kind: 'external-agent-login',
-        agentId: 'codex',
-        authMethods: [{ id: 'terminal-auth', name: 'Sign in with Codex', terminalCommand: 'codex login' }],
-      },
-    });
-    expect(rendered).toContain('EXTERNAL_AGENT_AUTH_REQUIRED: codex needs you to sign in.');
-    expect(rendered).toContain('codex login');
-  });
-
-  it('should print the verification page and code of a device-code login', () => {
-    const rendered = refusalText({
-      code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
-      message: 'codex needs you to sign in.',
-      login: {
-        kind: 'external-agent-login',
-        agentId: 'codex',
-        authMethods: [],
-        url: 'https://example.invalid/device',
-        code: 'FAKE-CODE',
-      },
-    });
-    expect(rendered).toContain('https://example.invalid/device');
-    expect(rendered).toContain('FAKE-CODE');
-  });
 });

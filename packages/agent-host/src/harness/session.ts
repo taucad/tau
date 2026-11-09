@@ -54,6 +54,7 @@ import {
   latexDelimiterMiddleware,
   skillsUpdateMessageId,
 } from '#harness/cad-middleware.js';
+import { omitAttachments, planAttachmentOmissions } from '#transport/document-payload.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
 import { installCompaction, isCompactionSummaryRow } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
@@ -1547,10 +1548,28 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const readAttachment = async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> =>
     options.attachments?.read(options.chatId, path);
   const materializeHistory = async (history: readonly ProviderMessage[]): Promise<ProviderMessage[]> => {
-    const pending = history.filter((message) => !materializedById.has(message.id) && hasFileRef(message));
-    const outcome = await materializeAttachments(pending, readAttachment);
+    /* Which attachments every device leaves out is decided from the rows, before any byte is read (I1). A row's
+     * omissions grow in batches as the chat does, so the copy is keyed by them: a row whose omissions changed is
+     * materialised again. */
+    const omissions = planAttachmentOmissions(history);
+    const keyOf = (message: ProviderMessage): string => {
+      const omission = omissions.get(message.id);
+      return omission === undefined
+        ? message.id
+        : `${message.id}#${[...omission.blocks].join(',')}#${[...omission.images].join(',')}`;
+    };
+    const pending = history.filter(
+      (message) => !materializedById.has(keyOf(message)) && (hasFileRef(message) || omissions.has(message.id)),
+    );
+    const outcome = await materializeAttachments(
+      pending.map((message) => {
+        const omission = omissions.get(message.id);
+        return omission === undefined ? message : omitAttachments(message, omission);
+      }),
+      readAttachment,
+    );
     for (const [index, message] of outcome.messages.entries()) {
-      materializedById.set(pending[index]!.id, message);
+      materializedById.set(keyOf(pending[index]!), message);
     }
     for (const [hash, document] of outcome.documents) {
       documents.set(hash, document);
@@ -1568,7 +1587,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         `Chat ${options.chatId}: ${String(outcome.malformed)} malformed attachment row(s) omitted; the model will not see them.`,
       );
     }
-    return history.map((message) => materializedById.get(message.id) ?? message);
+    return history.map((message) => materializedById.get(keyOf(message)) ?? message);
   };
   /** What the chat's history tells the next turn's context about skills: the block it pins and the note it carries. */
   const skillsCarriage = async (): Promise<{

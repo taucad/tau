@@ -11,6 +11,8 @@ import {
   attachmentBudgetCharacters,
   attachmentImageLimit,
   fitAttachmentBudget,
+  omitAttachments,
+  planAttachmentOmissions,
   rewriteDocuments,
 } from '#transport/document-payload.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
@@ -409,6 +411,78 @@ describe('fitAttachmentBudget image count ceiling (I1)', () => {
       tools: [],
     };
     expect(fitAttachmentBudget(context, documents, { imageLimit: 10 }).omitted).toBe(0);
+  });
+});
+
+describe('attachment omissions decided from the durable rows (I1 across devices)', () => {
+  const imageRef = (index: number, byteLength?: number): ProviderMessage => ({
+    id: `user-${String(index)}`,
+    role: 'user',
+    content: [
+      { type: 'text', text: `capture ${String(index)}` },
+      {
+        type: 'file-ref',
+        path: `attachments/${String(index).padStart(64, '0')}.png`,
+        mimeType: 'image/png',
+        filename: `view-${String(index)}.png`,
+        ...(byteLength === undefined ? {} : { byteLength }),
+      },
+    ],
+  });
+  const documentRef: ProviderMessage = {
+    id: 'user-doc',
+    role: 'user',
+    content: [{ type: 'file-ref', path: `attachments/${hash}.pdf`, mimeType: 'application/pdf', byteLength: 30 }],
+  };
+  const stored = (index: number): ProviderMessage => ({
+    id: `shot-${String(index)}`,
+    role: 'tool-output',
+    toolCallId: `call-${String(index)}`,
+    toolName: 'screenshot',
+    content: {
+      images: [
+        { view: 'front', path: `attachments/${'f'.repeat(64)}.webp`, mimeType: 'image/webp', byteLength: 3 },
+        { view: 'top', dataUrl: 'data:image/png;base64,AAAA' },
+      ],
+    },
+    isError: false,
+  });
+
+  it('should evict the oldest images past the limit, whatever device reads them, and leave documents alone', () => {
+    const history = [
+      imageRef(0, 3),
+      imageRef(1, 3),
+      documentRef,
+      stored(2),
+      ...[3, 4, 5, 6, 7, 8, 9].map((i) => imageRef(i, 3)),
+    ];
+    /* Eleven images (two per capture) against a limit of ten: the oldest four go, down to the floor of seven. */
+    const omissions = planAttachmentOmissions(history, { imageLimit: 10 });
+    expect([...omissions.entries()].map(([id, omission]) => [id, [...omission.blocks], [...omission.images]])).toEqual([
+      ['user-0', [1], []],
+      ['user-1', [1], []],
+      ['shot-2', [], [0, 1]],
+    ]);
+    expect(omitAttachments(history[0]!, omissions.get('user-0')!).content).toEqual([
+      { type: 'text', text: 'capture 0' },
+      { type: 'text', text: '[attachment omitted: view-0.png]' },
+    ]);
+    expect(omitAttachments(stored(2), omissions.get('shot-2')!).content).toEqual({ images: [] });
+    /* The copy is transient: the durable row is untouched. */
+    expect(history[0]).toEqual(imageRef(0, 3));
+  });
+
+  it('should weigh a reference by the bytes its row records and count one it does not size as an image of no bytes', () => {
+    /* 36 bytes encode to 48 characters each; three overflow a budget of 100 and evict down to the floor of 70. */
+    expect([
+      ...planAttachmentOmissions([imageRef(0, 36), imageRef(1, 36), imageRef(2, 36)], { budget: 100 }).keys(),
+    ]).toEqual(['user-0', 'user-1']);
+    expect(planAttachmentOmissions([imageRef(0), imageRef(1), imageRef(2)], { budget: 100 }).size).toBe(0);
+    /* Three images against a limit of two: the floor is one, so the oldest two go. */
+    expect([...planAttachmentOmissions([imageRef(0), imageRef(1), imageRef(2)], { imageLimit: 2 }).keys()]).toEqual([
+      'user-0',
+      'user-1',
+    ]);
   });
 });
 

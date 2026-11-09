@@ -2,6 +2,8 @@
 import type { Api, Context, ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { documentSentinel } from '#harness/session-record.js';
+import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
+import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
 import type { MaterializedDocument } from '#waist/ports.js';
 
 /** The pi codecs Tau's gateway speaks. @internal */
@@ -84,7 +86,8 @@ export type AttachmentMeasure = Readonly<{ size: number; image: boolean }>;
  * Attachments are admitted oldest first. The first time the admitted total overflows the byte budget, or the admitted
  * images outnumber the image limit, the oldest admitted attachments are evicted until no more than
  * {@link attachmentBudgetFloor} of the budget, and of the limit, remains, so between two overflows no attachment
- * changes. The newest attachment is kept unless it alone exceeds the byte budget.
+ * changes. Over the image limit alone, only images are evicted. The newest attachment is kept unless it alone exceeds
+ * the byte budget.
  *
  * @internal
  * @param measures - The attachments, oldest first.
@@ -102,11 +105,11 @@ export const planAttachmentEvictions = (
   /* Held in one object: the eviction below changes them, which a loop condition on bare bindings cannot see. */
   const held = { total: 0, images: 0 };
   const floor = { total: budget * attachmentBudgetFloor, images: Math.floor(imageLimit * attachmentBudgetFloor) };
-  const evictOldest = (): void => {
-    const oldest = admitted.shift()!;
-    evicted.add(oldest);
-    held.total -= measures[oldest]!.size;
-    held.images -= measures[oldest]!.image ? 1 : 0;
+  const evict = (position: number): void => {
+    const [index] = admitted.splice(position, 1) as [number];
+    evicted.add(index);
+    held.total -= measures[index]!.size;
+    held.images -= measures[index]!.image ? 1 : 0;
   };
   for (const [index, measure] of measures.entries()) {
     admitted.push(index);
@@ -116,13 +119,157 @@ export const planAttachmentEvictions = (
       continue;
     }
     while ((held.total > floor.total || held.images > floor.images) && admitted.length > 1) {
-      evictOldest();
+      /* Over the bytes, the oldest of any kind goes; over the images alone, the oldest image: a document is not
+       * evicted to make room for captures. */
+      const position =
+        held.total > floor.total ? 0 : admitted.findIndex((admittedIndex) => measures[admittedIndex]!.image);
+      if (position === -1 || position === admitted.length - 1) {
+        break;
+      }
+      evict(position);
     }
     if (held.total > budget) {
-      evictOldest();
+      evict(0);
     }
   }
   return evicted;
+};
+
+/** The text an evicted attachment leaves in its place. */
+const omittedAttachmentText = (name: string | undefined): string =>
+  name === undefined ? '[attachment omitted]' : `[attachment omitted: ${name}]`;
+
+/** The base64 characters `byteLength` bytes encode to: what the bytes weigh on the wire. */
+const base64Length = (byteLength: number): number => Math.ceil(byteLength / 3) * 4;
+
+const inlineDataUrl = /^data:[^;,]+;base64,(.*)$/u;
+
+/** One attachment a durable row names: a content block, or an image of a screenshot result. */
+type DurableAttachment = Readonly<{ kind: 'block' | 'image'; index: number; measure: AttachmentMeasure }>;
+
+/**
+ * The attachments one durable row names, in content order, each sized from the row alone: a `file-ref` by its
+ * recorded `byteLength` (0 when the writer recorded none), a stored capture by its `byteLength`, an inline image or
+ * capture by its base64 length.
+ */
+const durableAttachmentsOf = (message: ProviderMessage): DurableAttachment[] => {
+  if (message.role === 'tool-input') {
+    return [];
+  }
+  const { content } = message;
+  if (Array.isArray(content)) {
+    return content.flatMap((block: JsonValue, index): DurableAttachment[] => {
+      if (!zodUtility.isObject(block)) {
+        return [];
+      }
+      if (block['type'] === 'image' && typeof block['data'] === 'string') {
+        return [{ kind: 'block', index, measure: { size: block['data'].length, image: true } }];
+      }
+      if (block['type'] !== 'file-ref') {
+        return [];
+      }
+      const parsed = fileRefBlockSchema.safeParse(block);
+      if (!parsed.success) {
+        return [];
+      }
+      const size = parsed.data.byteLength === undefined ? 0 : base64Length(parsed.data.byteLength);
+      return [{ kind: 'block', index, measure: { size, image: parsed.data.mimeType.startsWith('image/') } }];
+    });
+  }
+  if (!zodUtility.isObject(content)) {
+    return [];
+  }
+  const result: JsonObject = content;
+  const { images } = result;
+  if (!Array.isArray(images)) {
+    return [];
+  }
+  return images.flatMap((image, index): DurableAttachment[] => {
+    if (!zodUtility.isObject(image)) {
+      return [];
+    }
+    const inline = typeof image['dataUrl'] === 'string' ? inlineDataUrl.exec(image['dataUrl']) : null;
+    if (inline !== null) {
+      return [{ kind: 'image', index, measure: { size: inline[1]!.length, image: true } }];
+    }
+    if (typeof image['path'] === 'string' && attachmentPathPattern.test(image['path'])) {
+      const size = typeof image['byteLength'] === 'number' ? base64Length(image['byteLength']) : 0;
+      return [{ kind: 'image', index, measure: { size, image: true } }];
+    }
+    return [];
+  });
+};
+
+/** The attachments of one durable row a request leaves out: content block indexes and screenshot image indexes. */
+export type AttachmentOmission = Readonly<{ blocks: ReadonlySet<number>; images: ReadonlySet<number> }>;
+
+/**
+ * Which attachments of a durable history every request leaves out (I1 across devices).
+ *
+ * Decided from the rows alone, by {@link planAttachmentEvictions} over the sizes they record, before any byte is read:
+ * a device that lacks an attachment's bytes, or has not received them yet, evicts the same attachments as a device
+ * that has them, so the two send the same request bytes apart from the attachment itself. The transport's own fit
+ * ({@link fitAttachmentBudget}) stays behind it as the bound on what is actually sent.
+ *
+ * @internal
+ * @param history - The durable history, oldest first.
+ * @param bounds - The characters of base64 and the images a request may carry; the defaults above when absent.
+ * @returns The omissions, keyed by message id; a row with none is absent.
+ */
+export const planAttachmentOmissions = (
+  history: readonly ProviderMessage[],
+  bounds: Readonly<{ budget?: number | undefined; imageLimit?: number | undefined }> = {},
+): ReadonlyMap<string, AttachmentOmission> => {
+  const named = history.flatMap((message) =>
+    durableAttachmentsOf(message).map((attachment) => ({ messageId: message.id, ...attachment })),
+  );
+  const evicted = planAttachmentEvictions(
+    named.map((attachment) => attachment.measure),
+    bounds,
+  );
+  const omissions = new Map<string, { blocks: Set<number>; images: Set<number> }>();
+  for (const index of evicted) {
+    const attachment = named[index]!;
+    const omission = omissions.get(attachment.messageId) ?? { blocks: new Set<number>(), images: new Set<number>() };
+    (attachment.kind === 'block' ? omission.blocks : omission.images).add(attachment.index);
+    omissions.set(attachment.messageId, omission);
+  }
+  return omissions;
+};
+
+/**
+ * A durable row with its evicted attachments left out, as a transient copy: an evicted content block becomes the
+ * text `[attachment omitted: <name>]` (or `[attachment omitted]`), and an evicted screenshot image is dropped.
+ *
+ * @internal
+ * @param message - The durable row; it is not mutated.
+ * @param omission - What {@link planAttachmentOmissions} decided for it.
+ * @returns The copy.
+ */
+export const omitAttachments = (message: ProviderMessage, omission: AttachmentOmission): ProviderMessage => {
+  if (message.role === 'tool-input') {
+    return message;
+  }
+  const { content } = message;
+  if (Array.isArray(content)) {
+    const blocks = content.map((block: JsonValue, index): JsonValue => {
+      if (!omission.blocks.has(index) || !zodUtility.isObject(block)) {
+        return block;
+      }
+      const name = typeof block['filename'] === 'string' ? block['filename'] : undefined;
+      return { type: 'text', text: omittedAttachmentText(name) };
+    });
+    return { ...message, content: blocks };
+  }
+  if (!zodUtility.isObject(content)) {
+    return message;
+  }
+  const result: JsonObject = content;
+  const { images } = result;
+  if (!Array.isArray(images)) {
+    return message;
+  }
+  return { ...message, content: { ...result, images: images.filter((_, index) => !omission.images.has(index)) } };
 };
 
 type AttachmentSlot = Readonly<{
@@ -194,10 +341,7 @@ export const fitAttachmentBudget = (
         if (slot === undefined) {
           return block;
         }
-        return {
-          type: 'text',
-          text: slot.name === undefined ? '[attachment omitted]' : `[attachment omitted: ${slot.name}]`,
-        };
+        return { type: 'text', text: omittedAttachmentText(slot.name) };
       },
     );
     return message.role === 'user' ? { ...message, content } : { ...message, content };

@@ -7,7 +7,12 @@ import type { MaterializedDocument, ModelStreamEvent, ModelStreamRequest } from 
 import { documentSentinel } from '#harness/session-record.js';
 import { createMemoryEventLog } from '#harness/harness.fixture.js';
 import { createAgentSession } from '#harness/session.js';
-import { attachmentBudgetCharacters, fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
+import {
+  attachmentBudgetCharacters,
+  attachmentImageLimit,
+  fitAttachmentBudget,
+  rewriteDocuments,
+} from '#transport/document-payload.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -276,7 +281,7 @@ describe('fitAttachmentBudget', () => {
 
   it('should return the same context when every attachment fits', () => {
     const input = context();
-    expect(fitAttachmentBudget(input, documents, 28)).toEqual({ context: input, omitted: 0 });
+    expect(fitAttachmentBudget(input, documents, { budget: 28 })).toEqual({ context: input, omitted: 0 });
   });
 
   it('should evict the oldest attachments in a batch and name the ones it omits', () => {
@@ -284,7 +289,7 @@ describe('fitAttachmentBudget', () => {
     const before = structuredClone(input);
 
     /* Sizes 8, 8, 4, 8 against a budget of 12 (floor 8.4): the second overflow evicts both the 8 and the 4. */
-    const fitted = fitAttachmentBudget(input, documents, 12);
+    const fitted = fitAttachmentBudget(input, documents, { budget: 12 });
 
     expect(fitted.omitted).toBe(3);
     expect(fitted.context.messages.map((message) => message.content)).toEqual([
@@ -323,7 +328,7 @@ describe('fitAttachmentBudget batch eviction (I1)', () => {
   it('should rewrite history only when the budget overflows, evicting the oldest down to the floor in one batch', () => {
     const omitted = Array.from(
       { length: 15 },
-      (_, index) => fitAttachmentBudget(attachments(index + 1), undefined, 100).omitted,
+      (_, index) => fitAttachmentBudget(attachments(index + 1), undefined, { budget: 100 }).omitted,
     );
     /* Ten fit; the eleventh overflows and evicts four, which lasts until the fifteenth overflows again. */
     expect(omitted).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 8]);
@@ -331,8 +336,8 @@ describe('fitAttachmentBudget batch eviction (I1)', () => {
 
   it('should keep every earlier eviction when a later attachment arrives, so replays agree byte for byte', () => {
     for (let count = 1; count < 15; count++) {
-      const before = omittedIndexes(fitAttachmentBudget(attachments(count), undefined, 100).context);
-      const after = omittedIndexes(fitAttachmentBudget(attachments(count + 1), undefined, 100).context);
+      const before = omittedIndexes(fitAttachmentBudget(attachments(count), undefined, { budget: 100 }).context);
+      const after = omittedIndexes(fitAttachmentBudget(attachments(count + 1), undefined, { budget: 100 }).context);
       expect(after.slice(0, before.length), `count ${String(count)}`).toEqual(before);
       /* Evictions take the oldest attachments, never one in the middle. */
       expect(after).toEqual(after.map((_, index) => index));
@@ -340,10 +345,70 @@ describe('fitAttachmentBudget batch eviction (I1)', () => {
   });
 
   it('should keep the newest attachment unless it alone exceeds the budget', () => {
-    const pair = fitAttachmentBudget(attachments(2, 80), undefined, 100);
+    const pair = fitAttachmentBudget(attachments(2, 80), undefined, { budget: 100 });
     expect(pair.omitted).toBe(1);
     expect(omittedIndexes(pair.context)).toEqual([0]);
-    expect(fitAttachmentBudget(attachments(1, 150), undefined, 100).omitted).toBe(1);
+    expect(fitAttachmentBudget(attachments(1, 150), undefined, { budget: 100 }).omitted).toBe(1);
+  });
+});
+
+describe('fitAttachmentBudget image count ceiling (I1)', () => {
+  const images = (count: number): Context => ({
+    systemPrompt: 'CAD',
+    messages: Array.from(
+      { length: count },
+      (_, index): UserMessage => ({
+        role: 'user',
+        content: [{ type: 'image', mimeType: 'image/png', data: 'AA' }],
+        timestamp: index,
+      }),
+    ),
+    tools: [],
+  });
+  const omittedIndexes = (context: Context): number[] =>
+    context.messages.flatMap((message, index) =>
+      typeof message.content !== 'string' && message.content.some((block) => block.type === 'text') ? [index] : [],
+    );
+
+  it('should refuse more images than the Anthropic Messages API accepts in one request', () => {
+    expect(attachmentImageLimit).toBe(100);
+    expect(fitAttachmentBudget(images(attachmentImageLimit), undefined).omitted).toBe(0);
+    const over = fitAttachmentBudget(images(attachmentImageLimit + 1), undefined);
+    expect(over.omitted).toBeGreaterThan(0);
+    expect(over.context.messages.length - omittedIndexes(over.context).length).toBeLessThanOrEqual(
+      attachmentImageLimit,
+    );
+  });
+
+  it('should evict the oldest images down to the floor in one batch when the count overflows', () => {
+    const omitted = Array.from(
+      { length: 15 },
+      (_, index) => fitAttachmentBudget(images(index + 1), undefined, { imageLimit: 10 }).omitted,
+    );
+    /* Ten fit; the eleventh overflows and evicts four, which lasts until the fifteenth overflows again. */
+    expect(omitted).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 8]);
+  });
+
+  it('should keep every earlier eviction when a later image arrives, so replays agree byte for byte', () => {
+    for (let count = 1; count < 15; count++) {
+      const before = omittedIndexes(fitAttachmentBudget(images(count), undefined, { imageLimit: 10 }).context);
+      const after = omittedIndexes(fitAttachmentBudget(images(count + 1), undefined, { imageLimit: 10 }).context);
+      expect(after.slice(0, before.length), `count ${String(count)}`).toEqual(before);
+      expect(after).toEqual(after.map((_, index) => index));
+    }
+  });
+
+  it('should count documents toward the bytes only, never toward the images', () => {
+    const documents = new Map<string, MaterializedDocument>([[hash, { ...pdf, data: 'AAAA' }]]);
+    const context: Context = {
+      systemPrompt: 'CAD',
+      messages: Array.from(
+        { length: 12 },
+        (_, index): UserMessage => ({ role: 'user', content: [{ type: 'text', text: sentinel }], timestamp: index }),
+      ),
+      tools: [],
+    };
+    expect(fitAttachmentBudget(context, documents, { imageLimit: 10 }).omitted).toBe(0);
   });
 });
 

@@ -67,30 +67,94 @@ export const attachmentBudgetCharacters = 24_000_000;
  */
 export const attachmentBudgetFloor = 0.7;
 
-type AttachmentSlot = Readonly<{ messageIndex: number; blockIndex: number; size: number; name: string | undefined }>;
+/**
+ * Images one request may carry: the Anthropic Messages API refuses a request with more than 100 image blocks, and a
+ * chat of screenshots outgrows that long before it outgrows the byte budget (R1).
+ *
+ * @internal
+ */
+export const attachmentImageLimit = 100;
+
+/** One attachment in request order: its base64 size and whether it is an image. @internal */
+export type AttachmentMeasure = Readonly<{ size: number; image: boolean }>;
+
+/**
+ * Which attachments of a request are evicted (I1): a function of their sizes and kinds alone.
+ *
+ * Attachments are admitted oldest first. The first time the admitted total overflows the byte budget, or the admitted
+ * images outnumber the image limit, the oldest admitted attachments are evicted until no more than
+ * {@link attachmentBudgetFloor} of the budget, and of the limit, remains, so between two overflows no attachment
+ * changes. The newest attachment is kept unless it alone exceeds the byte budget.
+ *
+ * @internal
+ * @param measures - The attachments, oldest first.
+ * @param bounds - The characters of base64 and the images the request may carry; the defaults above when absent.
+ * @returns The indexes into `measures` of the evicted attachments.
+ */
+export const planAttachmentEvictions = (
+  measures: readonly AttachmentMeasure[],
+  bounds: Readonly<{ budget?: number | undefined; imageLimit?: number | undefined }> = {},
+): ReadonlySet<number> => {
+  const budget = bounds.budget ?? attachmentBudgetCharacters;
+  const imageLimit = bounds.imageLimit ?? attachmentImageLimit;
+  const evicted = new Set<number>();
+  const admitted: number[] = [];
+  /* Held in one object: the eviction below changes them, which a loop condition on bare bindings cannot see. */
+  const held = { total: 0, images: 0 };
+  const floor = { total: budget * attachmentBudgetFloor, images: Math.floor(imageLimit * attachmentBudgetFloor) };
+  const evictOldest = (): void => {
+    const oldest = admitted.shift()!;
+    evicted.add(oldest);
+    held.total -= measures[oldest]!.size;
+    held.images -= measures[oldest]!.image ? 1 : 0;
+  };
+  for (const [index, measure] of measures.entries()) {
+    admitted.push(index);
+    held.total += measure.size;
+    held.images += measure.image ? 1 : 0;
+    if (held.total <= budget && held.images <= imageLimit) {
+      continue;
+    }
+    while ((held.total > floor.total || held.images > floor.images) && admitted.length > 1) {
+      evictOldest();
+    }
+    if (held.total > budget) {
+      evictOldest();
+    }
+  }
+  return evicted;
+};
+
+type AttachmentSlot = Readonly<{
+  messageIndex: number;
+  blockIndex: number;
+  size: number;
+  image: boolean;
+  name: string | undefined;
+}>;
 
 /**
  * Keep the attachments a request can carry and name the rest (R1), evicting in batches (I1).
  *
- * Durable history names every attachment a chat ever held, so a long chat can outgrow any request bound. Attachments
- * are replayed oldest first: each image block, and each document sentinel with a side-table entry, is admitted, and
- * the first time the total overflows the budget the oldest admitted attachments are evicted until no more than
- * {@link attachmentBudgetFloor} of the budget remains. An evicted attachment becomes the text
+ * Durable history names every attachment a chat ever held, so a long chat can outgrow any request bound. Each image
+ * block, and each document sentinel with a side-table entry, is measured in request order and
+ * {@link planAttachmentEvictions} decides which are evicted: the oldest, in one batch, the first time the total
+ * overflows the byte budget or the images outnumber the limit. An evicted attachment becomes the text
  * `[attachment omitted: <name>]` (or `[attachment omitted]`). The decision is a function of the history alone, so a
  * replay or another device sends the same bytes, and between two overflows no attachment changes: the model loses
  * sight of old bytes the way it loses old turns to compaction, a batch at a time, instead of one rewrite per new
- * attachment. The newest attachment is kept unless it alone exceeds the budget.
+ * attachment.
  *
  * @internal
  * @param context - The request's pi context; it is not mutated.
  * @param documents - The request's side table, keyed by lowercase SHA-256 hex.
- * @param budget - The characters of base64 the request may carry.
+ * @param bounds - The characters of base64 and the images the request may carry; the defaults above when absent.
  * @returns The fitted context and how many attachments were omitted.
  */
 export const fitAttachmentBudget = (
   context: Context,
   documents: ReadonlyMap<string, MaterializedDocument> | undefined,
-  budget: number = attachmentBudgetCharacters,
+  bounds: Readonly<{ budget?: number | undefined; imageLimit?: number | undefined }> = {},
 ): { readonly context: Context; readonly omitted: number } => {
   const slots: AttachmentSlot[] = [];
   for (const [messageIndex, message] of context.messages.entries()) {
@@ -99,39 +163,21 @@ export const fitAttachmentBudget = (
     }
     for (const [blockIndex, block] of message.content.entries()) {
       if (block.type === 'image') {
-        slots.push({ messageIndex, blockIndex, size: block.data.length, name: undefined });
+        slots.push({ messageIndex, blockIndex, size: block.data.length, image: true, name: undefined });
         continue;
       }
       const hash = standaloneSentinel.exec(block.text)?.[1];
       const document = hash === undefined ? undefined : documents?.get(hash);
       if (document !== undefined) {
-        slots.push({ messageIndex, blockIndex, size: document.data.length, name: document.filename });
+        slots.push({ messageIndex, blockIndex, size: document.data.length, image: false, name: document.filename });
       }
     }
   }
-  const evicted = new Set<AttachmentSlot>();
-  const admitted: AttachmentSlot[] = [];
-  let total = 0;
-  const floor = budget * attachmentBudgetFloor;
-  for (const slot of slots) {
-    admitted.push(slot);
-    total += slot.size;
-    if (total <= budget) {
-      continue;
-    }
-    while (total > floor && admitted.length > 1) {
-      const oldest = admitted.shift()!;
-      evicted.add(oldest);
-      total -= oldest.size;
-    }
-    if (total > budget) {
-      evicted.add(admitted.shift()!);
-      total = 0;
-    }
-  }
-  if (evicted.size === 0) {
+  const evictedIndexes = planAttachmentEvictions(slots, bounds);
+  if (evictedIndexes.size === 0) {
     return { context, omitted: 0 };
   }
+  const evicted = new Set([...evictedIndexes].map((index) => slots[index]!));
   const byMessage = Map.groupBy(evicted, (slot) => slot.messageIndex);
   const messages = context.messages.map((message, messageIndex) => {
     const evictions = byMessage.get(messageIndex);

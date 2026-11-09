@@ -27,11 +27,11 @@ type Scan = typeof billingCashScan.$inferSelect;
 type Grant = typeof creditTransaction.$inferSelect;
 
 /**
- * Reconciliation kinds that pause only the affected account's new collection.
+ * Reconciliation kinds this sweep opens, each with the owning `accountId` set.
  *
- * `assertNewCollectionCashScope` treats an account-scoped open case as an
- * attention stop for that account alone, so every kind listed here is opened
- * with the owning `accountId` set.
+ * `invalid_grant_cause` and `entitlement_source_disagreement` are spend-blocking, so they stop that account
+ * spending and refuse its new collection (`assertCollectionNotSpendBlocked`); an `unfulfilled_purchase_obligation`
+ * is money Tau owes and refuses nothing.
  */
 export const purchaseBlockingFinancialCaseKinds = [
   'unfulfilled_purchase_obligation',

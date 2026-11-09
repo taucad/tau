@@ -1096,7 +1096,8 @@ describe('desktop main compute owner', () => {
 
       for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
         listener(
-          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          /* A filesystem concern is scoped to the asking window's import grants (W7.4). */
+          { sender: { id: 7 }, senderFrame: { url: 'app://tau/index.html', postMessage } },
           { requestId: 'req-quit', concern: 'nodeFs' },
         );
       }

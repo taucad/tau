@@ -893,6 +893,12 @@ const revisionIdentityCommands = (
    * until an identity's own mint has answered: that mint is the first attempt.
    */
   let recovered = true;
+  /*
+   * Set when a session change is announced: until the root answers it, the
+   * projection still shows the last session's refusal, which is no refusal of
+   * the credential just sent and must not spend the one retry.
+   */
+  let awaitingAnswer = false;
   let unsubscribe: (() => void) | undefined;
 
   const setCredential = async (source: RevisionCredentialSource): Promise<boolean> => {
@@ -909,14 +915,20 @@ const revisionIdentityCommands = (
     if (status === undefined) {
       return;
     }
-    if (status.sync.state === 'backedUp') {
-      recovered = false;
-      return;
-    }
     const refused =
       status.remote.kind === 'git' &&
       (status.remote.phase === 'reconnectRequired' ||
         (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
+    if (awaitingAnswer) {
+      if (refused) {
+        return;
+      }
+      awaitingAnswer = false;
+    }
+    if (status.sync.state === 'backedUp') {
+      recovered = false;
+      return;
+    }
     if (
       !refused ||
       recovered ||
@@ -943,6 +955,7 @@ const revisionIdentityCommands = (
    * remote waiting on a credential takes the one just sent.
    */
   const announceSession = (): void => {
+    awaitingAnswer = true;
     client().send({ command: 'sessionChanged' });
     if (client().status()?.remote.phase === 'reconnectRequired') {
       client().send({ command: 'authorizeRemote' });
@@ -1025,6 +1038,7 @@ const revisionIdentityCommands = (
     user = undefined;
     generation += 1;
     recovered = true;
+    awaitingAnswer = false;
   };
 
   return { setUser, setCredential, release };

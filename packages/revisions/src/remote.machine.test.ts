@@ -1067,6 +1067,28 @@ describe('remoteMachine', () => {
     actor.stop();
   });
 
+  it('reads the stored figure again under a new session, dropping the last one (audit R6)', async () => {
+    let count = 0;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => {
+          count += 1;
+          return count === 1 ? { used: 1, quota: 1024 } : undefined;
+        },
+      }),
+    });
+    await settle();
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 1, quota: 1024 });
+
+    actor.send({ type: 'sessionChanged' });
+    await settle();
+
+    expect(count).toBe(2);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'connected', storage: undefined });
+    actor.stop();
+  });
+
   it('38 (F9): ignores a storage read that finishes after a refusal set the figures', async () => {
     let answer: ((storage: RemoteStorage) => void) | undefined;
     const { actor } = start({

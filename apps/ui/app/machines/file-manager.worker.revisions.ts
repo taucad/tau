@@ -1643,6 +1643,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'sessionChanged': {
+          actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
           actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
           return;
         }

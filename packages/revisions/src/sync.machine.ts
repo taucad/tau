@@ -157,6 +157,8 @@ type SyncMachineContextFields = Readonly<{
    * and the state that finishes the current effect fetches for it.
    */
   pendingFetch: boolean;
+  /** The signed-in person changed while the host was quiescing (audit R6): the remote is read afresh on release. */
+  pendingSession: boolean;
   /** Holds new background work while the host waits for close. */
   quiescing: boolean;
   /** Transport cancellation was requested; local reconciliation still completes. */
@@ -1265,6 +1267,7 @@ const syncMachineDefinition = setup({
     ahead: false,
     conflictRef: undefined,
     pendingFetch: false,
+    pendingSession: false,
     quiescing: false,
     transportStopped: false,
     leaseSettled: false,
@@ -1299,8 +1302,22 @@ const syncMachineDefinition = setup({
   /* Connectivity and the remote are facts about the host, not about which state
    * the scheduler is in, so they are handled once at the root. */
   on: {
-    quiesce: ({ context, event, value }) => {
+    quiesce: ({ context, event, value, guards }) => {
       if (event.phase === 'release') {
+        if (context.pendingSession && guards.hasRemote(context)) {
+          /* A session change held through the close is read now (audit R6). */
+          return {
+            target: '.opening',
+            reenter: true,
+            context: {
+              quiescing: false,
+              transportStopped: false,
+              pendingFetch: false,
+              pendingFlush: false,
+              pendingSession: false,
+            },
+          };
+        }
         return {
           ...(value === 'queued' ? { target: '.queued', reenter: true } : {}),
           context: { quiescing: false, transportStopped: false, pendingFetch: false, pendingFlush: false },
@@ -1337,20 +1354,23 @@ const syncMachineDefinition = setup({
       return {};
     },
     /*
-     * A new session may be answered where the last one was refused (rule 19):
-     * the move stream is watched afresh, since a refused one is never re-read
-     * for the remote it already watches. `failed` also opens again on it.
+     * The page's signed-in person changed (audit R6, rule 19): the remote is
+     * read afresh under the new session, as a freshly started root would. Like
+     * `open`, from any state: an answer still in flight was asked under the
+     * last session and is dropped with the state it belongs to, and a terminal
+     * refusal may have been that session's. Re-entering from the root restarts
+     * the root's own children too, so the move stream (a refused one is never
+     * re-read for the remote it already watches) is a fresh subscription that
+     * `opening` watches again. Held while quiescing, read on release.
      */
-    sessionChanged: ({ context }, enq) => {
-      if (context.remote !== undefined && context.remote !== '') {
-        enq.sendTo('remoteMoves', { type: 'unwatch' });
-        enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote });
-        /* A fresh watch reports only what lands after its tail, so the remote
-         * is pulled as a move would be: an idle state fetches, a busy one
-         * remembers it. A remote with no stream is read the same way. */
-        enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
+    sessionChanged: ({ context, guards }) => {
+      if (!guards.hasRemote(context)) {
+        return {};
       }
-      return {};
+      if (context.quiescing) {
+        return { context: { pendingSession: true } };
+      }
+      return { target: '.opening', reenter: true, context: { pendingSession: false } };
     },
     leaseRetired: { context: { leaseSettled: true } },
     /* The root forwards every answer to a cut no turn asked for; only `minting`
@@ -2465,12 +2485,6 @@ const syncMachineDefinition = setup({
                 target: 'opening',
                 context: carry(context, event),
               },
-        /* Any terminal refusal may be the last session's (rule 19): open again,
-         * the stream unwatched first so `opening` watches it afresh. */
-        sessionChanged: ({ context }, enq) => {
-          enq.sendTo('remoteMoves', { type: 'unwatch' });
-          return context.quiescing ? {} : { target: 'opening' };
-        },
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({

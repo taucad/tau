@@ -2703,11 +2703,51 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
 
     harness.actor.send({ type: 'sessionChanged' });
 
+    /* A fresh subscription, watched again: the refused session is not the one asked. */
+    expect(harness.holds.inputsFor('remoteMoves')).toHaveLength(2);
     await vi.waitFor(() => {
       expect(harness.holds.deliveries.slice(before).map(({ event }) => event)).toEqual([
-        { type: 'unwatch' },
         { type: 'watch', remote: 'tau' },
       ]);
+    });
+
+    harness.stop();
+  });
+
+  it('drops an answer asked under the last session when the session changes (audit R6)', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'sessionChanged' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    /* The last session's fetch answers 401 after the change: it was stopped with its state, so nothing hears it. */
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('Sign in.'), { code: 'REMOTE_UNAUTHORIZED' }),
+    });
+    await Promise.resolve();
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
+    expect(harness.actor.getSnapshot().matches('opening')).toBe(true);
+
+    harness.stop();
+  });
+
+  it('holds a session change through quiescing and reads the remote on release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    await Promise.resolve();
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
     });
 
     harness.stop();
@@ -2748,10 +2788,8 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
     });
-    expect(harness.holds.deliveries.slice(-2).map(({ event }) => event)).toEqual([
-      { type: 'unwatch' },
-      { type: 'watch', remote: 'tau' },
-    ]);
+    expect(harness.holds.inputsFor('remoteMoves')).toHaveLength(2);
+    expect(harness.holds.deliveries.at(-1)?.event).toEqual({ type: 'watch', remote: 'tau' });
 
     harness.stop();
   });

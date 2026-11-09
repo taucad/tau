@@ -477,7 +477,20 @@ describe('an identity change on the open client (audit R6)', () => {
     expect(scripted.client.close).not.toHaveBeenCalled();
     expect(scripted.client.open).toHaveBeenCalledOnce();
     expect(githubToken).toHaveBeenCalledOnce();
-    expect(scripted.frames()).toStrictEqual([
+
+    /* A frame that still shows the signed-out refusal is not the root's answer: the one retry is kept. */
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired' });
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 20);
+    });
+    expect(githubToken).toHaveBeenCalledOnce();
+    /* The root answers, and its refusal of the fresh credential gets the one retry. */
+    scripted.show({ ...githubRemote, phase: 'connecting' });
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'Refused.' });
+    await vi.waitFor(() => {
+      expect(githubToken).toHaveBeenCalledTimes(2);
+    });
+    expect(scripted.frames().slice(0, 2)).toStrictEqual([
       { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
       expect.objectContaining({ repositoryUrl, authorization: basic('fresh') }),
     ]);

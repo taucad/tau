@@ -644,6 +644,8 @@ const remoteMachineDefinition = setup({
         connect: ({ context, event }) => replaceOrReconnect(context, event, 'connected'),
         /* F9: a push changed what is stored; read it again, dropping any read in flight. */
         pushed: { target: '.reading', reenter: true },
+        /* Audit R6: the figure was read under the last session; read it under this one, as a fresh root would. */
+        sessionChanged: { target: '.reading', reenter: true, context: { storage: undefined } },
         /* F9: a refusal's own figures are newer than a read still in flight, so
            leaving `reading` stops that read before its answer can overwrite them. */
         quotaRefused: ({ context, event }) =>

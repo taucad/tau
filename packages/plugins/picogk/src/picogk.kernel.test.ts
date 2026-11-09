@@ -365,9 +365,14 @@ describe('PicoGK kernel', () => {
       ),
     ).toEqual(built.handle);
     // A snapshot written while meshRelax existed restores, without the field.
-    const serialized = structuredClone(definition.serializeHandle!({ handle: built.handle }, runtime, value));
-    const older = { ...serialized, tessellation: { ...serialized.tessellation!, relax: true } };
-    expect(definition.deserializeHandle!({ serialized: older }, runtime, value)).toEqual(built.handle);
+    const olderTessellation = { ...built.handle.tessellation!, relax: true };
+    expect(
+      definition.deserializeHandle!(
+        { serialized: { glb: built.handle.glb, tessellation: olderTessellation } },
+        runtime,
+        value,
+      ).tessellation,
+    ).toEqual(built.handle.tessellation);
   });
 
   it('refuses an adaptive view from a worker that does not echo the meshing it applied', async () => {

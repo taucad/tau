@@ -9,7 +9,7 @@ import type { DatabaseType } from '@taucad/api-database';
 import { DatabaseService } from '@taucad/api-database';
 import { durableStream, durableStreamEvent } from '@taucad/api-database/schema';
 import { RedisService } from '@taucad/api-redis';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type {
   DurableAppendOutcome,

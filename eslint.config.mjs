@@ -237,10 +237,12 @@ const memberOrdering = [
  * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
  * instead names the API libraries it may depend on (the "May depend on" column of
  * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
- * project. Every edge points down `billing -> llm-gateway -> hosts -> auth ->
- * {database, email, redis} -> lifecycle -> observability -> core`; no library may
- * depend on the `api` app (its `type:app` tag is outside every `type:app-lib`
- * allowlist). Entries marked "measured" are downward edges the moved code already
+ * project. Every edge points down `{git-mirror, projects} -> git-core -> object-storage -> billing ->
+ * llm-gateway -> hosts -> auth -> {database, email, redis} -> lifecycle -> observability ->
+ * core`, with `testing` beside `database` and `agent-observability` and `chat` beside
+ * `object-storage`; no library but `api` imports `git-mirror`, and no
+ * library may depend on the `api` app (its `type:app` tag is
+ * outside every `type:app-lib` allowlist). Entries marked "measured" are downward edges the moved code already
  * had that the blueprint's column did not list.
  */
 const apiLibraryDependencies = {
@@ -259,6 +261,25 @@ const apiLibraryDependencies = {
   'llm-gateway': ['hosts', 'auth', 'core', 'observability', 'lifecycle'],
   // measured: `createBillingTestApp` boots `RedisModule`.
   billing: ['llm-gateway', 'hosts', 'auth', 'database', 'email', 'core', 'observability', 'lifecycle', 'redis'],
+  // Shared test fixtures (ci-decomposition-blueprint P1-a): only the database and core, so a library's tests
+  // that import them gain no feature library in their dependency closure.
+  testing: ['database', 'core'],
+  // The object store, signed file links and storage accounting (P1-b). Git imports it, so it may not name
+  // git; accounting reads the subscription tier from billing and keeps its snapshots in Redis.
+  'object-storage': ['billing', 'database', 'redis', 'core', 'observability'],
+  // The repository store, the storage worker, routing, admission and forwarding (P1-c). Projects and
+  // publications sit above it; the API binds their hooks (`project-deletion`, the preview writer).
+  'git-core': ['object-storage', 'database', 'redis', 'lifecycle', 'core', 'observability'],
+  // The off-site mirror and the maintenance jobs (P1-c). Only the `api` app's command entries import it.
+  'git-mirror': ['git-core', 'object-storage', 'database', 'core'],
+  // Evidence admission, delivery and erasure, the model-invocation recorder and telemetry purposes (P1-e).
+  // The app binds the recorder into the gateway's port (`composition/`); billing never imports it.
+  'agent-observability': ['billing', 'llm-gateway', 'hosts', 'auth', 'database', 'lifecycle', 'core', 'observability'],
+  // The chat controller and service (P1-e). measured: the billing-backed chat tests build `BillingModule`.
+  chat: ['billing', 'llm-gateway', 'auth', 'core', 'observability'],
+  // Projects, previews, deletion, collaboration and publications (P1-d). The API binds the git service's
+  // leases to `publicationRepositoryLeasesKey`; measured: `testing` for the shared database fixtures.
+  projects: ['git-core', 'object-storage', 'auth', 'database', 'email', 'redis', 'testing', 'core', 'observability'],
 };
 
 const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({

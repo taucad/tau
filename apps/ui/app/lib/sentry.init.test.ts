@@ -71,7 +71,7 @@ describe('initSentry', () => {
     expect(options).not.toHaveProperty('replaysSessionSampleRate');
   });
 
-  it('should not trace production until the staging cost is measured (SB17)', () => {
+  it('should trace one production page load in twenty (SB17)', () => {
     mocks.init.mockClear();
     mocks.env['SENTRY_ENVIRONMENT'] = 'production';
     try {
@@ -81,9 +81,9 @@ describe('initSentry', () => {
     }
     const [options] = mocks.init.mock.calls[0] as [Record<string, unknown>];
 
-    expect(options).not.toHaveProperty('tracesSampleRate');
-    expect(options).not.toHaveProperty('tracePropagationTargets');
-    expect(options).not.toHaveProperty('beforeSendTransaction');
+    expect(options).toMatchObject({ tracesSampleRate: 0.05 });
+    expect(options['tracePropagationTargets']).toStrictEqual([/^https:\/\/api\.taucad\.dev(?:\/|$)/u]);
+    expect(options['beforeSendTransaction']).toBeTypeOf('function');
   });
 
   it('should hand desktop events to main through the Electron renderer SDK, leaving channel, release and sessions to main (SB11)', () => {

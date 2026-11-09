@@ -9,8 +9,8 @@ export { createFixtureClosure, fixtureTargets, sha256Hex, writeSeedDirectory } f
 export type {
   FixtureClosure,
   FixtureClosureInput,
-  FixturePayload,
-  FixturePayloadInput,
+  FixtureDependencyFile,
+  FixtureDependencyFileInput,
 } from '#preparation/fixture-closure.js';
 export {
   appendGoldenSummary,
@@ -19,5 +19,5 @@ export {
   readGoldenReceipts,
 } from '#preparation/golden-receipts.js';
 export type { GoldenComparison, GoldenReceipt, GoldenReceipts } from '#preparation/golden-receipts.js';
-export { startPayloadMirror } from '#preparation/payload-mirror.js';
-export type { MirrorOverride, MirrorRequest, PayloadMirror } from '#preparation/payload-mirror.js';
+export { startDependencyMirror } from '#preparation/dependency-mirror.js';
+export type { MirrorOverride, MirrorRequest, DependencyMirror } from '#preparation/dependency-mirror.js';

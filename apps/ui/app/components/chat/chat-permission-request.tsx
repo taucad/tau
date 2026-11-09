@@ -7,9 +7,9 @@ import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { ProviderPermissionResolution } from '@taucad/agent-host/wire';
-import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
+import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { useFeature } from '#flags/use-feature.js';
-import { ChatShellApprovalContent } from '#components/chat/chat-shell-approval.js';
+import { ChatShellApprovalContent } from '@taucad/chat-ui/components/chat-shell-approval';
 
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;

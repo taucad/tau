@@ -10,7 +10,7 @@ import { project, projectCollaborator, user } from '@taucad/api-database/schema'
 import type { DatabaseService } from '@taucad/api-database';
 import type { RedisService } from '@taucad/api-redis';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import { DurableEventsController } from '#api/durable-events/durable-events.controller.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import { revisionStreamId } from '#api/durable-events/durable-events.types.js';

@@ -7,8 +7,8 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ComposerRecordPatch, ComposerRecordReadResult } from '#db/composer-record-store.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecordPatch, ComposerRecordReadResult } from '@taucad/chat-ui/db/composer-record-store';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { createComposerRecordActor, draftPersistenceFor } from '#hooks/composer-record.js';
 import { composerRecordMachine } from '#machines/composer-record.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';

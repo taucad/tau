@@ -11,7 +11,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
  * concurrent writes to one key the way R2 does (D5, W0b). Rather than one seam
  * for `429` and three mechanisms for the rest, everything the store sees goes
  * through here, which also makes the five fault points of
- * `apps/api/app/api/git/store/fault-points.ts` observable from outside the
+ * `apps/libs/api-git-core/src/store/fault-points.ts` observable from outside the
  * process: they bracket exactly these calls.
  *
  * | Fault point | The store call this proxy sees |

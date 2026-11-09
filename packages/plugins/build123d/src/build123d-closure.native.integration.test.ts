@@ -84,8 +84,10 @@ describe.runIf(seedPresent)('Build123d sealed closure', () => {
 
   it('should install only wheels the host target lock pins', () => {
     const lock = readFileSync(join(packageRoot, 'python', `pylock.${hostKey!}.toml`), 'utf8');
-    const wheels = hostVariant!.payloads.filter(({ format }) => format === 'wheel');
-    const installed = new Set(sealed.files.flatMap(({ payload }) => (payload === undefined ? [] : [payload])));
+    const wheels = hostVariant!.files.filter(({ format }) => format === 'wheel');
+    const installed = new Set(
+      sealed.files.flatMap(({ dependencyFile }) => (dependencyFile === undefined ? [] : [dependencyFile])),
+    );
     expect(wheels.length).toBeGreaterThan(0);
     for (const wheel of wheels) {
       expect(installed.has(wheel.name), wheel.name).toBe(true);

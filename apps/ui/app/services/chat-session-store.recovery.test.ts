@@ -5,8 +5,8 @@ import { mock } from 'vitest-mock-extended';
 import type { UIMessageChunk, ChatStatus } from 'ai';
 import type { Chat } from '@ai-sdk/react';
 import type { MyUIMessage } from '@taucad/chat';
-import type * as SharedChat from '#chat-clients/_internal/shared-chat-transport.js';
-import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type * as SharedChat from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
+import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { serializeTranscript } from '#utils/chat.utils.js';
 import * as Projection from '#machines/chat-projection.logic.js';
 import * as HostCommands from '#chat-clients/_internal/host-command.js';
@@ -33,7 +33,7 @@ const harness = vi.hoisted(() => ({ errorStatuses: [] as ChatStatus[] }));
 // eslint-disable-next-line @typescript-eslint/naming-convention -- mirror the environment module's fixed exported names.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
-vi.mock('#chat-clients/_internal/shared-chat-transport.js', async (importOriginal) => {
+vi.mock('@taucad/chat-ui/chat-clients/_internal/shared-chat-transport', async (importOriginal) => {
   const original = await importOriginal<typeof SharedChat>();
   return {
     createChatInstance: (options: Parameters<typeof original.createChatInstance>[0]) => {

@@ -1,4 +1,4 @@
-import type { DependencyPayload, Integrity, ReceiptFile } from '#preparation/preparation.types.js';
+import type { DependencyFile, Integrity, InstalledFile } from '#preparation/preparation.types.js';
 
 const encoder = new TextEncoder();
 
@@ -11,13 +11,14 @@ const sha256Integrity = async (text: string): Promise<Integrity> => {
 /**
  * Identity of *which pins* a closure is made of: sha256 over the newline-joined `name<TAB>integrity` rows in
  * manifest order. Two hosts that select the same variant compute the same value before downloading anything.
- * @param payloads - The selected variant's payloads, in manifest order.
+ * @param dependencyFiles - The selected variant's dependency files, in manifest order.
  * @returns An SRI sha256 string.
  * @public
  */
 export const computeClosureIntegrity = async (
-  payloads: ReadonlyArray<Pick<DependencyPayload, 'name' | 'integrity'>>,
-): Promise<Integrity> => sha256Integrity(payloads.map(({ name, integrity }) => `${name}\t${integrity}`).join('\n'));
+  dependencyFiles: ReadonlyArray<Pick<DependencyFile, 'name' | 'integrity'>>,
+): Promise<Integrity> =>
+  sha256Integrity(dependencyFiles.map(({ name, integrity }) => `${name}\t${integrity}`).join('\n'));
 
 /**
  * The canonical row of one receipt file: `path NUL byteLength NUL sha256 NUL mode NUL symlinkTarget`, with
@@ -26,7 +27,7 @@ export const computeClosureIntegrity = async (
  * @param file - One receipt file.
  * @returns The row, without a line terminator.
  */
-export const receiptRow = (file: ReceiptFile): string =>
+export const receiptRow = (file: InstalledFile): string =>
   [file.path, String(file.byteLength), file.sha256, file.mode.toString(8), file.symlinkTarget ?? ''].join('\0');
 
 /**
@@ -37,7 +38,7 @@ export const receiptRow = (file: ReceiptFile): string =>
  * @returns An SRI sha256 string.
  * @public
  */
-export const computeTreeIntegrity = async (files: readonly ReceiptFile[]): Promise<Integrity> =>
+export const computeTreeIntegrity = async (files: readonly InstalledFile[]): Promise<Integrity> =>
   sha256Integrity(
     files
       .toSorted((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
@@ -64,7 +65,7 @@ export type LaunchIndex = {
   readonly dependency: string;
   readonly closureIntegrity: Integrity;
   /** The launch set's receipt rows, sorted by path. */
-  readonly files: readonly ReceiptFile[];
+  readonly files: readonly InstalledFile[];
 };
 
 /**
@@ -89,18 +90,18 @@ export const renderLaunchIndex = (index: LaunchIndex): string =>
           sha256: file.sha256,
           mode: file.mode,
           ...(file.symlinkTarget === undefined ? {} : { symlinkTarget: file.symlinkTarget }),
-          ...(file.payload === undefined ? {} : { payload: file.payload }),
+          ...(file.dependencyFile === undefined ? {} : { dependencyFile: file.dependencyFile }),
         })),
     },
     undefined,
     2,
   )}\n`;
 
-const isReceiptFile = (value: unknown): value is ReceiptFile => {
+const isInstalledFile = (value: unknown): value is InstalledFile => {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const file = value as Partial<Record<keyof ReceiptFile, unknown>>;
+  const file = value as Partial<Record<keyof InstalledFile, unknown>>;
   return (
     typeof file.path === 'string' &&
     typeof file.byteLength === 'number' &&
@@ -132,7 +133,7 @@ export const parseLaunchIndex = (text: string): LaunchIndex | undefined => {
     typeof index.dependency === 'string' &&
     typeof index.closureIntegrity === 'string' &&
     Array.isArray(index.files) &&
-    index.files.every((file) => isReceiptFile(file))
+    index.files.every((file) => isInstalledFile(file))
     ? (index as LaunchIndex)
     : undefined;
 };

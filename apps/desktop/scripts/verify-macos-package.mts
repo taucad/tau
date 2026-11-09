@@ -355,9 +355,9 @@ const verifyPicoGkLayer = (): readonly string[] | undefined => {
     throw new Error(`The Tau PicoGK layer ${archive} does not match its record or the worker protocol.`);
   }
   const seed = JSON.parse(readFileSync(resolve(picoGkLayerRoot, 'seed/tau-seed.json'), 'utf8')) as {
-    readonly closures: ReadonlyArray<{ readonly payloads: ReadonlyArray<{ readonly blob: string }> }>;
+    readonly closures: ReadonlyArray<{ readonly dependencyFiles: ReadonlyArray<{ readonly blob: string }> }>;
   };
-  const runtimeBlob = seed.closures[0]?.payloads[0]?.blob;
+  const runtimeBlob = seed.closures[0]?.dependencyFiles[0]?.blob;
   if (runtimeBlob === undefined || !/^blobs\/sha256\/[\da-f]{64}$/u.test(runtimeBlob)) {
     throw new Error('The PicoGK layer seed does not index the .NET runtime archive.');
   }
@@ -517,7 +517,7 @@ const verifyNativeClosures = async (store: string): Promise<ReadonlyMap<string, 
       const variant = variants.find(({ target }) => targetKey(target) === `darwin-${architecture}`);
       if (variant !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- three small manifests
-        const integrity = await computeClosureIntegrity(variant.payloads);
+        const integrity = await computeClosureIntegrity(variant.files);
         const key = Buffer.from(integrity.slice('sha256-'.length), 'base64');
         expected.set(key.toString('hex'), { package: name, dependency });
       }

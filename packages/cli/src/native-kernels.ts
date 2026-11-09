@@ -2,7 +2,7 @@
  * The CLI's side of native kernels. A native kernel is whatever the runtime definition lists (built-ins plus
  * `--plugin`/`--config`): each kernel binds to its sealed closure itself, in `initialize`, and refuses with
  * `KERNEL_NOT_PREPARED` until it is prepared. This module learns which native deployments a runtime lists from a
- * thread that builds it (no kernel code loads in the command's process), prepares them through the payload store, and
+ * thread that builds it (no kernel code loads in the command's process), prepares them through the dependency store, and
  * maps refusals to CLI errors and exit codes.
  *
  * @module
@@ -12,7 +12,7 @@ import type { WorkerOptions } from 'node:worker_threads';
 
 import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 import {
-  defaultPayloadStore,
+  defaultDependencyStore,
   inspectNativeKernels,
   loadReportedDeployments,
   nativeDeploymentReportSchema,
@@ -57,7 +57,7 @@ export const readManaged = (): ManagedPreparation => {
   }
 };
 
-const storeInput = (): NativeStoreInput => ({ store: defaultPayloadStore(), managed: readManaged() });
+const storeInput = (): NativeStoreInput => ({ store: defaultDependencyStore(), managed: readManaged() });
 
 /** What a runtime thread in `describe` mode posts its parent. */
 const describedSchema = z.object({
@@ -271,7 +271,7 @@ export type ReportedClosureRequest = {
 };
 
 /**
- * Answer a runtime child's closure request from the CLI's payload store, from the data it sent alone: its package's
+ * Answer a runtime child's closure request from the CLI's dependency store, from the data it sent alone: its package's
  * unparsed `tau-plugin.json` and root. No module the child names is imported, and nothing is downloaded.
  * @param request - The child's request.
  * @returns The answer the child's kernel binds with, and the roots of the closures it names as sealed.

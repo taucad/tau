@@ -7,9 +7,9 @@ import {
   ChatToolCardContent,
   ChatToolCardHeader,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { FileLink } from '#components/files/file-link.js';
 import { ViewerLink } from '#components/files/viewer-link.js';
 

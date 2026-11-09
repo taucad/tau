@@ -175,8 +175,9 @@ const config: KnipConfig = {
         'app/testing/project-deletion-process.ts',
       ],
       ignoreDependencies: [
-        // Imported by the source-consumed `api-observability` and `api-email` libraries the server bundle
-        // inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        // Imported by the source-consumed `api-observability`, `api-email` and `api-object-storage` libraries
+        // the server bundle inlines; they stay external, so `pnpm deploy` must install them beside the app.
+        '@aws-sdk/s3-request-presigner',
         '@pyroscope/nodejs',
         '@sentry/node',
         'react-email',
@@ -270,6 +271,10 @@ const config: KnipConfig = {
       // That config's `resolve.alias` points `#benchmark-bundler` at the mode's bundler file;
       // bundler-benchmark/bundler.d.ts declares its type.
       ignoreUnresolved: ['#benchmark-bundler'],
+    },
+    'apps/cli-e2e': {
+      // The Build123d suites read its `tau-plugin.json` through `createRequire(...).resolve`.
+      ignoreDependencies: ['@taucad/build123d'],
     },
     'apps/runtime-e2e': {
       entry: [

@@ -21,9 +21,9 @@ import {
   linuxTarget,
   originOf,
   pluginOf,
-  pythonPayloadBytes,
-  pythonPayloads,
-  servePayloads,
+  pythonFileBytes,
+  pythonFiles,
+  serveDependencyFiles,
   sha256Hex,
   temporaryDirectory,
 } from '#preparation/preparation.fixture.js';
@@ -31,9 +31,9 @@ import type { FakeRegistry } from '#preparation/preparation.fixture.js';
 
 const packageName = '@taucad/demo';
 const mirror = 'https://mirror.corp.example/tau/';
-const bytes = pythonPayloadBytes();
-const payloads = pythonPayloads(bytes);
-const plugin = pluginOf(packageName, { engine: [{ target: linuxTarget, payloads }] });
+const bytes = pythonFileBytes();
+const dependencyFiles = pythonFiles(bytes);
+const plugin = pluginOf(packageName, { engine: [{ target: linuxTarget, files: dependencyFiles }] });
 
 let cleanups: Array<() => Promise<void> | void> = [];
 
@@ -57,32 +57,34 @@ const directory = async (prefix: string): Promise<string> => {
   return created.path;
 };
 
-/** A registry serving every payload at its manifest URL and, under `mirror`, at its digest. */
+/** A registry serving every dependency file at its manifest URL and, under `mirror`, at its digest. */
 const registryServing = (sources: { readonly origin?: boolean; readonly mirror?: boolean }): FakeRegistry => {
   const registry = createFakeRegistry();
   if (sources.origin !== false) {
-    servePayloads(
+    serveDependencyFiles(
       registry,
-      payloads.map((payload) => [payload, bytes[payload.name as keyof typeof bytes]] as const),
+      dependencyFiles.map(
+        (dependencyFile) => [dependencyFile, bytes[dependencyFile.name as keyof typeof bytes]] as const,
+      ),
     );
   }
   if (sources.mirror === true) {
-    for (const payloadBytes of Object.values(bytes)) {
-      registry.route(`${mirror}blobs/sha256/${sha256Hex(payloadBytes)}`, { bytes: payloadBytes });
+    for (const fileBytes of Object.values(bytes)) {
+      registry.route(`${mirror}blobs/sha256/${sha256Hex(fileBytes)}`, { bytes: fileBytes });
     }
   }
   return registry;
 };
 
-/** A seed directory in the bundle layout holding every payload, or the given bytes under each payload's name. */
+/** A seed directory in the bundle layout holding every dependency file, or the given bytes under each dependency file's name. */
 const seedDirectory = async (
-  contents: (payloadBytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer> = (payloadBytes) => payloadBytes,
+  contents: (fileBytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer> = (fileBytes) => fileBytes,
 ): Promise<string> => {
   const seed = await directory('tau-managed-seed-');
   await mkdir(join(seed, 'blobs', 'sha256'), { recursive: true });
-  for (const payloadBytes of Object.values(bytes)) {
+  for (const fileBytes of Object.values(bytes)) {
     // oxlint-disable-next-line no-await-in-loop -- three seed files
-    await writeFile(join(seed, 'blobs', 'sha256', sha256Hex(payloadBytes)), contents(payloadBytes));
+    await writeFile(join(seed, 'blobs', 'sha256', sha256Hex(fileBytes)), contents(fileBytes));
   }
   return seed;
 };
@@ -152,7 +154,7 @@ describe('managed profile guarantees (D25)', () => {
 
     const environments: ReadonlyArray<Readonly<Record<string, string>>> = [
       { TAU_ACQUISITION: 'locked' },
-      { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: mirror },
+      { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: mirror },
     ];
     for (const environment of environments) {
       const { host, prepare } = managedHost(store, environment, registry.fetch);
@@ -173,11 +175,11 @@ describe('managed profile guarantees (D25)', () => {
     // One byte flipped: the declared length still matches, so only the digest can refuse it.
     const flipped = new Uint8Array(bytes.demo);
     flipped[0] = 0xff - (flipped[0] ?? 0);
-    const tampered = (payloadBytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
-      payloadBytes === bytes.demo ? flipped : payloadBytes;
+    const tampered = (fileBytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+      fileBytes === bytes.demo ? flipped : fileBytes;
     const seed = await seedDirectory(tampered);
     const seeded = join(await directory('tau-managed-'), 'store');
-    const fromSeed = managedHost(seeded, { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_DIR: seed }, forbidGlobalFetch());
+    const fromSeed = managedHost(seeded, { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_DIR: seed }, forbidGlobalFetch());
 
     const seedError = await rejection(fromSeed.prepare());
 
@@ -186,7 +188,11 @@ describe('managed profile guarantees (D25)', () => {
     registry.route(`${mirror}blobs/sha256/${sha256Hex(bytes.demo)}`, { bytes: flipped });
     registry.route(`${mirror}blobs/sha256/${sha256Hex(bytes['worker.py'])}`, { bytes: bytes['worker.py'] });
     const mirrored = join(await directory('tau-managed-'), 'store');
-    const fromMirror = managedHost(mirrored, { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: mirror }, registry.fetch);
+    const fromMirror = managedHost(
+      mirrored,
+      { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: mirror },
+      registry.fetch,
+    );
 
     const mirrorError = await rejection(fromMirror.prepare());
 
@@ -208,7 +214,7 @@ describe('managed profile guarantees (D25)', () => {
     const store = join(await directory('tau-managed-'), 'store');
     const registry = registryServing({});
     const seed = await directory('tau-managed-empty-seed-');
-    const { prepare } = managedHost(store, { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_DIR: seed }, registry.fetch);
+    const { prepare } = managedHost(store, { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_DIR: seed }, registry.fetch);
 
     const outcome = await prepare();
 
@@ -225,7 +231,7 @@ describe('managed profile guarantees (D25)', () => {
     const missStore = join(await directory('tau-managed-'), 'store');
 
     const missError = await rejection(
-      managedHost(missStore, { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: mirror }, missed.fetch).prepare(),
+      managedHost(missStore, { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: mirror }, missed.fetch).prepare(),
     );
 
     const redirected = `${mirror}blobs/sha256/${sha256Hex(bytes['worker.py'])}`;
@@ -241,7 +247,7 @@ describe('managed profile guarantees (D25)', () => {
     const redirectStore = join(await directory('tau-managed-'), 'store');
 
     const redirectError = await rejection(
-      managedHost(redirectStore, { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: mirror }, transport).prepare(),
+      managedHost(redirectStore, { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: mirror }, transport).prepare(),
     );
 
     expect(missError.code).toBe('DOWNLOAD_FAILED');
@@ -268,20 +274,20 @@ describe('managed profile guarantees (D25)', () => {
       readyReceipt(
         await managedHost(
           join(await directory('tau-managed-'), 'store'),
-          { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_MIRROR: mirror },
+          { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_MIRROR: mirror },
           mirrored.fetch,
         ).prepare(),
       ),
       readyReceipt(
         await managedHost(
           join(await directory('tau-managed-'), 'store'),
-          { TAU_ACQUISITION: 'locked', TAU_PAYLOAD_DIR: seed },
+          { TAU_ACQUISITION: 'locked', TAU_DEPENDENCY_DIR: seed },
           forbidGlobalFetch(),
         ).prepare(),
       ),
     ];
 
-    expect(receipts.map(({ payloads: rows }) => rows.map(({ acquiredFrom }) => acquiredFrom.kind)[0])).toEqual([
+    expect(receipts.map(({ dependencyFiles: rows }) => rows.map(({ acquiredFrom }) => acquiredFrom.kind)[0])).toEqual([
       'origin',
       'mirror',
       'seed',

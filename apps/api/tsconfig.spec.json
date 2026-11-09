@@ -40,7 +40,14 @@
     "../libs/api-auth/src/**/*.ts",
     "../libs/api-hosts/src/**/*.ts",
     "../libs/api-llm-gateway/src/**/*.ts",
-    "../libs/api-billing/src/**/*.ts"
+    "../libs/api-billing/src/**/*.ts",
+    "../libs/api-object-storage/src/**/*.ts",
+    "../libs/api-git-core/src/**/*.ts",
+    "../libs/api-git-mirror/src/**/*.ts",
+    "../libs/api-agent-observability/src/**/*.ts",
+    "../libs/api-chat/src/**/*.ts",
+    "../libs/api-projects/src/**/*.ts",
+    "../libs/api-testing/src/**/*.ts"
   ],
   "exclude": ["../libs/*/src/**/*.test.ts", "../libs/*/src/**/*.spec.ts", "../libs/*/src/**/*.test-d.ts"]
 }

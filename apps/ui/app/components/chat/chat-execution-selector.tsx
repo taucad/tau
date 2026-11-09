@@ -12,7 +12,7 @@ import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf, localAgentHostId, placementRungOf } from '#lib/agent-host-placement.js';
 import { externalAgentRefusalReasons } from '#lib/external-agent.js';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
-import { withoutHostId, withTauExecutionModel } from '#utils/chat-execution.js';
+import { withoutHostId, withTauExecutionModel } from '@taucad/chat-ui/utils/chat-execution';
 import type { CadAgentExecution, TauAgentHostId } from '@taucad/chat';
 
 type TauTarget = {

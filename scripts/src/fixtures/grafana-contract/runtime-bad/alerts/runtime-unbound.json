@@ -49,6 +49,18 @@
           }
         }
       ]
+    },
+    {
+      "uid": "seeded-state-history-unbound",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "alert-state-history",
+          "model": {
+            "expr": "sum(count_over_time({from=\"state-history\"} | json | current=~\"Error.*\" [30m]))"
+          }
+        }
+      ]
     }
   ]
 }

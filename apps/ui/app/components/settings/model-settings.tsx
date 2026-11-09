@@ -9,7 +9,7 @@ import { SearchInput } from '@taucad/ui/components/search-input';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
-import { ModelPinButton } from '#components/chat/model-pin-button.js';
+import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
 
 export function ModelSettings(): React.JSX.Element {
   const {

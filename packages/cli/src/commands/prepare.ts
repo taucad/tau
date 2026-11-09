@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { defaultPayloadStore } from '@taucad/host';
+import { defaultDependencyStore } from '@taucad/host';
 import { failedPreparation, preparationReporter } from '@taucad/host/telemetry';
 import type { NodeHostTelemetry, PreparationReport } from '@taucad/host/telemetry';
 import {
@@ -82,7 +82,7 @@ const refusal = (
   if (outcome.status === 'cancelled') {
     return cliError(
       'PREPARATION_CANCELLED',
-      `Preparing ${kernel} was cancelled${stoppedBy === undefined ? '' : ` by ${stoppedBy}`}; verified payloads are kept, so the next run downloads only the rest.`,
+      `Preparing ${kernel} was cancelled${stoppedBy === undefined ? '' : ` by ${stoppedBy}`}; verified dependency files are kept, so the next run downloads only the rest.`,
       stoppedBy === 'SIGTERM' ? exitCodes.terminated : exitCodes.interrupted,
     );
   }
@@ -138,7 +138,7 @@ const prepareArgs = {
   },
   verify: {
     type: 'boolean',
-    description: 'Re-verify every file of the prepared closures and repair the payloads that differ',
+    description: 'Re-verify every file of the prepared closures and repair the dependency files that differ',
     default: false,
   },
   gc: {
@@ -154,7 +154,7 @@ const prepareArgs = {
   bundle: {
     type: 'string',
     description:
-      'Prepare the kernel (every kernel this host supports when none is named) and export its payloads, manifest and audit unit into this seed directory',
+      'Prepare the kernel (every kernel this host supports when none is named) and export its dependency files, manifest and audit unit into this seed directory',
     required: false,
   },
   seed: {
@@ -182,7 +182,7 @@ const prepareArgs = {
 } as const satisfies ArgsDef;
 
 const verifyLine = (row: ClosureVerification): string =>
-  `${row.package} ${row.dependency}: ${row.status}${row.payloads.length === 0 ? '' : ` (${row.payloads.join(', ')})`}`;
+  `${row.package} ${row.dependency}: ${row.status}${row.dependencyFiles.length === 0 ? '' : ` (${row.dependencyFiles.join(', ')})`}`;
 
 type Arguments = ParsedArgs<typeof prepareArgs>;
 
@@ -209,7 +209,7 @@ type Session = {
   readonly store: string;
   readonly indicators: HostIndicators | undefined;
   readonly managed: ManagedPreparation;
-  /** `--seed`: prepare from the store and the seed only, as `TAU_ACQUISITION=locked` with `TAU_PAYLOAD_DIR` does. */
+  /** `--seed`: prepare from the store and the seed only, as `TAU_ACQUISITION=locked` with `TAU_DEPENDENCY_DIR` does. */
   readonly offline: boolean;
   readonly signal: AbortSignal;
   readonly stoppedBy: () => NodeJS.Signals | undefined;
@@ -406,7 +406,7 @@ const prepareKernel = async (
     reported = now;
     output.info(
       sanitize(
-        `${state.phase} ${state.payload} (${megabytes(state.completedBytes)} of ${megabytes(state.totalBytes)}, ${String(state.completedPayloads)}/${String(state.totalPayloads)} payloads)`,
+        `${state.phase} ${state.dependencyFile} (${megabytes(state.completedBytes)} of ${megabytes(state.totalBytes)}, ${String(state.completedDependencyFiles)}/${String(state.totalDependencyFiles)} dependency files)`,
       ),
     );
   });
@@ -463,7 +463,7 @@ const bundle = async (session: Session, directory: string, output: ConsolaInstan
   for (const [index, { plugin, receipt }] of [...sealed.values()].entries()) {
     const row = rows[index];
     // oxlint-disable-next-line no-await-in-loop -- one closure at a time on one disk
-    const payloads = await exportBlobs({ store: session.store, directory, plugin, receipt });
+    const dependencyFiles = await exportBlobs({ store: session.store, directory, plugin, receipt });
     // oxlint-disable-next-line no-await-in-loop -- see above
     const version = await exportManifest(directory, plugin);
     // oxlint-disable-next-line no-await-in-loop -- see above
@@ -479,17 +479,19 @@ const bundle = async (session: Session, directory: string, output: ConsolaInstan
       target: receipt.target,
       closureIntegrity: receipt.closureIntegrity,
       treeIntegrity: receipt.treeIntegrity,
-      payloads,
+      dependencyFiles,
       audit: auditDirectory(receipt.closureIntegrity),
     });
   }
   const [first] = sealed.values();
   const index = await writeSeedIndex(directory, first?.receipt.tauVersion ?? '', closures);
-  const byteLength = closures.flatMap((closure) => closure.payloads).reduce((sum, row) => sum + row.byteLength, 0);
+  const byteLength = closures
+    .flatMap((closure) => closure.dependencyFiles)
+    .reduce((sum, row) => sum + row.byteLength, 0);
   await (session.args.json
     ? emit({ kind: 'bundle', directory, kernels, closures, indexed: index.closures.length, byteLength })
     : writeStdout(
-        `Bundled ${kernels.join(', ')} into ${directory}: ${String(closures.length)} closures, ${String(closures.flatMap((closure) => closure.payloads).length)} payloads (${megabytes(byteLength)}).\n`,
+        `Bundled ${kernels.join(', ')} into ${directory}: ${String(closures.length)} closures, ${String(closures.flatMap((closure) => closure.dependencyFiles).length)} dependency files (${megabytes(byteLength)}).\n`,
       ));
 };
 
@@ -603,7 +605,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
   defineCommand({
     meta: {
       name: 'prepare',
-      description: 'Download, verify and unpack a native kernel’s runtime into the shared payload store',
+      description: 'Download, verify and unpack a native kernel’s runtime into the shared dependency store',
     },
     args: prepareArgs,
     async run({ args }) {
@@ -611,7 +613,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
       const managed = readManaged();
       const seedDirectory = args.seed === undefined ? managed.seed : resolve(args.seed);
       const plugins = options.plugins === undefined ? await describedPlugins(args) : await options.plugins();
-      const store = defaultPayloadStore();
+      const store = defaultDependencyStore();
       const indicators = detectHostIndicators();
       const host = createPreparationHost({
         plugins,
@@ -670,13 +672,13 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
 /**
  * `tau prepare` command.
  *
- * Prepares a native kernel's runtime (an interpreter, wheels, a .NET runtime) into the payload store every Tau host
- * on this machine shares: each payload is downloaded once, verified against its pinned digest before a byte is
+ * Prepares a native kernel's runtime (an interpreter, wheels, a .NET runtime) into the dependency store every Tau host
+ * on this machine shares: each dependency file is downloaded once, verified against its pinned digest before a byte is
  * written, unpacked and sealed with a receipt. `tau mcp`, `tau export` and the desktop use the result without
  * downloading. It prepares the native kernels the runtime definition lists: the built-ins, plus those of `--plugin` and
  * `--config`, learned from a thread that builds the runtime, so no kernel module loads in this process. Honours
- * `TAU_ACQUISITION`, `TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`,
- * `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION` and `TAU_CONFIG_DIR`.
+ * `TAU_ACQUISITION`, `TAU_DEPENDENCY_MIRROR`, `TAU_DEPENDENCY_MIRROR_NO_FALLBACK`, `TAU_DEPENDENCY_DIR`,
+ * `TAU_DEPENDENCY_TARGET`, `TAU_DEPENDENCY_EMULATION` and `TAU_CONFIG_DIR`.
  *
  * @example <caption>Prepare, inspect, verify and collect garbage</caption>
  * ```bash

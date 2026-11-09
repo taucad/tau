@@ -10,11 +10,11 @@ import { crc32, gzipSync } from 'node:zlib';
 import { parsePluginDeployment } from '#preparation/plugin-deployment.js';
 import type { PreparationPlugin } from '#preparation/preparation-host.types.js';
 import type {
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   DependencyVariant,
   HostIndicators,
-  PayloadFormat,
+  DependencyFileFormat,
 } from '#preparation/preparation.types.js';
 
 const encoder = new TextEncoder();
@@ -24,7 +24,7 @@ const encoder = new TextEncoder();
  * @param bytes - Bytes.
  * @returns `sha256-<base64>`.
  */
-export const sri = (bytes: Uint8Array<ArrayBuffer>): DependencyPayload['integrity'] =>
+export const sri = (bytes: Uint8Array<ArrayBuffer>): DependencyFile['integrity'] =>
   `sha256-${createHash('sha256').update(bytes).digest('base64')}`;
 
 /**
@@ -139,26 +139,26 @@ export const wheel = (distribution: string, files: Readonly<Record<string, strin
 export const utf8 = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
 
 /**
- * Where every in-test payload is pinned unless a test names other URLs.
- * @param name - Payload name.
+ * Where every in-test dependency file is pinned unless a test names other URLs.
+ * @param name - Dependency file name.
  * @returns Its canonical https URL.
  */
-export const originOf = (name: string): string => `https://registry.example/payloads/${name}`;
+export const originOf = (name: string): string => `https://registry.example/files/${name}`;
 
 /**
- * A manifest payload pinned to `bytes`.
+ * A manifest dependency file pinned to `bytes`.
  * @param input - Name, bytes, format, destination and optional origin URLs.
- * @returns The payload.
+ * @returns The dependency file.
  */
-export const payloadOf = (input: {
+export const dependencyFileOf = (input: {
   readonly name: string;
   readonly bytes: Uint8Array<ArrayBuffer>;
-  readonly format: PayloadFormat;
+  readonly format: DependencyFileFormat;
   readonly destination: string;
   readonly urls?: readonly [string, ...string[]];
   readonly stripComponents?: number;
   readonly unpackedByteLength?: number;
-}): DependencyPayload => ({
+}): DependencyFile => ({
   name: input.name,
   integrity: sri(input.bytes),
   byteLength: input.bytes.byteLength,
@@ -186,10 +186,10 @@ export const linuxHost: HostIndicators = {
 export const sitePackages = 'python/lib/python3.13/site-packages';
 
 /**
- * The bytes of a three-payload Python closure: an interpreter archive, a wheel and a raw worker script.
- * @returns Payload name to bytes.
+ * The bytes of a three-file Python closure: an interpreter archive, a wheel and a raw worker script.
+ * @returns Dependency file name to bytes.
  */
-export const pythonPayloadBytes = (): {
+export const pythonFileBytes = (): {
   readonly python: Uint8Array<ArrayBuffer>;
   readonly demo: Uint8Array<ArrayBuffer>;
   readonly 'worker.py': Uint8Array<ArrayBuffer>;
@@ -208,16 +208,22 @@ export const pythonPayloadBytes = (): {
 });
 
 /**
- * The manifest payloads of {@link pythonPayloadBytes}, in closure order.
- * @param bytes - Payload bytes.
- * @returns Three payloads.
+ * The manifest dependency files of {@link pythonFileBytes}, in closure order.
+ * @param bytes - Dependency file bytes.
+ * @returns Three dependency files.
  */
-export const pythonPayloads = (
-  bytes: ReturnType<typeof pythonPayloadBytes>,
-): readonly [DependencyPayload, ...DependencyPayload[]] => [
-  payloadOf({ name: 'python', bytes: bytes.python, format: 'tar.gz', destination: 'python', stripComponents: 1 }),
-  payloadOf({ name: 'demo', bytes: bytes.demo, format: 'wheel', destination: sitePackages }),
-  payloadOf({ name: 'worker.py', bytes: bytes['worker.py'], format: 'raw', destination: 'worker' }),
+export const pythonFiles = (
+  bytes: ReturnType<typeof pythonFileBytes>,
+): readonly [DependencyFile, ...DependencyFile[]] => [
+  dependencyFileOf({
+    name: 'python',
+    bytes: bytes.python,
+    format: 'tar.gz',
+    destination: 'python',
+    stripComponents: 1,
+  }),
+  dependencyFileOf({ name: 'demo', bytes: bytes.demo, format: 'wheel', destination: sitePackages }),
+  dependencyFileOf({ name: 'worker.py', bytes: bytes['worker.py'], format: 'raw', destination: 'worker' }),
 ];
 
 /**
@@ -361,17 +367,17 @@ export const createFakeRegistry = (): FakeRegistry => {
 };
 
 /**
- * Route every payload of some variants to its own bytes at its first origin URL.
+ * Route every dependency file of some variants to its own bytes at its first origin URL.
  * @param registry - The registry.
- * @param entries - Payload and bytes pairs.
+ * @param entries - Dependency file and bytes pairs.
  */
-export const servePayloads = (
+export const serveDependencyFiles = (
   registry: FakeRegistry,
-  entries: ReadonlyArray<readonly [DependencyPayload, Uint8Array<ArrayBuffer>]>,
+  entries: ReadonlyArray<readonly [DependencyFile, Uint8Array<ArrayBuffer>]>,
 ): void => {
-  for (const [payload, bytes] of entries) {
-    if (payload.origin.kind === 'url') {
-      registry.route(payload.origin.urls[0], { bytes });
+  for (const [dependencyFile, bytes] of entries) {
+    if (dependencyFile.origin.kind === 'url') {
+      registry.route(dependencyFile.origin.urls[0], { bytes });
     }
   }
 };

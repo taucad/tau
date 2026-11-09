@@ -51,6 +51,42 @@ export const gatewayErrorCodes = [
 export type GatewayErrorCode = (typeof gatewayErrorCodes)[number];
 
 /**
+ * `x-tau-turn-step`: whether a gateway step is the first model invocation after a user turn was admitted, or a later
+ * step of the same run. apps/api reads it as a telemetry label only (`readTurnTelemetry`), never for admission, price
+ * or the request digest, and turns a value it does not know into `unknown`.
+ *
+ * @public
+ */
+export const gatewayTurnSteps = ['first', 'continuation'] as const;
+
+/** One {@link gatewayTurnSteps} value. @public */
+export type GatewayTurnStep = (typeof gatewayTurnSteps)[number];
+
+/**
+ * `x-tau-turn-gap`: the pause from the chat's previous model step to this turn's first step, bucketed at the provider
+ * cache lifetimes (5 and 60 minutes). `first_turn` when the chat has no previous model step. Every step of a run
+ * carries its turn's gap, so a series can be cut by gap and step together.
+ *
+ * @public
+ */
+export const gatewayTurnGaps = ['first_turn', 'lt_5m', '5m_60m', 'gt_60m'] as const;
+
+/** One {@link gatewayTurnGaps} value. @public */
+export type GatewayTurnGap = (typeof gatewayTurnGaps)[number];
+
+/**
+ * The turn labels one gateway step carries as `x-tau-turn-step` and `x-tau-turn-gap`: enumerated labels only (I4),
+ * sent as headers and never in the request body.
+ *
+ * @public
+ */
+export type GatewayTurnLabels = Readonly<{
+  step: GatewayTurnStep;
+  /** Absent when the previous step's time cannot be read; the gateway then records the gap as `unknown`. */
+  gap?: GatewayTurnGap | undefined;
+}>;
+
+/**
  * The host's reader-side projection of the gateway's attempt lookup, `GET v1/billing/attempts/:surface/:attemptKey`.
  * `z.looseObject` keeps fields this build does not read (D16) without reshaping them, so the receipt can grow.
  * `voided: true` on `not_found` means the gateway voided the key before answering (GI-R3); a bare `not_found` comes

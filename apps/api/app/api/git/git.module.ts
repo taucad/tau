@@ -4,29 +4,29 @@ import type { MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/commo
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import { DatabaseModule } from '@taucad/api-database';
-import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
+import { ProjectAccessModule } from '@taucad/api-projects/collaboration/project-access.module';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { ownerInFlightGateProvider } from '#api/git/admission/owner-in-flight.providers.js';
+import { ownerInFlightGateProvider } from '@taucad/api-git-core/admission/owner-in-flight.providers';
 import { DeriveScheduler } from '#api/git/forwarding/derive-scheduler.js';
 import {
   gitExecutionProvider,
   gitExecutorProvider,
   receiptVerificationProvider,
 } from '#api/git/forwarding/forwarding.providers.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
 import { StorageReceiptsController } from '#api/git/forwarding/receipts.controller.js';
-import { repositoryRouteGuardProvider } from '#api/git/routing/routing.providers.js';
+import { repositoryRouteGuardProvider } from '@taucad/api-git-core/routing/routing.providers';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 import { UsageController } from '#api/git/usage.controller.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 
 /**
  * The Tau Hosted Remote. StorageModule is `@Global()`, so `ObjectStorageService`

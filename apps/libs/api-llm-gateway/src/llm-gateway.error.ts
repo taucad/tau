@@ -7,6 +7,21 @@ import type { GatewayErrorCode } from '@taucad/agent-host/wire';
  */
 export type LlmGatewayErrorType = GatewayErrorCode;
 
+/**
+ * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
+ *
+ * Neither denial carries a per-request estimate, so each value is the blueprint's
+ * own bound for the condition: 30 seconds is B9's due-to-terminal p99 target
+ * (`llm-admission-failsafe-and-recovery-blueprint.md:251`), after which a saturating
+ * funded operation has reached terminal; 60 seconds is the recovery claim lease
+ * (`credit-ledger.service.ts:1069`), after which another claimant's lease expires.
+ */
+export const fundedRetryAfterSeconds: ReadonlyMap<string, number> = new Map<string, number>([
+  ['FUNDED_OPERATION_LIMIT', 30],
+  ['FUNDED_HELPER_LIMIT', 30],
+  ['BILLING_RECOVERY_UNAVAILABLE', 60],
+]);
+
 /** Turns the billing owner's closed-account refusal into the gateway's stable wire code. */
 export const isBillingAccountClosed = (error: unknown): boolean => {
   if (!(error instanceof ForbiddenException)) {

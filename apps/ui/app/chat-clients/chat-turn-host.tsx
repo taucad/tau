@@ -14,7 +14,7 @@ import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-sess
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { hostAdmission } from '#chat-clients/_internal/turn-body.js';
-import { commandOf, turnIntentOf, turnReferencesOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
+import { commandOf, turnIntentOf, turnReferencesOf, turnTriggerOf } from '@taucad/chat-ui/chat-clients/turn-intent';
 import { externalAdmissionConfig, wireAdmissionConfig } from '#services/agent-host-client.js';
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';

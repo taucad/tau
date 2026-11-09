@@ -59,8 +59,8 @@ import { localKernelOptions } from '#constants/local-kernel-options.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
-import { isNotFound } from '#db/attachment-store.js';
+import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
+import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 

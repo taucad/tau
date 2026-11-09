@@ -53,8 +53,8 @@ import {
   LlmGatewayService,
   modelInvocationServiceKey,
 } from '@taucad/api-llm-gateway';
-import { ChatController } from '#api/chat/chat.controller.js';
-import { ChatService } from '#api/chat/chat.service.js';
+import { ChatController } from '@taucad/api-chat/chat.controller';
+import { ChatService } from '@taucad/api-chat/chat.service';
 import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
 import { HostsService } from '@taucad/api-hosts';
 import { DatabaseService } from '@taucad/api-database';

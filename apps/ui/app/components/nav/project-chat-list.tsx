@@ -10,7 +10,7 @@ import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#componen
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
-import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { compareChatsByRecency, getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { StatusMark } from '#components/nav/status-mark.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import {

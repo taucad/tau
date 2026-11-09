@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { nativeDeploymentOf } from '@taucad/native-process-core/adopter';
 import { nativeDeploymentsOf } from '@taucad/native-process-core/store';
 import { parsePluginDeployment, targetKey } from '@taucad/runtime/preparation/node';
-import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, InstalledFile } from '@taucad/runtime/preparation/node';
 import { defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
@@ -15,7 +15,7 @@ import { build123d } from '#build123d.plugin.js';
 import { build123dKernel } from '#build123d.kernel.js';
 import { build123dNative } from '#native.js';
 
-const row = (path: string, digit: string): ReceiptFile => ({
+const row = (path: string, digit: string): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digit.repeat(64),

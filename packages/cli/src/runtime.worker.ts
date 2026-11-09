@@ -4,7 +4,7 @@
  *
  * Started by a `nodeWorkerTransport` client. It composes the CLI runtime from
  * `workerData` `{ projectRoot, plugin?, config?, zooProxyUrl? }`. Native kernels in the runtime bind to their sealed
- * closures themselves, reading the payload store's launch indexes from this thread's environment; nothing here
+ * closures themselves, reading the dependency store's launch indexes from this thread's environment; nothing here
  * downloads (D4).
  *
  * With `describe`, it builds the runtime, posts what it lists (`{ type: 'described', report, plugins }`: the native

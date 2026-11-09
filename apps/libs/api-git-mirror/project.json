@@ -1,0 +1,7 @@
+{
+  "name": "api-git-mirror",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-git-mirror",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:feature", "api:git-mirror"]
+}

@@ -39,7 +39,7 @@ const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// The closure `tau prepare build123d` installs, prepared from the payload seed (`pnpm nx run build123d:seed`).
+// The closure `tau prepare build123d` installs, prepared from the dependency seed (`pnpm nx run build123d:seed`).
 const receipt = seedPresent ? await prepareFromSeed() : undefined;
 
 const runtime = defineRuntime({

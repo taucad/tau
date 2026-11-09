@@ -16,6 +16,15 @@ datasources:
     url: http://localhost:3100
     editable: true
 
+  # Hosted, this logical uid is Grafana Cloud's alert state history. Locally it points at the same Loki so
+  # alerting-rule-health provisions; no local stream carries from="state-history", so it reads no data.
+  - name: Alert state history
+    type: loki
+    uid: alert-state-history
+    access: proxy
+    url: http://localhost:3100
+    editable: true
+
   - name: Tempo
     type: tempo
     uid: tempo

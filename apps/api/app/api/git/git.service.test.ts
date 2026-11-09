@@ -34,41 +34,44 @@ import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   incompleteRepositoryMarker,
-} from '#api/git/git.constants.js';
+} from '@taucad/api-git-core/git.constants';
 import type { DatabaseService } from '@taucad/api-database';
-import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { MemoryOwnerInFlightCap, OwnerInFlightGate } from '#api/git/admission/owner-in-flight.js';
+import type { CommercialEntitlementsService } from '@taucad/api-projects/entitlements/commercial-entitlements';
+import { MemoryOwnerInFlightCap, OwnerInFlightGate } from '@taucad/api-git-core/admission/owner-in-flight';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { StorageGitService } from '#api/git/worker/storage-git.service.js';
-import type { LeaseRequest } from '#api/git/lease-host.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
-import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
-import { developmentPublicKeysJson, developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
-import { parsePublicKeys, parseSigningKey } from '#api/git/forwarding/contract/keys.js';
-import { signReceipt } from '#api/git/forwarding/contract/receipt.js';
+import { StorageGitService } from '@taucad/api-git-core/worker/storage-git.service';
+import type { LeaseRequest } from '@taucad/api-git-core/lease-host';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
+import { loopbackExecutor, loopbackReceiptChannel } from '@taucad/api-git-core/testing/loopback-executor';
+import {
+  developmentPublicKeysJson,
+  developmentSigningKeyJson,
+} from '@taucad/api-git-core/forwarding/contract/development-keys';
+import { parsePublicKeys, parseSigningKey } from '@taucad/api-git-core/forwarding/contract/keys';
+import { signReceipt } from '@taucad/api-git-core/forwarding/contract/receipt';
 import {
   DeriveScheduler,
   deriveLagGraceSeconds,
   deriveScanIntervalMilliseconds,
 } from '#api/git/forwarding/derive-scheduler.js';
-import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
+import type { StorageReceiptFacts } from '@taucad/api-git-core/forwarding/contract/receipt';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitAccess, ReceiptVerification } from '#api/git/git.service.js';
-import { commitLease } from '#api/git/store/commit.js';
-import { RepositoryStoreError } from '#api/git/store/errors.js';
-import { hydrateLease } from '#api/git/store/lease.js';
-import type * as LeaseModule from '#api/git/store/lease.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
+import { commitLease } from '@taucad/api-git-core/store/commit';
+import { RepositoryStoreError } from '@taucad/api-git-core/store/errors';
+import { hydrateLease } from '@taucad/api-git-core/store/lease';
+import type * as LeaseModule from '@taucad/api-git-core/store/lease';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import {
   compactionCommitter,
   decodeManifest,
   encodeManifest,
   succeedManifest,
   tombstoneManifest,
-} from '#api/git/store/manifest.js';
+} from '@taucad/api-git-core/store/manifest';
 import type {
   CommitToken,
   ManifestBytes,
@@ -76,8 +79,8 @@ import type {
   RepositoryLocator,
   RepositoryStore,
   StoredObject,
-} from '#api/git/store/port.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+} from '@taucad/api-git-core/store/port';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
@@ -86,7 +89,7 @@ import * as schema from '@taucad/api-database/schema';
 import { project, projectDeletion, projectGit, user } from '@taucad/api-database/schema';
 
 /* Every lease is still a real one; the spy is how DB1 shows an advertisement builds none. */
-vi.mock('#api/git/store/lease.js', async (importOriginal) => {
+vi.mock('@taucad/api-git-core/store/lease', async (importOriginal) => {
   const actual = await importOriginal<typeof LeaseModule>();
   return { ...actual, hydrateLease: vi.fn(actual.hydrateLease) };
 });
@@ -2769,7 +2772,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
       await Promise.all(closes.map(async (close) => close()));
     } finally {
       vi.mocked(hydrateLease).mockRestore();
-      const actual = await vi.importActual<typeof LeaseModule>('#api/git/store/lease.js');
+      const actual = await vi.importActual<typeof LeaseModule>('@taucad/api-git-core/store/lease');
       vi.mocked(hydrateLease).mockImplementation(actual.hydrateLease);
     }
     expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([0]);

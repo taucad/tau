@@ -1,7 +1,7 @@
 /**
  * Purpose: Run Python unit tests under a strict 100% line and branch coverage gate: the core's own `tau_kernel` tests,
  * or a Python kernel's worker tests with the interpreter of the sealed closure `tau prepare <kernel>` installs,
- * prepared offline from the payload seed (`pnpm nx run <project>:seed`).
+ * prepared offline from the dependency file seed (`pnpm nx run <project>:seed`).
  * Why: The worker modules run inside the closure's exact interpreter and wheels, so their tests do too; `tau_kernel`
  * needs only CPython 3.13, numpy and coverage, which uv provides at the closure's versions.
  * Environment: Node 24+. Core mode: uv on PATH with access to pypi.org, unless `--python` names an interpreter that has

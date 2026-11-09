@@ -39,7 +39,7 @@ vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-pane-skeleton.js', () => ({
+vi.mock('@taucad/project-workspace/components/chat-pane-skeleton', () => ({
   ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
@@ -56,7 +56,7 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
-vi.mock('#components/chat/chat-context-insertion.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('allotment', () => {

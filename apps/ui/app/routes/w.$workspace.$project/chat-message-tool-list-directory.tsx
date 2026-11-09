@@ -10,14 +10,14 @@ import {
   ChatToolCardContent,
   ChatToolCardList,
   ChatToolCardListItem,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
 import { DirectoryLink } from '#components/files/directory-link.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
-import { formatToolFileMetadata } from '#routes/w.$workspace.$project/chat-tool-file-metadata.js';
+import { formatToolFileMetadata } from '@taucad/project-workspace/utils/chat-tool-file-metadata';
 
 /**
  * Joins a parent directory path with a basename. Tolerates root-listing

@@ -5,7 +5,6 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging", "ci:browser", "ci:standalone"],
   "targets": {
-    "formal:lean": {},
     "formal": {},
     "render-calibration": {
       "executor": "nx:run-commands",

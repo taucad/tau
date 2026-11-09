@@ -1,4 +1,4 @@
-import { declaresManifest } from '#lib/project-manifest-equivalence.js';
+import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
@@ -62,9 +62,9 @@ import type {
 } from '#filesystem/handle-store.js';
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { chatPlacementOf } from '#utils/chat-execution.js';
-import { writeChatPlacement } from '#db/chat-placements.js';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
+import { chatPlacementOf } from '@taucad/chat-ui/utils/chat-execution';
+import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -72,10 +72,10 @@ import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import { createInitialProject } from '#constants/project.constants.js';
-import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
-import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import {
   getMainFile,
   getEmptyCode,
@@ -102,7 +102,7 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
 import type { ProjectOpenOutcome } from '#lib/project-open-performance.js';
 import type {

@@ -51,8 +51,8 @@ jobs:
 
       # A native plugin's tau-plugin.json is published with the package; every URL it
       # pins must already serve exactly the pinned bytes (charter I13, DEL-20).
-      - name: Prove every pinned payload URL serves its bytes
-        run: node scripts/src/check-payload-urls.ts packages/plugins/*/tau-plugin.json
+      - name: Prove every pinned dependency file URL serves its bytes
+        run: node scripts/src/check-dependency-urls.ts packages/plugins/*/tau-plugin.json
 
       # The GeoSpec engine is the published `geospec-engine` catalog pin, installed
       # from npm with the workspace; the release gate prepares its installed consumer.

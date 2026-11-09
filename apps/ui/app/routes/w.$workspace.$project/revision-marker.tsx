@@ -78,7 +78,7 @@ import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison 
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { consumeRevisionReveal, useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';

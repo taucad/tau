@@ -1,6 +1,6 @@
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
+import type { ContextSuggestionItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
 import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -67,10 +67,12 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
 vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('#components/chat/chat-textarea-skeleton.js', () => ({ ChatTextareaSkeleton: () => null }));
+vi.mock('@taucad/chat-ui/components/chat-textarea-skeleton', () => ({ ChatTextareaSkeleton: () => null }));
 vi.mock('#components/chat/chat-approval-banner.js', () => ({ ChatApprovalBanner: () => null }));
-vi.mock('#components/chat/tiptap/context-suggestion.utils.js', () => ({ takeScreenshotGroup: 'Take Screenshot' }));
-vi.mock('#components/chat/chat-context-insertion.js', () => ({
+vi.mock('@taucad/chat-ui/components/tiptap/context-suggestion.utils', () => ({
+  takeScreenshotGroup: 'Take Screenshot',
+}));
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   useChatContextInsertion: () => ({ registerContextReferenceInserter: vi.fn() }),
 }));
 vi.mock('#hooks/use-project.js', () => ({
@@ -98,7 +100,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
-vi.mock('#services/agent-host-event-projection.js', () => ({ latestAcpSessionData: () => undefined }));
+vi.mock('@taucad/chat-ui/services/agent-host-event-projection', () => ({ latestAcpSessionData: () => undefined }));
 vi.mock('#providers/headless-image-provider.js', () => ({ useHeadlessImageService: () => ({ export: vi.fn() }) }));
 vi.mock('#services/headless-capture.js', () => ({
   captureCadImages: vi.fn(),

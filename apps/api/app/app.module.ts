@@ -4,7 +4,8 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '@taucad/api-database';
-import { StorageModule } from '#storage/storage.module.js';
+import { StorageModule } from '@taucad/api-object-storage/module';
+import { StorageSeedModule } from '#storage/storage-seed.module.js';
 import { AuthModule } from '@taucad/api-auth/module';
 import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
 import type { Environment } from '@taucad/api-core';
@@ -48,6 +49,7 @@ export class AppModule implements NestModule {
         AuthModule.forRootAsync(mode),
         ApiModule.forRoot(mode),
         StorageModule,
+        StorageSeedModule,
         LoggerModule,
       ],
     };

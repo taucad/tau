@@ -12,7 +12,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
-import { defaultPayloadStore } from '@taucad/host';
+import { defaultDependencyStore } from '@taucad/host';
 import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
@@ -355,10 +355,10 @@ const main = async (): Promise<void> => {
   if (linuxConsumer && channel !== 'staging') {
     throw new Error('Linux clean-host acceptance is staging only');
   }
-  const store = channel === 'staging' ? join(profile, 'config/payloads') : defaultPayloadStore();
+  const store = channel === 'staging' ? join(profile, 'config/dependencies') : defaultDependencyStore();
   const coldEntries = await files.readdir(join(store, 'closures/sha256'));
   if (coldEntries.length > 0) {
-    throw new Error('First-use qualification requires an initially cold payload store');
+    throw new Error('First-use qualification requires an initially cold dependency store');
   }
   const readJson = async (path: string): Promise<unknown> => {
     const bytes = await files.read(path);

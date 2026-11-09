@@ -1,5 +1,5 @@
 /**
- * What a native kernel's preparation answered: `prepare_kernel`'s outcome, as main's payload store reports it to the
+ * What a native kernel's preparation answered: `prepare_kernel`'s outcome, as main's dependency store reports it to the
  * isolated renderer (desktop first-use download).
  */
 export type DesktopKernelPreparation =

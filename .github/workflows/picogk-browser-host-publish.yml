@@ -7,9 +7,17 @@
 #   - Already tagged (`dependency@picogk-browser-<16 hex>` exists for this key): nothing is built again. Once
 #     the tag run's production publish has succeeded, the tagged pin is proven on both hosts and carried to
 #     the pin pull request; while that publish still awaits approval the run ends green and says so.
-#   - Otherwise: the host is prepared twice and refused unless both builds are byte-identical (I4); the
-#     tau-release-bot commits the pin on `bot/picogk-browser-host-pin` and tags that commit, and the run
-#     ends green with a summary that production publication needs a reviewer's approval.
+#   - Otherwise: the host is prepared twice and refused unless both builds are byte-identical (I4), and
+#     `write` pins the built bundle. The inputs key decides whether to build; the output digest names what is
+#     published (D31). `served` then asks both hosts whether they already serve that manifest digest: one
+#     HEAD of the manifest per host, production then staging, stopping at the first that is not 200 (a 404
+#     is "not served"), so an unpublished digest is never probed further; only when both answer 200 is
+#     every blob read back with its digest on both hosts (`check`).
+#       - Already served (a re-keyed build that reproduced a published manifest): no tag, no publish and no
+#         approval. The tau-release-bot commits the pin on `bot/picogk-browser-host-pin` and opens or
+#         updates the pin pull request at once, saying that no publish was needed.
+#       - Not served: the bot commits the pin on that branch and tags the commit, and the run ends green
+#         with a summary that production publication needs a reviewer's approval.
 #
 # On a `dependency@picogk-browser-*` tag (created only by the release bot) it takes the bundle of the tagged
 # commit's inputs (the cache the producer saved, or a rebuild), refuses unless the tag, the key and every
@@ -22,9 +30,10 @@
 # Both run `.github/actions/picogk-browser-host-publish`. Each bucket is locked, so a blob that already
 # exists is refused; it counts as present only when its bytes, read back through the bucket, hash to its
 # key. When production has published, `dispatch-producer` dispatches this workflow on `main`, whose
-# "already tagged" path opens or updates the pin pull request. CI's "Validate workspace" proves every blob
-# on both hosts again on that pull request and in the merge queue, so `main` never names a digest a host
-# does not serve (D9, I2). Both environments admit `dependency@*` tags and no branch or pull request (I6).
+# "already tagged" path opens or updates the pin pull request. Whichever path opens it, CI's "Validate
+# workspace" proves every blob on both hosts again on that pull request and in the merge queue, so `main`
+# never names a digest a host does not serve (D9, I2). Both environments admit `dependency@*` tags and no
+# branch or pull request (I6).
 #
 # This file is not one of the key's inputs: changing how the host is published does not rebuild it.
 name: PicoGK browser host publish
@@ -116,7 +125,7 @@ jobs:
           elif [ "$TAGGED" = true ]; then
             message="$TAG already exists for this key; once its production publish has succeeded, its pin is carried to the pin pull request without a rebuild."
           else
-            message="The inputs key is not pinned; the host is built twice, compared and pinned as $TAG."
+            message="The inputs key is not pinned; the host is built twice, compared and pinned. If both hosts already serve its manifest digest, the pin pull request opens without a publish; otherwise it is tagged $TAG and published."
           fi
           echo "::notice title=PicoGK browser host::$message"
           printf '### PicoGK browser host\n\n- inputs key `%s`\n- %s\n' "$KEY" "$message" >> "$GITHUB_STEP_SUMMARY"
@@ -165,14 +174,9 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
           permission-pull-requests: write
-      # The tag is created with the App token, so its push starts this workflow's publish jobs; a
-      # GITHUB_TOKEN tag would start nothing.
-      - name: Commit the pin and tag it
-        env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+      - name: Commit the pin
         run: |
           set -euo pipefail
-          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config user.name "tau-release-bot[bot]"
           git config user.email "tau-release-bot[bot]@users.noreply.github.com"
           if [ "$TAGGED" = true ]; then
@@ -187,17 +191,43 @@ jobs:
             # Contributor hooks do not apply to this generated commit.
             git commit --quiet --no-verify -m "chore(picogk): Pin the PicoGK browser host to manifest ${manifest:0:12}"
           fi
+      # D31: a rebuild whose manifest digest both hosts already serve updates the pin and publishes nothing.
+      # `served` HEADs the manifest on each host and stops at the first answer that is not 200, so an
+      # unpublished digest costs one HEAD and no GET; anything short of a full proof on both hosts reads as
+      # not served and falls back to tagging and publishing.
+      - name: Ask whether both hosts already serve the pinned manifest
+        id: served
+        if: env.TAGGED != 'true'
+        run: |
+          set -euo pipefail
+          node scripts/src/picogk-browser-host-pin.ts served --pin "$PIN" | tee -a "$GITHUB_OUTPUT"
+      # The tag is created with the App token, so its push starts this workflow's publish jobs; a
+      # GITHUB_TOKEN tag would start nothing.
+      - name: Push the pin and tag it unless it is already served
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          SERVED: ${{ steps.served.outputs.served }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # The bot branch carries only the generated pin commit; it is rewritten for each new key. It is
           # pushed first, so the tag below names a commit the repository already has.
           git push --force "$remote" "HEAD:refs/heads/$PIN_BRANCH"
-          if [ "$TAGGED" != true ]; then
+          if [ "$TAGGED" != true ] && [ "$SERVED" != true ]; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$(git rev-parse HEAD)" --silent
+          fi
+          if [ "$SERVED" = true ]; then
+            manifest=$(jq -r .manifest.sha256 "$PIN")
+            echo "::notice title=PicoGK browser host already served::No publish was needed: manifest $manifest is already served on both hosts, so $TAG is not created and the pin pull request opens without an approval."
+            printf -- '- **No publish needed:** manifest `%s` is already served with its digest on both hosts; `%s` is not created and no approval is asked.\n' \
+              "$manifest" "$TAG" >> "$GITHUB_STEP_SUMMARY"
           fi
       # The tag run publishes to staging at once and to production after a reviewer approves the
       # `dependencies` environment, so this job never waits for it: a new tag ends here, green, and the
       # tag run dispatches this workflow on main once production has published.
       - name: Find the tag's publish run
         id: published
+        if: steps.served.outputs.served != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -244,21 +274,29 @@ jobs:
       - name: Prove every pinned blob is served on both hosts
         if: steps.published.outputs.ready == 'true'
         run: node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
+      # Reached from the tag run's dispatch once production has published, or at once when `served` proved
+      # every blob on both hosts, in which case no tag exists and nothing was published.
       - name: Open or update the pin pull request
-        if: steps.published.outputs.ready == 'true'
+        if: steps.published.outputs.ready == 'true' || steps.served.outputs.served == 'true'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
+          SERVED: ${{ steps.served.outputs.served }}
         run: |
           set -euo pipefail
           manifest=$(jq -r .manifest.sha256 "$PIN")
           subject="chore(picogk): Pin the PicoGK browser host to manifest ${manifest:0:12}"
+          if [ "$SERVED" = true ]; then
+            provenance="no publish was needed: manifest \`$manifest\` is already served on both hosts, so no \`dependency@\` tag was created and no approval was asked; every blob was read back with its digest"
+          else
+            provenance="published from \`$TAG\`; every blob read back with its digest"
+          fi
           {
             echo "Pins the PicoGK browser host the UI loads by digest from \`dependencies.tau.new\` (production) and \`dependencies.taucad.dev\` (staging)."
             echo
             echo "- inputs key \`$KEY\`"
             echo "- manifest \`$manifest\`, $(jq -r .manifest.byteLength "$PIN") bytes"
             echo "- $(jq -r .files.count "$PIN") files, $(jq -r .files.byteLength "$PIN") bytes"
-            echo "- published from \`$TAG\`; every blob read back with its digest from \`https://dependencies.tau.new/blobs/sha256/<hex>\` and \`https://dependencies.taucad.dev/blobs/sha256/<hex>\`"
+            echo "- $provenance from \`https://dependencies.tau.new/blobs/sha256/<hex>\` and \`https://dependencies.taucad.dev/blobs/sha256/<hex>\`"
             echo
             echo "---"
             echo

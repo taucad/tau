@@ -78,6 +78,8 @@ const lineHeight = fontSize * 1.5;
  */
 const readEditorFontFamily = (element: Element): string =>
   getComputedStyle(element).getPropertyValue('--font-mono').trim() || fallbackFontFamily;
+const readMinimumContrastRatio = (): number =>
+  globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1;
 const scrollbackLines = 10_000;
 // Bound synchronous bridge startup separately from the host's ongoing backpressure window.
 const initialFrameLimit = 64;
@@ -310,6 +312,29 @@ export function TerminalPane({
     viewRef.current?.setScreenReaderMode(screenReaderMode);
   }, [screenReaderMode]);
 
+  const applyTheme = useCallback(() => {
+    const host = hostRef.current;
+    if (host && viewRef.current) {
+      const theme = readTerminalTheme(host);
+      viewRef.current.setTheme(theme, {
+        ...terminalTextRendering(theme),
+        minimumContrastRatio: readMinimumContrastRatio(),
+      });
+    }
+  }, []);
+
+  /* The canvas holds resolved colours, so it re-reads the tokens when the root element or contrast query scoping them changes. */
+  useEffect(() => {
+    const observer = new MutationObserver(applyTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    const contrast = globalThis.matchMedia(highContrastQuery);
+    contrast.addEventListener('change', applyTheme);
+    return () => {
+      observer.disconnect();
+      contrast.removeEventListener('change', applyTheme);
+    };
+  }, [applyTheme]);
+
   /* Keep the grid fitted while the pane is resized, hidden and shown again. */
   useEffect(() => {
     const host = hostRef.current;
@@ -363,7 +388,7 @@ export function TerminalPane({
         ...terminalTextRendering(theme),
         scrollback: scrollbackLines,
         screenReaderMode: screenReaderModeRef.current,
-        minimumContrastRatio: globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1,
+        minimumContrastRatio: readMinimumContrastRatio(),
         reducedMotion: globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches,
         onLinkActivate(uri) {
           /* The desktop navigation policy sends http(s) to the person's browser and opens nothing in the app. */
@@ -397,6 +422,8 @@ export function TerminalPane({
       return;
     }
     viewRef.current = view;
+    /* The theme may have changed while the renderer loaded. */
+    applyTheme();
     /* Counts the shells this port has served. An access replacement keeps the port but starts the host's offsets
      * again at zero, so output of the replaced shell that paints afterwards acknowledges nothing: its offset would be
      * beyond the new shell's, which the host refuses as an invalid frame and ends the Terminal. */
@@ -525,7 +552,7 @@ export function TerminalPane({
     } finally {
       initialFrames.length = 0;
     }
-  }, [bridge, loadRenderer, projectRoot, teardown]);
+  }, [applyTheme, bridge, loadRenderer, projectRoot, teardown]);
   useEffect(() => {
     startRef.current = start;
   }, [start]);

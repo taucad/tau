@@ -840,8 +840,16 @@ export const TauMetrics = {
     name: 'tau.billing.open_financial_cases',
     unit: '{case}',
     description:
-      'Open or attention financial cases by kind after each hourly reconciliation (alert on unfulfilled_purchase_obligation > 0)',
-    attributes: z.object({ kind: z.string() }),
+      'Open or attention financial cases by kind and whether the case names an account, after each hourly reconciliation (alert on attributed="false" > 0)',
+    attributes: z.object({ kind: z.string(), attributed: z.enum(['true', 'false']) }),
+  }),
+
+  billingOpenFinancialCaseAge: defineGauge({
+    name: 'tau.billing.open_financial_case_age_seconds',
+    unit: 's',
+    description:
+      'Age of the oldest open or attention financial case by kind and whether it names an account, after each hourly reconciliation; 0 when none is open',
+    attributes: z.object({ kind: z.string(), attributed: z.enum(['true', 'false']) }),
   }),
 
   billingFundedOperationRecoveries: defineCounter({

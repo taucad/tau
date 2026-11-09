@@ -92,28 +92,40 @@ export const readTerminalTheme = (element: HTMLElement): TerminalTheme => {
 export type TerminalTextRendering = Readonly<{
   textBlending: 'native' | 'linear' | 'linear-corrected';
   textWeight: number;
+  /** The regular face's weight; the editor sets 400. */
+  fontWeight: number;
 }>;
 
 /**
  * Text blending that sets the Terminal's strokes at the editor's weight. AurigaX draws each glyph white on a
- * transparent atlas and tints it, which reads heavier than the editor's DOM text: on a light background by about
- * 9% of ink, on a dark one by about 3% (measured in Chromium at 2x against the editor's own styles). On light,
- * linear blending thins dark strokes and a coverage exponent below 1 restores the rest; on dark, linear blending
- * would thicken light strokes, so the corrected mode keeps sRGB weight without its fringes and the exponent thins.
- * Both land within 2% of the editor's ink. Tuned again on macOS, whose font smoothing adds weight of its own.
+ * transparent atlas and tints it, which reads heavier than the editor's DOM text. On light, linear blending thins
+ * dark strokes; on dark, linear blending would thicken light strokes, so the corrected mode keeps sRGB weight
+ * without its fringes. The coverage exponent then trims the rest. Measured as stroke width against the editor's
+ * own text in the same window:
+ *
+ * - Chromium on Linux at 2x: light `linear` 0.65 and dark `linear-corrected` 1.15 land within 2% of the editor's ink.
+ * - macOS: canvas glyphs come out about 0.6 device pixels wider per stroke than the editor's DOM text (2.95 against
+ *   2.0 at 2x in the installed app), more than any coverage exponent removes. The face drops to 300, which takes
+ *   about 0.5 px off a Geist Mono stroke, and the exponent covers the rest.
  *
  * @param theme - The resolved theme the Terminal opens with.
- * @returns The blending options for the renderer.
+ * @param apple - Whether the renderer runs on macOS (or iOS), whose glyph rasterizer draws heavier.
+ * @returns The blending and weight options for the renderer.
  */
-export const terminalTextRendering = (theme: Pick<TerminalTheme, 'background'>): TerminalTextRendering => {
+export const terminalTextRendering = (
+  theme: Pick<TerminalTheme, 'background'>,
+  apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform),
+): TerminalTextRendering => {
   const channel = (offset: number): number => {
     const value = Number.parseInt(theme.background.slice(offset, offset + 2), 16) / 255;
     return value <= 4.045e-2 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
   };
   const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  return luminance > 0.5
-    ? { textBlending: 'linear', textWeight: 0.65 }
-    : { textBlending: 'linear-corrected', textWeight: 1.15 };
+  const fontWeight = apple ? 300 : 400;
+  if (luminance > 0.5) {
+    return { textBlending: 'linear', textWeight: apple ? 1.4 : 0.65, fontWeight };
+  }
+  return { textBlending: 'linear-corrected', textWeight: 1.15, fontWeight };
 };
 
 /** WCAG AA for body text: the floor AurigaX holds every foreground to when the person asks for more contrast. */

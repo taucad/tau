@@ -1,12 +1,12 @@
-# Terms of Service - TauCAD Limited
+# Terms of Service - TAUCAD LIMITED
 
 *Effective date: November 8, 2026*
 
-> **Summary:** These Terms constitute a binding legal agreement between you and TauCAD Limited. By using the Service, you agree to these Terms. If you do not agree, you may not use the Service.
+> **Summary:** These Terms constitute a binding legal agreement between you and TAUCAD LIMITED. By using the Service, you agree to these Terms. If you do not agree, you may not use the Service.
 
 ## 1. Introduction
 
-These Terms of Service ("Terms") govern your access to and use of the TauCAD Limited software service, including any associated websites, networks, applications, and other services provided by TauCAD Limited (collectively, the "Service"). These Terms constitute a legally binding agreement between you and TauCAD Limited ("we," "us," or "our"). By accessing or using our Service, you acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/legal/privacy), which is incorporated by reference.
+These Terms of Service ("Terms") govern your access to and use of the Tau software service, including any associated websites, networks, applications, and other services provided by TAUCAD LIMITED (collectively, the "Service"). These Terms constitute a legally binding agreement between you and TAUCAD LIMITED ("Tau," "we," "us," or "our"). By accessing or using our Service, you acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/legal/privacy), which is incorporated by reference.
 
 If you are using our Service on behalf of an organization, you represent and warrant that you have the authority to bind that organization to these Terms. If you do not agree to these Terms, you may not access or use our Service.
 
@@ -27,7 +27,7 @@ We reserve the right to modify these Terms at any time. We will provide notice o
 
 ### 3.1 Service Description
 
-TauCAD is an AI-assisted computer-aided design (CAD) software service. The Service enables users to create, edit, convert, and export 3D designs through various tools and features, which may include AI-powered assistance, code-based modeling, file format conversion, and integrations with third-party platforms. We may also offer developer tools, APIs, and software packages for programmatic access to certain Service functionality.
+Tau is an AI-assisted computer-aided design (CAD) software service. The Service enables users to create, edit, convert, and export 3D designs through various tools and features, which may include AI-powered assistance, code-based modeling, file format conversion, and integrations with third-party platforms. We may also offer developer tools, APIs, and software packages for programmatic access to certain Service functionality.
 
 To use our Service, you must be at least 18 years old or the age of legal majority in your jurisdiction, whichever is greater.
 
@@ -107,7 +107,7 @@ Your privacy is important to us. Our collection, use, and protection of your per
 
 ### 6.1 Our Intellectual Property
 
-All content provided by TauCAD Limited, including the Service, website, text, graphics, logos, and software, is the property of TauCAD Limited or its content suppliers and is protected by international intellectual property laws. Our trademarks and trade dress may not be used without our prior written consent.
+All content provided by TAUCAD LIMITED, including the Service, website, text, graphics, logos, and software, is the property of TAUCAD LIMITED or its content suppliers and is protected by international intellectual property laws. Our trademarks and trade dress may not be used without our prior written consent.
 
 We grant you a limited, non-exclusive, non-transferable, revocable license to use the Service for your internal business purposes or personal use. This license does not include the right to modify, copy, resell, sublicense, reverse engineer, or distribute the Service, except as permitted by applicable open-source licenses.
 
@@ -115,19 +115,19 @@ These restrictions do not apply to the open-source software in the Service, incl
 
 ### 6.2 Open Source
 
-TauCAD is built on open-source software. The source code is publicly available at [https://github.com/taucad/tau](https://github.com/taucad/tau).
+Tau is built on open-source software. The source code is publicly available at [https://github.com/taucad/tau](https://github.com/taucad/tau).
 
-All TauCAD-authored source, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses, listed in our [Open-Source Notices](/legal/open-source).
+All Tau-authored source, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses, listed in our [Open-Source Notices](/legal/open-source).
 
-Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the TauCAD name and trademarks, and any content we create that is not part of the open-source codebase.
+Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the Tau name and trademarks, and any content we create that is not part of the open-source codebase.
 
 ### 6.3 Your Designs
 
-CAD designs, models, and other creative works you create using TauCAD are your intellectual property. Your use of TauCAD does not create any obligation for you to license your designs under any open-source license.
+CAD designs, models, and other creative works you create using Tau are your intellectual property. Your use of Tau does not create any obligation for you to license your designs under any open-source license.
 
 ### 6.4 Feedback & Contributions
 
-You grant us a perpetual, irrevocable, royalty-free license to use any feedback, comments, or suggestions you provide. If you contribute to the TauCAD open-source project, your contributions will be licensed under the same license as the project.
+You grant us a perpetual, irrevocable, royalty-free license to use any feedback, comments, or suggestions you provide. If you contribute to the Tau open-source project, your contributions will be licensed under the same license as the project.
 
 ## 7. Disclaimers & Liability
 
@@ -149,7 +149,7 @@ Some jurisdictions do not allow limitations on implied warranties or liability f
 
 ### 7.3 Indemnification
 
-You agree to indemnify, defend, and hold harmless TauCAD Limited, its officers, directors, employees, agents, and affiliates from and against any claims, liabilities, damages, losses, costs, expenses, or fees arising from your violation of these Terms, your User Data, or your use of the Service.
+You agree to indemnify, defend, and hold harmless TAUCAD LIMITED, its officers, directors, employees, agents, and affiliates from and against any claims, liabilities, damages, losses, costs, expenses, or fees arising from your violation of these Terms, your User Data, or your use of the Service.
 
 ### 7.4 Third-Party Services
 
@@ -169,7 +169,7 @@ Any disputes will be resolved in the courts of Auckland, New Zealand, except whe
 
 ### 8.3 Class Action Waiver
 
-**To the maximum extent permitted by applicable law**, you agree that any dispute resolution proceedings will be conducted only on an individual basis and not in a class, consolidated, or representative action. You waive any right to participate in a class action lawsuit or class-wide arbitration against TauCAD Limited.
+**To the maximum extent permitted by applicable law**, you agree that any dispute resolution proceedings will be conducted only on an individual basis and not in a class, consolidated, or representative action. You waive any right to participate in a class action lawsuit or class-wide arbitration against TAUCAD LIMITED.
 
 **Jurisdictional limitations**: This waiver does not apply, and you retain your full statutory rights, where prohibited by law. In particular:
 
@@ -195,7 +195,7 @@ If you wish to close your account, you may do so through your account settings o
 
 ### 8.5 General Provisions
 
-These Terms, including our Privacy Policy and any other agreements referenced herein, constitute the entire agreement between you and TauCAD Limited regarding your use of our Service. The failure of TauCAD Limited to enforce any right or provision will not be deemed a waiver. If any provision is found invalid or unenforceable, the remaining provisions will remain in full force. These Terms may not be transferred or assigned by you without our prior written consent, but may be assigned by us without restriction. All provisions which by their nature should survive termination shall survive.
+These Terms, including our Privacy Policy and any other agreements referenced herein, constitute the entire agreement between you and TAUCAD LIMITED regarding your use of our Service. The failure of TAUCAD LIMITED to enforce any right or provision will not be deemed a waiver. If any provision is found invalid or unenforceable, the remaining provisions will remain in full force. These Terms may not be transferred or assigned by you without our prior written consent, but may be assigned by us without restriction. All provisions which by their nature should survive termination shall survive.
 
 ## 9. Additional Terms
 
@@ -205,7 +205,7 @@ You agree to comply with all applicable export and re-export control laws and re
 
 ### 9.2 Force Majeure
 
-TauCAD Limited shall not be liable for any delay or failure to perform resulting from causes outside its reasonable control, including acts of God, war, terrorism, riots, embargoes, acts of civil or military authorities, fire, floods, accidents, pandemics, or disease.
+TAUCAD LIMITED shall not be liable for any delay or failure to perform resulting from causes outside its reasonable control, including acts of God, war, terrorism, riots, embargoes, acts of civil or military authorities, fire, floods, accidents, pandemics, or disease.
 
 ### 9.3 U.S. Government Users
 

@@ -8,7 +8,7 @@ export const legalDocuments = [
   {
     slug: 'privacy',
     title: 'Privacy Policy',
-    description: 'How TauCAD Limited collects, uses, stores and protects your personal information.',
+    description: 'How Tau collects, uses, stores and protects your personal information.',
   },
   {
     slug: 'cookies',

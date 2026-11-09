@@ -2,7 +2,7 @@
 
 *Effective date: October 9, 2026*
 
-This notice explains how TauCAD Limited ("Tau", "we", "us", or "our") uses cookies and browser storage when you use Tau. Read it with our [Privacy Policy](/legal/privacy).
+This notice explains how TAUCAD LIMITED ("Tau", "we", "us", or "our") uses cookies and browser storage when you use Tau. Read it with our [Privacy Policy](/legal/privacy).
 
 ## Web and Desktop
 

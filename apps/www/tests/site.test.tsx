@@ -287,3 +287,16 @@ test('should start every new project from the app home', () => {
     expect(link).toContain('data-open-app=""');
   }
 });
+
+test('should draw the pricing page from the shared plan cards and catalogue', () => {
+  const html = renderToStaticMarkup(<MemoryRouter>{pricing()}</MemoryRouter>);
+  expect(html.match(/data-slot="plan-card"/gu)).toHaveLength(3);
+  // Features still in development carry the coming-soon icon, and one legend under the cards explains it.
+  expect(html).toContain('data-coming-soon');
+  expect(html.match(/data-slot="coming-soon-legend"/gu)).toHaveLength(1);
+  expect(html).toContain('1 GB cloud backup and sync');
+  expect(html).not.toContain('US$');
+  const pro = /<a\b[^>]*data-placement="pricing-pro"[^>]*>/u.exec(html)?.[0];
+  expect(pro).toContain('settings=billing');
+  expect(html).toContain('Upgrade to Pro');
+});

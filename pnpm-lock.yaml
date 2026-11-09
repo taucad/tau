@@ -4176,6 +4176,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../libs/billing
       '@taucad/consent':
         specifier: workspace:*
         version: link:../libs/consent
@@ -4185,6 +4188,9 @@ importers:
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@taucad/ui-kit':
+        specifier: workspace:*
+        version: link:../libs/ui-kit
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils

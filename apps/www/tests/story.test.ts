@@ -56,21 +56,20 @@ test('should map reading position to continuous chapter progress', async () => {
   assert.ok(progressFromTops([-3000, -2200, -1400], 500) < 3);
 });
 
-test('should advertise Tau Cloud sync as available on paid plans and never as coming soon', async () => {
-  const { plans, pricingFaq, storyChapters } = await import('#www/content.js');
-  const copy = JSON.stringify({ plans, pricingFaq, storyChapters });
-  for (const plan of plans) {
-    for (const [label, flag] of plan.features) {
-      if (/sync|backup/iu.test(label)) {
-        assert.equal(flag, undefined, `${label} is available now`);
-      }
+test('should advertise cloud backup as included on every plan and never as coming soon', async () => {
+  const { pricingFaq, storyChapters } = await import('#www/content.js');
+  const { tauPlanCatalog } = await import('@taucad/billing/plan-catalog');
+  const copy = JSON.stringify({ pricingFaq, storyChapters });
+  const sizes = { free: '1 GB', pro: '10 GB', enterprise: '100 GB' } as const;
+  for (const plan of tauPlanCatalog) {
+    const backup = plan.features.filter((feature) => /sync|backup/iu.test(feature.label));
+    assert.equal(backup.length, 1, `${plan.name} lists cloud backup once`);
+    for (const feature of backup) {
+      assert.equal(feature.isComingSoon, false, `${plan.name} cloud backup is available now`);
+      assert.ok(feature.label.includes(sizes[plan.id]), `${plan.name} names its ${sizes[plan.id]} allowance`);
     }
+    // The FAQ quotes the same allowances as the cards.
+    assert.ok(copy.includes(`${sizes[plan.id]} on ${plan.name}`));
   }
-  assert.ok(plans.find((plan) => plan.id === 'pro')?.features.some(([label]) => label.includes('10 GB')));
-  assert.ok(plans.find((plan) => plan.id === 'enterprise')?.features.some(([label]) => label.includes('100 GB')));
-  assert.equal(
-    plans.find((plan) => plan.id === 'free')?.features.some(([label]) => /Tau Cloud/u.test(label)),
-    false,
-  );
   assert.doesNotMatch(copy, /sync[^"]*coming soon|coming soon[^"]*sync/iu);
 });

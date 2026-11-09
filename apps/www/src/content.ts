@@ -240,68 +240,6 @@ export const visionChapters: Array<[string, string, string]> = [
   ],
 ];
 
-/** Plans from apps/libs/billing tau-plan-catalog and entitlements; prices in USD. */
-export const plans: Array<{
-  id: string;
-  name: string;
-  tagline: string;
-  price: string;
-  billingPeriod: string;
-  features: Array<[string, string?]>;
-  cta: readonly [string, string];
-}> = [
-  {
-    id: 'free',
-    name: 'Free',
-    tagline: 'Design, check and export for free.',
-    price: 'US$0',
-    billingPeriod: 'forever',
-    features: [
-      ['All AI models, paid with credits'],
-      ['All open-source CAD kernels'],
-      ['Unlimited local geometry checks'],
-      ['Export to every supported format'],
-      ['Public share links'],
-      ['Back up to GitHub'],
-    ],
-    cta: ['Start designing', '/'] as const,
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    tagline: 'Monthly credits and cloud sync.',
-    price: 'US$20',
-    billingPeriod: 'per month, plus applicable tax',
-    features: [
-      ['Everything in Free'],
-      ['2,000 credits every month'],
-      ['Unused plan credits roll over, up to 4,000'],
-      ['Tau Cloud backup & sync, 10 GB'],
-      ['Zoo KCL cloud kernel, metered'],
-      ['Private and unlisted share links'],
-      ['No training on your designs'],
-    ],
-    cta: ['Choose Pro in Tau', '/?settings=billing'] as const,
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    tagline: 'For teams and organizations.',
-    price: 'Custom',
-    billingPeriod: 'annual agreement',
-    features: [
-      ['Everything in Pro'],
-      ['Tau Cloud backup & sync, 100 GB'],
-      ['Custom credit allotment'],
-      ['Contractual no-train guarantee (DPA)'],
-      ['Dedicated technical contact'],
-      ['Invoicing and PO support'],
-      ['Verification CI and org dashboards', 'soon'],
-    ],
-    cta: ['Talk to us', `mailto:${salesEmail}`] as const,
-  },
-];
-
 export const pricingFaq: Array<[string, string]> = [
   [
     'How do credits work?',
@@ -309,18 +247,18 @@ export const pricingFaq: Array<[string, string]> = [
   ],
   [
     'Can I buy credits without Pro?',
-    'Yes. Credits cost US$1 per 100, with top-ups from US$5 to US$5,000 before applicable tax. Purchased credits do not expire.',
+    'Yes. Credits cost $1 per 100, and you can add from $5 to $5,000 at a time, plus tax. Purchased credits never expire.',
   ],
   [
-    'What does Tau Cloud backup & sync include?',
-    'On Pro and Enterprise, each project’s files and revision history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 10 GB on Pro, 100 GB on Enterprise. You need to be signed in; while offline you keep working on your local copy.',
+    'What does cloud backup and sync include?',
+    'On every plan, each project’s files and revision history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 1 GB on Free, 10 GB on Pro, 100 GB on Enterprise. You need to be signed in; while offline you keep working on your local copy.',
   ],
   [
     'Can I back up on the Free plan?',
-    'Yes, to GitHub. Every plan can connect a project to a GitHub repository. Tau Cloud sync is part of Pro and Enterprise.',
+    'Yes. Free includes 1 GB of cloud backup and sync, and every plan can also connect a project to a GitHub repository.',
   ],
   [
     'What happens to unused Pro credits?',
-    'Unused plan credits roll over, up to 4,000. Purchased credits are separate and never expire. Subscription and cancellation terms are shown in the app before you buy.',
+    'Unused monthly credits roll over, up to 4,000. Purchased credits are separate and never expire. Subscription and cancellation terms are shown in the app before you buy.',
   ],
 ];

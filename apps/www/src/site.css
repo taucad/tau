@@ -2,6 +2,9 @@
 @import '@taucad/ui/styles/tokens.css';
 @import './principle-diagrams.css';
 @source '../../../packages/ui/src/components/button.tsx';
+@source '../../../packages/ui/src/components/badge.tsx';
+@source '../../../packages/ui/src/components/card.tsx';
+@source '../../libs/ui-kit/src/components/plan-cards.tsx';
 
 @font-face {
   font-family: 'Geist Sans';
@@ -1224,83 +1227,12 @@ main > .band:not(.band ~ .band)::before {
 .case:hover h3 span {
   transform: translateX(4px);
 }
+/* The plan grid is the shared `PlanCards` component (ui-kit); the site only places it in the band. */
 .plans {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--line);
 }
-.plan {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding-block: 2.5rem;
-}
-.plan + .plan {
-  border-left: 1px solid var(--line);
-}
-.plan.featured {
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
-}
-.plan-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.badge {
-  padding: 0.125rem 0.5rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  font: 500 0.75rem var(--font-mono);
-  letter-spacing: 0.04em;
-}
-.price {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  color: var(--foreground);
-  font-size: 2.75rem;
-  font-weight: 550;
-  letter-spacing: -0.04em;
-  line-height: 1;
-}
-.price span {
-  font-size: var(--fine);
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--muted-foreground);
-}
-.plan ul {
-  display: grid;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: var(--small);
-}
-.plan li {
-  display: grid;
-  grid-template-columns: 1.25rem 1fr;
-}
-.plan li .mark {
-  color: var(--primary);
-}
-.plan li.soon {
-  color: var(--muted-foreground);
-}
-.plan li.soon .mark {
-  color: var(--muted-foreground);
-}
-.soon-label {
-  font: 500 0.75rem var(--font-mono);
-  white-space: nowrap;
-}
-/* Every plan's call to action sits on the same line at the foot of its card.
- * `SiteLink` renders buttons through the UI `Button`, which drops the `.button` class. */
-.plan > [data-slot='button'] {
-  margin-top: auto;
-}
-.pricing-teaser .plan {
-  padding-block: 2rem;
+.plans [data-slot='plan-card'] [data-slot='button'] {
+  width: 100%;
 }
 .faq {
   display: grid;
@@ -1505,7 +1437,7 @@ main > .band:not(.band ~ .band)::before {
   font-size: 1rem;
   margin: 1.5rem 0 0.5rem;
 }
-.legal :is(h2, h3, h4) {
+.legal :is(h2, h3, h4, p[id]) {
   scroll-margin-top: 5rem;
 }
 .legal :is(p, ul, ol, pre, .table-scroll) {
@@ -1802,7 +1734,6 @@ main > .band:not(.band ~ .band)::before {
   }
   .principles,
   .case-grid,
-  .plans,
   .steps,
   .contact-grid,
   .download-grid,
@@ -1819,7 +1750,6 @@ main > .band:not(.band ~ .band)::before {
   }
   .principle + .principle,
   .case + .case,
-  .plan + .plan,
   .steps > .cell + .cell,
   .contact-grid > .cell + .cell,
   .download-grid > .cell + .cell,
@@ -1965,9 +1895,6 @@ main > .band:not(.band ~ .band)::before {
   .case-image,
   .case-detail-image {
     background: oklch(0.94 0 none);
-  }
-  .plan.featured {
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
   }
 }
 @media (forced-colors: active) {

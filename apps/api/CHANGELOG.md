@@ -14,6 +14,43 @@
 
 ### Fixes
 
+- fix(desktop): Desktop Sentry release commits, PostHog CSP, API otel map and lighter page-load traces (#1615) (d577b7b7b)
+- fix(api-billing): Refuse new collection only for an account a spend-blocking case names (#1614) (805d4d7f6)
+- fix(ui): Light the Terminal's text on macOS and turn on ls colours (#1592) (a25024279)
+- fix(api): Boot without a tariff and pause only billing (#1593) (bec7e7673)
+- fix: report a failed Linux sandbox setup as not started, give shell cleanup a realistic deadline, and stop the location chip loop from #1558 (#1586) (595c1737d)
+- fix(revisions): Give the compute worker realm its own Buffer global (#1505) (5476c70ba)
+- fix(api): Idle the billing workers while Tau Cloud is off instead of exiting (#1548) (2a8303d86)
+
+### Performance
+
+- perf(api-llm-gateway): Sign Vertex bearer tokens locally instead of exchanging them (#1599) (2e4140a92)
+- perf(api-llm-gateway): Reuse the Vertex access token across requests (#1590) (9ea11f5e2)
+
+### Other changes
+
+- refactor(picovoxel): Remove the meshRelax option from PicoVoxel and PicoGK (#1622) (d42494722)
+- docs(www): simplify legal documents and describe agent recording (#1457) (d2d039df7)
+- ci(nx): Read and write the self-hosted Nx remote cache (#1603) (e59e3bd22)
+- refactor(api): Split the API into ten module libraries and run only affected package tests (#1576) (735d178dc)
+- ci(root): Run the standalone oracles only when they are affected, plus nightly (#1549) (6fc04b8d6)
+- refactor(chat): share the model catalog wire schema so the UI stops importing the API (#1568) (cb1b424f4)
+- test(api): pin the HTTP route table and schema-migration parity before the library split (#1565) (d5387548a)
+
+## 0.5.0 (2026-11-09)
+
+### Features
+
+- feat(api): record free accounts by default until they opt out (#1543) (9dba60326)
+- feat(api-billing): Add read-only list-cases lifecycle operation (#1611) (57c14cf56)
+- feat(api-billing): Label open cases by attribution and add age gauge (#1607) (195e6fa92)
+- feat(filesystem, desktop): Import a desktop folder or opened file by copying it host-side (W7.4) (#1584) (2305062c9)
+- feat(api): Measure gateway upload, admission and first-step prompt-cache hits (#1578) (5321d3e8a)
+- feat(filesystem, ui, api): Confirm editor saves before close and stream exports and publications (W12) (#1581) (be2ffdbcc)
+- feat(revisions): Honour the checkout's own Git ignore rules on both legs (#1572) (a01585196)
+
+### Fixes
+
 - fix(api-billing): Refuse new collection only for an account a spend-blocking case names (#1614) (805d4d7f6)
 - fix(ui): Light the Terminal's text on macOS and turn on ls colours (#1592) (a25024279)
 - fix(api): Boot without a tariff and pause only billing (#1593) (bec7e7673)

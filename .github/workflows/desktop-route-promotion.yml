@@ -110,6 +110,8 @@ jobs:
       # only a candidate whose own commit has five green shell conformance rows. They come from the
       # staging gate that created the tag (its run is named in the release notes) or from a green
       # `shell-conformance.yml` run on that commit. This reads results; it never runs the rows again.
+      # A `pull_request` run never counts: it is the only trigger allowed to reuse a cached verdict (CF-1), and a
+      # labelled PR whose head is a `main` commit (the `production` trail PR) would otherwise satisfy this lookup.
       - name: Require green shell conformance on the candidate's commit
         if: steps.selected.outputs.run == 'true' && matrix.channel == 'production' && inputs.operation == 'promote-routes'
         env:
@@ -119,7 +121,8 @@ jobs:
           set -euo pipefail
           [ -n "$TAG" ] || { echo '::error::A production promotion names its candidate tag.'; exit 1; }
           sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha)
-          green=$(gh api "repos/${GH_REPO}/actions/workflows/shell-conformance.yml/runs?head_sha=${sha}&status=success&per_page=1" --jq '.total_count')
+          green=$(gh api "repos/${GH_REPO}/actions/workflows/shell-conformance.yml/runs?head_sha=${sha}&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event != "pull_request")] | length')
           if [ "$green" -gt 0 ]; then
             echo "Shell conformance passed on ${sha} in a shell-conformance.yml run."
             exit 0

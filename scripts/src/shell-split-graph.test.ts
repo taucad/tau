@@ -4,6 +4,8 @@ import { createProjectGraphAsync, readCachedProjectGraph } from '@nx/devkit';
 import type { ProjectGraph } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 
+import { cacheViolations, isConformanceTarget } from '#shell-evidence.js';
+
 /*
  * The shell split's graph guards in their pre-split form (shell split blueprint, PR 0). The sandbox file set
  * of `native-process-core` and the production files of `packages/host/src/shell` are still inside their
@@ -122,12 +124,12 @@ describe('shell split graph (pre-split)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps every shell conformance and qualification target uncached', async () => {
+  it('keeps every shell conformance and qualification target uncached or keyed on the environment fingerprint', async () => {
     const graph = await projectGraph();
     const targets = Object.values(graph.nodes).flatMap(({ name, data }) =>
       Object.entries(data.targets ?? {})
-        .filter(([target]) => /^test:[\w-]*conformance$|^test:shell-qualification$/u.test(target))
-        .map(([target, configuration]) => ({ target: `${name}:${target}`, cache: configuration.cache })),
+        .filter(([target]) => isConformanceTarget(target))
+        .map(([target, configuration]) => ({ target: `${name}:${target}`, configuration })),
     );
 
     expect(targets.map(({ target }) => target).toSorted()).toEqual(
@@ -138,6 +140,6 @@ describe('shell split graph (pre-split)', () => {
         'native-process-core:test:shell-conformance',
       ]),
     );
-    expect(targets.filter(({ cache }) => cache !== false)).toEqual([]);
+    expect(targets.flatMap(({ target, configuration }) => cacheViolations(target, configuration))).toEqual([]);
   });
 });

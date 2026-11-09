@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +15,8 @@ import {
 import type { Fingerprint, Probe, TargetConfiguration, VerdictRecord } from '#shell-evidence.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables and GitHub fields keep their wire names. */
+
+const root = resolve(import.meta.dirname, '../..');
 
 const macEnvironment = {
   TAU_SHELL_EVIDENCE: 'reuse',
@@ -273,6 +278,73 @@ describe('conformance cache guard', () => {
     expect(
       cacheViolations('a:t', { ...cacheable, options: { ...cacheable.options, env: { NX_CACHE_FAILURES: 'true' } } }),
     ).toEqual([expect.stringContaining('NX_CACHE_FAILURES')]);
+  });
+});
+
+type Step = { name?: string; run?: string; env?: Record<string, string>; if?: string };
+type Workflow = { env?: Record<string, string>; jobs: Record<string, { env?: Record<string, string>; steps: Step[] }> };
+const workflow = (file: string): Workflow =>
+  load(readFileSync(resolve(root, '.github/workflows', file), 'utf8')) as Workflow;
+
+describe('shell conformance workflow evidence', () => {
+  const shell = workflow('shell-conformance.yml');
+  const projectTargets = (path: string): Record<string, TargetConfiguration> =>
+    (JSON.parse(readFileSync(resolve(root, path), 'utf8')) as { targets: Record<string, TargetConfiguration> }).targets;
+  const targets: Record<string, TargetConfiguration> = {
+    'native-process-core:test:shell-conformance': projectTargets('packages/core/native-process/project.json')[
+      'test:shell-conformance'
+    ]!,
+    'host:test:shell-conformance': projectTargets('packages/host/project.json')['test:shell-conformance']!,
+    'host:test:shell-qualification': projectTargets('packages/host/project.json')['test:shell-qualification']!,
+    'desktop:test:terminal-conformance': projectTargets('apps/desktop/project.json')['test:terminal-conformance']!,
+  };
+
+  it('asks for reuse only on its own pull request trigger', () => {
+    expect(shell.jobs['macos']?.env?.['TAU_SHELL_EVIDENCE']).toBe(
+      `\${{ github.event_name == 'pull_request' && !inputs.ref && 'reuse' || 'fresh' }}`,
+    );
+    expect(shell.jobs['linux']?.env?.['TAU_SHELL_EVIDENCE']).toBeUndefined();
+    expect(JSON.stringify(shell)).not.toContain('NX_CACHE_FAILURES');
+    expect(shell.env?.['NX_DAEMON']).toBe('false');
+  });
+
+  it('runs every Mac conformance target fresh unless reuse was asked for, then stamps every receipt', () => {
+    const steps = shell.jobs['macos']?.steps ?? [];
+    const receipts: string[] = [];
+    for (const [target, configuration] of Object.entries(targets)) {
+      const step = steps.find((candidate) => candidate.run?.includes(`pnpm nx run ${target} `));
+      expect(step, target).toBeDefined();
+      const receipt = step?.env?.['TAU_SHELL_CONFORMANCE_RECEIPT']?.split('/').at(-1) ?? '';
+      receipts.push(receipt);
+      if (configuration.cache === false) {
+        expect(step?.run).toMatch(/ --skip-nx-cache$/u);
+      } else {
+        expect(step?.run).toMatch(/ \$\{\{ env\.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' \|\| '' \}\}$/u);
+        expect(configuration.outputs).toContain(`{workspaceRoot}/out/test-results/shell-conformance/*/${receipt}`);
+      }
+    }
+    const stamp = steps.find((step) => step.run?.includes('node scripts/src/shell-evidence.ts stamp'));
+    expect(stamp?.if).toBe('success() || failure()');
+    expect(stamp?.run?.split(/\s+/u).slice(-receipts.length).toSorted()).toEqual(receipts.toSorted());
+  });
+
+  it('keeps the Linux guest rows fresh', () => {
+    const guest = readFileSync(
+      resolve(root, 'packages/core/native-process/scripts/shell-conformance-guest.sh'),
+      'utf8',
+    );
+    const runs = guest.match(/nx run [\w-]+:test:[\w:-]+[^\n]*/gu) ?? [];
+    expect(runs.length).toBeGreaterThanOrEqual(4);
+    for (const run of runs) {
+      expect(run).toContain('--skip-nx-cache');
+    }
+    expect(guest).not.toContain('TAU_SHELL_EVIDENCE');
+  });
+
+  it('never lets a pull request run satisfy the promotion gate', () => {
+    const promotion = readFileSync(resolve(root, '.github/workflows/desktop-route-promotion.yml'), 'utf8');
+    expect(promotion).toContain(`shell-conformance.yml/runs?head_sha=\${sha}&status=success&per_page=100`);
+    expect(promotion).toContain(`--jq '[.workflow_runs[] | select(.event != "pull_request")] | length'`);
   });
 });
 

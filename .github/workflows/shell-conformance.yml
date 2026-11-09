@@ -12,7 +12,13 @@
 #   provider. The macOS Terminal rows are recorded `operator-validation-pending`, never run here.
 # - WIN-ARM is not a row yet: the Windows provider is paused.
 #
-# Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
+# Fresh by construction except where reuse is asked for (CF-1): the provider, service and qualification targets are
+# cacheable only under the environment fingerprint of `scripts/src/shell-evidence.ts`, which is a fresh nonce unless
+# `TAU_SHELL_EVIDENCE` is `reuse`. Only a pull request run asks for reuse; the nightly, `workflow_dispatch` and the
+# candidate gate's `workflow_call` run fresh and still pass `--skip-nx-cache`, and the Linux guests always do. The
+# stamp step then records each Mac receipt as fresh or as a verdict reused from an Nx hash first proven at another
+# commit, and refuses a reused receipt in a fresh run. This workflow has no remote cache env (the cache project's
+# call), so until then a reuse run can only miss.
 name: Shell conformance
 
 # Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
@@ -109,6 +115,11 @@ jobs:
       github.triggering_actor != 'dependabot[bot]')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      # Reuse a fingerprinted verdict only on this workflow's own pull request trigger; every call and every other
+      # trigger needs fresh evidence (CF-1). The queue's semantics-tier call joins reuse when SS-4 adds `tier`.
+      TAU_SHELL_EVIDENCE: ${{ github.event_name == 'pull_request' && !inputs.ref && 'reuse' || 'fresh' }}
+      TAU_SHELL_TIER: full
     strategy:
       fail-fast: false
       matrix:
@@ -137,14 +148,14 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run native-process-core:test:shell-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       - name: Run the shell service conformance target
         if: success() || failure()
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
       - name: Run the shell qualification target
@@ -152,7 +163,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
       # until the operator's own-pty run, which this workflow never performs.
@@ -162,6 +173,17 @@ jobs:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
         run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
+
+      # Uncached: each receipt is stamped fresh (this run, this commit) or reused (restored by a cache hit, with the Nx
+      # hash and the commit that first proved it). A fresh run refuses a reused receipt.
+      - name: Stamp the receipts
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+        run: >-
+          GITHUB_SHA="$(git rev-parse HEAD)" node scripts/src/shell-evidence.ts stamp
+          "out/test-results/shell-conformance/$TAU_SHELL_CONFORMANCE_ROW"
+          receipt.json service-receipt.json qualification-receipt.json terminal-receipt.json
 
       - name: Upload the receipt
         if: always()

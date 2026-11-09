@@ -1,5 +1,5 @@
 /**
- * Error normalizer for LangGraph, LangChain, and LLM provider errors.
+ * Error normalizer for LLM provider and chat pipeline errors.
  * Converts various error formats into a structured JSON format for the UI.
  */
 
@@ -12,68 +12,19 @@ import { z } from 'zod';
 import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
-/**
- * LangChain error codes that may be present on wrapped errors.
- */
-type LangChainErrorCode =
-  | 'INVALID_PROMPT_INPUT'
-  | 'INVALID_TOOL_RESULTS'
-  | 'MESSAGE_COERCION_FAILURE'
-  | 'MODEL_AUTHENTICATION'
-  | 'MODEL_NOT_FOUND'
-  | 'MODEL_RATE_LIMIT'
-  | 'OUTPUT_PARSING_FAILURE'
-  | 'GRAPH_RECURSION_LIMIT'
-  | 'INVALID_CHAT_HISTORY'
-  | 'INVALID_CONCURRENT_GRAPH_UPDATE'
-  | 'INVALID_GRAPH_NODE_RETURN_VALUE'
-  | 'MISSING_CHECKPOINTER'
-  | 'MULTIPLE_SUBGRAPHS'
-  | 'UNREACHABLE_NODE';
-
-/**
- * Maps LangChain error codes to user-friendly categories.
- */
-/* eslint-disable @typescript-eslint/naming-convention -- LangChain error codes use SCREAMING_SNAKE_CASE */
-const langChainCodeToCategory: Record<LangChainErrorCode, ErrorCategory> = {
-  INVALID_PROMPT_INPUT: errorCategory.toolError,
-  INVALID_TOOL_RESULTS: errorCategory.toolError,
-  MESSAGE_COERCION_FAILURE: errorCategory.toolError,
-  MODEL_AUTHENTICATION: errorCategory.auth,
-  MODEL_NOT_FOUND: errorCategory.server,
-  MODEL_RATE_LIMIT: errorCategory.rateLimit,
-  OUTPUT_PARSING_FAILURE: errorCategory.toolError,
-  GRAPH_RECURSION_LIMIT: errorCategory.server,
-  INVALID_CHAT_HISTORY: errorCategory.toolError,
-  INVALID_CONCURRENT_GRAPH_UPDATE: errorCategory.toolError,
-  INVALID_GRAPH_NODE_RETURN_VALUE: errorCategory.toolError,
-  MISSING_CHECKPOINTER: errorCategory.server,
-  MULTIPLE_SUBGRAPHS: errorCategory.server,
-  UNREACHABLE_NODE: errorCategory.server,
-};
-/* eslint-enable @typescript-eslint/naming-convention -- re-enable after SCREAMING_SNAKE_CASE section */
-
 /* eslint-disable @typescript-eslint/naming-convention -- provider SDK and HTTP body schemas mirror wire keys. */
 const providerSdkRootFields = {
   status: z.number().optional(),
   requestID: z.string().optional(),
   request_id: z.string().optional(),
-  lc_error_code: z.string().optional(),
 } as const;
 
 const directProviderSdkErrorSchema = z
   .looseObject(providerSdkRootFields)
-  .refine(
-    (error) =>
-      error.status !== undefined ||
-      error.requestID !== undefined ||
-      error.request_id !== undefined ||
-      error.lc_error_code !== undefined,
-  )
+  .refine((error) => error.status !== undefined || error.requestID !== undefined || error.request_id !== undefined)
   .transform((error) => ({
     status: error.status,
     requestId: error.requestID ?? error.request_id,
-    lcErrorCode: error.lc_error_code,
     nestedMessage: undefined as string | undefined,
   }));
 
@@ -90,7 +41,6 @@ const nestedProviderSdkErrorSchema = z
   .transform((error) => ({
     status: error.status,
     requestId: error.requestID ?? error.request_id ?? error.error.request_id,
-    lcErrorCode: error.lc_error_code,
     nestedMessage: error.error.message,
   }));
 
@@ -106,7 +56,6 @@ const nestedAnthropicSdkErrorSchema = z
   .transform((error) => ({
     status: error.status,
     requestId: error.requestID ?? error.request_id ?? error.error.request_id,
-    lcErrorCode: error.lc_error_code,
     nestedMessage: error.error.error.message,
   }));
 
@@ -133,8 +82,7 @@ const parseJsonRecord = (value: string): Record<string, unknown> | undefined => 
 };
 
 /**
- * Extracts help/troubleshooting URL from error message.
- * LangChain appends "Troubleshooting URL: https://..." to error messages.
+ * Extracts a help link from a "Troubleshooting URL: https://..." line in an error message.
  */
 function extractHelpUrl(message: string): string | undefined {
   const match = /troubleshooting url:\s*(https?:\/\/\S+)/i.exec(message);
@@ -278,7 +226,7 @@ function detectPatternCategory(message: string): ErrorCategory | undefined {
  *
  * Detection priority:
  * 0. Abort errors (explicit user cancellation - checked first)
- * 1. LangChain/LangGraph error codes (lc_error_code property)
+ * 1. Tau pipeline errors (context compaction)
  * 2. HTTP status codes (SDK error classes)
  * 3. JSON parsing from error message
  * 4. Billing pattern override on extracted provider message
@@ -297,7 +245,7 @@ export function normalizeError(error: unknown): string {
   let message = rawMessage;
   let requestId: string | undefined;
 
-  // Extract help URL from raw message (LangChain appends troubleshooting URLs)
+  // Extract a troubleshooting link from the raw message, when one is present
   const helpUrl = extractHelpUrl(rawMessage);
 
   // 0. Check for abort errors first (explicit user cancellation)
@@ -312,19 +260,10 @@ export function normalizeError(error: unknown): string {
     message = tauImplementationBugError.message;
   }
 
-  // 1. Check for LangChain error codes
-  if (category === errorCategory.generic && providerSdkError?.lcErrorCode) {
-    const lcCode = providerSdkError.lcErrorCode as LangChainErrorCode;
-    if (lcCode in langChainCodeToCategory) {
-      category = langChainCodeToCategory[lcCode];
-      code = lcCode;
-    }
-  }
-
   // 2. Check for HTTP status (SDK errors)
   if (providerSdkError?.status !== undefined) {
     httpStatus = providerSdkError.status;
-    // Only override category if we don't have a more specific LangChain code
+    // Keep a more specific category already set above
     if (category === errorCategory.generic) {
       category = httpStatusToCategory(providerSdkError.status);
     }
@@ -341,7 +280,7 @@ export function normalizeError(error: unknown): string {
   requestId = providerSdkError?.requestId;
 
   // 2.5. Try to extract message from nested Anthropic error structure on the error object
-  // LangChain wraps Anthropic errors with: error.error = { type, error: { type, message }, request_id }
+  // Anthropic SDK errors carry the response body as: error.error = { type, error: { type, message }, request_id }
   const nestedMessage = providerSdkError?.nestedMessage;
   if (nestedMessage) {
     message = nestedMessage;

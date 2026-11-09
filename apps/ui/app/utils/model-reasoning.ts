@@ -34,7 +34,7 @@ const anthropicReasoning = (configuration: Model['configuration'] | undefined): 
  * The catalog keeps each provider's own field — Anthropic's adaptive thinking
  * and `outputConfig.effort`, Vertex's `thinkingLevel`, everyone else's
  * `reasoning` — because those fields are also what the API's name and commit
- * profiles hand to LangChain. This is the one reader that collapses them.
+ * profiles send on the provider wire. This is the one reader that collapses them.
  *
  * @param model - The catalog row, when the catalog has loaded.
  * @returns The default reasoning, or `undefined` for a model with none.

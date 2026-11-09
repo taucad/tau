@@ -26,7 +26,6 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 import { redactUrlQuery } from '#logger/logger-factory.js';
 import { cardinalityViews } from '#cardinality-views.js';
 
@@ -98,8 +97,6 @@ const sdk = new NodeSDK({
   logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 
   instrumentations: [
-    // Spans keep model, timing and usage; prompts and completions never ride them into Grafana (blueprint T07).
-    new LangChainInstrumentation({ traceContent: false }),
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-fs': { enabled: false },
       '@opentelemetry/instrumentation-dns': { enabled: false },

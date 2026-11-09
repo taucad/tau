@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(196);
+    expect(metrics).toHaveLength(198);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -626,6 +626,23 @@ describe('TauMetrics', () => {
         'compaction.outcome': 'generated',
       }).success,
     ).toBe(false);
+  });
+
+  it('should declare the client-reported prefix-break counters with bounded labels', () => {
+    expect(TauMetrics.agentPrefixBreaks.name).toBe('tau.agent.prefix_breaks');
+    expect(TauMetrics.agentReasoningOmittedBlocks.name).toBe('tau.agent.reasoning_omitted_blocks');
+    const labels = { 'agent.id': 'tau', 'prefix_break.cause': 'unsanctioned', 'gen_ai.provider.name': 'anthropic' };
+    expect(TauMetrics.agentPrefixBreaks.attributes.safeParse(labels).success).toBe(true);
+    expect(
+      TauMetrics.agentPrefixBreaks.attributes.safeParse({ ...labels, 'prefix_break.cause': 'cosmic-ray' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentPrefixBreaks.attributes.safeParse({ ...labels, 'gen_ai.provider.name': 'acme' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentReasoningOmittedBlocks.attributes.safeParse({ 'agent.id': 'tau', 'prefix_break.cause': 'tools' })
+        .success,
+    ).toBe(true);
   });
 
   it('should expose the prompt-section-size histogram with the canonical OTEL name', () => {

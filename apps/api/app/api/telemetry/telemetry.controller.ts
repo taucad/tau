@@ -181,8 +181,18 @@ export class TelemetryController {
     entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
     durationSeconds: number,
   ): void {
-    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens, safeguards, compactions, context } =
-      entry.detail;
+    const {
+      placement,
+      outcome,
+      errorCode,
+      timeToFirstUpdate,
+      toolCalls,
+      tokens,
+      safeguards,
+      compactions,
+      prefixBreaks,
+      context,
+    } = entry.detail;
     const agent = { [AttributeKey.AGENT_ID]: recordedAgentId(entry.detail.agentId) };
     const placed = { ...agent, [AttributeKey.AGENT_PLACEMENT]: placement };
     const turn = { ...placed, [AttributeKey.AGENT_OUTCOME]: outcome };
@@ -228,6 +238,13 @@ export class TelemetryController {
         [AttributeKey.AGENT_COMPACTION_TIER]: tier,
         [AttributeKey.AGENT_COMPACTION_OUTCOME]: compactionOutcome,
       });
+    }
+    for (const { cause, provider, count, reasoningOmitted } of prefixBreaks ?? []) {
+      const broken = { ...agent, [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: cause };
+      this.metrics.agentPrefixBreaks.add(count, { ...broken, [AttributeKey.GEN_AI_PROVIDER_NAME]: provider });
+      if (reasoningOmitted > 0) {
+        this.metrics.agentReasoningOmittedBlocks.add(reasoningOmitted, broken);
+      }
     }
     if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
       this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });

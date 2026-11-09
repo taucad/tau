@@ -21,7 +21,7 @@ type CameraPose = Readonly<{
   revision: number;
 }>;
 
-type PointerMark = Readonly<{ type: string; at: number }>;
+type PointerMark = Readonly<{ type: string; at: number; pose?: CameraPose }>;
 
 type CameraBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
@@ -36,6 +36,8 @@ type DragTimeline = Readonly<{
   secondDragMilliseconds: number;
   /** From drag 1's last move to drag 2's first move: how long the echo had to land before drag 2. */
   gapMilliseconds: number;
+  /** The pose as drag 2 was pressed: where drag 1 left the camera. */
+  secondPressPose: CameraPose;
 }>;
 
 const previewCanvasSelector = 'canvas[data-engine]';
@@ -80,7 +82,10 @@ async function canvasCenter(): Promise<{ x: number; y: number }> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** Records every pointer event the page receives, before camera-controls handles it. */
+/**
+ * Records every pointer event the page receives, before camera-controls handles it, and the pose at
+ * each press. Reading drag 1's end pose at drag 2's press keeps a command round trip out of the gap.
+ */
 async function recordPointerMarks(): Promise<void> {
   await target.evaluate(() => {
     const page = globalThis as unknown as CameraBridgeWindow;
@@ -90,7 +95,17 @@ async function recordPointerMarks(): Promise<void> {
       page.addEventListener(
         type,
         () => {
-          marks.push({ type, at: performance.now() });
+          const pose = type === 'pointerdown' ? page.__TAU_SECTION_VIEW_TEST__?.getCamera() : undefined;
+          marks.push({
+            type,
+            at: performance.now(),
+            pose: pose && {
+              position: pose.position,
+              target: pose.target,
+              quaternion: pose.quaternion,
+              revision: pose.revision,
+            },
+          });
         },
         { capture: true },
       );
@@ -103,9 +118,11 @@ async function readDragTimeline(): Promise<DragTimeline> {
     () => (globalThis as unknown as CameraBridgeWindow).__TAU_E2E_POINTER_MARKS__ ?? [],
   );
   const drags: PointerMark[][] = [];
+  const presses: PointerMark[] = [];
   let current: PointerMark[] | undefined;
   for (const mark of marks) {
     if (mark.type === 'pointerdown') {
+      presses.push(mark);
       current = [];
       drags.push(current);
     } else if (mark.type === 'pointerup') {
@@ -116,7 +133,8 @@ async function readDragTimeline(): Promise<DragTimeline> {
   }
 
   const [first, second] = drags;
-  if (drags.length !== 2 || !first?.length || !second?.length) {
+  const secondPressPose = presses[1]?.pose;
+  if (drags.length !== 2 || !first?.length || !second?.length || !secondPressPose) {
     throw new Error(`Expected two drags with moves, saw: ${JSON.stringify(marks)}`);
   }
 
@@ -124,6 +142,7 @@ async function readDragTimeline(): Promise<DragTimeline> {
     firstDragMilliseconds: Math.round(first.at(-1)!.at - first[0]!.at),
     secondDragMilliseconds: Math.round(second.at(-1)!.at - second[0]!.at),
     gapMilliseconds: Math.round(second[0]!.at - first.at(-1)!.at),
+    secondPressPose,
   };
 }
 
@@ -160,25 +179,26 @@ test.describe('Viewer camera persistence', () => {
       await target.mouseMove(center.x, center.y);
       await target.mouseDown();
       await dragRightFrom(center);
-      /* Undamped controls: once the last move's command returns, the pose is final. Reading it while
-       * the button is still down keeps the read out of the gap. */
       const firstDragMovedAt = performance.now();
-      const endOfFirstDrag = await readCameraPose();
       await target.mouseUp();
-      /* Drag 2 starts where drag 1 released, so no pointer move sits in the gap. The round trips that
-       * remain can exceed the shortest gap, hence "at least"; the page clock records what was achieved. */
+      /* Drag 2 starts where drag 1 released and drag 1's end pose is read in-page at drag 2's press,
+       * so only the release and the press sit in the gap. Those round trips can exceed the shortest
+       * gap, hence "at least"; the page clock records what was achieved. */
       await target.delay(Math.max(0, gapMilliseconds - (performance.now() - firstDragMovedAt)));
       await target.mouseDown();
       const secondDragStart = { x: center.x + dragDistancePixels, y: center.y };
       await dragRightFrom(secondDragStart);
-      /* Read before release: the adoption fires 250 ms after this last move, so a later read could
-       * already see the snapped pose and mistake it for where drag 2 ended. */
+      /* Undamped controls, so the pose is final once the moves are in. Read before release: the
+       * adoption fires 250 ms after this last move, so a later read could already see the snapped
+       * pose and mistake it for where drag 2 ended. */
       const endOfSecondDrag = await readCameraPose();
       await target.mouseUp();
       await target.delay(settleAfterSecondDragMilliseconds);
       const settled = await readCameraPose();
       const timeline = await readDragTimeline();
-      await annotate(`drag timeline (page clock): ${JSON.stringify(timeline)}`);
+      const endOfFirstDrag = timeline.secondPressPose;
+      const { secondPressPose: _pose, ...timing } = timeline;
+      await annotate(`drag timeline (page clock): ${JSON.stringify(timing)}`);
 
       /* 1 cm is a noise floor; a 120 px orbit of the birdhouse moves the camera about 25 cm. */
       const tolerance = 0.01;
@@ -186,7 +206,7 @@ test.describe('Viewer camera persistence', () => {
       const secondArc = distance(endOfSecondDrag.position, endOfFirstDrag.position);
       const evidence = JSON.stringify({
         gapMilliseconds,
-        timeline,
+        timing,
         beforeFirstDrag,
         endOfFirstDrag,
         endOfSecondDrag,

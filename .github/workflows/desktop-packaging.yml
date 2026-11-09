@@ -26,8 +26,38 @@ env:
   NX_NO_CLOUD: 'true'
 
 jobs:
+  # `pnpm-lock.yaml` is a trigger path so a dependency change of the desktop closure packages, but
+  # a lockfile change elsewhere must not start the macOS, Windows and Linux legs. On a pull request
+  # this reads the lockfile's changed importers and asks Nx whether they affect `desktop`
+  # (scripts/src/desktop-packaging-select.ts). It fails open: any other trigger path, a change
+  # outside the importers section, an error, or a failed or skipped job here runs packaging.
+  select:
+    name: Select packaging
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Select packaging for this pull request
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/src/desktop-packaging-select.ts "$BASE_SHA" "$HEAD_SHA"
+
   assembly:
     name: Native assembly (${{ matrix.os }})
+    needs: [select]
+    if: ${{ !cancelled() && needs.select.outputs.run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +172,8 @@ jobs:
   # beyond the DMG still building and mounting.
   dmg-window-preview:
     name: DMG window preview (macos-26)
+    needs: [select]
+    if: ${{ !cancelled() && needs.select.outputs.run != 'false' }}
     runs-on: macos-26
     timeout-minutes: 20
     steps:

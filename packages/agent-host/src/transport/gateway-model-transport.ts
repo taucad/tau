@@ -594,6 +594,22 @@ const anthropicLongCacheTtl = '1h';
 const cacheRetentionFor = (request: ModelStreamRequest): GatewayCacheRetention =>
   request.providerKind === 'anthropic' && request.invocationPurpose !== 'compaction' ? 'long' : 'short';
 
+/**
+ * The Responses `prompt_cache_key` for a chat: SHA-256 of its id, as 32 hex
+ * characters. It routes a conversation's steps to one supplier server so its
+ * prefix cache is found again, without handing a Tau identifier to the
+ * supplier (I4).
+ *
+ * @param chatId - The chat the invocation belongs to.
+ * @returns The hashed routing key.
+ */
+const promptCacheKeyFor = async (chatId: string): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(chatId));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+};
+
 /** Anthropic refuses a request with more `cache_control` breakpoints than this. */
 const anthropicMaxCacheBreakpoints = 4;
 
@@ -1155,13 +1171,31 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;
     const cacheRetention = cacheRetentionFor(request);
+    // Set on the body rather than through pi's `sessionId`: pi would also stamp
+    // `session_id` and `x-client-request-id` headers, which the gateway's CORS
+    // allow-list refuses. Only the Responses wire admits the key, and a request
+    // with no chat has nothing to route by.
+    const promptCacheKey =
+      isOpenAiResponsesProviderKind(request.providerKind) && request.chatId !== undefined
+        ? await promptCacheKeyFor(request.chatId)
+        : undefined;
     // Every adapter shares one request-construction step: Vertex signature echo,
-    // then the document rewrite (D21, D25). A refusal here is the caller's
-    // request, so it surfaces as INVALID_REQUEST and nothing is fetched.
+    // then the document rewrite (D21, D25), then the Responses routing key. A
+    // refusal here is the caller's request, so it surfaces as INVALID_REQUEST
+    // and nothing is fetched.
     const onPayload = (payload: unknown): unknown => {
       try {
         const echoed = echo?.(payload);
-        return rewrite(echoed ?? payload) ?? echoed;
+        const rewritten = rewrite(echoed ?? payload) ?? echoed;
+        if (promptCacheKey === undefined) {
+          return rewritten;
+        }
+        const body = rewritten ?? payload;
+        if (!zodUtility.isObject(body)) {
+          throw new TypeError('pi-ai produced a non-object Responses request body.');
+        }
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI's wire uses snake_case.
+        return { ...body, prompt_cache_key: promptCacheKey };
       } catch (error) {
         state.failure = new GatewayModelTransportError({
           code: 'INVALID_REQUEST',

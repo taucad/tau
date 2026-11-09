@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
@@ -1495,6 +1496,55 @@ describe('createGatewayModelTransport', () => {
       expectAdmissibleBreakpoints(breakpoints);
       expect(breakpoints).toEqual(breakpoints.map(() => ({ type: 'ephemeral' })));
     });
+
+    it.each(['openai', 'xai'] as const)(
+      'routes a %s chat by its hashed id and hands the supplier no Tau id',
+      async (providerKind) => {
+        let headerNames: string[] | undefined;
+        let body: Record<string, unknown> | undefined;
+        const fetchFor = (): typeof globalThis.fetch =>
+          vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            headerNames = [...new Headers(init?.headers).keys()];
+            body = JSON.parse(init?.body as string) as Record<string, unknown>;
+            return byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn);
+          });
+
+        await collect(
+          createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchFor() }).stream(
+            request({ providerKind, chatId: 'chat_fixture' }),
+          ),
+        );
+
+        const key = createHash('sha256').update('chat_fixture').digest('hex').slice(0, 32);
+        expect(body?.['prompt_cache_key']).toBe(key);
+        expect(JSON.stringify(body)).not.toContain('chat_fixture');
+        // Retention stays the provider's own: the longer controls are refused or deprecated.
+        expect(body).not.toHaveProperty('prompt_cache_retention');
+        expect(body).not.toHaveProperty('prompt_cache_options');
+        // The key rides the body only. pi-ai's `sessionId` would also stamp
+        // `session_id` and `x-client-request-id`, which the CORS allow-list refuses.
+        expect(headerNames).toEqual(['accept', 'content-type', 'user-agent', 'x-tau-attempt-id', 'x-tau-chat-id']);
+
+        await collect(
+          createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchFor() }).stream(
+            request({ providerKind }),
+          ),
+        );
+        // A request with no chat has nothing to route by.
+        expect(body).not.toHaveProperty('prompt_cache_key');
+      },
+    );
+
+    it.each(['vertexai', 'cerebras', 'together', 'morph', 'moonshot'] as const)(
+      'never puts a cache key or retention on a %s Completions body, which the gateway refuses',
+      async (providerKind) => {
+        const body = await bodyFor({ providerKind, chatId: 'chat_fixture' });
+
+        expect(body).not.toHaveProperty('prompt_cache_key');
+        expect(body).not.toHaveProperty('prompt_cache_retention');
+        expect(JSON.stringify(body)).not.toContain('cache_control');
+      },
+    );
   });
 
   it('reads a typed gateway code out of the flattened API error envelope', async () => {

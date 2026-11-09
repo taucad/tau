@@ -99,9 +99,13 @@ ${selection}
 ${record}
 </message_references>`);
   }
+  /* The snapshot stays in the conversation where its turn committed it (prompt-cache identity), so it says when it
+   * was true: the newest one in the conversation is the current state. */
   return parts.length === 0
     ? undefined
     : `<system-reminder>
+The workspace as it was when the message after this reminder was sent. A newer snapshot later in the conversation supersedes this one.
+
 ${parts.join('\n\n')}
 </system-reminder>
 

@@ -72,6 +72,10 @@
 \* host withholds adoption until the composer is loaded, the composer receives the adopted
 \* snapshot as a prop instead of mounting its own early input, and no submit, admission,
 \* enqueue or acknowledgement path can run before it arrives; queue paths unchanged.
+\* A Tau turn's admission now waits for the page's skills catalog to settle, bounded the way it
+\* waits for the host probe, before it composes the turn's context (prompt-prefix identity I1);
+\* the wait sits inside Prepare, and submit, persistence, delivery, cancellation and the queue
+\* keep their paths and guards; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

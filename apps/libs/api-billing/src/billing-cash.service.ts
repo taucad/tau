@@ -9,7 +9,6 @@ import type { CreditLedgerService } from '#credit-ledger.service.js';
 import { BillingTaxService } from '#billing-tax.service.js';
 import { cashOccurredAt, cashProjectionCoversRetained, cashProjectionDigest } from '#billing-payment-contract.js';
 import type { CashProjectionEvidence } from '#billing-payment-contract.js';
-import { assertNewCollectionCashScope } from '#billing-cash-reconciliation.service.js';
 import type { DatabaseService } from '@taucad/api-database';
 import { billingReversalCase, billingStripeSource } from '@taucad/api-database/schema';
 import {
@@ -19,9 +18,6 @@ import {
   retrieveStripeDispute,
   retrieveStripePaymentIntent,
 } from '#billing-cash-stripe.js';
-
-type Database = DatabaseService['database'];
-type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 export type CashProjectionResult =
   | { readonly status: 'qualified'; readonly evidence: CashProjectionEvidence; readonly digest: string }
@@ -80,7 +76,6 @@ type ChargeSourceInput = {
 };
 
 export type BillingCashQualification = {
-  assertNewCollectionScope(accountId: string, transaction?: Transaction): Promise<void>;
   releaseQualifiedClaim(input: {
     readonly environment: FinancialEnvironment;
     readonly stripeAccountId: string;
@@ -334,10 +329,6 @@ export class BillingCashService {
     },
     private readonly tax = new BillingTaxService(databaseService),
   ) {}
-
-  public async assertNewCollectionScope(accountId: string, transaction?: Transaction): Promise<void> {
-    await assertNewCollectionCashScope(this.databaseService, this.config, accountId, transaction);
-  }
 
   public async qualifyInitialPayment(
     input: Parameters<BillingCashQualification['qualifyInitialPayment']>[0],

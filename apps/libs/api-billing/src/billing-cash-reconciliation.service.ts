@@ -1,8 +1,8 @@
 /* oxlint-disable curly, no-await-in-loop, unicorn/switch-case-braces, eslint/complexity -- Stripe cursors are sequential and provider unions require explicit guards */
 /* eslint-disable max-params-no-constructor/max-params-no-constructor -- persisted scan and case inputs are explicit */
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { and, asc, eq, gt, gte, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
 import { z } from 'zod';
 import type { FinancialEnvironment } from '#billing-policy.js';
@@ -59,7 +59,10 @@ export const spendBlockingFinancialCaseKinds: readonly string[] = [
   ...journalBlockingFinancialCaseKinds,
 ];
 
-/** Every cash, purchase and journal case kind: what pauses new collection while a case names no account. */
+/**
+ * Every cash, purchase and journal case kind the hourly gauge reports, so a zero is written for each even when none
+ * is open. It refuses nothing: only `spendBlockingFinancialCaseKinds` naming an account restrict that account.
+ */
 export const cashBlockingFinancialCaseKinds: readonly string[] = [
   'orphan_local_receipt',
   'missing_local_payment',
@@ -67,34 +70,44 @@ export const cashBlockingFinancialCaseKinds: readonly string[] = [
   'paid_unfulfilled_recovery',
   'refund_unresolved',
   'dispute_unresolved',
-  // Purchase and entitlement reconciliation opens account-scoped cases through the same stop.
+  // Purchase and entitlement reconciliation opens account-scoped cases.
   ...purchaseBlockingFinancialCaseKinds,
-  // Journal conservation cases always name their own account, so the same stop pauses only that account.
+  // Journal conservation cases always name their own account.
   ...journalBlockingFinancialCaseKinds,
 ];
 
-export async function assertNewCollectionCashScope(
-  databaseService: Pick<DatabaseService, 'database'>,
-  config: { readonly environment: FinancialEnvironment; readonly stripeAccountId: string; readonly livemode: boolean },
+/**
+ * Refuses new collection (a purchase, a renewal, an automatic reload or its confirmation) only for an account an
+ * open spend-blocking case names: that customer could not spend what they would pay for, so Tau would owe it straight
+ * back. It reads the same cases the spend gate in `credit-ledger.service.ts` does and answers the refusal an
+ * operator-restricted account gets, which model admission reports as `BILLING_ACCOUNT_RESTRICTED`. Money Tau owes
+ * the customer, Tau's own bookkeeping, and any case that names no account never refuse collection: an unattributed
+ * case is operator work, and it pages instead.
+ */
+export async function assertCollectionNotSpendBlocked(
+  database: DatabaseService['database'] | Transaction,
+  environment: FinancialEnvironment,
   accountId: string,
-  transaction?: Transaction,
 ): Promise<void> {
-  const database = transaction ?? databaseService.database;
-  const [open] = await database
+  const [blocking] = await database
     .select({ id: billingFinancialCase.id })
     .from(billingFinancialCase)
     .where(
       and(
-        eq(billingFinancialCase.environment, config.environment),
-        eq(billingFinancialCase.stripeAccountId, config.stripeAccountId),
-        eq(billingFinancialCase.livemode, config.livemode),
-        or(eq(billingFinancialCase.accountId, accountId), isNull(billingFinancialCase.accountId)),
-        inArray(billingFinancialCase.kind, cashBlockingFinancialCaseKinds),
-        or(eq(billingFinancialCase.state, 'open'), eq(billingFinancialCase.state, 'attention')),
+        eq(billingFinancialCase.environment, environment),
+        eq(billingFinancialCase.accountId, accountId),
+        inArray(billingFinancialCase.kind, spendBlockingFinancialCaseKinds),
+        inArray(billingFinancialCase.state, ['open', 'attention']),
       ),
     )
     .limit(1);
-  if (open !== undefined) throw new ConflictException('cash_scope_attention');
+  if (blocking !== undefined) {
+    throw new ForbiddenException({
+      code: 'billing_account_closed',
+      message: 'Financial account is restricted by an open financial case',
+      restricted: true,
+    });
+  }
 }
 
 @Injectable()
@@ -277,10 +290,6 @@ export class BillingCashReconciliationService {
       return { status: 'incomplete' };
     }
     return { status: 'complete' };
-  }
-
-  public async assertCashScopeClear(accountId: string): Promise<void> {
-    await assertNewCollectionCashScope(this.databaseService, this.config, accountId);
   }
 
   private async claimScan(id: string): Promise<Scan> {
@@ -480,9 +489,13 @@ export class BillingCashReconciliationService {
           await this.openCase(claim, 'paid_unfulfilled_recovery', fact.sourceId, disposition.accountId, fact.evidence);
         } else if (disposition.status === 'missing') {
           const owner = await this.owningAccount(claim, fact.evidence);
+          // Tau binds a Customer to every PaymentIntent it creates, so one without a Customer is not Tau's in either
+          // mode: it opens unattributed, as operator work, and the case records that the payment named no Customer.
+          const evidence =
+            typeof fact.evidence['customer'] === 'string' ? fact.evidence : { ...fact.evidence, customer: null };
           await (owner === undefined && (await this.belongsToAnotherEnvironment(claim, fact.evidence))
             ? this.resolveCase(claim, 'missing_local_payment', fact.sourceId)
-            : this.openCase(claim, 'missing_local_payment', fact.sourceId, owner, fact.evidence));
+            : this.openCase(claim, 'missing_local_payment', fact.sourceId, owner, evidence));
         } else {
           await this.resolveCase(claim, 'missing_local_payment', fact.sourceId);
           await this.resolveCase(claim, 'paid_unfulfilled_recovery', fact.sourceId);
@@ -602,8 +615,8 @@ export class BillingCashReconciliationService {
   }
 
   /**
-   * The account a provider fact belongs to, so its case restricts only that customer. Resolution runs
-   * through the fulfilled cause, then the purchase, then the Customer binding; `undefined` stays global.
+   * The account a provider fact belongs to, so its case names only that customer. Resolution runs through the
+   * fulfilled cause, then the purchase, then the Customer binding; `undefined` stays unattributed operator work.
    */
   private async owningAccount(scan: Scan, evidence: Record<string, unknown>): Promise<string | undefined> {
     const text = (value: unknown): string | undefined =>
@@ -859,6 +872,27 @@ export class BillingCashReconciliationService {
             nextStep: 'qualify_source_and_resolve',
           },
         });
+      if (accountId !== undefined && attributedCaseKinds.has(kind)) {
+        // The owned row supersedes the unattributed one an earlier pass opened for the same source, for example
+        // when a dispute read failed once, so the two are never open together.
+        await tx
+          .update(billingFinancialCase)
+          .set({
+            state: 'resolved',
+            resolvedAt: sql`clock_timestamp()`,
+            resolutionEvidence: { scanId: scan.id, sourceId, disposition: 'attributed', successorAccountId: accountId },
+          })
+          .where(
+            and(
+              eq(billingFinancialCase.environment, scan.environment),
+              eq(billingFinancialCase.stripeAccountId, scan.stripeAccountId),
+              eq(billingFinancialCase.livemode, scan.livemode),
+              eq(billingFinancialCase.kind, kind),
+              eq(billingFinancialCase.dedupeKey, `${kind}:${sourceId}`),
+              inArray(billingFinancialCase.state, ['open', 'attention']),
+            ),
+          );
+      }
     });
   }
 

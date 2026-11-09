@@ -63,44 +63,6 @@ export class MetricsService {
     unit: TauMetrics.genAiCost.unit,
   });
 
-  public readonly genAiToolInvocations = this.apiMeter.createCounter(TauMetrics.genAiToolInvocations.name, {
-    description: TauMetrics.genAiToolInvocations.description,
-    unit: TauMetrics.genAiToolInvocations.unit,
-  });
-
-  public readonly genAiToolDuration = this.apiMeter.createHistogram(TauMetrics.genAiToolDuration.name, {
-    description: TauMetrics.genAiToolDuration.description,
-    unit: TauMetrics.genAiToolDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.genAiToolDuration.buckets] },
-  });
-
-  public readonly genAiToolInputRepairs = this.apiMeter.createCounter(TauMetrics.genAiToolInputRepairs.name, {
-    description: TauMetrics.genAiToolInputRepairs.description,
-    unit: TauMetrics.genAiToolInputRepairs.unit,
-  });
-
-  public readonly genAiAgentIterations = this.apiMeter.createHistogram(TauMetrics.genAiAgentIterations.name, {
-    description: TauMetrics.genAiAgentIterations.description,
-    unit: TauMetrics.genAiAgentIterations.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.genAiAgentIterations.buckets] },
-  });
-
-  public readonly genAiAgentSafeguardInterventions = this.apiMeter.createCounter(
-    TauMetrics.genAiAgentSafeguardInterventions.name,
-    {
-      description: TauMetrics.genAiAgentSafeguardInterventions.description,
-      unit: TauMetrics.genAiAgentSafeguardInterventions.unit,
-    },
-  );
-
-  public readonly genAiInterruptRecoveryReminders = this.apiMeter.createCounter(
-    TauMetrics.genAiInterruptRecoveryReminders.name,
-    {
-      description: TauMetrics.genAiInterruptRecoveryReminders.description,
-      unit: TauMetrics.genAiInterruptRecoveryReminders.unit,
-    },
-  );
-
   public readonly chatToolResultOffloaded = this.apiMeter.createCounter(TauMetrics.chatToolResultOffloaded.name, {
     description: TauMetrics.chatToolResultOffloaded.description,
     unit: TauMetrics.chatToolResultOffloaded.unit,
@@ -187,14 +149,6 @@ export class MetricsService {
     unit: TauMetrics.genAiContextBudgetTokens.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiContextBudgetTokens.buckets] },
   });
-
-  public readonly genAiContextCompactionDecisions = this.apiMeter.createCounter(
-    TauMetrics.genAiContextCompactionDecisions.name,
-    {
-      description: TauMetrics.genAiContextCompactionDecisions.description,
-      unit: TauMetrics.genAiContextCompactionDecisions.unit,
-    },
-  );
 
   // Infrastructure
   public readonly redisConnectionState = this.apiMeter.createGauge(TauMetrics.redisConnectionState.name, {
@@ -425,6 +379,19 @@ export class MetricsService {
   public readonly agentErrors = this.clientMeter.createCounter(TauMetrics.agentErrors.name, {
     description: TauMetrics.agentErrors.description,
     unit: TauMetrics.agentErrors.unit,
+  });
+
+  public readonly agentSafeguardInterventions = this.clientMeter.createCounter(
+    TauMetrics.agentSafeguardInterventions.name,
+    {
+      description: TauMetrics.agentSafeguardInterventions.description,
+      unit: TauMetrics.agentSafeguardInterventions.unit,
+    },
+  );
+
+  public readonly agentCompactions = this.clientMeter.createCounter(TauMetrics.agentCompactions.name, {
+    description: TauMetrics.agentCompactions.description,
+    unit: TauMetrics.agentCompactions.unit,
   });
 
   // --- Client-reported: agent context ---

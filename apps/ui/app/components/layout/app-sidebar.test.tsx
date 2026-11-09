@@ -89,7 +89,7 @@ describe('AppSidebar', () => {
   it('should place Projects directly in the sidebar and secondary destinations under More', async () => {
     renderSidebar();
 
-    expect(getNavLink('All projects')).toHaveAttribute('href', '/projects');
+    expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
     for (const name of ['Community', 'Convert', 'Import', 'Usage']) {
       expect(getNavLink(name)).toBeUndefined();
     }
@@ -137,7 +137,7 @@ describe('AppSidebar', () => {
   it('uses an Allotment-owned browser pane without duplicate titlebar controls', () => {
     const { container } = renderSidebar();
     const sidebar = screen.getByRole('complementary', { name: 'Application sidebar' });
-    const projectsButton = getNavLink('All projects')?.querySelector('[data-sidebar=menu-button]');
+    const projectsButton = getNavLink('Projects')?.querySelector('[data-sidebar=menu-button]');
 
     expect(sidebar).toHaveAttribute('id', 'app-sidebar');
     expect(sidebar).toHaveClass('w-full', 'border-r');

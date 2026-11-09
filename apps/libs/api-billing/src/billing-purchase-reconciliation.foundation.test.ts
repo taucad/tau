@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
 import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
-import { assertNewCollectionCashScope } from '#billing-cash-reconciliation.service.js';
+import { assertCollectionNotSpendBlocked } from '#billing-cash-reconciliation.service.js';
 import { BillingPurchaseReconciliationService } from '#billing-purchase-reconciliation.service.js';
 import { createBillingStripeClient } from '#billing-stripe.js';
 import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
@@ -276,7 +276,7 @@ async function seedEntitlement(
 }
 
 describe('purchase and entitlement reconciliation foundation', () => {
-  it('cases an acknowledged obligation that never became a grant and pauses only that account', async () => {
+  it('should case an acknowledged obligation that never became a grant and keep admitting its account to new collection', async () => {
     const accountId = randomUUID();
     await database.insert(schema.creditAccount).values({ id: accountId, environment: 'development' });
     const purchase = await seedPaidPurchase({
@@ -304,8 +304,6 @@ describe('purchase and entitlement reconciliation foundation', () => {
       latest_charge: purchase.proof.chargeId,
       created: Math.floor(Date.now() / 1000),
     });
-    const independentAccountId = randomUUID();
-    await database.insert(schema.creditAccount).values({ id: independentAccountId, environment: 'development' });
 
     const result = await run(await seedScan(), 'sk_test_purchase_obligation');
 
@@ -320,13 +318,8 @@ describe('purchase and entitlement reconciliation foundation', () => {
         sourceType: 'billing_provider_leg',
       }),
     ]);
-    const scope = { environment: 'development', stripeAccountId, livemode: false } as const;
-    await expect(assertNewCollectionCashScope({ database: runtimeDatabase }, scope, accountId)).rejects.toThrow(
-      'cash_scope_attention',
-    );
-    await expect(
-      assertNewCollectionCashScope({ database: runtimeDatabase }, scope, independentAccountId),
-    ).resolves.toBeUndefined();
+    // Tau owes this customer, so refusing their next payment would help no one: the collection check admits them.
+    await expect(assertCollectionNotSpendBlocked(runtimeDatabase, 'development', accountId)).resolves.toBeUndefined();
   });
 
   it('cases a paid Checkout obligation whose local purchase never left its pending state', async () => {

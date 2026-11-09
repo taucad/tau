@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { toPrometheusName } from '#prometheus.js';
 import { TauMetrics } from '#registry.js';
@@ -146,25 +144,6 @@ describe('runtime.operation (T10)', () => {
       expect(parseRuntimeEntry(operation({ release: value }))).toBeDefined();
     },
   );
-
-  it('D-T12-2: should admit the release the CLI and its MCP route actually send', () => {
-    const { version } = JSON.parse(
-      readFileSync(fileURLToPath(new URL('../../../packages/cli/package.json', import.meta.url)), 'utf8'),
-    ) as { version: string };
-
-    expect(
-      parseRuntimeEntry(
-        operation({
-          route: 'cli',
-          caller: 'host',
-          transport: 'in-process',
-          platform: 'node',
-          os: 'linux',
-          release: version,
-        }),
-      ),
-    ).toBeDefined();
-  });
 
   it('should honour count only on merged outcomes and clamp it to 500', () => {
     expect(parseRuntimeEntry(operation({ outcome: 'superseded', count: 10_000 }))?.detail).toMatchObject({

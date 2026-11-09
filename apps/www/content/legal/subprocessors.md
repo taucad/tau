@@ -1,73 +1,53 @@
-# Sub-processors - TauCAD Limited
+# Sub-processors
 
-*Effective date: November 9, 2026*
+*Effective date: November 8, 2026*
 
-This page lists all third-party service providers (sub-processors) that process personal data on behalf of TauCAD Limited in connection with our Service. This list is maintained in accordance with our [Privacy Policy](/legal/privacy) and applicable data protection laws.
+These are the companies that process personal data on behalf of TAUCAD LIMITED to run Tau. Each may use the data only to provide its service to us and must protect it under a written agreement with us. Our [Privacy Policy](/legal/privacy) explains what we collect and why.
 
-We require all sub-processors to implement appropriate technical and organizational security measures and to process personal data only for the purposes we specify.
+## Hosting and infrastructure
 
-## Infrastructure and Hosting
+| Provider | What it does for us | Data it handles | Location |
+| --- | --- | --- | --- |
+| Fly.io (including its managed Redis, run by Upstash) | Runs the Tau API | Everything the API processes: requests and responses, IP addresses, server logs | United States |
+| Supabase | Hosts our database | Account data, settings, project metadata, billing records | United States |
+| Cloudflare | Stores files (R2), serves our CDN, and provides DNS and web security | Projects in Tau Cloud, publications and shared files, request data and IP addresses | United States |
+| Netlify | Hosts the website and web app | Request data and IP addresses | United States |
+| Resend | Sends our service emails | Email address, name, email content | United States |
 
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **Fly.io** | API application hosting | Data stored and transmitted through our API hosting infrastructure, including request/response data, IP addresses, and server logs | USA | SOC 2 Type II |
-| **Netlify** | Frontend hosting and CDN | Static assets, IP addresses, request headers | USA | SOC 2 Type II |
-| **Supabase** | Database and backend services | User account data, authentication data, application data stored in PostgreSQL database | USA | SOC 2 Type II, HIPAA |
+## AI models
 
-## AI and Machine Learning Services
+When you use an AI feature, your prompt and the design context the agent needs go to the provider behind the model you chose. Under our agreements with them, none of these providers uses your data to train its models.
 
-When you use AI-assisted CAD features, your prompts and relevant context may be processed by the following providers. Your data is not retained by these providers for their own training purposes.
+| Provider | What it does for us | Data it handles | Location |
+| --- | --- | --- | --- |
+| OpenAI | GPT models; voice dictation transcription | Prompts, design context, chat history; dictation audio | United States |
+| Anthropic | Claude models | Prompts, design context, chat history | United States |
+| Google (Vertex AI) | Gemini models | Prompts, design context, chat history | United States |
+| xAI | Grok models | Prompts, design context, chat history | United States |
+| Together AI | Open-weight models | Prompts, design context, chat history | United States |
+| Morph | Open-weight models | Prompts, design context, chat history | United States |
 
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **OpenAI** | AI language models (GPT) | Prompts, CAD context, conversation history | USA | SOC 2 Type II |
-| **Anthropic** | AI language models (Claude) | Prompts, CAD context, conversation history | USA | SOC 2 Type II |
-| **Google (Vertex AI)** | AI model services (Gemini) | Prompts, CAD context, conversation history | USA | SOC 1/2/3, ISO 27001, ISO 27017, ISO 27018 |
-| **SambaNova** | AI model services (optional) | Prompts, CAD context when model is selected | USA | SOC 2 Type II |
-| **Cerebras** | AI model services (optional) | Prompts, CAD context when model is selected | USA | SOC 2 Type II |
-| **Tavily** | Web search for AI features | Search queries when web search is enabled | USA | SOC 2 Type II |
+## Payments
 
-## CAD Processing
+| Provider | What it does for us | Data it handles | Location |
+| --- | --- | --- | --- |
+| Stripe | Processes payments and issues invoices | Payment method, billing name and address, invoices | United States |
 
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **Zoo.dev (KittyCAD)** | KCL CAD kernel processing | CAD code, model geometry, rendering data | USA | SOC 2 Type II |
+## Analytics, errors and observability
 
-## Analytics and Observability
+| Provider | What it does for us | Data it handles | Location |
+| --- | --- | --- | --- |
+| PostHog | Product analytics (on the web, after you accept) | Usage events, device information, session replays with text masked | United States |
+| Sentry | Error and crash reports | Error messages, stack traces, app and device details, desktop crash memory snapshots | United States |
+| Grafana Labs | Server logs and metrics | API logs and performance metrics | United States |
+| Langfuse (Langfuse GmbH, part of ClickHouse, Inc.) | Stores agent task recordings (Privacy Policy section 2) | Task summaries and ratings and, when your setting allows it, prompts, designs, tool calls and replies, under a pseudonymous account id | United States (Oregon) |
 
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **PostHog** | Product analytics (with consent on the web; always in the desktop app) | Usage data, device info, interaction patterns | USA | SOC 2 Type II |
-| **Sentry** (Functional Software, Inc.) | Error and crash reporting for the web app, desktop app and API | Error messages, stack traces, app version, page route, browser, OS and device information, desktop crash memory snapshots | USA | SOC 2 Type II, ISO 27001 |
+Sign-in through GitHub or Google, and GitHub repositories you connect, are services you choose to use under their own terms; they are not sub-processors.
 
-## Payment Processing
+## Changes
 
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **Stripe** | Payment processing | Payment method details, billing information | USA | PCI DSS Level 1, SOC 1/2, ISO 27001 |
+We update this page when the list changes and change the date at the top. Every change is recorded in the page's history in our public repository at [github.com/taucad/tau](https://github.com/taucad/tau/commits/main/apps/www/content/legal/subprocessors.md), which you can watch for notifications.
 
-## Authentication Services
+## Contact
 
-When you choose to sign in using third-party authentication, we receive certain information from these providers.
-
-| Sub-processor | Purpose | Data Processed | Location | Certifications |
-|---------------|---------|----------------|----------|----------------|
-| **GitHub** | OAuth authentication | Email, display name, profile picture (if authorized) | USA | SOC 1/2, ISO 27001 |
-| **Google** | OAuth authentication | Email, name, profile picture (if authorized) | USA | SOC 1/2/3, ISO 27001 |
-
-## Changes to This List
-
-We will update this list when we add or remove sub-processors. For material changes, we will notify you in accordance with our [Privacy Policy](/legal/privacy).
-
-## Notification of Changes
-
-To receive notifications when we update this sub-processor list, you may:
-- Subscribe to repository notifications at [https://github.com/taucad/tau](https://github.com/taucad/tau)
-- Email privacy@tau.new with "Sub-processor Updates" in the subject line to be added to our notification list
-
-We will provide at least 30 days' notice before engaging new sub-processors that process personal data, allowing you to review and raise any objections.
-
-## Contact Us
-
-If you have questions about our sub-processors or data processing practices, please contact us at [privacy@tau.new](mailto:privacy@tau.new).
-
+[privacy@tau.new](mailto:privacy@tau.new)

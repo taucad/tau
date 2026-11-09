@@ -1,4 +1,4 @@
-import { createHash, sign } from 'node:crypto';
+import { sign } from 'node:crypto';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { isModelListEntryEnabled, modelList } from '#models/model.constants.js';
 import type { ModelProviderWire } from '#model-invocation.types.js';
@@ -99,7 +99,13 @@ const routes = new Map<string, GatewayModelRoute>(
 );
 
 type GatewayConfig = { get(key: string): unknown };
-export type VertexCredentials = { clientEmail: string; privateKey: string; projectId: string };
+export type VertexCredentials = {
+  clientEmail: string;
+  privateKey: string;
+  projectId: string;
+  /** Names the signing key so Google need not try each of the account's keys. */
+  privateKeyId?: string;
+};
 
 const vertexCredentials = (value: unknown): VertexCredentials | undefined => {
   if (value === null || typeof value !== 'object') {
@@ -109,154 +115,55 @@ const vertexCredentials = (value: unknown): VertexCredentials | undefined => {
   return typeof record['client_email'] === 'string' &&
     typeof record['private_key'] === 'string' &&
     typeof record['project_id'] === 'string'
-    ? { clientEmail: record['client_email'], privateKey: record['private_key'], projectId: record['project_id'] }
+    ? {
+        clientEmail: record['client_email'],
+        privateKey: record['private_key'],
+        projectId: record['project_id'],
+        ...(typeof record['private_key_id'] === 'string' && record['private_key_id'].length > 0
+          ? { privateKeyId: record['private_key_id'] }
+          : {}),
+      }
     : undefined;
 };
 
 const base64Url = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-/** A Vertex access token and when Google said it stops working, in epoch milliseconds. */
-type VertexAccessToken = { readonly token: string; readonly expiresAt: number };
+/* Google accepts a JWT signed with the service account's own key as the bearer token, so no
+ * token exchange stands between a request and Vertex. An hour is the longest lifetime Google
+ * accepts; a fresh one is signed for every request. */
+const vertexAccessTokenLifetimeSeconds = 3600;
 
-/* Google issues service-account access tokens for an hour and reports it as `expires_in`. */
-const vertexTokenLifetimeSeconds = 3600;
 /**
- * Milliseconds. A token this close to expiry is replaced before use, so a long
- * stream never starts on one about to lapse.
+ * A self-signed Vertex bearer token for one request.
+ *
+ * Signing locally costs about a millisecond and a half. The OAuth exchange it replaces cost a
+ * round trip to Google before every uncached request, and the cache that hid it needed refresh,
+ * single-flight and eviction logic. A signed token has none of those to get wrong.
+ *
+ * @param credentials - The service account.
+ * @param now - The clock in epoch milliseconds, injectable for tests.
+ * @returns The bearer token.
  */
-const vertexTokenRefreshMargin = 5 * 60 * 1000;
-/** Milliseconds. The exchange runs detached from any one caller, so it carries its own bound. */
-const vertexTokenExchangeTimeout = 10_000;
-
-const exchangeVertexToken = async (
-  credentials: VertexCredentials,
-  fetchOnce: typeof fetch,
-  now: () => number,
-): Promise<VertexAccessToken> => {
-  const startedAt = now();
-  const issuedAt = Math.floor(startedAt / 1000);
-  const unsigned = `${base64Url({ alg: 'RS256', typ: 'JWT' })}.${base64Url({
+export const signVertexAccessToken = (credentials: VertexCredentials, now: number = Date.now()): string => {
+  const issuedAt = Math.floor(now / 1000);
+  const unsigned = `${base64Url({
+    alg: 'RS256',
+    typ: 'JWT',
+    ...(credentials.privateKeyId === undefined ? {} : { kid: credentials.privateKeyId }),
+  })}.${base64Url({
     iss: credentials.clientEmail,
+    sub: credentials.clientEmail,
     scope: 'https://www.googleapis.com/auth/cloud-platform',
-    aud: 'https://oauth2.googleapis.com/token',
     iat: issuedAt,
-    exp: issuedAt + vertexTokenLifetimeSeconds,
+    exp: issuedAt + vertexAccessTokenLifetimeSeconds,
   })}`;
-  const assertion = `${unsigned}.${sign('RSA-SHA256', Buffer.from(unsigned), credentials.privateKey).toString('base64url')}`;
-  const response = await fetchOnce('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    redirect: 'error',
-    signal: AbortSignal.timeout(vertexTokenExchangeTimeout),
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams([
-      ['grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer'],
-      ['assertion', assertion],
-    ]),
-  });
-  if (!response.ok) {
-    throw new ServiceUnavailableException('Vertex credential exchange failed');
+  try {
+    return `${unsigned}.${sign('RSA-SHA256', Buffer.from(unsigned), credentials.privateKey).toString('base64url')}`;
+  } catch {
+    // The key is configuration, not request input, and its parse error must not reach a log line.
+    throw new ServiceUnavailableException('Vertex credentials cannot sign');
   }
-  const payload = (await response.json()) as unknown;
-  if (
-    payload === null ||
-    typeof payload !== 'object' ||
-    !('access_token' in payload) ||
-    typeof payload.access_token !== 'string'
-  ) {
-    throw new ServiceUnavailableException('Vertex credential exchange returned invalid data');
-  }
-  const expiresIn =
-    'expires_in' in payload && typeof payload.expires_in === 'number' && payload.expires_in > 0
-      ? payload.expires_in
-      : vertexTokenLifetimeSeconds;
-  // Measured from before the exchange, so network time only ever shortens the token's assumed life.
-  return { token: payload.access_token, expiresAt: startedAt + expiresIn * 1000 };
 };
-
-/** One account's reusable Vertex access tokens. */
-export type VertexAccessTokenCache = {
-  readonly token: (credentials: VertexCredentials, fetchOnce: typeof fetch, signal: AbortSignal) => Promise<string>;
-  readonly evict: (credentials: VertexCredentials, token: string) => void;
-};
-
-/** Rejects when the caller stops waiting; the shared exchange it was waiting on carries on. */
-const abandoned = async (signal: AbortSignal): Promise<never> =>
-  new Promise((_resolve, reject) => {
-    const fail = (): void => {
-      reject(signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
-    };
-    if (signal.aborted) {
-      fail();
-      return;
-    }
-    signal.addEventListener('abort', fail, { once: true });
-  });
-
-/**
- * Reuses one Vertex access token per service account until it nears expiry.
- *
- * Minting one costs an RSA signature and a round trip to Google before the model
- * request can start, so doing it per request sits on every Vertex request's time to
- * first token. Concurrent requests share one exchange, a failed exchange is never
- * kept, and a rotated key is a different account to this cache.
- *
- * @param options - The clock, injectable for tests.
- * @returns The cache's two operations.
- */
-export const createVertexAccessTokenCache = (options: { readonly now?: () => number } = {}): VertexAccessTokenCache => {
-  const now = options.now ?? Date.now;
-  const tokens = new Map<string, VertexAccessToken>();
-  const exchanges = new Map<string, Promise<VertexAccessToken>>();
-  const keyOf = (credentials: VertexCredentials): string =>
-    createHash('sha256').update(credentials.clientEmail).update('\0').update(credentials.privateKey).digest('hex');
-  return {
-    /**
-     * A usable access token for the account, minting one only when none is fresh.
-     *
-     * @param credentials - The service account.
-     * @param fetchOnce - The fetch an exchange uses.
-     * @param signal - The caller's abort, which ends only this caller's wait.
-     * @returns The bearer token.
-     */
-    token: async (credentials: VertexCredentials, fetchOnce: typeof fetch, signal: AbortSignal): Promise<string> => {
-      signal.throwIfAborted();
-      const key = keyOf(credentials);
-      const cached = tokens.get(key);
-      if (cached !== undefined && cached.expiresAt - now() > vertexTokenRefreshMargin) {
-        return cached.token;
-      }
-      let exchange = exchanges.get(key);
-      if (exchange === undefined) {
-        exchange = (async () => {
-          try {
-            const minted = await exchangeVertexToken(credentials, fetchOnce, now);
-            tokens.set(key, minted);
-            return minted;
-          } finally {
-            exchanges.delete(key);
-          }
-        })();
-        exchanges.set(key, exchange);
-      }
-      const minted = await Promise.race([exchange, abandoned(signal)]);
-      return minted.token;
-    },
-    /**
-     * Forget the account's token after Vertex refused it, so the next request mints anew.
-     *
-     * @param credentials - The service account.
-     * @param token - The token Vertex refused; a newer one minted meanwhile is kept.
-     */
-    evict: (credentials: VertexCredentials, token: string): void => {
-      const key = keyOf(credentials);
-      if (tokens.get(key)?.token === token) {
-        tokens.delete(key);
-      }
-    },
-  };
-};
-
-const vertexAccessTokens = createVertexAccessTokenCache();
 
 export const gatewayModelRoutes = (): readonly GatewayModelRoute[] => [...routes.values()];
 
@@ -408,7 +315,7 @@ export const executeGatewayProviderRequest = async (input: {
   }
   const credentials = input.providerId === 'vertexai' ? vertexCredentials(configured) : undefined;
   const key = typeof configured === 'string' && configured.length > 0 ? configured : undefined;
-  const accessToken = credentials ? await vertexAccessTokens.token(credentials, fetchOnce, input.signal) : key;
+  const accessToken = credentials ? signVertexAccessToken(credentials) : key;
   if (!accessToken) {
     throw new ServiceUnavailableException(`Configured provider ${input.providerId} is unavailable`);
   }
@@ -425,9 +332,5 @@ export const executeGatewayProviderRequest = async (input: {
         ? { 'content-type': 'application/json', 'x-api-key': accessToken, ...input.headers }
         : { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
   });
-  // Not retried: a funded request is sent at most once. The next one mints a fresh token.
-  if (credentials && response.status === 401) {
-    vertexAccessTokens.evict(credentials, accessToken);
-  }
   return response;
 };

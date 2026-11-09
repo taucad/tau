@@ -1,56 +1,50 @@
 # Storage and Cookie Policy
 
-*Effective date: October 9, 2026*
+*Effective date: November 8, 2026*
 
-This notice explains how TauCAD Limited ("Tau", "we", "us", or "our") uses cookies and browser storage when you use Tau. Read it with our [Privacy Policy](/legal/privacy).
+This page explains what TAUCAD LIMITED ("Tau", "we") stores in your browser and on your device, and how to change your analytics choice. Read it with our [Privacy Policy](/legal/privacy).
 
-## Web and Desktop
+## Necessary cookies on the web
 
-The Tau website and Tau desktop app use different storage:
+These make the website and web app work. They are set without asking.
 
-- **Web:** uses necessary authentication, theme, and consent cookies. Optional PostHog analytics storage starts only after you accept analytics.
-- **Desktop:** runs PostHog product analytics as part of the app, without a cookie-consent form, and keeps the analytics identity in the app's local storage rather than in cookies. It does not record sessions. Product preferences and project data are stored locally on your device. Privacy and Terms links open this website in your system browser. Operational security and service logs may still process network information when you use online features.
+| Purpose | Cookie | Kept for |
+| --- | --- | --- |
+| Keeping you signed in | Session cookie (Secure, HttpOnly, SameSite=Lax) | Up to 7 days |
+| Showing your theme without a flash | Theme cookie (HttpOnly, SameSite=Lax) | Browser session |
+| Opening the app directly on your next visit to tau.new | `tau-entry` | 30 days |
+| Remembering your analytics choice | `tau-cookie-consent`, containing only "accepted" or "declined" | Up to 365 days |
 
-## Necessary Web Cookies
+If the consent cookie is missing, expired or from an older version of this policy, we ask again before analytics start.
 
-| Purpose | Storage | Retention |
-|---|---|---|
-| Authentication and account security | Secure, HttpOnly, SameSite=Lax session cookie | Up to 7 days under the current session configuration |
-| Server-rendered theme and flash prevention | Secure on HTTPS, HttpOnly, SameSite=Lax theme cookie | Browser session |
-| Analytics consent decision | Versioned SameSite=Lax cookie containing accepted or declined only | Up to 365 days |
+## Local storage for your preferences and projects
 
-The consent cookie records your decision so Tau can enforce it. If it is absent, expired, malformed, or belongs to an obsolete policy version, Tau asks again before analytics starts.
+Interface choices (sidebar state, kernel, model, editor and display preferences) are kept in `localStorage`. Your local projects and files are kept in IndexedDB or the Origin Private File System in the web app, and on disk in the desktop app. None of this is analytics. It stays until you delete it, clear the site or app data, or uninstall the app.
 
-## Functional Local Storage
+## Optional analytics
 
-Tau stores interface choices such as sidebar state, CAD kernel, model selection, editor options, converter options, and display preferences in `localStorage`. These values remain until you reset the preference or clear site/app data. Known legacy preference cookies are moved to local storage and deleted when first read.
+On the web, Tau asks on your first visit whether to allow analytics. If you accept, PostHog Cloud records page views, browser and device information, feature use, your account identity when you are signed in, error events and session replays, and stores its own first-party cookies and local storage. Replays mask all text and inputs. If your choice is unknown, declined or withdrawn, PostHog is not started and nothing is sent.
 
-Projects and other user-created local product data may use IndexedDB or the Origin Private File System in the web app and device-local storage in the desktop app. This storage performs the CAD functions you request; it is not PostHog analytics. It remains until you delete the data, clear the relevant site/app storage, or uninstall the app, subject to platform behaviour.
+The desktop app sends the same analytics, without session replay, unless you turn it off; it tells you this when you first open it, and keeps its analytics identity in the app's local storage rather than in a cookie.
 
-## Optional Web Analytics
+PostHog receives this data; see the [PostHog privacy policy](https://posthog.com/privacy).
 
-After you accept, Tau uses PostHog Cloud for product analytics. The approved web configuration can collect page views and navigation, browser/device information, interaction and feature-use events, authenticated account identity and profile fields, error events, and session replay. PostHog uses first-party cookie and local-storage persistence in this accepted state. Tau does not initialize PostHog or send analytics while your choice is unknown, declined, withdrawn, or overridden by Global Privacy Control.
+## Changing your choice
 
-PostHog is a recipient of this analytics data. See the [PostHog Privacy Policy](https://posthog.com/privacy). The web client does not set PostHog’s server-side record-retention period; contact [privacy@tau.new](mailto:privacy@tau.new) for the current configured retention and deletion schedule.
+Use **Cookie preferences** in the website footer, the **Manage cookie preferences** control on this page, or **Help → Cookie preferences** in the Tau web app. In the desktop app use **Settings → Data controls**. One choice covers the website and the web app on the same domain.
 
-## Usage Metrics Sent to Tau
+Withdrawing consent stops capture and replay, resets the analytics identity and clears PostHog's stored data. It does not remove the necessary cookies or your local projects.
 
-When you are signed in, the web and desktop apps report operational telemetry and, unless you switch them off, anonymous usage metrics about AI agent turns to Tau's own API. These requests use your existing sign-in session; they set no additional cookies or browser storage and do not use PostHog. They contain counts, durations, outcome classes and error codes only, with no prompts, code, file names or account labels. Operational telemetry is always sent; switch anonymous usage metrics off under **Settings → General → Privacy**, and an active Global Privacy Control signal switches them off on the web. See Section 3.3 of our [Privacy Policy](/legal/privacy) for the full list.
+If your browser sends a Global Privacy Control signal, Tau treats it as a decline: analytics stay off and the question is not shown.
 
-## Your Choice and Global Privacy Control
+## Usage metrics sent to Tau
 
-On your first eligible visit to the Tau website with no valid decision, the website shows a consent form. Your decision covers the website and the Tau web app on the same domain, and the web app does not start analytics until you have accepted. Accept and Decline apply only to optional analytics. Choose **Cookie preferences** in the website footer, **Manage cookie preferences** on this page, or **Help → Cookie preferences** in the Tau web app to review or change the choice.
+Signed in, the apps also send Tau anonymous usage and diagnostics metrics over your existing session. They set no cookies and do not use PostHog. What they contain, and the **Share usage and diagnostics** switch that controls the optional part, are described in section 1 of our [Privacy Policy](/legal/privacy).
 
-Withdrawing consent stops capture and session replay, resets the analytics identity, and asks the PostHog SDK to clear its analytics persistence. It does not delete functional project data or account cookies needed for a signed-in session.
+## Browser controls
 
-Tau treats an active Global Privacy Control signal as a hard analytics decline. It prevents acceptance while the signal is active and suppresses the consent prompt. See [Global Privacy Control](https://globalprivacycontrol.org). Consent choices and Global Privacy Control apply to the website and web app; the desktop app does not offer an analytics choice.
+You can inspect, block or delete cookies and site storage in your browser. Blocking the necessary cookies may stop sign-in, saved preferences or local projects from working.
 
-## Browser Controls
+## Changes and contact
 
-Your browser can inspect, block, or delete cookies and site storage. Blocking necessary storage may prevent sign-in, saved preferences, or local projects from working. Clearing the consent cookie makes Tau ask for an analytics decision again before capture.
-
-## Changes and Contact
-
-We may update this notice when our storage or analytics purposes change. A materially changed consent purpose may require a new decision.
-
-Questions or privacy requests: [privacy@tau.new](mailto:privacy@tau.new).
+We update this page when what we store changes; a new analytics purpose means we ask for your choice again. Questions: [privacy@tau.new](mailto:privacy@tau.new).

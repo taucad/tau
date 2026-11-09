@@ -41,6 +41,7 @@ export type TerminalOptions = {
   readonly rows?: number;
   readonly fontFamily: string;
   readonly fontSize: number;
+  readonly fontWeight?: 'normal' | 'bold' | number;
   readonly theme: TerminalTheme;
   readonly scrollback: number;
   readonly renderer: 'webgl' | 'canvas';

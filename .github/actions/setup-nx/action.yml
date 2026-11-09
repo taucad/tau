@@ -92,9 +92,10 @@ runs:
       shell: bash
 
     # Every `pnpm nx` call goes through `nx-guard.ts`: it reruns a command once
-    # when Nx dies from SIGSEGV, and once with the remote cache off when Nx's
-    # self-hosted remote cache client fails the command (see the file header).
-    # Every other exit status passes through unchanged.
+    # when Nx dies from SIGSEGV, and points Nx at a local relay to the remote
+    # cache that turns cache faults, oversize entries and refused writes into
+    # misses (with a rerun with the cache off as the fallback; see the file
+    # header). Every other exit status passes through unchanged.
     - name: Guard Nx against segfaults and remote cache faults
       if: runner.os != 'Windows'
       shell: bash

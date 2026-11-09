@@ -880,8 +880,11 @@ jobs:
       # deterministic edit qualification is the Tier-D edit bench.
       # The two billing foundation suites that compose billing with the app's chat and
       # agent-observability code, on the launcher's own disposable PostgreSQL 17.
+      # postgres:17-alpine pinned by digest; the billing-e2e job's step says how to refresh it.
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run the API's billing composition contracts
         run: pnpm nx run-many -t test:billing-composition
@@ -935,8 +938,16 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # postgres:17-alpine pinned to the tag's OCI index digest, resolved 2026-11-09 from
+      # registry-1.docker.io (`HEAD /v2/library/postgres/manifests/17-alpine`, Docker-Content-Digest).
+      # The launcher (apps/libs/api-billing/scripts/test-billing-foundation.mts) runs `postgres:17-alpine`
+      # with `pull_policy: never`, so the pinned image is tagged locally under that name. Refresh: resolve
+      # the tag's current digest the same way and replace it in every pull step of ci.yml and
+      # billing-nightly.yml (scripts/src/billing-stripe-lanes.test.ts requires one digest everywhere).
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation

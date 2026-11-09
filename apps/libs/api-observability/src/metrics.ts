@@ -305,6 +305,11 @@ export class MetricsService {
     unit: TauMetrics.billingOpenFinancialCases.unit,
   });
 
+  public readonly billingOpenFinancialCaseAge = this.apiMeter.createGauge(TauMetrics.billingOpenFinancialCaseAge.name, {
+    description: TauMetrics.billingOpenFinancialCaseAge.description,
+    unit: TauMetrics.billingOpenFinancialCaseAge.unit,
+  });
+
   public readonly billingFundedOperationRecoveries = this.apiMeter.createCounter(
     TauMetrics.billingFundedOperationRecoveries.name,
     {

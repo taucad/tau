@@ -47,11 +47,16 @@ export {
   directoryHandleImportSource,
   fileListImportSource,
   handleListImportSource,
+  hostImportSource,
   planImport,
   spoolImportArchive,
   zipImportSource,
 } from '#importer/sources.js';
 export type {
+  HostImportGrant,
+  HostImportLocator,
+  HostImportRow,
+  HostImportSourcePort,
   ImportListControl,
   ImportListedEntry,
   ImportPlan,
@@ -89,4 +94,9 @@ export {
   sweepStagedImports,
   touchStagedImport,
 } from '#importer/staging.js';
-export type { ImportStagingPort, ImportStagingProgress, StagedImport } from '#importer/staging.js';
+export type {
+  HostImportCopyReceipt,
+  ImportStagingPort,
+  ImportStagingProgress,
+  StagedImport,
+} from '#importer/staging.js';

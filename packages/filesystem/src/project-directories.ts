@@ -91,6 +91,9 @@ import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 
+/** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
+type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagingPort['copyHost']> }>;
+
 /** Concurrent `tau.json` probes while scanning a discovery root. */
 const manifestProbeConcurrency = 64;
 
@@ -827,9 +830,14 @@ export class ProjectDirectories {
     }
     const provider = await this._registry.getProvider(parsed.data);
     const storageRootKey = this._registry.resolveStorageRootKey(parsed.data);
+    /* A desktop node root's host copies what a person chose on it straight into the staging (W7.4). */
+    const { copyFromImportGrant } = provider as Partial<Pick<HostImportCopier, 'copyFromImportGrant'>>;
     return {
       provider,
       apply: async (entries) => this._pipeline.applyUnlocked(provider, entries),
+      ...(typeof copyFromImportGrant === 'function'
+        ? { copyHost: async (grant, entries) => copyFromImportGrant.call(provider, grant, entries) }
+        : {}),
       exclusive: async <Result>(path: string, work: () => Promise<Result>): Promise<Result> => {
         const physicalLock = `${storageRootKey}:${path}`;
         return this._crossTabCoordinator.withLocks([physicalLock], async () =>

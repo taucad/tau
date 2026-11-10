@@ -798,7 +798,10 @@ const composeProjectHost = async (
         },
       },
       revisions,
-      testingEnabled: provide.testingEnabled ?? false,
+      /* The registry lists `test_model` whatever the chat's testing switch says. The declared tool list is part of
+       * the cached prefix, so the switch masks the call (the admission's tool choice) and never the listing.
+       * ponytail: `provide.testingEnabled` is now unread; drop it from the worker contract when that next changes. */
+      testingEnabled: true,
       // X43: under the locked profile the page's own install_packages makes no registry request.
       acquisition: runtimeConfig.acquisition,
       /* R1: web research runs on Tau's API under the page's session cookie, so the search key never reaches the tab. */

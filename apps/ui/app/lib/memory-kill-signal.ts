@@ -25,10 +25,11 @@ import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { readLastMemorySample, readHighWaterWasmBytes, takeMemorySample } from '#lib/memory-sampler.js';
 import { readSessionStorage } from '#lib/session-storage.js';
+import { isModelKey } from '#lib/kill-memory.js';
 import type { MemorySample } from '#lib/memory-sampler.js';
 
 /** The marker shape this build writes and reads. An older shape is left alone rather than guessed at. */
-export const killMarkerVersion = 2;
+export const killMarkerVersion = 3;
 
 /** The marker's budget, kept well inside every browser's `sessionStorage` quota. */
 export const markerByteLimit = 4096;
@@ -44,6 +45,148 @@ export const killDetectionWindowMilliseconds = 90_000;
 
 /** How often a visible page refreshes `updatedAt`, so the detection window measures the kill, not the idle. */
 export const killHeartbeatMilliseconds = 30_000;
+
+/** How often the heartbeat runs while a model is opening or rendering, so `phaseSeconds` is accurate to it. */
+export const killBusyHeartbeatMilliseconds = 5000;
+
+/**
+ * The step the page was in, written as the step begins (crash capture blueprint). `boot` from marker creation,
+ * `idle` from the viewer's first frame; the rest name runtime and viewer work.
+ */
+export const killPhases = [
+  'boot',
+  'kernel-init',
+  'evaluate',
+  'mesh',
+  'geometry-receive',
+  'gpu-upload',
+  'idle',
+  'export',
+  'capture',
+] as const;
+
+/** One closed phase name. @public */
+export type KillPhase = (typeof killPhases)[number];
+
+/** The phases in which a model is opening or rendering: a kill in one of them pauses the model next time. */
+export const busyKillPhases: ReadonlySet<KillPhase> = new Set([
+  'kernel-init',
+  'evaluate',
+  'mesh',
+  'geometry-receive',
+  'gpu-upload',
+]);
+
+/** The closed interaction names a page records. */
+export const killInteractions = [
+  'none',
+  'open',
+  'parameter',
+  'camera',
+  'section',
+  'measure',
+  'export',
+  'chat',
+  'edit',
+] as const;
+
+/** Share providers whose name may be recorded; never the reference. */
+export const killShareProviders = ['builtin', 'tau', 'github-gist', 'direct'] as const;
+
+/**
+ * What the page was working on, recorded before it could die (crash capture blueprint, marker v3). Closed names,
+ * counts, sizes and durations only: no source, parameter names or values, file names or geometry.
+ * @public
+ */
+export type KillWork = Readonly<{
+  kernel?: string;
+  /** A builtin's public catalog locator, such as `replicad.worm-gear-system`. */
+  builtin?: string;
+  shareProvider?: (typeof killShareProviders)[number];
+  phase?: KillPhase;
+  phaseStartedAt?: number;
+  renderCount?: number;
+  /** Milliseconds: the last settled evaluate. */
+  lastEvaluate?: number;
+  /** Milliseconds: the last settled render. */
+  lastRender?: number;
+  triangles?: number;
+  geometryBytes?: number;
+  gpuGeometries?: number;
+  textures?: number;
+  peakWasmBytes?: number;
+  backend?: 'webgl' | 'webgpu';
+  contextLost?: boolean;
+  lastInteraction?: (typeof killInteractions)[number];
+  interactionAt?: number;
+  parameterChanges?: number;
+  /** The opaque kill-memory key of the model on screen (`#lib/kill-memory`); kept on the device, never reported. */
+  model?: string;
+}>;
+
+const kernelPattern = /^[a-z][\da-z-]{0,31}$/u;
+/** A builtin locator: `<kernel>.<example>`, lowercase words joined by hyphens. */
+const builtinPattern = /^[a-z][\da-z-]{0,31}\.[\da-z][\da-z-]{0,79}$/u;
+const phaseSet: ReadonlySet<string> = new Set(killPhases);
+const interactionSet: ReadonlySet<string> = new Set(killInteractions);
+const providerSet: ReadonlySet<string> = new Set(killShareProviders);
+const numericWorkFields = [
+  'phaseStartedAt',
+  'renderCount',
+  'lastEvaluate',
+  'lastRender',
+  'triangles',
+  'geometryBytes',
+  'gpuGeometries',
+  'textures',
+  'peakWasmBytes',
+  'interactionAt',
+  'parameterChanges',
+] as const;
+
+/**
+ * Keep only the closed names and finite non-negative numbers of a work patch; anything else is dropped, so free
+ * text can never reach the marker or a report.
+ *
+ * @param patch - What a producer wants to record.
+ * @returns The admitted fields.
+ * @public
+ */
+export const admitKillWork = (patch: Readonly<Record<string, unknown>>): KillWork => {
+  const admitted: Record<string, unknown> = {};
+  const { kernel, builtin, shareProvider, phase, backend, contextLost, lastInteraction, model } = patch;
+  if (isModelKey(model)) {
+    admitted['model'] = model;
+  }
+  if (typeof kernel === 'string' && kernelPattern.test(kernel)) {
+    admitted['kernel'] = kernel;
+  }
+  if (typeof builtin === 'string' && builtinPattern.test(builtin)) {
+    admitted['builtin'] = builtin;
+  }
+  if (typeof shareProvider === 'string' && providerSet.has(shareProvider)) {
+    admitted['shareProvider'] = shareProvider;
+  }
+  if (typeof phase === 'string' && phaseSet.has(phase)) {
+    admitted['phase'] = phase;
+  }
+  if (backend === 'webgl' || backend === 'webgpu') {
+    admitted['backend'] = backend;
+  }
+  if (typeof contextLost === 'boolean') {
+    admitted['contextLost'] = contextLost;
+  }
+  if (typeof lastInteraction === 'string' && interactionSet.has(lastInteraction)) {
+    admitted['lastInteraction'] = lastInteraction;
+  }
+  for (const field of numericWorkFields) {
+    const value = patch[field];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      admitted[field] = Math.round(value);
+    }
+  }
+  return admitted as KillWork;
+};
 
 /** Kills that can wait for delivery at once; the oldest is dropped beyond this (G17). */
 export const pendingKillLimit = 3;
@@ -73,6 +216,8 @@ export type DetectedMemoryKill = Readonly<{
   chatCount: number;
   lastActivity: string | undefined;
   aliveForMilliseconds: number;
+  /** Epoch milliseconds of the dead page's last marker write: the latest it is known to have been alive. */
+  diedAt: number;
   /** How long the page had been hidden when it died, for a `background` kill. */
   hiddenForMilliseconds?: number;
   /** Kills in a row on this tab without a clean finish, this one included. */
@@ -80,6 +225,8 @@ export type DetectedMemoryKill = Readonly<{
   sample?: MemorySample;
   highWaterWasmBytes?: number;
   trail: readonly KillTrailEntry[];
+  /** What the page was working on; absent fields were never known. */
+  work: KillWork;
 }>;
 
 type AliveMarker = {
@@ -102,6 +249,7 @@ type AliveMarker = {
   consecutiveKills: number;
   /** Kills detected but not yet handed to the error tracker. */
   pending: readonly DetectedMemoryKill[];
+  work: KillWork;
 };
 
 const markerKey = 'tau:alive';
@@ -184,12 +332,20 @@ export type MemoryKillSignal = Readonly<{
   settleKill: (id: string) => void;
   /** Name the heavy work about to start. */
   breadcrumb: (name: string) => void;
+  /** Record what the page is working on: closed names and numbers only (`admitKillWork`). */
+  work: (patch: Readonly<Record<string, unknown>>) => void;
+  /** What has been recorded so far. */
+  currentWork: () => KillWork;
   setCounts: (counts: Readonly<{ liveProjectCount: number; chatCount: number }>) => void;
   /** The counts last set, for the error tracker's `tau.session` context. */
   counts: () => Readonly<{ liveProjectCount: number; chatCount: number }>;
   /** The page became visible or hidden (`visibilitychange`). */
   observeVisibility: () => void;
-  /** Keep `updatedAt` fresh while the page is visible; a no-op on a hidden page. */
+  /**
+   * Keep `updatedAt` fresh while the page is visible; a no-op on a hidden page. Called every
+   * {@link killBusyHeartbeatMilliseconds}; it writes every time while the phase is busy, else every
+   * {@link killHeartbeatMilliseconds}.
+   */
   heartbeat: () => void;
   /** The page ended cleanly (`pagehide`). */
   finish: () => void;
@@ -197,8 +353,25 @@ export type MemoryKillSignal = Readonly<{
   arm: () => void;
 }>;
 
-/** A path with no query, no fragment and no invitation token (principle 6). */
-const scrubPath = (path: string): string => redactInvitationTokens(path.split(/[?#]/u, 1)[0] ?? '');
+const sharePathPattern = /^\/s\/([^/~]+)~[^/]+/u;
+
+/**
+ * A path with no query, no fragment and no invitation token (principle 6), and, for a share that is not a builtin,
+ * no share reference: `/s/github-gist~…` names the provider only, since the reference identifies someone's share
+ * (crash capture blueprint, Finding 7). A builtin's reference is a public catalog name and stays.
+ *
+ * @param path - The document path.
+ * @returns The scrubbed path.
+ * @public
+ */
+export const scrubPath = (path: string): string => {
+  const plain = redactInvitationTokens(path.split(/[?#]/u, 1)[0] ?? '');
+  const share = sharePathPattern.exec(plain);
+  if (share === null || share[1] === 'builtin') {
+    return plain;
+  }
+  return plain.replace(sharePathPattern, `/s/${share[1] ?? ''}~…`);
+};
 
 const readDocumentPath = (): string | undefined => {
   try {
@@ -325,6 +498,7 @@ export const createMemoryKillSignal = ({
     trail: [],
     consecutiveKills: 0,
     pending: [],
+    work: { phase: 'boot', phaseStartedAt: now() },
   };
   let taken = false;
   const write = (): void => {
@@ -404,6 +578,7 @@ export const createMemoryKillSignal = ({
               chatCount: previous.chatCount,
               lastActivity: previous.trail.at(-1)?.name,
               aliveForMilliseconds: previous.updatedAt - previous.startedAt,
+              diedAt: previous.updatedAt,
               ...(classification === 'background' && previous.hiddenAt !== undefined
                 ? { hiddenForMilliseconds: previous.updatedAt - previous.hiddenAt }
                 : {}),
@@ -411,6 +586,7 @@ export const createMemoryKillSignal = ({
               ...(previous.sample === undefined ? {} : { sample: previous.sample }),
               ...(previous.highWaterWasmBytes === undefined ? {} : { highWaterWasmBytes: previous.highWaterWasmBytes }),
               trail: previous.trail,
+              work: previous.work,
             };
       const detected = [...undelivered, ...(kill === undefined ? [] : [kill])];
       marker = {
@@ -430,6 +606,21 @@ export const createMemoryKillSignal = ({
     breadcrumb: (name) => {
       update({ trail: [...marker.trail.slice(-(killTrailLimit - 1)), { at: now(), name }] });
     },
+    work: (patch) => {
+      const admitted = admitKillWork(patch);
+      if (Object.keys(admitted).length === 0) {
+        return;
+      }
+      const changesPhase = admitted.phase !== undefined && admitted.phase !== marker.work.phase;
+      update({
+        work: {
+          ...marker.work,
+          ...admitted,
+          ...(changesPhase && admitted.phaseStartedAt === undefined ? { phaseStartedAt: now() } : {}),
+        },
+      });
+    },
+    currentWork: () => marker.work,
     setCounts: ({ liveProjectCount, chatCount }) => {
       if (liveProjectCount !== marker.liveProjectCount || chatCount !== marker.chatCount) {
         update({ liveProjectCount, chatCount });
@@ -445,6 +636,10 @@ export const createMemoryKillSignal = ({
     },
     heartbeat: () => {
       if (!marker.visible) {
+        return;
+      }
+      const isBusy = marker.work.phase !== undefined && busyKillPhases.has(marker.work.phase);
+      if (!isBusy && now() - marker.updatedAt < killHeartbeatMilliseconds - killBusyHeartbeatMilliseconds) {
         return;
       }
       update({});
@@ -509,6 +704,9 @@ export const getDocumentMemoryKillSignal = (
  */
 export const recordMemoryBreadcrumb = (name: string): void => {
   takeMemorySample();
+  if (name === 'export' || name === 'capture') {
+    documentSignal?.work({ phase: name });
+  }
   documentSignal?.breadcrumb(name);
   recordActivityBreadcrumb(name);
 };
@@ -521,3 +719,22 @@ export const recordMemoryBreadcrumb = (name: string): void => {
  */
 export const readDocumentSessionCounts = (): Readonly<{ liveProjectCount: number; chatCount: number }> | undefined =>
   documentSignal?.counts();
+
+/**
+ * Record what the page is working on in the document's marker (crash capture blueprint). A no-op before the
+ * reporter created the document's signal, and during SSR. Closed names and numbers only.
+ *
+ * @param patch - The fields to record.
+ * @public
+ */
+export const recordKillWork = (patch: Readonly<Record<string, unknown>>): void => {
+  documentSignal?.work(patch);
+};
+
+/**
+ * What the document's marker has recorded so far.
+ *
+ * @returns The work block, or `undefined` before the signal exists.
+ * @public
+ */
+export const readKillWork = (): KillWork | undefined => documentSignal?.currentWork();

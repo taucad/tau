@@ -33,7 +33,7 @@ const issueAction: Readonly<Record<ChatRoute, string>> = {
 };
 
 /**
- * What Add to chat says about issues: the file and each issue as desktop's Fix with AI lists it.
+ * What Add to chat says about issues: the file and each issue as desktop's Fix in chat lists it.
  *
  * @param issues - The issues to fix.
  * @param sourceFile - The source they are for, when known.

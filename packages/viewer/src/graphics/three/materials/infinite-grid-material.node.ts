@@ -42,6 +42,7 @@ import type {
   InfiniteGridVisualOverrides,
 } from '#graphics/three/materials/infinite-grid-material.types.js';
 import { infiniteGridFadeEndRatio, infiniteGridFadeStartRatio } from '#graphics/three/utils/infinite-grid-frame.js';
+import { infiniteGridLargeThickness, infiniteGridSmallThickness } from '#graphics/three/overlay-colors.constants.js';
 
 const mapAxesToIndex = (axes: 'xyz' | 'xzy' | 'zyx'): number => {
   if (axes === 'xyz') {
@@ -103,8 +104,8 @@ export function createInfiniteGridNodeMaterial(
     largeSize = 100,
     color = new Color('grey'),
     axes = 'xyz',
-    smallThickness = 1.25,
-    largeThickness = 2,
+    smallThickness = infiniteGridSmallThickness,
+    largeThickness = infiniteGridLargeThickness,
     lineOpacity = 0.3,
     gridDistance = 20,
     fadeStart = infiniteGridFadeStartRatio,

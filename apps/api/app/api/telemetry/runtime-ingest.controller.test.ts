@@ -668,6 +668,18 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
             },
           },
           {
+            name: RuntimeEntryName.KILL,
+            duration: 0,
+            detail: {
+              kernel: 'replicad',
+              phase: 'gpu-upload',
+              classification: 'foreground',
+              route: 'browser',
+              release: '0123abc',
+              device: 'constrained',
+            },
+          },
+          {
             name: RuntimeEntryName.DELIVERY,
             duration: 0,
             detail: {
@@ -681,7 +693,7 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
       },
       { user: 'user-1' },
     );
-    expect(response.json()).toMatchObject({ recorded: 13, rejected: 0 });
+    expect(response.json()).toMatchObject({ recorded: 14, rejected: 0 });
     const names = new Set(harness.runtimeMetrics.count.mock.calls.map(([name]) => name));
     const histograms = new Set(harness.runtimeMetrics.record.mock.calls.map(([name]) => name));
     for (const name of [
@@ -705,6 +717,7 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
       'runtimeFactsMissing',
       'runtimeLateTerminals',
       'runtimeViewerEvents',
+      'runtimePageKills',
       'telemetryClientDropped',
       'telemetrySpansDropped',
     ]) {
@@ -726,6 +739,18 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
     ]) {
       expect(histograms, name).toContain(name);
     }
+    /* Crash capture, question 8: a tab kill counts as `terminated` by kernel and phase, beside the operations. */
+    expect(counted(harness, 'runtimePageKills').map(({ attributes }) => attributes)).toEqual([
+      {
+        'kernel.id': 'replicad',
+        'tau.runtime.kill_phase': 'gpu-upload',
+        'tau.runtime.kill_class': 'foreground',
+        'tau.runtime.outcome': 'terminated',
+        'tau.runtime.route': 'browser',
+        'tau.runtime.device': 'constrained',
+        'tau.runtime.population': 'signed-in',
+      },
+    ]);
     const pairs = counted(harness, 'runtimeTranscodeFormats').map(({ attributes }) => attributes);
     expect(pairs).toEqual([
       expect.objectContaining({

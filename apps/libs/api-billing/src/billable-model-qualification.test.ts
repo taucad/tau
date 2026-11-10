@@ -43,8 +43,9 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(30);
-    expect(new Set(billableModelRouteIds).size).toBe(30);
+    expect(billableModelRouteIds).toHaveLength(31);
+    expect(new Set(billableModelRouteIds).size).toBe(31);
+    expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');

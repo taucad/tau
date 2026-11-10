@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useMemo } from 'react';
 import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {
@@ -78,7 +79,9 @@ export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolea
 
   return (
     <section aria-label='Chat usage' className='@container overflow-hidden rounded-xl border border-border bg-card'>
-      <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Chat usage</h2>
+      <Heading level={2} variant='label' className='border-b px-3 py-2 text-foreground'>
+        Chat usage
+      </Heading>
       <Table>
         <TableHeader>
           <TableRow>

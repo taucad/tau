@@ -135,11 +135,7 @@ function CommunityProjectCard({
       >
         <div className='min-w-0 sm:self-start'>
           <div className='flex items-center gap-2'>
-            <Heading
-              level={titleLevel}
-              variant={isFeatured ? 'title' : 'item'}
-              className={cn('line-clamp-2', isFeatured && 'text-xl')}
-            >
+            <Heading level={titleLevel} variant={isFeatured ? 'title' : 'item'} className='line-clamp-2'>
               {name}
             </Heading>
             {isFeatured ? <Badge variant='secondary'>Featured</Badge> : null}

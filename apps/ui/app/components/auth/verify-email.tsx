@@ -95,16 +95,14 @@ export function VerifyEmail({ className }: VerifyEmailProps): React.JSX.Element 
           )}
         </div>
 
-        <CardTitle className='text-xl font-semibold'>
-          <h1>
-            {status === 'verified'
-              ? 'Email verified'
-              : status === 'verifying'
-                ? 'Verifying your email'
-                : status === 'missing-token'
-                  ? 'Verification link is missing'
-                  : "We couldn't verify your email"}
-          </h1>
+        <CardTitle level={1} variant='title'>
+          {status === 'verified'
+            ? 'Email verified'
+            : status === 'verifying'
+              ? 'Verifying your email'
+              : status === 'missing-token'
+                ? 'Verification link is missing'
+                : "We couldn't verify your email"}
         </CardTitle>
 
         <CardDescription>

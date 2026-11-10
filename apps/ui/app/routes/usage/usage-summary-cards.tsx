@@ -65,7 +65,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
               <p className='text-sm text-muted-foreground'>Balance unavailable</p>
             ) : (
               <>
-                <div className='text-2xl font-bold tabular-nums' data-testid='purchased-balance'>
+                <div className='text-2xl font-semibold tabular-nums' data-testid='purchased-balance'>
                   {formatCredits(purchased)} available
                 </div>
                 <p className='text-xs text-muted-foreground'>Used after monthly credits · Never expire</p>
@@ -102,7 +102,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
           <CardContent>
             {totals ? (
               <>
-                <div className='text-2xl font-bold' data-testid='credits-used'>
+                <div className='text-2xl font-semibold' data-testid='credits-used'>
                   {formatCredits(BigInt(totals.netUsedCreditAtoms))} used
                 </div>
                 <p className='text-xs text-muted-foreground'>
@@ -144,7 +144,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
             <Bot className='size-4 text-muted-foreground' />
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-bold'>{models.length}</div>
+            <div className='text-2xl font-semibold'>{models.length}</div>
             <p className='text-xs text-muted-foreground'>
               {snapshot.models?.complete === false ? 'First page of this range' : 'In the selected range'}
             </p>

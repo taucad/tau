@@ -294,5 +294,9 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
-  return <h1>Unknown Error</h1>;
+  return (
+    <Heading level={1} variant='title'>
+      Unknown Error
+    </Heading>
+  );
 }

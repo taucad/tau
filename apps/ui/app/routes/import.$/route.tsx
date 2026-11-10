@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { Link, useLoaderData, useLocation, useNavigate } from 'react-router';
@@ -1098,9 +1099,9 @@ export default function ImportRoute(): React.JSX.Element {
           {isValidRepo ? (
             <section aria-labelledby='review-repository' className='space-y-6 border-t pt-6'>
               <div className='space-y-1'>
-                <h2 id='review-repository' className='text-base font-medium'>
+                <Heading level={2} variant='item' id='review-repository'>
                   Review repository
-                </h2>
+                </Heading>
                 <p className='text-sm text-muted-foreground'>A copy of the chosen branch is added to your projects.</p>
               </div>
               {!isCheckingOrFetching && !repoMetadata ? (
@@ -1269,7 +1270,9 @@ export default function ImportRoute(): React.JSX.Element {
               <div className='grid gap-8 border-t pt-6 md:grid-cols-2'>
                 <section className='min-w-0 space-y-5'>
                   <div className='space-y-1'>
-                    <h2 className='text-base font-medium'>GitHub repository</h2>
+                    <Heading level={2} variant='item'>
+                      GitHub repository
+                    </Heading>
                     <p className='text-sm text-muted-foreground'>
                       {githubConnectionAvailable === false
                         ? 'Import a copy of a public repository.'
@@ -1371,9 +1374,9 @@ export default function ImportRoute(): React.JSX.Element {
           ) : (
             <section aria-labelledby='linked-import-review' className='space-y-6 border-t pt-6'>
               <div className='space-y-1'>
-                <h2 id='linked-import-review' className='text-base font-medium'>
+                <Heading level={2} variant='item' id='linked-import-review'>
                   Review linked import
-                </h2>
+                </Heading>
                 <p className='text-sm break-all text-muted-foreground'>
                   {linkedSelection.repository.fullName} at {linkedSelection.branch.name} ·{' '}
                   {linkedSelection.repository.access === 'write' ? 'GitHub permits read and write access' : 'read-only'}

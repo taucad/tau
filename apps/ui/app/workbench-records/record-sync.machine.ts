@@ -230,10 +230,10 @@ const isReading = (value: StateValue): boolean => matchesState({ source: 'readin
 
 const isQuiet = (value: StateValue): boolean => !matchesState({ intent: 'debouncing' }, value);
 
-/** The edits of a debounce window count as due once the window ends. */
+/** The edits of a debounce window count as due once the window ends, or at once while a flush waits. */
 const hasWork = <T, P>(context: RecordSyncContext<T, P>, value: StateValue): boolean =>
   context.commands.length > 0 ||
-  (context.pending !== undefined && isQuiet(value)) ||
+  (context.pending !== undefined && (isQuiet(value) || context.flushes.length > 0)) ||
   (context.flushes.length > 0 && (context.deferred !== undefined || context.readBack !== 'none'));
 
 /**
@@ -344,9 +344,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   };
 
   /** A read starts and supersedes the one in flight; its waiters wait for the latest. */
-  const startRead = (context: Context, request: { requestId?: string; forced: boolean }): Patch => ({
+  const startRead = (
+    context: Context,
+    request: { requestId?: string; forced: boolean },
+    value?: StateValue,
+  ): Patch => ({
     readRequests: request.requestId === undefined ? context.readRequests : [...context.readRequests, request.requestId],
-    readForced: request.forced,
+    /* A read that supersedes a forced one in flight is still forced: the person's "Try again" publishes. */
+    readForced: request.forced || (value !== undefined && isReading(value) && context.readForced),
     overlap: context.overlap || context.inFlight !== undefined,
     readBack: context.readBack === 'owed' ? 'reading' : context.readBack,
   });
@@ -588,7 +593,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               : {
                   target: '.reading',
                   reenter: true,
-                  context: startRead(context, { requestId: event.requestId, forced: event.forced }),
+                  context: startRead(context, { requestId: event.requestId, forced: event.forced }, value),
                 },
           ),
           retryRead: refines('ForcedRead', ({ context, event, value }, enq) =>
@@ -600,7 +605,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   context: reported(
                     context,
                     {
-                      ...startRead(context, { requestId: event.requestId, forced: true }),
+                      ...startRead(context, { requestId: event.requestId, forced: true }, value),
                       readFailures: 0,
                       health: { ...context.health, read: 'retrying' },
                     },
@@ -612,7 +617,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           'write.readRequested': refines('WatchRead', ({ context, value }) =>
             matchesState({ source: 'fenced' }, value)
               ? {}
-              : { target: '.reading', reenter: true, context: startRead(context, { forced: false }) },
+              : { target: '.reading', reenter: true, context: startRead(context, { forced: false }, value) },
           ),
           close: refines('CloseFence', ({ context, value }, enq) => {
             if (matchesState({ source: 'fenced' }, value)) {

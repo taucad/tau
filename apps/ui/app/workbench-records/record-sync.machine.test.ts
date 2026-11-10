@@ -977,7 +977,7 @@ describe('recordSync', () => {
     });
   });
 
-  describe('round-one review rows', () => {
+  describe('adversarial review rows', () => {
     it('should keep the edits a reset folded in while a write was on the wire when that write is blocked', async () => {
       const store = harness();
       await store.observe();
@@ -1065,6 +1065,50 @@ describe('recordSync', () => {
       await store.serve();
 
       expect(store.writes.map((write) => write.input.data)).toEqual(['name=mine']);
+    });
+
+    it('should write an edit made before a waiting flush before the flush answers, even in a new debounce window', async () => {
+      const store = harness({ editDebounce: 100 });
+      await store.observe();
+      void store.commands.edit({ name: 'zero' });
+      store.clock.advance(100);
+      await flush();
+
+      expect(store.writes).toHaveLength(1);
+
+      const edited = store.commands.edit({ name: 'A' });
+      const flushed = store.commands.flush();
+      const later = store.commands.edit({ name: 'A', unit: 'in' });
+      await flush();
+      await store.reply(0);
+
+      expect(store.writes).toHaveLength(2);
+
+      await store.reply();
+
+      expect(await edited).toBe(true);
+      expect(await later).toBe(true);
+      expect(await flushed).toBe(true);
+      expect(store.file.bytes && decoder.decode(store.file.bytes)).toBe('name=A;unit=in');
+    });
+
+    it('should publish the Try again read when a watch read supersedes it', async () => {
+      const store = harness();
+      await store.observe();
+      for (let attempt = 0; attempt < 4; attempt++) {
+        void store.commands.read();
+        store.reads.at(-1)?.settle({ status: 'failed', error: new Error('disk busy') });
+        // oxlint-disable-next-line no-await-in-loop -- each failure settles before the next read.
+        await flush();
+      }
+      const published = store.published().length;
+      const retried = store.commands.retryRead();
+      void store.commands.read();
+      await flush();
+      await store.serve();
+
+      expect(await retried).toBe(true);
+      expect(store.published()).toHaveLength(published + 1);
     });
 
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {

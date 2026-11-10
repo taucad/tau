@@ -252,6 +252,34 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     ).toThrow('Provider header is outside the funded request contract');
   });
 
+  it('should admit the thinking binding controls at the price of the same request without them', () => {
+    const body = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const plain = resolver.resolve({ ...intent(body), providerWire: 'anthropic', priceHeaders: headers });
+    const bound = resolver.resolve({
+      ...intent({
+        ...body,
+        thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+      }),
+      providerWire: 'anthropic',
+      priceHeaders: { ...headers, 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+    });
+
+    expect(bound.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+      body: { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } },
+    });
+    /* The control changes which replayed blocks the provider reads, never what a token costs. */
+    expect(bound.sku).toBe(plain.sku);
+    expect(bound.invocation.supplierRates).toStrictEqual(plain.invocation.supplierRates);
+  });
+
   it('should accept the authoritative OpenAI-compatible host stream options and strict function shape', () => {
     const result = resolver.resolve({
       ...intent({

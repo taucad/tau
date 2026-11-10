@@ -1318,7 +1318,7 @@ const startTree = async (
   filesystem: RevisionFileSystem,
   extra: Partial<RevisionActorsOptions> = {},
 ) => {
-  const { actor } = createProjectRevisionsActor({
+  const { actor, checkLargeObjects } = createProjectRevisionsActor({
     port,
     projectId: 'project-1',
     filesystem: async () => filesystem,
@@ -1338,7 +1338,10 @@ const startTree = async (
     await expect.poll(() => answers().length, { timeout: 20_000 }).toBeGreaterThanOrEqual(count);
     const answer = answers()[count - 1];
     if (answer?.type !== 'revisionMinted' || answer.revisionId === undefined) {
-      throw new Error(`The ${trigger} cut answered ${String(answer?.type)}.`);
+      const reason = (answer as { reason?: unknown } | undefined)?.reason;
+      throw new Error(
+        `The ${trigger} cut answered ${String(answer?.type)}${reason === undefined ? '' : `: ${JSON.stringify(reason)}`}.`,
+      );
     }
     return answer.revisionId;
   };
@@ -1354,7 +1357,7 @@ const startTree = async (
     });
     return minted('save', saves);
   };
-  return { actor, facts, minted, mintedIds, save };
+  return { actor, facts, minted, mintedIds, save, checkLargeObjects };
 };
 
 describe('restore, through the machine that owns it', () => {
@@ -1449,6 +1452,101 @@ describe('restore, through the machine that owns it', () => {
       closure: ['tau.json'],
     });
     expect(release).toHaveBeenCalledOnce();
+    tree.actor.stop();
+  }, 30_000);
+
+  /*
+   * L5: a restore that fails part-way must not leave the reading at treeReady with nothing that can move it. A
+   * write that rolled itself back left the checkout whole; one whose rollback failed too is put back by the
+   * person's Try again, so the viewer never waits on "Preparing model" with a button that cannot help.
+   */
+  const failingWrites = async (): Promise<{
+    tree: Awaited<ReturnType<typeof startTree>>;
+    filesystem: RevisionFileSystem;
+    outcomes: Array<{ failed?: boolean } | undefined>;
+    first: string;
+    fail: (count: number, after?: number) => void;
+  }> => {
+    let failures = 0;
+    let passes = 0;
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    const failing = new Proxy(filesystem, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+        if (property === 'applyBatch') {
+          return async (...parameters: unknown[]) => {
+            if (failures > 0 && passes > 0) {
+              passes -= 1;
+            } else if (failures > 0) {
+              failures -= 1;
+              throw new Error('The disk refused the write.');
+            }
+            return bound(...parameters);
+          };
+        }
+        return bound;
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const outcomes: Array<{ failed?: boolean } | undefined> = [];
+    const tree = await startTree(port, failing, {
+      onApplyingTree: (_place, _paths, bracket) =>
+        bracket?.purpose === 'tree'
+          ? (outcome) => {
+              outcomes.push(outcome);
+            }
+          : undefined,
+    });
+    /* A restore to `first` creates one file and replaces another: two changesets, so a failure between them tears. */
+    await filesystem.writeFile('extra.txt', 'added\n');
+    const first = await tree.save();
+    await filesystem.unlink('extra.txt');
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    await tree.save();
+    return {
+      tree,
+      filesystem,
+      outcomes,
+      first,
+      fail: (count, after = 0) => {
+        failures = count;
+        passes = after;
+      },
+    };
+  };
+
+  it('tells a tree write that rolled itself back as whole, not torn', async () => {
+    const { tree, filesystem, outcomes, first, fail } = await failingWrites();
+    /* The second changeset fails and the rollback lands: the checkout is whole again. */
+    fail(1, 1);
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => outcomes.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+    expect(outcomes.some((outcome) => outcome?.failed === true)).toBe(false);
+    expect(await filesystem.exists('extra.txt')).toBe(false);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 2;\n');
+    tree.actor.stop();
+  }, 30_000);
+
+  it('puts a torn checkout back when the person tries again', async () => {
+    const { tree, filesystem, outcomes, first, fail } = await failingWrites();
+    /* The second changeset and the rollback both fail: the checkout is torn. */
+    fail(2, 1);
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => outcomes.at(-1)?.failed, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+
+    await tree.checkLargeObjects(undefined);
+
+    await expect.poll(() => outcomes.at(-1)?.failed, { timeout: 10_000 }).toBe(false);
+    expect(await filesystem.exists('extra.txt')).toBe(false);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 2;\n');
     tree.actor.stop();
   }, 30_000);
 
@@ -1603,6 +1701,59 @@ describe('restore, through the machine that owns it', () => {
   }, 30_000);
 
   /* D10: an owed check samples the checkout's tree writes before it awaits, as `fillSoon` does: a write begun in the gap owns the word. */
+  /*
+   * Red rows (Brain research/new-project-viewer-stuck-downloading-blueprint.md):
+   * a checkout's readiness waits on the fill's word, and these two paths never give it.
+   */
+  it('tells the fill result for a new linked checkout (E1, L2)', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const added = await run<{ checkout: { id: string } }>(actors.checkouts.addCheckout, {
+      projectId: 'project-1',
+      branch: 'turn',
+      from: first.commitId,
+    });
+    await vi.waitFor(() => {
+      expect(reports).toContainEqual(expect.objectContaining({ checkoutId: added.checkout.id, facet: undefined }));
+    });
+  }, 30_000);
+
+  it('tells the fill result once a project with no revision gets its first one (E2, L1)', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    /* The first capture, before any revision: the check finds no head. */
+    await run(actors.checkout.captureTree, { checkoutId: 'live' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    await run(actors.checkout.captureTree, { checkoutId: 'live' });
+    await vi.waitFor(() => {
+      expect(reports).toContainEqual(expect.objectContaining({ checkoutId: 'live', facet: undefined }));
+    });
+  }, 30_000);
+
   it('starts no owed fill for a linked checkout once a newer tree write has begun', async () => {
     let failWrite = false;
     let failReads = 0;
@@ -1970,9 +2121,9 @@ describe('the checkout registry', () => {
         events.push(placement.status);
       },
     });
-    /* The root checks the project directory for large-object placeholders as it starts. */
+    /* The root checks every checkout for large-object placeholders as it starts: a reload may show a linked one. */
     await vi.waitFor(() => {
-      expect(events).toEqual(['open:live', 'close:live']);
+      expect(events.toSorted()).toEqual(['close:linked', 'close:live', 'open:linked', 'open:live']);
     });
     events.length = 0;
 

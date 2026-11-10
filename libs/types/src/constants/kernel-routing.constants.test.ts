@@ -8,20 +8,23 @@ import {
 import type { KernelId } from '#constants/kernel.constants.js';
 import {
   exactGeometryKernelIds,
+  kernelRoutingCopy,
   kernelRoutingRules,
   kernelRoutingZones,
   kernelsReachedByNameOnly,
-  voxelKernelIds,
+  implicitKernelIds,
 } from '#constants/kernel-routing.constants.js';
+import type { KernelRouting } from '#constants/kernel-routing.constants.js';
 
 const zonedKernels = new Set<string>(kernelRoutingZones.flatMap(({ acceptable }) => acceptable));
 const byNameOnly = new Set<string>(kernelsReachedByNameOnly);
 
 describe('kernel routing facets', () => {
   it('should give every kernel one-line use and avoid copy that names no default', () => {
-    for (const { id, routing } of kernelConfigurations) {
+    for (const { id } of kernelConfigurations) {
+      const routing: KernelRouting = kernelRoutingCopy[id];
       const lines: string[] = [routing.useWhen, routing.avoidWhen];
-      if ('prerequisites' in routing) {
+      if (routing.prerequisites !== undefined) {
         lines.push(routing.prerequisites);
       }
       for (const line of lines) {
@@ -39,7 +42,7 @@ describe('kernel routing facets', () => {
   });
 
   it('should group PicoGK and PicoVoxel as the voxel family (D5 rule 7)', () => {
-    expect([...voxelKernelIds].sort()).toEqual(['picogk', 'picovoxel']);
+    expect([...implicitKernelIds].sort()).toEqual(['picogk', 'picovoxel']);
   });
 });
 
@@ -95,7 +98,7 @@ describe('kernel routing rules and zones', () => {
 
   it('should keep computational engineering voxel-only (E15)', () => {
     const u8 = kernelRoutingZones.find(({ id }) => id === 'U8');
-    expect([...(u8?.acceptable ?? [])].sort()).toEqual([...voxelKernelIds].sort());
+    expect([...(u8?.acceptable ?? [])].sort()).toEqual([...implicitKernelIds].sort());
   });
 });
 

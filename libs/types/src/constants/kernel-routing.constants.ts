@@ -8,15 +8,105 @@ import type { KernelId } from '#constants/kernel.constants.js';
  * which kernels sit under the selector's More level are layout, not routing.
  */
 
-/** The kernels whose exports include analytic STEP, in catalog order. @public */
-export const exactGeometryKernelIds: readonly KernelId[] = kernelConfigurations
-  .filter(({ exactGeometry }) => exactGeometry)
-  .map(({ id }) => id);
+/**
+ * Model-read routing copy for one kernel, rendered into the routing rubric on every surface (automatic kernel
+ * selection blueprint D4). Each field is one line, names no default and states no preference order.
+ *
+ * Kept out of `kernelConfigurations` so the runtime bundle, which carries the catalog, never carries
+ * model-read copy.
+ *
+ * @public
+ */
+export type KernelRouting = {
+  /** The requests this kernel serves, in the person's terms. */
+  readonly useWhen: string;
+  /** The requests it cannot serve or another kernel serves without loss. */
+  readonly avoidWhen: string;
+  /** What must be true before its first evaluation; absent when nothing is needed. */
+  readonly prerequisites?: string;
+  /** The library a `.ts`, `.js` or `.py` entry imports to bind this kernel; absent when the extension alone binds it. */
+  readonly imports?: string;
+};
 
-/** The voxel and implicit kernels, in catalog order. @public */
-export const voxelKernelIds: readonly KernelId[] = kernelConfigurations
-  .filter(({ representation }) => representation === 'voxel')
-  .map(({ id }) => id);
+/** Each kernel's routing copy. @public */
+export const kernelRoutingCopy = {
+  picogk: {
+    useWhen:
+      'Computational engineering in C#: reusing PicoGK or LEAP 71 code, or a voxel model the browser runs out of memory on',
+    avoidWhen: 'STEP or an exact B-rep is needed, or the work can stay in TypeScript in the browser',
+    prerequisites: 'The desktop app or the CLI; downloads a .NET runtime once per computer',
+  },
+  picovoxel: {
+    useWhen:
+      'Computational engineering (lattices and graded infill, TPMS and gyroid cores, heat exchangers, conformal cooling channels, porous implants) and blended, branching or stylised organic forms',
+    avoidWhen:
+      'STEP, an exact B-rep or thin precise features are needed; output is a mesh, and time rises as the voxel size shrinks',
+    imports: 'picovoxel',
+  },
+  build123d: {
+    useWhen:
+      'Python is asked for or Python code is reused; exact B-rep parts and assemblies with labelled topology and STEP',
+    avoidWhen: 'Python is not asked for and the work can run in the browser',
+    prerequisites: 'The desktop app or the CLI; downloads a native Python runtime once per computer (194 MB)',
+    imports: 'build123d',
+  },
+  smlibpy: {
+    useWhen:
+      'NURBS B-rep in Python, physical materials, textures and mechanisms, or a project that already imports smlibpy',
+    avoidWhen: "build123d's builder mode, joints or STEP labels are needed, or Python is not asked for",
+    prerequisites: 'The desktop app or the CLI; downloads a native runtime once per computer',
+    imports: 'smlibpy',
+  },
+  openscad: {
+    useWhen:
+      'Boxes, cylinders and holes; a script others will adjust; a `.scad` file or a MakerWorld or Thingiverse customiser; a script around an imported mesh',
+    avoidWhen: 'STEP, edge fillets or exact mating geometry are needed; output is a mesh',
+  },
+  replicad: {
+    useWhen:
+      'Exact B-rep parts and assemblies: edge fillets and chamfers, shells, lofts, sweeps and revolves, standard or toleranced features, fits to bought parts, STEP',
+    avoidWhen:
+      'Lattices or field-driven geometry, mesh repair, a `.scad` deliverable, or another language is asked for',
+    imports: 'replicad',
+  },
+  manifold: {
+    useWhen: 'Repairing, combining or remixing an existing mesh (STL, OBJ, 3MF); fast, robust mesh booleans',
+    avoidWhen: 'STEP or exact topology is needed; output is a mesh',
+    imports: 'manifold-3d/manifoldCAD',
+  },
+  zoo: {
+    useWhen: 'KCL is asked for, or the request itself describes a large assembly that needs cloud capacity',
+    avoidWhen: "Zoo's cloud engine is not available here",
+    prerequisites: "Runs on Zoo's cloud engine",
+  },
+  jscad: {
+    useWhen: 'JSCAD is asked for, or existing JSCAD code is reused',
+    avoidWhen: 'STEP or an exact B-rep is needed; curves become facets',
+    imports: '@jscad/modeling',
+  },
+  opencascadejs: {
+    useWhen: 'An OpenCascade operation replicad lacks, or the direct OCCT API is asked for',
+    avoidWhen: 'Replicad covers the operation on the same kernel without manual memory management',
+    imports: 'libcascade',
+  },
+  smlib: {
+    useWhen: 'Freeform NURBS surfaces in TypeScript, or SMLib is asked for',
+    avoidWhen: 'A plain prismatic part that needs no NURBS surfaces',
+    imports: '@classcad/smlibwasm',
+  },
+  tscircuit: {
+    useWhen: 'Circuit boards: schematics, PCB layouts, netlists, BOM and fabrication files',
+    avoidWhen: 'Anything that is not electronics; an enclosure for a board is a separate model',
+  },
+} as const satisfies Record<KernelId, KernelRouting>;
+
+/** The kernels whose exports include analytic STEP, in catalog order. @public */
+export const exactGeometryKernelIds: readonly KernelId[] = /* @__PURE__ */ (() =>
+  kernelConfigurations.filter(({ exactGeometry }) => exactGeometry).map(({ id }) => id))();
+
+/** The implicit kernels (signed distance fields, voxelised for evaluation), in catalog order. @public */
+export const implicitKernelIds: readonly KernelId[] = /* @__PURE__ */ (() =>
+  kernelConfigurations.filter(({ representation }) => representation === 'implicit').map(({ id }) => id))();
 
 /** @public */
 export type KernelRoutingRuleId =
@@ -106,7 +196,7 @@ export type KernelRoutingZone = {
 };
 
 const exact = exactGeometryKernelIds;
-const voxel = voxelKernelIds;
+const implicit = implicitKernelIds;
 
 /** The seven narrow rules, in the order they apply (D5 tier 1). @public */
 export const kernelRoutingRules = [
@@ -149,7 +239,7 @@ export const kernelRoutingRules = [
     name: 'Required input',
     outcomes: [
       { when: 'An existing mesh to repair, combine or remix', kernels: ['manifold', 'openscad'] },
-      { when: 'An existing mesh to offset, hollow or lattice', kernels: voxel },
+      { when: 'An existing mesh to offset, hollow or lattice', kernels: implicit },
     ],
   },
   {
@@ -165,7 +255,7 @@ export const kernelRoutingRules = [
     outcomes: [
       {
         when: 'Computational engineering: lattices and graded infill, TPMS and gyroid cores, heat exchangers and cold plates, conformal and regenerative cooling channels, porous implants, topology-optimised and lightweighted structures, additive manifolds with blended internal passages',
-        kernels: voxel,
+        kernels: implicit,
       },
     ],
     doesNotFireOn: '"Lightweight" or "organic" alone, a plate of plain holes, a honeycomb drawn as a pattern',

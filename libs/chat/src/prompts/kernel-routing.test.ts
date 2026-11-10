@@ -169,7 +169,7 @@ describe('renderKernelGuidance', () => {
 describe('groupKernelsByRepresentation', () => {
   it('should place every kernel once, under its representation, in group order', () => {
     const groups = groupKernelsByRepresentation(catalog);
-    expect(groups.map(({ label }) => label)).toEqual(['BRep', 'Mesh', 'Voxel', 'Electronics']);
+    expect(groups.map(({ label }) => label)).toEqual(['BRep', 'Mesh', 'Implicit', 'Electronics']);
     expect(groups.flatMap(({ kernels }) => kernels).sort()).toEqual([...catalog].sort());
     for (const { representation, kernels } of groups) {
       expect(kernels.every((id) => resolveKernel(id).representation === representation)).toBe(true);

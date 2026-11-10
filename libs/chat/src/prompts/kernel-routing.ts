@@ -1,5 +1,5 @@
-import { kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
-import type { KernelId, KernelPreference, KernelRepresentation } from '@taucad/types/constants';
+import { kernelRoutingCopy, kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
+import type { KernelId, KernelPreference, KernelRepresentation, KernelRouting } from '@taucad/types/constants';
 
 /*
  * The routing generator (automatic kernel selection blueprint D4): one set of pure renderings over the catalog's
@@ -67,11 +67,11 @@ export const kernelChoiceCondition =
 const groupLabels: Readonly<Record<KernelRepresentation, string>> = {
   brep: 'BRep',
   mesh: 'Mesh',
-  voxel: 'Voxel',
+  implicit: 'Implicit',
   electronics: 'Electronics',
 };
 
-const groupOrder: readonly KernelRepresentation[] = ['brep', 'mesh', 'voxel', 'electronics'];
+const groupOrder: readonly KernelRepresentation[] = ['brep', 'mesh', 'implicit', 'electronics'];
 
 const bindingSentence =
   'The entry file binds the kernel: its extension, and for `.ts`, `.js` and `.py` the library the entry imports.';
@@ -91,9 +91,10 @@ const cell = (text: string): string => text.replaceAll('|', String.raw`\|`);
 
 const kernelTable = (profile: KernelRoutingProfile): string => {
   const rows = profile.available.map((id) => {
-    const { name, mainFile, routing } = resolveKernel(id);
-    const imports = 'imports' in routing ? `\`${routing.imports}\`` : 'none';
-    const prerequisites = 'prerequisites' in routing ? routing.prerequisites : 'none';
+    const { name, mainFile } = resolveKernel(id);
+    const routing: KernelRouting = kernelRoutingCopy[id];
+    const imports = routing.imports === undefined ? 'none' : `\`${routing.imports}\``;
+    const prerequisites = routing.prerequisites ?? 'none';
     const skill = skillOf(id, profile);
     return `| ${name} | \`${mainFile}\` | ${imports} | ${cell(routing.useWhen)} | ${cell(routing.avoidWhen)} | ${cell(prerequisites)} | ${skill ? `\`${skill}\`` : 'none'} |`;
   });
@@ -224,8 +225,10 @@ export const renderKernelRoutingDigest = (profile: KernelRoutingProfile): string
     'Ask one question only when two rules conflict or the best fit is not available here; otherwise choose, and say which kernel and why in one sentence before modelling.',
     `Kernels: ${profile.available
       .map((id) => {
-        const { name, mainFile, routing } = resolveKernel(id);
-        const binding = 'imports' in routing ? `\`${mainFile}\` importing \`${routing.imports}\`` : `\`${mainFile}\``;
+        const { name, mainFile } = resolveKernel(id);
+        const routing: KernelRouting = kernelRoutingCopy[id];
+        const binding =
+          routing.imports === undefined ? `\`${mainFile}\`` : `\`${mainFile}\` importing \`${routing.imports}\``;
         const skill = skillOf(id, profile);
         return `${name} (${binding}${skill ? `, skill \`${skill}\`` : ''}): ${routing.useWhen}.`;
       })
@@ -233,7 +236,7 @@ export const renderKernelRoutingDigest = (profile: KernelRoutingProfile): string
   ].join('\n');
 
 /**
- * Group kernels by representation for the selector, BRep, Mesh, Voxel, Electronics, keeping input order within a
+ * Group kernels by representation for the selector, BRep, Mesh, Implicit, Electronics, keeping input order within a
  * group and dropping empty groups. Which rows sit under More is layout and belongs to the selector.
  *
  * @param kernels - The kernels to show.

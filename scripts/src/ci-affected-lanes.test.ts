@@ -30,13 +30,18 @@ type Job = {
   readonly outputs?: Record<string, string>;
   readonly steps?: readonly Step[];
 };
-type Workflow = { readonly jobs: Record<string, Job> };
+type Workflow = {
+  readonly on?: { readonly pull_request?: { readonly types?: readonly string[] } };
+  readonly jobs: Record<string, Job>;
+};
 
 const ci = load(read('.github/workflows/ci.yml')) as Workflow;
 const staging = load(read('.github/workflows/staging.yml')) as Workflow;
 
 /** A GitHub Actions `${{ … }}` expression, built so the source holds no template-like string literal. */
 const expression = (body: string): string => ['$', '{{ ', body, ' }}'].join('');
+/** The one non-affected condition a CI job may carry: a draft pull request runs nothing. */
+const draftGuard = expression('!github.event.pull_request.draft');
 
 const isTestTarget = (target: string): boolean => /^test(?:$|[:-])/u.test(target);
 
@@ -130,7 +135,8 @@ describe('ci.yml affected-only lanes', () => {
   it.each(testJobs.map(({ name, definition, targets }) => [name, definition, targets] as const))(
     'should gate %s on a plan affected output or its own nx affected',
     (_name, definition, targets) => {
-      const condition = definition.if ?? '';
+      // A draft pull request runs no CI; that is the one condition beside the affected one.
+      const condition = (definition.if ?? '').replace(draftGuard, '');
       // `nx affected` selects its own projects; every other test command needs a lane the plan selected.
       if (!targets.every(({ affected }) => affected)) {
         expect([definition.needs ?? []].flat()).toContain('plan');
@@ -148,7 +154,7 @@ describe('ci.yml affected-only lanes', () => {
   it('should run the affected lanes without the plan and skip them only on a reused queue verdict', () => {
     const lane = ci.jobs['affected-lane'];
     expect(lane?.needs).toBeUndefined();
-    expect(lane?.if).toBeUndefined();
+    expect(lane?.if).toBe(draftGuard);
     const steps = lane?.steps ?? [];
     const verdict = steps.findIndex((step) => step.id === 'queue');
     expect(steps[verdict]?.uses).toBe('./.github/actions/queue-verdict');
@@ -173,6 +179,31 @@ describe('ci.yml affected-only lanes', () => {
     expect(check).toContain('test "$PLAN_RESULT" = success');
     expect(check).toContain('test "$LANES_RESULT" = success');
     expect(gate?.steps?.[0]?.env?.['REUSED']).toBe(expression('needs.plan.outputs.reused'));
+  });
+
+  it('should run no CI on a draft pull request and pass the required gate', () => {
+    expect(ci.on?.pull_request?.types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review']);
+    for (const job of ['plan', 'workspace', 'affected-lane']) {
+      expect(ci.jobs[job]?.if, job).toBe(draftGuard);
+    }
+    const gate = ci.jobs['affected'];
+    expect(gate?.steps?.[0]?.env?.['DRAFT']).toBe(
+      expression("github.event_name == 'pull_request' && github.event.pull_request.draft"),
+    );
+    const check = gate?.steps?.[0]?.run ?? '';
+    expect(check.indexOf('if [ "$DRAFT" = true ]; then')).toBeLessThan(check.indexOf('test "$PLAN_RESULT" = success'));
+  });
+
+  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end and standalone lanes to the merge queue on a pull request', () => {
+    const slim = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = pull_request ]; then'));
+    for (const lane of ['run_api', 'run_billing', 'formal', 'browser', 'geospec_examples', 'cli_e2e', 'standalone']) {
+      expect(slim, lane).toMatch(new RegExp(`^\\s*${lane}=false$`, 'mu'));
+    }
+    // The PR-only Docker smoke test keeps its own flag, the raw API selection.
+    expect(planScript).toContain('echo "api-image=$api_image"');
+    expect(ci.jobs['api-docker-smoke']?.if).toBe(
+      "github.event_name == 'pull_request' && needs.plan.outputs.api-image == 'true'",
+    );
   });
 
   it('should skip a service lane on a push only where the reused queue run passed it', () => {

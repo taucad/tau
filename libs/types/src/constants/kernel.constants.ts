@@ -29,28 +29,11 @@ export type KernelEcosystem = 'npm' | 'pypi' | 'nuget' | 'kcl' | 'none';
 /**
  * The geometry family a kernel's models are made of; it names the kernel's group in the selector and in the routing
  * rubric. `brep` is exact boundary representation, `mesh` constructive or mesh-first solids exported as triangles,
- * `voxel` voxel and implicit fields, `electronics` circuit boards.
+ * `implicit` signed distance and other implicit fields, voxelised to evaluate, `electronics` circuit boards.
  *
  * @public
  */
-export type KernelRepresentation = 'brep' | 'mesh' | 'voxel' | 'electronics';
-
-/**
- * Model-read routing copy for one kernel, rendered into the routing rubric on every surface (automatic kernel
- * selection blueprint D4). Each field is one line, names no default and states no preference order.
- *
- * @public
- */
-export type KernelRouting = {
-  /** The requests this kernel serves, in the person's terms. */
-  readonly useWhen: string;
-  /** The requests it cannot serve or another kernel serves without loss. */
-  readonly avoidWhen: string;
-  /** What must be true before its first evaluation; absent when nothing is needed. */
-  readonly prerequisites?: string;
-  /** The library a `.ts`, `.js` or `.py` entry imports to bind this kernel; absent when the extension alone binds it. */
-  readonly imports?: string;
-};
+export type KernelRepresentation = 'brep' | 'mesh' | 'implicit' | 'electronics';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -89,8 +72,6 @@ export type KernelConfiguration = {
   representation: KernelRepresentation;
   /** Whether its exports include analytic STEP, which standards-based or toleranced mating geometry needs. */
   exactGeometry: boolean;
-  /** Model-read routing copy. */
-  routing: KernelRouting;
 };
 
 /** @public */
@@ -122,14 +103,8 @@ public static class Params
     tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
     features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
     requiresRuntimeKernelId: 'picogk',
-    representation: 'voxel',
+    representation: 'implicit',
     exactGeometry: false,
-    routing: {
-      useWhen:
-        'Computational engineering in C#: reusing PicoGK or LEAP 71 code, or a voxel model the browser runs out of memory on',
-      avoidWhen: 'STEP or an exact B-rep is needed, or the work can stay in TypeScript in the browser',
-      prerequisites: 'The desktop app or the CLI; downloads a .NET runtime once per computer',
-    },
   },
   {
     id: 'picovoxel',
@@ -162,15 +137,8 @@ export default function main(pico: Pico, params = defaultParams): Voxels[] {
       'Fast preview with exact export',
       'Interactive parameters',
     ],
-    representation: 'voxel',
+    representation: 'implicit',
     exactGeometry: false,
-    routing: {
-      useWhen:
-        'Computational engineering (lattices and graded infill, TPMS and gyroid cores, heat exchangers, conformal cooling channels, porous implants) and blended, branching or stylised organic forms',
-      avoidWhen:
-        'STEP, an exact B-rep or thin precise features are needed; output is a mesh, and time rises as the voxel size shrinks',
-      imports: 'picovoxel',
-    },
   },
   {
     id: 'build123d',
@@ -199,13 +167,6 @@ def main(params: Params) -> Shape | None:
     requiresRuntimeKernelId: 'build123d',
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen:
-        'Python is asked for or Python code is reused; exact B-rep parts and assemblies with labelled topology and STEP',
-      avoidWhen: 'Python is not asked for and the work can run in the browser',
-      prerequisites: 'The desktop app or the CLI; downloads a native Python runtime once per computer (194 MB)',
-      imports: 'build123d',
-    },
   },
   {
     id: 'smlibpy',
@@ -234,13 +195,6 @@ def main(params: Params) -> smlibpy.Part | None:
     requiresRuntimeKernelId: 'smlibpy',
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen:
-        'NURBS B-rep in Python, physical materials, textures and mechanisms, or a project that already imports smlibpy',
-      avoidWhen: "build123d's builder mode, joints or STEP labels are needed, or Python is not asked for",
-      prerequisites: 'The desktop app or the CLI; downloads a native runtime once per computer',
-      imports: 'smlibpy',
-    },
   },
   {
     id: 'openscad',
@@ -259,11 +213,6 @@ def main(params: Params) -> smlibpy.Part | None:
     features: ['Boolean operations', 'Parametric design', 'GLB export', '3MF export'],
     representation: 'mesh',
     exactGeometry: false,
-    routing: {
-      useWhen:
-        'Boxes, cylinders and holes; a script others will adjust; a `.scad` file or a MakerWorld or Thingiverse customiser; a script around an imported mesh',
-      avoidWhen: 'STEP, edge fillets or exact mating geometry are needed; output is a mesh',
-    },
   },
   {
     id: 'replicad',
@@ -287,13 +236,6 @@ export default function main(p = defaultParams) {}
     features: ['Exact geometry', 'TypeScript API', 'CAD operations', 'STEP export'],
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen:
-        'Exact B-rep parts and assemblies: edge fillets and chamfers, shells, lofts, sweeps and revolves, standard or toleranced features, fits to bought parts, STEP',
-      avoidWhen:
-        'Lattices or field-driven geometry, mesh repair, a `.scad` deliverable, or another language is asked for',
-      imports: 'replicad',
-    },
   },
   {
     id: 'manifold',
@@ -317,11 +259,6 @@ export default function main(p = defaultParams) {}
     features: ['Fast booleans', 'Robust topology', 'WASM runtime', 'GLTF-native scene output'],
     representation: 'mesh',
     exactGeometry: false,
-    routing: {
-      useWhen: 'Repairing, combining or remixing an existing mesh (STL, OBJ, 3MF); fast, robust mesh booleans',
-      avoidWhen: 'STEP or exact topology is needed; output is a mesh',
-      imports: 'manifold-3d/manifoldCAD',
-    },
   },
   {
     id: 'zoo',
@@ -347,11 +284,6 @@ export default function main(p = defaultParams) {}
     ],
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen: 'KCL is asked for, or the request itself describes a large assembly that needs cloud capacity',
-      avoidWhen: "Zoo's cloud engine is not available here",
-      prerequisites: "Runs on Zoo's cloud engine",
-    },
   },
   {
     id: 'jscad',
@@ -380,11 +312,6 @@ export default function main(p = defaultParams) {}
     ],
     representation: 'mesh',
     exactGeometry: false,
-    routing: {
-      useWhen: 'JSCAD is asked for, or existing JSCAD code is reused',
-      avoidWhen: 'STEP or an exact B-rep is needed; curves become facets',
-      imports: '@jscad/modeling',
-    },
   },
   {
     id: 'opencascadejs',
@@ -414,11 +341,6 @@ export default function main(p = defaultParams) {}
     ],
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen: 'An OpenCascade operation replicad lacks, or the direct OCCT API is asked for',
-      avoidWhen: 'Replicad covers the operation on the same kernel without manual memory management',
-      imports: 'libcascade',
-    },
   },
   {
     id: 'smlib',
@@ -442,11 +364,6 @@ export default function main(p = defaultParams) {}
     features: ['build123d-style API', 'Exact NURBS geometry', 'STEP export', 'Interactive parameters'],
     representation: 'brep',
     exactGeometry: true,
-    routing: {
-      useWhen: 'Freeform NURBS surfaces in TypeScript, or SMLib is asked for',
-      avoidWhen: 'A plain prismatic part that needs no NURBS surfaces',
-      imports: '@classcad/smlibwasm',
-    },
   },
   {
     id: 'tscircuit',
@@ -472,10 +389,6 @@ export default function main(p = defaultParams) {}
     features: ['3D board preview', 'Schematic and PCB SVG', 'Offline autorouting', 'BOM and netlist export'],
     representation: 'electronics',
     exactGeometry: false,
-    routing: {
-      useWhen: 'Circuit boards: schematics, PCB layouts, netlists, BOM and fabrication files',
-      avoidWhen: 'Anything that is not electronics; an enclosure for a board is a separate model',
-    },
   },
 ] as const satisfies KernelConfiguration[];
 

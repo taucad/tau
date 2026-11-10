@@ -12,5 +12,8 @@ describe('shutdownPhases', () => {
 
     expect(shutdownPhases.cut).toBeLessThan(shutdownPhases.abandon);
     expect(shutdownPhases.abandon + teardown).toBeLessThanOrEqual(killTimeout);
+    // Fly repeats the stop signal when its kill_timeout clock (started at the Machine update, not
+    // at the first signal) runs out, and kills the VM 5 s later; the last call and closing fit inside.
+    expect(shutdownPhases.lastCall + 2000).toBeLessThanOrEqual(5000);
   });
 });

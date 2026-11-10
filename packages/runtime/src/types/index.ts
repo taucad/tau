@@ -261,6 +261,7 @@ export type {
   RuntimeFactsStatus,
   RuntimeLateTerminal,
   RuntimeObservationMode,
+  RuntimeOperationBegin,
   RuntimeObservationSupport,
   RuntimeObservedTermination,
   RuntimeOperation,

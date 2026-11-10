@@ -8,6 +8,11 @@
  * sends one Grafana IRM formatted-webhook alert, so the operator gets a phone push without a GitHub issue (operator
  * decision 2026-11-08, tau-brain `research/ci-throughput-review.md`).
  *
+ * It also checks the release gate (WD-1a of the CI affected-first program): every `desktop-staging@*` candidate tag
+ * whose `release-desktop-staging.yml` run started in the last 36 hours must have a green "Shell gate" (the
+ * `shell-conformance.yml` call that runs on the candidate commit before the tag exists, #1591). A tag with no such run,
+ * or whose gate jobs are not all green, is a problem like a red nightly.
+ *
  * Usage: node scripts/src/nightly-watchdog.ts [--summary <file>] [--test-alert]
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY (`owner/name`), CI_ALERT_WEBHOOK_URL (unset: report only and exit 1 on a
  * problem, so the run itself turns red), GITHUB_SERVER_URL, GITHUB_RUN_ID (for the alert's link).
@@ -119,6 +124,121 @@ export const alertPayload = (problems: readonly Verdict[], now: Date, runUrl: st
     .join('\n'),
 });
 
+/** A `release-desktop-staging.yml` run, as the Actions API reports it. */
+export type CandidateRun = {
+  readonly id: number;
+  readonly run_number: number;
+  readonly created_at: string;
+  readonly html_url: string;
+};
+
+/** A job of a run, as the Actions API reports it. */
+export type RunJob = { readonly name: string; readonly status: string; readonly conclusion: string | undefined };
+
+/** The workflow that cuts candidates, under which candidate verdicts are reported. */
+export const candidateWorkflow: ScheduledWorkflow = {
+  file: 'release-desktop-staging.yml',
+  name: 'Candidate shell gate',
+  crons: [],
+};
+
+/** The build number a candidate tag carries: `desktop-staging@<version>-staging.<run number>`. */
+export const candidateRunNumber = (tag: string): number | undefined => {
+  const match = /^desktop-staging@\d+\.\d+\.\d+-staging\.(\d+)$/u.exec(tag);
+  return match ? Number(match[1]) : undefined;
+};
+
+/**
+ * Judge each candidate tag of the last 36 hours by its run's "Shell gate" jobs.
+ *
+ * A tag is in the window when the run with its build number started in the last 36 hours. A tag whose build number is
+ * newer than every listed run has no run at all (it was not cut by the workflow), and is judged `missing`.
+ */
+export const judgeCandidates = ({
+  tags,
+  runs,
+  jobsOf,
+  now,
+}: {
+  readonly tags: readonly string[];
+  readonly runs: readonly CandidateRun[];
+  readonly jobsOf: (run: CandidateRun) => readonly RunJob[];
+  readonly now: Date;
+}): Verdict[] => {
+  const byNumber = new Map(runs.map((run) => [run.run_number, run]));
+  const newest = Math.max(0, ...runs.map((run) => run.run_number));
+  const verdicts: Verdict[] = [];
+  for (const tag of [...tags].sort()) {
+    const number = candidateRunNumber(tag);
+    if (number === undefined) {
+      continue;
+    }
+    const run = byNumber.get(number);
+    if (!run) {
+      if (number > newest) {
+        verdicts.push({ workflow: candidateWorkflow, state: 'missing', detail: `${tag}: no release run cut it` });
+      }
+      continue;
+    }
+    if (now.getTime() - Date.parse(run.created_at) > 36 * hour) {
+      continue;
+    }
+    const gate = jobsOf(run).filter((job) => job.name.startsWith('Shell gate'));
+    const green =
+      gate.length > 0 &&
+      gate.every((job) => job.status === 'completed' && passing.has(job.conclusion ?? '')) &&
+      gate.some((job) => job.conclusion === 'success');
+    verdicts.push({
+      workflow: candidateWorkflow,
+      state: green ? 'ok' : 'failed',
+      detail: green
+        ? `${tag}: ${gate.length} gate jobs green`
+        : `${tag}: shell gate not green (${gate.map((job) => job.conclusion ?? job.status).join(', ') || 'no gate jobs'})`,
+      url: run.html_url,
+    });
+  }
+  return verdicts;
+};
+
+const githubGet = async <T>(path: string, token: string): Promise<T> => {
+  const response = await fetch(`https://api.github.com/${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`${path}: GitHub API ${response.status}`);
+  }
+  return (await response.json()) as T;
+};
+
+const candidateVerdicts = async (repository: string, token: string, now: Date): Promise<Verdict[]> => {
+  const references = await githubGet<ReadonlyArray<{ readonly ref: string }>>(
+    `repos/${repository}/git/matching-refs/tags/desktop-staging@`,
+    token,
+  );
+  const tags = references.map((ref) => ref.ref.replace(/^refs\/tags\//u, ''));
+  const { workflow_runs: runs } = await githubGet<{ readonly workflow_runs: readonly CandidateRun[] }>(
+    `repos/${repository}/actions/workflows/${candidateWorkflow.file}/runs?per_page=100`,
+    token,
+  );
+  const recent = runs.filter((run) => now.getTime() - Date.parse(run.created_at) <= 36 * hour);
+  const jobs = new Map(
+    await Promise.all(
+      recent.map(async (run) => {
+        const page = await githubGet<{ readonly jobs: readonly RunJob[] }>(
+          `repos/${repository}/actions/runs/${run.id}/jobs?per_page=100`,
+          token,
+        );
+        return [run.id, page.jobs] as const;
+      }),
+    ),
+  );
+  return judgeCandidates({ tags, runs, jobsOf: (run) => jobs.get(run.id) ?? [], now });
+};
+
 const newestScheduledRun = async (
   repository: string,
   file: string,
@@ -159,9 +279,14 @@ const main = async (args: readonly string[]): Promise<number> => {
   const now = new Date();
 
   const workflows = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
-  const verdicts = await Promise.all(
-    workflows.map(async (workflow) => judge(workflow, await newestScheduledRun(repository, workflow.file, token), now)),
-  );
+  const verdicts = [
+    ...(await Promise.all(
+      workflows.map(async (workflow) =>
+        judge(workflow, await newestScheduledRun(repository, workflow.file, token), now),
+      ),
+    )),
+    ...(await candidateVerdicts(repository, token, now)),
+  ];
   const problems = verdicts.filter((verdict) => verdict.state === 'failed' || verdict.state === 'missing');
 
   const table = [

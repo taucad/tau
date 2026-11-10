@@ -1,5 +1,5 @@
-# Staging desktop candidates. Each green `ci.yml` push run on `main` that affects `desktop`
-# creates a candidate that release-build.yml packages for Apple silicon only; the nightly
+# Staging desktop candidates. Each green `ci.yml` push run on `main` that affects `desktop` or
+# its renderer, `ui`, creates a candidate that release-build.yml packages for Apple silicon only; the nightly
 # schedule (and a dispatch that asks for it) creates one that also packages Intel, so the x64
 # archive and its OTA replacement are still exercised once a day while `main` pushes cost one
 # macOS packaging job each. The tag records which: an annotated tag whose message carries a
@@ -186,7 +186,9 @@ jobs:
             # not silently count as an unaffected desktop.
             pnpm nx show projects --affected --base="$base" --head="$TARGET" --json | tail -1 > "$RUNNER_TEMP/affected.json"
             jq -e 'type == "array" and all(.[]; type == "string")' "$RUNNER_TEMP/affected.json" > /dev/null
-            if ! jq -e 'index("desktop")' "$RUNNER_TEMP/affected.json" > /dev/null; then
+            # The candidate ships the renderer too: `desktop` consumes `ui:build:desktop` as a build
+            # artifact, not as a project-graph dependency, so a renderer-only change is a desktop change.
+            if ! jq -e 'index("desktop") or index("ui")' "$RUNNER_TEMP/affected.json" > /dev/null; then
               echo "release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi

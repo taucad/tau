@@ -71,7 +71,7 @@ const waitForConverterReady = async (page: Page): Promise<void> => {
     .toBeGreaterThan(0);
 };
 
-const expectUsdzDownload = async (path: string, expectTexture: boolean): Promise<void> => {
+const expectUsdzDownload = async (path: string, texture: Uint8Array<ArrayBuffer> | undefined): Promise<void> => {
   const bytes = await readFile(path);
   expect(bytes.byteLength).toBeGreaterThan(500);
   expect(bytes.subarray(0, 4).toString('binary')).toBe('PK\u0003\u0004');
@@ -87,16 +87,19 @@ const expectUsdzDownload = async (path: string, expectTexture: boolean): Promise
   const isUsda = usd.stdout.subarray(0, 5).toString() === '#usda';
   const isUsdc = usd.stdout.subarray(0, 8).toString() === 'PXR-USDC';
   expect(isUsda || isUsdc).toBe(true);
-  if (expectTexture) {
-    expect(isUsda).toBe(true);
-    const textureReference = /asset inputs:file = @\.\/([^@]+)@/u.exec(usd.stdout.toString())?.[1];
-    expect(textureReference).toBeDefined();
-    const textureMember = memberNames.find((name) => name === textureReference);
-    expect(textureMember).toBeDefined();
-    const texture = spawnSync('/usr/bin/unzip', ['-p', path, textureMember!]);
-    expect(texture.status, texture.stderr.toString()).toBe(0);
-    expect([...texture.stdout.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    expect(texture.stdout.byteLength).toBeGreaterThan(100);
+  if (texture !== undefined) {
+    /* Libassimp 0.4 (LightUSD) packages a textured model for ARKit: the root layer is binary
+     * USDC, first in the archive, and the texture rides beside it under `textures/`, as
+     * `assimp.integration.test.ts` pins for the same exporter. USDC keeps asset paths in a
+     * compressed token table, so the packaged texture is matched by its bytes. */
+    expect(memberNames[0]).toBe(usdMember);
+    expect(isUsdc).toBe(true);
+    const textureMembers = memberNames.filter((name) => /^textures\/[^/]+\.png$/u.test(name));
+    expect(textureMembers).toEqual(['textures/texture0.png']);
+    const packaged = spawnSync('/usr/bin/unzip', ['-p', path, textureMembers[0]!]);
+    expect(packaged.status, packaged.stderr.toString()).toBe(0);
+    expect([...packaged.stdout.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(new Uint8Array(packaged.stdout)).toEqual(texture);
   }
 };
 
@@ -121,7 +124,7 @@ const utilityProcesses = async (desktopSession: DesktopSession): Promise<Readonl
 const chooseUsdzAndDownload = async (
   desktopSession: DesktopSession,
   page: Page,
-  options: { readonly expectTexture?: boolean; readonly name: string },
+  options: { readonly texture?: Uint8Array<ArrayBuffer>; readonly name: string },
 ): Promise<void> => {
   const format = page.getByLabel(/\(USDZ\)$/u);
   const glbFormat = page.getByLabel(/\(GLB\)$/u);
@@ -145,7 +148,7 @@ const chooseUsdzAndDownload = async (
     page.getByRole('button', { name: 'Download USDZ', exact: true }).click(),
   );
   expect(download.filename).toMatch(/\.usdz$/u);
-  await expectUsdzDownload(path, options.expectTexture ?? false);
+  await expectUsdzDownload(path, options.texture);
 };
 
 test('[completed-artifact] should fullscreen the viewer with settings and restore its existing canvas', async () => {
@@ -277,7 +280,10 @@ test('[completed-artifact] converts GLB, OBJ sidecars, and STEP to USDZ without 
   const secondCanvas = session.page.locator('canvas').first();
   await secondCanvas.waitFor({ state: 'visible' });
   expect(await secondCanvas.isVisible()).toBe(true);
-  await chooseUsdzAndDownload(session, session.page, { expectTexture: true, name: 'obj' });
+  await chooseUsdzAndDownload(session, session.page, {
+    texture: new Uint8Array(await readFile(textureFixture)),
+    name: 'obj',
+  });
 
   await openRoute(session.page, '/');
   await openRoute(session.page, '/convert');

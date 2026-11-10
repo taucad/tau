@@ -166,6 +166,14 @@ describe('gateway provider headers', () => {
       version: '2023-06-01',
       beta: 'fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
     });
+    expect(validateAnthropicHeaders({ beta: 'thinking-binding-controls-2026-08-01' }).beta).toBe(
+      'thinking-binding-controls-2026-08-01',
+    );
+    expect(
+      validateAnthropicHeaders({
+        beta: 'mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01',
+      }).beta,
+    ).toBe('mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01');
     for (const [headers, message] of [
       [{ version: '2099-01-01' }, 'Unsupported anthropic-version'],
       [{ beta: 'unknown-beta' }, 'Unsupported anthropic-beta'],

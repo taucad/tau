@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { SharedProjectHydrator, SharedProjectWorkbench } from '#components/share/shared-project-workbench.js';
+import { killMemory, modelKeyOf } from '#lib/kill-memory.js';
+import { readBuildId } from '#lib/build-identity.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 
 const fileManager = vi.hoisted(() => {
@@ -269,5 +271,58 @@ describe('SharedProjectWorkbench', () => {
 
     const drawer = await screen.findByRole('dialog', { name: 'Project workbench' });
     expect(within(drawer).getByText('Workbench panes')).toBeInTheDocument();
+  });
+});
+
+describe('SharedProjectWorkbench paused model (crash capture blueprint)', () => {
+  const owned: ParsedPublication = { ...publication, viewerRole: 'owner' };
+  const build = (): string | undefined => {
+    const id = readBuildId();
+    return id === 0 ? undefined : String(id);
+  };
+
+  beforeEach(() => {
+    fileManager.reset();
+    projectProvider.mockReset();
+    globalThis.localStorage.clear();
+  });
+
+  it('pauses a model that stopped the page here last time, starts no kernel, and runs once on Try again', async () => {
+    killMemory.record(modelKeyOf(owned.id), build(), Date.now());
+    renderWorkbench(owned);
+
+    expect(screen.getByRole('heading', { name: 'We paused this model' })).toBeInTheDocument();
+    /* No thumbnail in the fixture: the facts line names the entry file. */
+    expect(screen.getByText('main.ts')).toBeInTheDocument();
+    expect(projectProvider).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+    await waitFor(() => {
+      expect(projectProvider).toHaveBeenCalled();
+    });
+  });
+
+  it('shows the repeat state after a kill that followed Try again', () => {
+    killMemory.record(modelKeyOf(owned.id), build(), Date.now() - 1000);
+    killMemory.record(modelKeyOf(owned.id), build(), Date.now());
+    renderWorkbench(owned);
+
+    expect(screen.getByRole('heading', { name: 'This model can’t run on this device yet' })).toBeInTheDocument();
+    expect(projectProvider).not.toHaveBeenCalled();
+  });
+
+  it('runs a model with no kill memory as before', async () => {
+    renderWorkbench(owned);
+
+    expect(screen.queryByRole('heading', { name: 'We paused this model' })).not.toBeInTheDocument();
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+    await waitFor(() => {
+      expect(projectProvider).toHaveBeenCalled();
+    });
   });
 });

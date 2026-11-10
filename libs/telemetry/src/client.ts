@@ -21,6 +21,7 @@ import type {
   deliveryHealthEntrySchema,
   runtimeLateEntrySchema,
   runtimeOperationEntrySchema,
+  runtimeKillEntrySchema,
   runtimeViewerEntrySchema,
 } from '#runtime-entry.js';
 
@@ -106,10 +107,17 @@ export type RuntimeOperationEntry = z.input<typeof runtimeOperationEntrySchema>;
 export type RuntimeLateEntry = z.input<typeof runtimeLateEntrySchema>;
 /** A `runtime.viewer` entry as sent. @public */
 export type RuntimeViewerEntry = z.input<typeof runtimeViewerEntrySchema>;
+/** A `runtime.kill` entry as sent. @public */
+export type RuntimeKillEntry = z.input<typeof runtimeKillEntrySchema>;
 /** A `telemetry.delivery` entry as sent. @public */
 export type DeliveryHealthEntry = z.input<typeof deliveryHealthEntrySchema>;
 /** Any entry the runtime reporter sends. @public */
-export type RuntimeIngestEntry = RuntimeOperationEntry | RuntimeLateEntry | RuntimeViewerEntry | DeliveryHealthEntry;
+export type RuntimeIngestEntry =
+  | RuntimeOperationEntry
+  | RuntimeLateEntry
+  | RuntimeViewerEntry
+  | RuntimeKillEntry
+  | DeliveryHealthEntry;
 /** Why a reporter dropped entries. @public */
 export type DropReason = (typeof dropReasons)[number];
 
@@ -454,6 +462,33 @@ export const toLateEntry = (late: RuntimeLateInput, context: RuntimeEntryContext
     settledAs: late.settledAs,
     route: context.route,
     caller: closedValue(v.caller, context.caller),
+  },
+});
+
+/** A tab kill the next load detected (crash capture blueprint): what the marker recorded, closed afterwards. @public */
+export type PageKillInput = Readonly<{
+  kernel?: string;
+  phase?: string;
+  classification: string;
+}>;
+
+/**
+ * Map a detected tab kill to its `runtime.kill` entry: closed kernel, phase and classification; a phase the marker
+ * never recorded is `boot`.
+ *
+ * @param input - The kill.
+ * @param context - The host context of the page reporting it; its caller is not sent.
+ * @returns The entry.
+ * @public
+ */
+export const toKillEntry = (input: PageKillInput, context: RuntimeEntryContext): RuntimeKillEntry => ({
+  name: RuntimeEntryName.KILL,
+  duration: 0,
+  detail: {
+    ...optional('kernel', input.kernel === undefined ? undefined : closedValue(v.kernel, input.kernel)),
+    phase: closedValue(v.killPhase, input.phase ?? 'boot'),
+    classification: closedValue(v.killClass, input.classification),
+    ...contextFields(context),
   },
 });
 

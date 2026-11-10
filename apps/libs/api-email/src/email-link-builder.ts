@@ -5,8 +5,12 @@ const authEmailPaths = {
   'reset-password': '/auth/reset-password',
   'password-changed': '/auth/forgot-password',
   'verify-email': '/auth/verify-email',
+  'account-exists': '/auth/sign-in',
 } as const satisfies Record<
-  Extract<EmailTemplate['kind'], 'magic-link' | 'reset-password' | 'password-changed' | 'verify-email'>,
+  Extract<
+    EmailTemplate['kind'],
+    'magic-link' | 'reset-password' | 'password-changed' | 'verify-email' | 'account-exists'
+  >,
   string
 >;
 
@@ -22,19 +26,19 @@ export const sanitizeFrontendRedirectPath = ({
     return '/';
   }
 
-  if (callbackURL.startsWith('/') && !callbackURL.startsWith('//')) {
-    return callbackURL;
-  }
-
+  // Resolved against the frontend rather than matched by prefix: browsers read `/\host` as `//host`, so a
+  // prefix check let it through (web UI security assessment F-6). Only a same-origin result is kept.
   try {
     const frontendOrigin = new URL(frontendURL).origin;
-    const callback = new URL(callbackURL);
+    const callback = new URL(callbackURL, frontendOrigin);
 
     if (callback.origin !== frontendOrigin) {
       return '/';
     }
 
-    return `${callback.pathname}${callback.search}${callback.hash}` || '/';
+    // Dot segments normalise `/.//host` to the path `//host`, which a browser would again read as another origin.
+    const path = `${callback.pathname}${callback.search}${callback.hash}`;
+    return path.startsWith('//') ? '/' : path || '/';
   } catch {
     return '/';
   }
@@ -73,6 +77,10 @@ export const buildFrontendResetPasswordUrl = ({
   resetUrl.searchParams.set('token', token);
   return resetUrl.toString();
 };
+
+/** The sign-in page an existing account holder is sent to when they try to sign up again. */
+export const buildFrontendSignInUrl = ({ frontendURL }: { readonly frontendURL: string }): string =>
+  new URL(authEmailPaths['account-exists'], frontendURL).toString();
 
 /** Where a recipient who did not change their password goes to take the account back. */
 export const buildFrontendForgotPasswordUrl = ({ frontendURL }: { readonly frontendURL: string }): string =>
@@ -134,6 +142,13 @@ export const assertEmailTemplateUrlAllowed = ({
     }
 
     return;
+  }
+
+  if (template.kind === 'account-exists') {
+    const resetUrl = new URL(template.resetUrl);
+    if (resetUrl.origin !== frontendOrigin || resetUrl.pathname !== authEmailPaths['password-changed']) {
+      throw new Error('Invalid account-exists email reset URL');
+    }
   }
 
   if ('billingUrl' in template) {

@@ -1194,6 +1194,14 @@
       "owner": "open first, model waits"
     },
     {
+      "id": "LFS-FILL-RETRY",
+      "bound": "Failed large-object fill retries on its own after 2 s, 5 s, 15 s, 30 s, then every 60 s (retryMilliseconds), keeping what arrived; cleared by a manual retry, a success, or the fill being replaced or the project closing",
+      "site": "packages/revisions/src/large-object-fill.ts",
+      "token": "fill.retryTimer = setTimeout(",
+      "class": "Liveness",
+      "owner": "open first, model waits"
+    },
+    {
       "id": "LFS-FILL-RESUME",
       "bound": "Large-object fill resume, deferred one task (0 ms) so the capture or root start that asked is not delayed; cleared when the project closes",
       "site": "packages/revisions/src/revision-effects.ts",

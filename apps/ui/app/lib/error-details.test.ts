@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 import { applyErrorDetails, readErrorDetails, recordErrorDetails } from '#lib/error-details.js';
+import { setReportedUserId } from '#lib/sentry-context.lib.js';
 import { beforeSendSentryEvent } from '#lib/sentry.lib.js';
 import { sendSentryEventDirectly } from '#lib/sentry-event.lib.js';
 
@@ -152,5 +153,33 @@ describe('details on both delivery paths (SB4, principle 7)', () => {
     const event = JSON.parse(posted[0]?.split('\n')[2] ?? '{}') as ErrorEvent;
     expect(event.level).toBe('warning');
     expect(event.breadcrumbs).toEqual([{ category: 'tau.activity', message: 'render', timestamp: 1_793_324_760 }]);
+  });
+
+  it('should send an anonymous report without user on the SDK path (crash capture blueprint)', () => {
+    const error = recordErrorDetails(new Error('tab killed'), { anonymous: true });
+
+    const sent = beforeSendSentryEvent({ ...exceptionEvent(), user: { id: 'user_1' } }, { originalException: error });
+
+    expect(sent).not.toHaveProperty('user');
+  });
+
+  it('should send an anonymous report without user on the path without the SDK', async () => {
+    const posted: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      posted.push(typeof init.body === 'string' ? init.body : '');
+      return new Response('{}');
+    });
+    setReportedUserId('user_1');
+    try {
+      await sendSentryEventDirectly(recordErrorDetails(new Error('tab killed'), { anonymous: true }), {});
+      await sendSentryEventDirectly(new Error('ordinary'), {});
+    } finally {
+      setReportedUserId(undefined);
+    }
+
+    const [anonymous, ordinary] = posted.map((body) => JSON.parse(body.split('\n')[2] ?? '{}') as ErrorEvent);
+    expect(anonymous).not.toHaveProperty('user');
+    /* D1 is unchanged for every other event. */
+    expect(ordinary?.user).toEqual({ id: 'user_1' });
   });
 });

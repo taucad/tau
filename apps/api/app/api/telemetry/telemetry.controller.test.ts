@@ -24,6 +24,8 @@ function createMockMetrics() {
     agentErrors: { add: vi.fn() },
     agentSafeguardInterventions: { add: vi.fn() },
     agentCompactions: { add: vi.fn() },
+    agentPrefixBreaks: { add: vi.fn() },
+    agentReasoningOmittedBlocks: { add: vi.fn() },
     agentCallsBeforeFirstWrite: { record: vi.fn() },
     agentTimeToFirstWrite: { record: vi.fn() },
     agentReferenceLookups: { add: vi.fn() },
@@ -378,6 +380,51 @@ describe('TelemetryController', () => {
         [AttributeKey.AGENT_COMPACTION_TIER]: 'summarization',
         [AttributeKey.AGENT_COMPACTION_OUTCOME]: 'placeholder',
       });
+    });
+
+    it('should count each prefix break by cause, provider and cache outcome, and the reasoning it left out by cause', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_TURN,
+            duration: 1000,
+            detail: {
+              agentId: 'tau',
+              placement: 'browser',
+              outcome: 'completed',
+              prefixBreaks: [
+                { cause: 'clearing', provider: 'anthropic', outcome: 'miss', count: 1, reasoningOmitted: 9 },
+                { cause: 'settings', provider: 'openai', count: 2, reasoningOmitted: 0 },
+              ],
+            },
+          },
+        ],
+      });
+
+      expect(mockMetrics.agentPrefixBreaks.add.mock.calls).toEqual([
+        [
+          1,
+          {
+            [AttributeKey.AGENT_ID]: 'tau',
+            [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: 'clearing',
+            [AttributeKey.GEN_AI_PROVIDER_NAME]: 'anthropic',
+            'tau.prompt_cache.outcome': 'miss',
+          },
+        ],
+        [
+          2,
+          {
+            [AttributeKey.AGENT_ID]: 'tau',
+            [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: 'settings',
+            [AttributeKey.GEN_AI_PROVIDER_NAME]: 'openai',
+            /* A client older than the field says nothing: the break is counted with no cache figure. */
+            'tau.prompt_cache.outcome': 'unreported',
+          },
+        ],
+      ]);
+      expect(mockMetrics.agentReasoningOmittedBlocks.add.mock.calls).toEqual([
+        [9, { [AttributeKey.AGENT_ID]: 'tau', [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: 'clearing' }],
+      ]);
     });
 
     it('should count a refused turn as an error once and record no tokens', () => {

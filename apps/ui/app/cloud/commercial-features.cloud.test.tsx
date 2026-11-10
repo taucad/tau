@@ -9,8 +9,8 @@ const plan = vi.hoisted(() => ({ current: undefined as (Entitlements & { isResol
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => plan.current }));
 vi.mock('#hooks/use-settings-dialog.js', () => ({ useSettingsDialog: () => ({ open: vi.fn() }) }));
 
-const withPlan = (tier: BillingTier, isResolved = true, freeTierSync = true) => {
-  plan.current = { ...entitlementsFromTier(tier, { freeTierSync }), isResolved };
+const withPlan = (tier: BillingTier, isResolved = true) => {
+  plan.current = { ...entitlementsFromTier(tier), isResolved };
   return renderHook(() => useCommercialFeatures()).result.current;
 };
 
@@ -26,9 +26,5 @@ describe('useCommercialFeatures storage allowance', () => {
 
   it('should say nothing about storage or upgrades before the plan is known', () => {
     expect(withPlan('free', false)).toMatchObject({ storageLimitBytes: undefined, canUpgradePlan: false });
-  });
-
-  it('should include no allowance while D23 keeps free sync closed', () => {
-    expect(withPlan('free', true, false).storageLimitBytes).toBeUndefined();
   });
 });

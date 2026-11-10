@@ -495,10 +495,7 @@ describe('ModelService', () => {
     const configService = {
       get: vi.fn((key: string) => (key === 'TOGETHER_API_KEY' ? 'sk-test-together' : false)),
     } satisfies Pick<ConfigService<Environment>, 'get'>;
-    const service = new ModelService(
-      new ProviderService(configService as unknown as ConfigService<Environment, true>),
-      configService as unknown as ConfigService<Environment>,
-    );
+    const service = new ModelService(new ProviderService(), configService as unknown as ConfigService<Environment>);
     await service.getModels();
 
     expect(

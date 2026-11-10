@@ -42,8 +42,8 @@ export type CameraDriverInput = Readonly<{
 /** Commands sent to a provided camera driver. @public */
 export type CameraDriverEvent = Readonly<{ type: 'sync'; snapshot: CameraDriverSnapshot }>;
 
-/** Events accepted by {@link cameraMachine}. */
-type CameraMachineEvent =
+/** The public event alphabet of {@link cameraMachine}. @public */
+export type CameraMachineEvent =
   | Readonly<{ type: 'setVerticalFieldOfView'; verticalFieldOfView: number }>
   | Readonly<{ type: 'setViewport'; viewport: CameraViewport }>
   | Readonly<{ type: 'setBounds'; bounds: CameraBounds }>
@@ -242,6 +242,14 @@ const cameraMachineDefinition = setup({
     reset: ({ context }, enq) => syncDriver(context, resetView(context), enq),
   },
 });
+
+/**
+ * The `[state, eventType]` pairs {@link cameraMachine} declares it ignores (MC-R17). The machine has one state and
+ * answers its whole alphabet there, so the baseline is empty; a later state split adds the pairs it leaves unanswered.
+ *
+ * @public
+ */
+export const cameraIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [];
 
 type CameraMachineDefinition = typeof cameraMachineDefinition;
 

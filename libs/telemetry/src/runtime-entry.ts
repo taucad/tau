@@ -191,6 +191,26 @@ export const runtimeViewerEntrySchema = z
   })
   .refine(({ detail }) => detail.format === undefined || detail.event === 'download', 'format rides download only');
 
+/**
+ * `runtime.kill`: a browser page the browser ended, reported by the next load (crash capture blueprint, question 8).
+ * Outcome `terminated` by ruling: the host ended the page under the work, not the caller. Counts only; the kernel and
+ * the phase are closed names, and nothing about the model leaves.
+ * @public
+ */
+export const runtimeKillEntrySchema = z.object({
+  name: z.literal(RuntimeEntryName.KILL),
+  duration: z.literal(0),
+  detail: z.strictObject({
+    kernel: v.kernel.optional(),
+    phase: v.killPhase,
+    classification: v.killClass,
+    route: v.route,
+    release,
+    device: v.device.optional(),
+    platform: v.platform.optional(),
+  }),
+});
+
 /** `telemetry.delivery`: what the reporter dropped before this batch, by reason, and how old the batch is. @public */
 export const deliveryHealthEntrySchema = z.object({
   name: z.literal(RuntimeEntryName.DELIVERY),
@@ -209,6 +229,8 @@ export type RuntimeOperationRecord = z.output<typeof runtimeOperationEntrySchema
 export type RuntimeLateRecord = z.output<typeof runtimeLateEntrySchema>;
 /** A validated `runtime.viewer` entry. @public */
 export type RuntimeViewerRecord = z.output<typeof runtimeViewerEntrySchema>;
+/** A validated `runtime.kill` entry. @public */
+export type RuntimeKillRecord = z.output<typeof runtimeKillEntrySchema>;
 /** A validated `telemetry.delivery` entry. @public */
 export type DeliveryHealthRecord = z.output<typeof deliveryHealthEntrySchema>;
 /** Any validated runtime entry. @public */
@@ -216,12 +238,14 @@ export type RuntimeEntryRecord =
   | RuntimeOperationRecord
   | RuntimeLateRecord
   | RuntimeViewerRecord
+  | RuntimeKillRecord
   | DeliveryHealthRecord;
 
 const entrySchemas = {
   [RuntimeEntryName.OPERATION]: runtimeOperationEntrySchema,
   [RuntimeEntryName.LATE]: runtimeLateEntrySchema,
   [RuntimeEntryName.VIEWER]: runtimeViewerEntrySchema,
+  [RuntimeEntryName.KILL]: runtimeKillEntrySchema,
   [RuntimeEntryName.DELIVERY]: deliveryHealthEntrySchema,
 } as const;
 

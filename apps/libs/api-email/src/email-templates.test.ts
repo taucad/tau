@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { EmailTemplate } from '#email.types.js';
 import { renderEmailTemplate, specForEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
 import { describeDevice, expiresIn } from '#email-copy.js';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { dark, light } from '#templates/email-palette.generated.js';
+import { wordmarkSize } from '#templates/shared.js';
 
 const layout = { siteUrl: 'https://tau.new', assetBase: 'https://tau.new' } as const;
 
@@ -11,6 +14,7 @@ const actionUrl: Record<EmailTemplate['kind'], string> = {
   'reset-password': 'https://tau.new/auth/reset-password?token=secret',
   'password-changed': 'https://tau.new/auth/forgot-password',
   'verify-email': 'https://tau.new/auth/verify-email?token=secret&redirectTo=%2F',
+  'account-exists': 'https://tau.new/auth/sign-in',
   'publication-invite': 'https://tau.new/s/tau~pub_123',
   'payment-failed': 'https://tau.new/?settings=billing',
   'auto-reload-disabled': 'https://tau.new/?settings=billing',
@@ -27,7 +31,18 @@ const templates: EmailTemplate[] = [
     url: actionUrl['password-changed'],
     device: 'Safari on macOS',
   },
-  { kind: 'verify-email', email: 'user@example.com', url: actionUrl['verify-email'] },
+  {
+    kind: 'verify-email',
+    email: 'user@example.com',
+    url: actionUrl['verify-email'],
+  },
+  {
+    kind: 'account-exists',
+    email: 'user@example.com',
+    url: actionUrl['account-exists'],
+    resetUrl: 'https://tau.new/auth/forgot-password',
+    device: 'Safari on macOS',
+  },
   {
     kind: 'publication-invite',
     recipientEmail: 'friend@example.com',
@@ -70,9 +85,69 @@ describe.each(templates)('$kind email', (template) => {
     // F13: both schemes are declared and the dark block exists.
     expect(html).toContain('name="color-scheme"');
     expect(html).toContain('@media (prefers-color-scheme: dark)');
-    expect(html).toContain(`<title>${spec.subject}</title>`);
-    // Gmail clips messages past 102 KB and hides the footer behind a "view entire message" link.
-    expect(Buffer.byteLength(html)).toBeLessThan(102_400);
+    // React-email's Preview would add a second <title> holding the preheader.
+    expect(html.match(/<title>[^<]*<\/title>/gu)).toEqual([`<title>${spec.subject}</title>`]);
+    // Gmail clips messages past 102 KB; 60 KB keeps the margin wide.
+    expect(Buffer.byteLength(html)).toBeLessThan(60 * 1024);
+  });
+
+  it('starts the inbox preview at the preheader', async () => {
+    const { html } = await renderEmailTemplate(template, layout);
+    const spec = specForEmailTemplate(template);
+
+    // Apple Mail starts its snippet at the first literal `<body>` in the raw HTML, wherever it sits.
+    expect(html.match(/<body/gu)).toHaveLength(1);
+    const afterBody = html.slice(html.indexOf('<body'));
+    const firstText = afterBody
+      .replaceAll(/<!--[\s\S]*?-->/gu, '')
+      .replaceAll(/<[^>]+>/gu, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '')
+      ?.replaceAll('&#x27;', "'")
+      .replaceAll('&quot;', '"')
+      .replaceAll('&amp;', '&');
+    expect(firstText).toBe(spec.preheader);
+  });
+
+  it('ships stylesheets every client can keep', async () => {
+    const { html } = await renderEmailTemplate(template, layout);
+    const blocks = [...html.matchAll(/<style>([\s\S]*?)<\/style>/gu)].map(([, css]) => css ?? '');
+
+    for (const css of blocks) {
+      // Comments leak into Apple Mail previews and make Yahoo skip the next rule.
+      expect(css).not.toContain('/*');
+      expect(css).not.toContain('<');
+      // Gmail drops a block over its size limit and every block after it.
+      expect(css.length).toBeLessThan(8000);
+    }
+    // One purpose per block, in order of importance, so a block Gmail rejects takes nothing else with it.
+    const purpose = (needle: string): number => blocks.findIndex((css) => css.includes(needle));
+    expect(purpose('@media (max-width: 600px)')).toBeLessThan(purpose('prefers-color-scheme'));
+    expect(purpose('prefers-color-scheme')).toBeLessThan(purpose('[data-ogsc]'));
+    expect(purpose('[data-ogsc]')).toBeLessThan(purpose('@font-face'));
+    expect(blocks.filter((css) => css.includes('[')).every((css) => !css.includes('@media'))).toBe(true);
+    expect(blocks.filter((css) => css.includes('@font-face')).every((css) => !css.includes('@media'))).toBe(true);
+  });
+
+  it('holds the card at 560 px in Outlook for Windows', async () => {
+    const { html } = await renderEmailTemplate(template, layout);
+
+    expect(html).toContain('<!--[if mso]><table role="presentation" width="560"');
+    expect(html).toContain('<!--[if mso]></td></tr></table><![endif]-->');
+    expect(html).not.toContain('tau-mso-');
+  });
+
+  it('styles addresses itself so clients do not turn them blue', async () => {
+    const { html } = await renderEmailTemplate(template, layout);
+    const addresses = new Set(html.match(/[\w.+-]+@example\.com/gu) ?? []);
+
+    for (const email of addresses) {
+      // Every visible occurrence is inside a Tau link; the preheader is hidden and exempt.
+      const visible = html.slice(html.indexOf('</div>', html.indexOf('data-skip-in-text')));
+      const bare = visible.split(`mailto:${email}`).join('').split(`>${email}</a>`).join('');
+      expect(bare, `${email} appears outside a Tau address link`).not.toContain(email);
+    }
   });
 
   it('keeps the subject, preheader and action distinct', async () => {
@@ -96,6 +171,16 @@ describe.each(templates)('$kind email', (template) => {
     for (const hex of new Set(html.match(/#[0-9a-f]{6}/gu) ?? [])) {
       expect(palette, `${hex} is not in the generated palette`).toContain(hex);
     }
+  });
+});
+
+describe('wordmark', () => {
+  it('keeps the drawn box at the asset ratio', () => {
+    const png = readFileSync(resolve(import.meta.dirname, '../../../ui/public/wordmark.png'));
+    const width = png.readUInt32BE(16);
+    const height = png.readUInt32BE(20);
+
+    expect(Math.abs(wordmarkSize.width / wordmarkSize.height / (width / height) - 1)).toBeLessThan(0.02);
   });
 });
 

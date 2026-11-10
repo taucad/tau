@@ -154,15 +154,16 @@ Use `isOperationAbortedError`, `isOperationTimeoutError`, or `isRuntimeTerminate
 
 `RuntimeLifecycleState` advances through `unconnected`, `connecting`, `connected`, and `terminated`. `connect()` is idempotent and takes no arguments; explicit connection allows capability discovery before opening a document. `terminate()` initiates teardown; `shutdown()` awaits transport closure. Both settle owned pending work and remove subscriptions.
 
-| Client event     | Payload                                          |
-| ---------------- | ------------------------------------------------ |
-| `capabilities`   | `CapabilitiesManifest`                           |
-| `state`          | `idle`, `busy`, or `error`, with optional detail |
-| `log`            | `LogEntry`                                       |
-| `telemetry`      | `TelemetryBatch`                                 |
-| `error`          | Connection-scoped `KernelIssue` records          |
-| `operation`      | `RuntimeOperationObservation`, one per attempt   |
-| `operation-late` | `RuntimeLateTerminal`                            |
+| Client event      | Payload                                        |
+| ----------------- | ---------------------------------------------- |
+| `capabilities`    | `CapabilitiesManifest`                         |
+| `state`           | `idle`, `busy`, or `error`, with detail        |
+| `log`             | `LogEntry`                                     |
+| `telemetry`       | `TelemetryBatch`                               |
+| `error`           | Connection-scoped `KernelIssue` records        |
+| `operation-begin` | `RuntimeOperationBegin`                        |
+| `operation`       | `RuntimeOperationObservation`, one per attempt |
+| `operation-late`  | `RuntimeLateTerminal`                          |
 
 Model/projection events belong to documents/views. `LogEntry` includes level (`LogLevel`; `logLevels`), timestamp, message, optional `LogOrigin` and data. `RuntimeCapabilities` combines the manifest with transport information. `machines` and `jobs` expose availability facets; inspect the facet before accessing its client.
 

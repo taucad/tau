@@ -16,6 +16,15 @@ import type { ParsedPublication } from '#components/share/parsed-publication.js'
 import { useViewPing } from '#components/share/use-view-ping.js';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { recordInteraction } from '#lib/kill-work-context.js';
+import { recordKillWork, recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
+import { killMemory, killMemoryClearAfter, modelKeyOf } from '#lib/kill-memory.js';
+import type { PausedState } from '#lib/kill-memory.js';
+import { readBuildId } from '#lib/build-identity.js';
+import { PausedModelGate } from '#components/share/paused-model-gate.js';
+import { onViewerEvent } from '@taucad/viewer/lib/renderer-telemetry';
+import { kernelConfigurations } from '@taucad/types/constants';
+import { parseShareSlug } from '@taucad/share/locator';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
@@ -42,6 +51,71 @@ const rememberSessionRunConsent = (consentKey: string): void => {
  * Shared models are code that runs on this origin's runtime worker, so a viewer opts in before any kernel starts.
  * Interim control until model code runs on a separate sandbox origin.
  */
+/**
+ * What the tab-kill marker may say about a share: the provider, and a builtin's public catalog name. A Gist or a
+ * Tau publication reference identifies someone's share and is never recorded (crash capture blueprint, Finding 7).
+ *
+ * @param slug - The route's share slug, or `undefined` for a publication opened by id.
+ * @returns The closed fields, and a builtin's kernel.
+ */
+export const shareWorkOf = (
+  slug: string | undefined,
+): Readonly<{ shareProvider: string; builtin?: string; kernel?: string }> => {
+  if (slug === undefined) {
+    return { shareProvider: 'tau' };
+  }
+  try {
+    const locator = parseShareSlug(slug);
+    return locator.providerId === 'builtin' && locator.reference !== undefined
+      ? // A builtin locator is `<kernel>.<example>`, so it names its kernel before any kernel starts.
+        { shareProvider: 'builtin', builtin: locator.reference, kernel: locator.reference.split('.', 1)[0] }
+      : { shareProvider: locator.providerId };
+  } catch {
+    return { shareProvider: 'tau' };
+  }
+};
+
+/** This build's id as the tab-kill marker records it, so a new build gets one automatic try. */
+const currentBuild = (): string | undefined => {
+  const id = readBuildId();
+  return id === 0 ? undefined : String(id);
+};
+
+/** The display name of a runtime kernel id, or the id itself. */
+const kernelNameOf = (kernel: string | undefined): string | undefined =>
+  kernel === undefined
+    ? undefined
+    : (kernelConfigurations.find(
+        (configuration) => configuration.id === kernel || configuration.backendProvider === kernel,
+      )?.name ?? kernel);
+
+/**
+ * The paused-model gate's thumbnail: the model's stored `thumbnail.webp`, as an object URL for as long as it shows.
+ *
+ * @param files - The share's files.
+ * @param isShown - Whether the gate shows.
+ * @returns The URL, or `undefined` when there is no thumbnail.
+ */
+const useStoredThumbnail = (files: SharedProjectFiles, isShown: boolean): string | undefined => {
+  const thumbnail = files['thumbnail.webp'];
+  const url = useMemo(
+    () =>
+      isShown && thumbnail !== undefined
+        ? URL.createObjectURL(new Blob([thumbnail.content], { type: 'image/webp' }))
+        : undefined,
+    [isShown, thumbnail],
+  );
+  useEffect(
+    () => () => {
+      if (url !== undefined) {
+        URL.revokeObjectURL(url);
+      }
+    },
+    [url],
+  );
+  return url;
+};
+
 const SharedRunConsent = ({
   title,
   onRun,
@@ -227,6 +301,7 @@ export const SharedProjectWorkbench = ({
   shareUrl,
   sourceLabel,
   managementActions,
+  kernel,
 }: {
   readonly shouldTrackView?: boolean;
   readonly projectId: string;
@@ -236,6 +311,8 @@ export const SharedProjectWorkbench = ({
   readonly shareUrl?: string;
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
+  /** The model's runtime kernel id, from the share manifest, recorded before any kernel starts. */
+  readonly kernel?: string;
 }): React.JSX.Element => {
   const instanceId = useId().replaceAll(':', '');
   const previewInstance = `shared-${instanceId}`;
@@ -257,9 +334,62 @@ export const SharedProjectWorkbench = ({
     rememberSessionRunConsent(consentKey);
     setHasRunConsent(true);
   }, [consentKey]);
+  // Crash capture: a model that stopped the page the last time it opened here is paused, not re-run.
+  const modelKey = useMemo(() => modelKeyOf(consentKey), [consentKey]);
+  const [paused, setPaused] = useState<PausedState | undefined>(() => killMemory.pausedState(modelKey, currentBuild()));
+  const tryOnce = useCallback(() => {
+    setPaused(undefined);
+  }, []);
+  const work = useMemo(() => shareWorkOf(slug), [slug]);
+  const isRunning = hasRunConsent && paused === undefined;
+  const thumbnailUrl = useStoredThumbnail(hydratedFiles, paused !== undefined);
+
+  // Opening a shared model is the first step of the crash record: before the kernel, the viewer or any render.
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+    recordKillWork({ ...work, ...(kernel === undefined ? {} : { kernel }), model: modelKey });
+    recordMemoryBreadcrumb('open');
+    recordInteraction('open');
+  }, [isRunning, kernel, modelKey, work]);
+
+  // A model that reached its first frame and kept the page alive 10 s more is no longer paused here.
+  useEffect(() => {
+    if (!isRunning) {
+      return undefined;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = onViewerEvent((event) => {
+      if (event.event === 'first-frame' && timer === undefined) {
+        timer = setTimeout(() => {
+          killMemory.clear(modelKey);
+        }, killMemoryClearAfter);
+      }
+    });
+    return () => {
+      stop();
+      clearTimeout(timer);
+    };
+  }, [isRunning, modelKey]);
 
   if (!hasRunConsent) {
     return <SharedRunConsent title={publication.title} onRun={grantRunConsent} />;
+  }
+
+  if (paused !== undefined) {
+    const kernelName = kernelNameOf(kernel ?? work.kernel);
+    const entryFile = publication.entryPath.split('/').at(-1);
+    const facts = [entryFile, kernelName].filter((part) => part !== undefined && part !== '').join(' · ');
+    return (
+      <PausedModelGate
+        state={paused}
+        name={publication.title}
+        thumbnailUrl={thumbnailUrl}
+        facts={facts === '' ? undefined : facts}
+        onRun={tryOnce}
+      />
+    );
   }
 
   return (

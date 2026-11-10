@@ -212,6 +212,14 @@ describe('LangfuseClient', () => {
       expect(fetcher).not.toHaveBeenCalled();
     });
 
+    it('should say which scores have a config id, so a receipt can be held before any of its scores is sent', () => {
+      const client = new LangfuseClient(configured, 1000, vi.fn<typeof fetch>());
+
+      expect(client.scoreConfigured('run-termination')).toBe(true);
+      expect(client.scoreConfigured('task-success')).toBe(false);
+      expect(new LangfuseClient(target, 1000, vi.fn<typeof fetch>()).scoreConfigured('user-rating')).toBe(false);
+    });
+
     it('should settle a 207 rejected and never send it again', async () => {
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(207, { errors: [{ id: score.id, status: 400 }] }));
 

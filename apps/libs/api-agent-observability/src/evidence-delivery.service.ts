@@ -12,13 +12,25 @@ import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import type { AgentEvidenceDeliveryOutcome, AgentEvidenceSupersededReason } from '@taucad/api-observability/metrics';
+import type {
+  AgentEvidenceDeliveryOutcome,
+  AgentEvidenceScoreOutcome,
+  AgentEvidenceSupersededReason,
+} from '@taucad/api-observability/metrics';
 import { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#evidence-seal.js';
 import { leasePending, leaseUncertain, prepareSend, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
 import type { DeliverySettlement, LeasedDelivery } from '#evidence-delivery.js';
 import { LangfuseClient } from '#langfuse-client.js';
-import { exportableEvidence, langfuseObservation, pseudonymKey, receiptSpanId } from '#langfuse-observation.js';
+import type { ScoreOutcome } from '#langfuse-client.js';
+import {
+  exportableEvidence,
+  langfuseObservation,
+  langfuseScores,
+  pseudonymKey,
+  receiptSpanId,
+} from '#langfuse-observation.js';
+import type { LangfuseScore } from '#langfuse-observation.js';
 
 /** Delivery pacing. Fixed and low: vendor availability never gates the API. */
 export const deliveryTiming = Object.freeze({
@@ -44,6 +56,9 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
       return settlement.reason === 'acknowledged' ? 'acknowledged' : 'uncertain';
     }
     case 'expired': {
+      if (settlement.reason === 'score-uncertain') {
+        return 'uncertain';
+      }
       return settlement.reason === 'gap'
         ? 'gap'
         : settlement.reason === 'revoked' || settlement.reason === 'deleted'
@@ -57,6 +72,24 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
       return settlement.kind;
     }
   }
+};
+
+const scoreOutcome: Readonly<Record<ScoreOutcome['kind'], AgentEvidenceScoreOutcome>> = {
+  accepted: 'accepted',
+  rejected: 'rejected',
+  uncertain: 'uncertain',
+  'not-sent': 'not_sent',
+  held: 'held',
+};
+
+/** The reason of a receipt's first score write that ended `kind`, if one did. */
+const reasonOf = (outcomes: readonly ScoreOutcome[], kind: 'not-sent' | 'rejected'): string | undefined => {
+  for (const outcome of outcomes) {
+    if (outcome.kind === kind && 'reason' in outcome) {
+      return outcome.reason;
+    }
+  }
+  return undefined;
 };
 
 const supersededReason: Readonly<Record<'object' | 'no-object', AgentEvidenceSupersededReason>> = {
@@ -133,7 +166,15 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       publicKey !== undefined &&
       secretKey !== undefined
     ) {
-      this.client = new LangfuseClient({ baseUrl, publicKey, secretKey }, deliveryTiming.requestTimeoutMilliseconds);
+      this.client = new LangfuseClient(
+        {
+          baseUrl,
+          publicKey,
+          secretKey,
+          scoreConfigs: configService.get('TAU_OBSERVABILITY_SCORE_CONFIG_IDS', { infer: true }),
+        },
+        deliveryTiming.requestTimeoutMilliseconds,
+      );
     }
     /* The same deployment name the payload was sealed under at admission. */
     const deployment: unknown = configService.get('BILLING_ENVIRONMENT', { infer: true });
@@ -390,8 +431,23 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       { environment: this.environment, protection: row.protection, identity: exportable.identity },
       pseudonym,
     );
+    const scores = langfuseScores(exportable.evidence, { environment: this.environment });
+    const unconfigured = scores.filter((score) => !client.scoreConfigured(score.name));
+    if (unconfigured.length > 0) {
+      /* Held whole, before anything is sent, until the operator names the score configs (LW9). */
+      for (const score of unconfigured) {
+        this.countScore(score, { kind: 'held', reason: 'config-unset' });
+      }
+      return this.settle(row, {
+        kind: 'retry',
+        reason: 'score-config',
+        notBefore: new Date(now.getTime() + deliveryTiming.maxBackoffMilliseconds),
+      });
+    }
     if (observation === undefined) {
-      return this.settle(row, { kind: 'superseded', reason: 'no-object' });
+      return scores.length === 0
+        ? this.settle(row, { kind: 'superseded', reason: 'no-object' })
+        : this.settleScores(row, await this.writeScores(client, scores), now);
     }
     const [object] = observation.spans;
     const claim = await prepareSend(
@@ -404,6 +460,8 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       },
     );
     if (claim === 'taken') {
+      /* A later outcome of a run whose root is written still writes its own scores (rule 5). */
+      await this.writeScores(client, scores);
       return this.settle(row, { kind: 'superseded', reason: 'object' });
     }
     if (claim === 'lost') {
@@ -412,6 +470,13 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
     progress.identified = true;
     const outcome = await client.send(observation.spans, this.shutdown.signal);
+    /*
+     * The scores follow the observation once it will never be sent again, so a retried send cannot write them twice.
+     * The payload goes with the settlement, so a score whose write failed here is not tried again.
+     */
+    if (outcome.kind !== 'not-sent') {
+      await this.writeScores(client, scores);
+    }
     switch (outcome.kind) {
       case 'accepted': {
         return this.settle(row, { kind: 'sent', reason: 'acknowledged' });
@@ -430,6 +495,62 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
         return this.settle(row, { kind: 'rejected', reason: outcome.reason });
       }
     }
+  }
+
+  /**
+   * Write a receipt's scores one at a time, each settled by its answer (nothing reads a score back), and count each
+   * outcome once. A write that never reached Langfuse stops the rest, so a receipt that only writes scores can be retried
+   * whole; any other answer is final.
+   */
+  private async writeScores(
+    client: LangfuseClient,
+    scores: readonly LangfuseScore[],
+  ): Promise<readonly ScoreOutcome[]> {
+    const outcomes: ScoreOutcome[] = [];
+    for (const score of scores) {
+      // oxlint-disable-next-line no-await-in-loop -- one score per request, in order, stopping at the first unsent
+      const outcome = await client.score(score, this.shutdown.signal);
+      this.countScore(score, outcome);
+      outcomes.push(outcome);
+      if (outcome.kind === 'not-sent') {
+        break;
+      }
+    }
+    return outcomes;
+  }
+
+  /**
+   * Count one score write by its outcome. An `accepted` score is the one Langfuse holds, counted here once per write
+   * that is never repeated, which is where the `score` kind of a units counter belongs (LW24).
+   */
+  private countScore(score: LangfuseScore, outcome: ScoreOutcome): void {
+    this.metrics.agentEvidenceScores.add(1, {
+      'tau.agent_evidence.score': score.name,
+      outcome: scoreOutcome[outcome.kind],
+    });
+  }
+
+  /**
+   * Settle a receipt that writes scores and no observation (a rating): confirmed by an accepted answer, rejected by a
+   * refusal, retried when a write never reached Langfuse, since a repeat replaces itself (LD5), and expired when it
+   * stayed uncertain after its bounded repeats, as nothing can read it back.
+   */
+  private async settleScores(row: LeasedDelivery, outcomes: readonly ScoreOutcome[], now: Date): Promise<string> {
+    const unsent = reasonOf(outcomes, 'not-sent');
+    if (unsent !== undefined) {
+      return this.settle(row, {
+        kind: 'retry',
+        reason: unsent,
+        notBefore: new Date(now.getTime() + retryDelay(row.attempts)),
+      });
+    }
+    const refused = reasonOf(outcomes, 'rejected');
+    if (refused !== undefined) {
+      return this.settle(row, { kind: 'rejected', reason: refused });
+    }
+    return outcomes.some((outcome) => outcome.kind === 'uncertain')
+      ? this.settle(row, { kind: 'expired', reason: 'score-uncertain' })
+      : this.settle(row, { kind: 'confirmed' });
   }
 
   private async reconcile(client: LangfuseClient, row: LeasedDelivery, now: Date): Promise<string> {

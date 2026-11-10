@@ -207,6 +207,16 @@ export class LangfuseClient {
   }
 
   /**
+   * Whether this project names a score config for a score, so its writes can be sent.
+   *
+   * @param name - The score's name.
+   * @returns True when the setting names its config id.
+   */
+  public scoreConfigured(name: LangfuseScoreName): boolean {
+    return this.target.scoreConfigs?.[name] !== undefined;
+  }
+
+  /**
    * Write one score with `POST /api/public/scores`, as an array of one that names the project's score config. A score
    * whose config id is not set is held and never sent without it. An uncertain answer repeats the identical body, at
    * most {@link scoreAttempts} sends in all; nothing is ever read back.

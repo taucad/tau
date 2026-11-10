@@ -134,6 +134,14 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };
 
+/** A completed run's outcome, decided verified by rule `cad-checks-v1`: its root and two scores. */
+export const outcomeFact = (): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
+  kind: 'outcome',
+  termination: 'completed',
+  success: 'verified',
+  assessment: 'cad-checks-v1',
+});
+
 /** A settled tool call's summary fact: one that maps to a Langfuse object. */
 export const toolFact = (call = 'call-1'): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
   kind: 'tool',

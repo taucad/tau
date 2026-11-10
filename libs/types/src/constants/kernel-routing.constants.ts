@@ -83,6 +83,8 @@ export type KernelRoutingTier = 'narrow' | 'broad' | 'none';
 export type KernelRoutingPreference = {
   readonly kernels: readonly KernelId[];
   readonly when: string;
+  /** The zone's remaining choice when no other signal fires; meaningless, and not rendered, without another signal. */
+  readonly otherwise?: true;
 };
 
 /**
@@ -122,7 +124,7 @@ export const kernelRoutingRules = [
     id: 'explicit-request',
     name: 'Explicit request',
     outcomes: [
-      { when: 'A kernel named by name', kernels: [] },
+      { when: 'A kernel named in the request', kernels: [] },
       { when: 'Python', kernels: ['build123d', 'smlibpy'] },
       { when: 'C#', kernels: ['picogk'] },
       { when: 'KCL', kernels: ['zoo'] },
@@ -207,7 +209,7 @@ export const kernelRoutingZones = [
       { kernels: ['opencascadejs'], when: 'an operation replicad lacks' },
       { kernels: ['smlib', 'smlibpy'], when: 'NURBS surfaces' },
       { kernels: ['build123d'], when: 'Python or existing Python code' },
-      { kernels: ['replicad'], when: 'none of those' },
+      { kernels: ['replicad'], when: 'none of those', otherwise: true },
     ],
   },
   {
@@ -220,7 +222,7 @@ export const kernelRoutingZones = [
       { kernels: ['opencascadejs'], when: 'an operation replicad lacks' },
       { kernels: ['smlib', 'smlibpy'], when: 'NURBS surfaces' },
       { kernels: ['build123d'], when: 'Python or existing Python code' },
-      { kernels: ['replicad'], when: 'none of those' },
+      { kernels: ['replicad'], when: 'none of those', otherwise: true },
     ],
   },
   {
@@ -232,7 +234,7 @@ export const kernelRoutingZones = [
     preferred: [
       { kernels: ['zoo'], when: 'the request itself describes a large assembly' },
       { kernels: ['build123d'], when: 'Python or existing Python code' },
-      { kernels: ['replicad'], when: 'otherwise' },
+      { kernels: ['replicad'], when: 'none of those', otherwise: true },
     ],
   },
   {

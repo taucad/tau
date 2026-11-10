@@ -1,9 +1,19 @@
-import type { ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
+import type { LangfuseScoreName } from '@taucad/api-core';
+import type { LangfuseScore, ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
 import { otlpBody, settlementObservationName } from '#langfuse-observation.js';
 
-/** Where and as whom the API writes to one Langfuse project. Server-side only. */
-export type LangfuseTarget = Readonly<{ baseUrl: string; publicKey: string; secretKey: string }>;
+/**
+ * Where and as whom the API writes to one Langfuse project. Server-side only. `scoreConfigs` names the project's score
+ * config for each score (`TAU_OBSERVABILITY_SCORE_CONFIG_IDS`); config ids differ per project and are never read from
+ * Langfuse (charter D6, ruling 9).
+ */
+export type LangfuseTarget = Readonly<{
+  baseUrl: string;
+  publicKey: string;
+  secretKey: string;
+  scoreConfigs?: Readonly<Partial<Record<LangfuseScoreName, string>>> | undefined;
+}>;
 
 /**
  * What one send attempt established about the observation (T02 attempts 1–6).
@@ -16,6 +26,19 @@ export type LangfuseTarget = Readonly<{ baseUrl: string; publicKey: string; secr
 export type SendOutcome =
   | Readonly<{ kind: 'accepted' }>
   | Readonly<{ kind: 'rejected' | 'not-sent' | 'uncertain'; reason: string }>;
+
+/**
+ * What one score write established (LW7). Nothing reads a score back (ruling 9), so its answer settles it: `accepted`
+ * and `rejected` are final, `not-sent` provably never reached Langfuse, `uncertain` may have been stored after its
+ * bounded repeats, and `held` was not sent because its score config id is not set.
+ */
+export type ScoreOutcome = SendOutcome | Readonly<{ kind: 'held'; reason: 'config-unset' }>;
+
+/**
+ * How many times one score write sends its identical body while the answer is uncertain. A repeat is safe: Langfuse
+ * replaces a score with the same id, name and timestamp date (LD5).
+ */
+export const scoreAttempts = 3;
 
 /** What one reconciliation read established; `unavailable` is never absence. */
 export type FindOutcome = 'present' | 'absent' | 'unavailable';
@@ -89,6 +112,16 @@ export const classifySendResponse = (status: number, body: unknown): SendOutcome
   }
   return { kind: 'uncertain', reason: `http-${status}` };
 };
+
+/**
+ * Classify the vendor's answer to one score write, always an array of one score. A 207 on that array means its one
+ * score was refused, and the OpenAPI says not to retry it; any other answer reads as for a span.
+ *
+ * @param status - The HTTP status.
+ * @returns The outcome, with a bounded reason code.
+ */
+export const classifyScoreResponse = (status: number): SendOutcome =>
+  status === 207 ? { kind: 'rejected', reason: 'partial' } : classifySendResponse(status, undefined);
 
 const readJson = async (response: Response): Promise<unknown> => {
   try {
@@ -171,6 +204,47 @@ export class LangfuseClient {
     } catch (error) {
       return classifySendError(error);
     }
+  }
+
+  /**
+   * Write one score with `POST /api/public/scores`, as an array of one that names the project's score config. A score
+   * whose config id is not set is held and never sent without it. An uncertain answer repeats the identical body, at
+   * most {@link scoreAttempts} sends in all; nothing is ever read back.
+   *
+   * @param score - The score, with its fixed id and timestamp.
+   * @param signal - Aborts the request on shutdown; an abort is uncertain.
+   * @returns What the write established.
+   */
+  public async score(score: LangfuseScore, signal?: AbortSignal): Promise<ScoreOutcome> {
+    const configId = this.target.scoreConfigs?.[score.name];
+    if (configId === undefined) {
+      return { kind: 'held', reason: 'config-unset' };
+    }
+    const { id, traceId, observationId, name, value, dataType, timestamp, environment } = score;
+    const body = JSON.stringify([
+      { id, traceId, observationId, name, value, dataType, configId, timestamp, environment },
+    ]);
+    let outcome: SendOutcome = { kind: 'uncertain', reason: 'unsent' };
+    for (let attempt = 0; attempt < scoreAttempts && outcome.kind === 'uncertain'; attempt++) {
+      const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a repeat follows only an uncertain answer
+        const response = await this.fetcher(new URL('/api/public/scores', this.target.baseUrl), {
+          method: 'POST',
+          headers: { authorization: authorization(this.target), 'content-type': 'application/json' },
+          body,
+          signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
+          redirect: 'error',
+        });
+        outcome = classifyScoreResponse(response.status);
+      } catch (error) {
+        outcome = classifySendError(error);
+      }
+      if (signal?.aborted === true) {
+        break;
+      }
+    }
+    return outcome;
   }
 
   /**

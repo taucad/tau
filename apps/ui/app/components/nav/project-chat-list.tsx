@@ -32,7 +32,7 @@ import {
 } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { toast } from '@taucad/ui/components/sonner';
 
 const chatsPerPage = 5;

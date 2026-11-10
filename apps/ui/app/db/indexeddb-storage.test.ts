@@ -1,14 +1,14 @@
 import { projectToManifest } from '@taucad/types';
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Project } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
-import type { EditorState } from '#types/editor.types.js';
+import type { EditorState } from '@taucad/ui-core/types/editor.types';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 const projectOneId = 'proj_one';

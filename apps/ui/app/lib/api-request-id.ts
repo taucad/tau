@@ -1,4 +1,4 @@
-import { isWeakKey } from '#lib/weak-key.js';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /*
  * Browser–API correlation (SB13): the `request-id` the API answers every request with, recorded on the error a

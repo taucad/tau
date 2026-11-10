@@ -8,7 +8,7 @@ import { Progress } from '@taucad/ui/components/progress';
 import { useLargeObjects, useProjectAvailability } from '#hooks/use-project-availability.js';
 import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 const messages = {
   connecting: ['Connecting to Tau Cloud', 'Opening this project on this device.'],

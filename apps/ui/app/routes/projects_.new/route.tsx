@@ -19,7 +19,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@t
 import { getKernelOption } from '#utils/kernel.utils.js';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 import { toast } from '@taucad/ui/components/sonner';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
+import { encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
@@ -27,7 +27,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { isDesktopTarget } from '#lib/build-target.js';

@@ -10,7 +10,7 @@ import type { RevisionConflictFacet } from '@taucad/revisions';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {

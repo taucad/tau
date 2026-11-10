@@ -5,7 +5,7 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAllChats } from '#hooks/use-all-chats.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';

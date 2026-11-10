@@ -1,6 +1,6 @@
 import process from 'node:process';
 import type { LoaderFunction } from 'react-router';
-import { heapThresholdBytes } from '#constants/health.constants.js';
+import { heapThresholdBytes } from '@taucad/ui-core/constants/health.constants';
 import { getEnvironment } from '#environment.config.js';
 
 /**

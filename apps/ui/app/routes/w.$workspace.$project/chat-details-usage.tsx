@@ -9,8 +9,8 @@ import {
   TableFooter,
   Table,
 } from '@taucad/ui/components/table';
-import { formatCredits } from '#utils/credits.utils.js';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 import { useProjectChatUsage } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';

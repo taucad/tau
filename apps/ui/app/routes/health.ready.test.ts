@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- TAU_API_URL is the env var name and HTTP `Accept` header retains TitleCase on the wire */
 import process from 'node:process';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { heapThresholdBytes } from '#constants/health.constants.js';
+import { heapThresholdBytes } from '@taucad/ui-core/constants/health.constants';
 
 const mockGetEnvironment = vi.fn<() => Promise<{ TAU_API_URL: string }>>();
 vi.mock('#environment.config.js', () => ({

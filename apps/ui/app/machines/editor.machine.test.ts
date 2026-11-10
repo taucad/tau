@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import type { EditorState, EditorStateInput } from '#types/editor.types.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { editorMachine } from '#machines/editor.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 
 // ---------------------------------------------------------------------------
 // Stubs

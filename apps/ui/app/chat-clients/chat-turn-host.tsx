@@ -20,7 +20,7 @@ import { buildEditedUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {

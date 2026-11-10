@@ -7,7 +7,7 @@ import { Bot, Circle, CircleAlert, Clock3, FolderGit2, GitBranch, Radio, ShieldA
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { projectChatUrl } from '#utils/project-url.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';

@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent } from '@taucad/ui/components/card';
 import { Separator } from '@taucad/ui/components/separator';
-import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+import { apiKeyPlugin } from '@taucad/ui-core/utils/api-key-plugin';
 import { cn } from '@taucad/ui/utils/cn';
 import { ApiKey } from '#components/auth/api-key/api-key.js';
 import { ApiKeySkeleton } from '#components/auth/api-key/api-key-skeleton.js';

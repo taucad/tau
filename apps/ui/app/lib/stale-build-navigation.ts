@@ -24,7 +24,7 @@
  */
 
 import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
-import { isPageHidden } from '#lib/page-visibility.js';
+import { isPageHidden } from '@taucad/ui-core/lib/page-visibility';
 
 /** Milliseconds a tab must have been hidden before being shown again asks the server. */
 export const hiddenRecheckAfter = 60_000;

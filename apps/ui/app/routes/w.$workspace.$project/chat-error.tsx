@@ -10,7 +10,10 @@ import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
 import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
-import { autoResumableProviderUnavailableCode, nextProviderUnavailableRetry } from '#utils/run-auto-resume.js';
+import {
+  autoResumableProviderUnavailableCode,
+  nextProviderUnavailableRetry,
+} from '@taucad/ui-core/utils/run-auto-resume';
 import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';

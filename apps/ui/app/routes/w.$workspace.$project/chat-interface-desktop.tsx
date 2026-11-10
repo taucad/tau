@@ -26,7 +26,7 @@ import {
   panelMinSizeViewerTight,
   panelMinSizeWorkbench,
   tightWorkspaceWidth,
-} from '#constants/editor.constants.js';
+} from '@taucad/ui-core/constants/editor.constants';
 import { cn } from '@taucad/ui/utils/cn';
 
 export const compactWorkspaceWidth = 1120;

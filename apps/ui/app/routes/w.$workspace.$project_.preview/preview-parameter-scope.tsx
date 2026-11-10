@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { randomUuid } from '@taucad/utils/id';
 import { parametersDirectory } from '@taucad/types';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
-import { createParameterSetService } from '#services/parameter-set-service.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { toast } from '@taucad/ui/components/sonner';
 
 type SourceFiles = Pick<ReturnType<typeof useFileManager>, 'exists' | 'readdir' | 'stat' | 'readFile'>;

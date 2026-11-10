@@ -23,10 +23,13 @@ type SectionHandlesProperties = Readonly<{
   planePicker?: SectionPlanePicker;
 }>;
 
+/** The handles' drawing and whether it was disposed, which the section input checks before it draws again. */
+type Drawing = Readonly<{ handles: SectionHandlesDrawing; isRetired: () => boolean }>;
+
 type SectionInputProperties = Readonly<{
   surface: HTMLElement;
   canvas: HTMLElement;
-  handles: SectionHandlesDrawing;
+  drawing: Drawing;
   planePicker?: SectionPlanePicker;
 }>;
 
@@ -35,7 +38,7 @@ type SectionInputProperties = Readonly<{
  * the drawing and the picker. It restarts only when one of those is replaced; the cuts, the bounds and the render
  * frame reach the adapter through its own subscriptions and never restart it, so none of them ends a drag.
  */
-function SectionInput({ surface, canvas, handles, planePicker }: SectionInputProperties): ReactNode {
+function SectionInput({ surface, canvas, drawing, planePicker }: SectionInputProperties): ReactNode {
   const graphics = useGraphics();
   const cameraRig = useCameraRig();
   const get = useThree((state) => state.get);
@@ -49,14 +52,15 @@ function SectionInput({ surface, canvas, handles, planePicker }: SectionInputPro
             canvas,
             get,
             invalidate,
-            handles,
+            handles: drawing.handles,
+            isRetired: drawing.isRetired,
             planePicker,
             graphics,
             cameraRig,
           }),
         },
       }),
-    [cameraRig, canvas, get, graphics, handles, invalidate, planePicker, surface],
+    [cameraRig, canvas, drawing, get, graphics, invalidate, planePicker, surface],
   );
   useActorRef(logic);
   return null;
@@ -85,16 +89,20 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
   // The drawing is an external Three resource: one per backend, disposed when it is replaced or the handles unmount.
-  // StrictMode's second effect pass builds a new one, which the section input then starts around.
-  const [handles, setHandles] = useState<SectionHandlesDrawing>();
+  // StrictMode's second effect pass builds a new one, which the section input then starts around. A section input
+  // stops a microtask after its unmount, so it checks `isRetired` before it draws into a disposed drawing.
+  const [drawing, setDrawing] = useState<Drawing>();
   useLayoutEffect(() => {
-    const drawing = createSectionHandles({ backend });
+    const handles = createSectionHandles({ backend });
+    const life = { retired: false };
     // oxlint-disable-next-line react/set-state-in-effect -- The effect owns allocation and StrictMode-safe teardown of this external resource.
-    setHandles(drawing);
+    setDrawing({ handles, isRetired: () => life.retired });
     return () => {
-      drawing.dispose();
+      life.retired = true;
+      handles.dispose();
     };
   }, [backend]);
+  const handles = drawing?.handles;
 
   useFrame((state) => {
     if (isActive) {
@@ -103,13 +111,13 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
   });
 
   // The section input restarts when a host object it is built around is replaced: a new generation keys it afresh.
-  const hostObjects = [surface, canvas, handles, planePicker, graphics, cameraRig, get, invalidate] as const;
+  const hostObjects = [surface, canvas, drawing, planePicker, graphics, cameraRig, get, invalidate] as const;
   const [hosts, setHosts] = useState({ objects: hostObjects, generation: 0 });
   if (hostObjects.some((object, index) => object !== hosts.objects[index])) {
     setHosts({ objects: hostObjects, generation: hosts.generation + 1 });
   }
 
-  if (!handles) {
+  if (!drawing) {
     return null;
   }
 
@@ -119,11 +127,11 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
         key={hosts.generation}
         surface={surface}
         canvas={canvas}
-        handles={handles}
+        drawing={drawing}
         planePicker={planePicker}
       />
       <SceneOverlay shouldClearDepth overlayActive={isActive} renderPriority={sectionHandlesPriority}>
-        {isActive ? <primitive object={handles.root} /> : null}
+        {isActive ? <primitive object={drawing.handles.root} /> : null}
       </SceneOverlay>
     </>
   );

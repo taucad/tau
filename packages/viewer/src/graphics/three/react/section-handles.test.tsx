@@ -24,9 +24,8 @@ const mocks = vi.hoisted(() => {
     frame: undefined as FrameCallback | undefined,
     bounds,
     renderFrame,
-    /** The view session's render-frame listeners, called after each rebase. */
-    renderFrameListeners: new Set<() => void>(),
-    session: undefined as unknown,
+    /** Callbacks subscribed to R3F's frame loop through `internal.subscribe`. */
+    frameSubscribers: new Set<{ current: () => void }>(),
     cameraRig: undefined as unknown,
   };
 });
@@ -43,10 +42,6 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
     useRenderFrame: () => mocks.renderFrame,
   };
 });
-
-vi.mock('#services/graphics-camera-registry.js', () => ({
-  getViewCameraSession: () => mocks.session,
-}));
 
 vi.mock('@react-three/fiber', () => ({
   useThree: (selector: (state: unknown) => unknown) => selector(mocks.state),
@@ -153,15 +148,7 @@ const mountHandles = ({
   const perspectiveCamera = new THREE.PerspectiveCamera();
   const orthographicCamera = new THREE.OrthographicCamera();
   mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
-  mocks.renderFrameListeners = new Set();
-  mocks.session = {
-    renderFrame: {
-      get current() {
-        return mocks.renderFrame;
-      },
-      listeners: mocks.renderFrameListeners,
-    },
-  };
+  mocks.frameSubscribers = new Set();
   mocks.cameraRig = {
     actorRef: {
       getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5], bounds: mocks.bounds } } }),
@@ -183,6 +170,14 @@ const mountHandles = ({
     events: { connected: surface },
     invalidate: vi.fn(),
     get: () => state,
+    internal: {
+      subscribe: (callback: { current: () => void }) => {
+        mocks.frameSubscribers.add(callback);
+        return () => {
+          mocks.frameSubscribers.delete(callback);
+        };
+      },
+    },
   };
   mocks.state = state;
 
@@ -238,8 +233,9 @@ const mountHandles = ({
       camera.updateMatrixWorld();
       act(() => {
         mocks.renderFrame = next;
-        for (const listener of mocks.renderFrameListeners) {
-          listener();
+        // The view draws the rebased frame; its frame loop runs every subscriber.
+        for (const subscriber of mocks.frameSubscribers) {
+          subscriber.current();
         }
         rendered.rerender(element());
       });
@@ -400,6 +396,21 @@ describe('SectionHandles', () => {
     expect(isHoverSuppressed(harness)).toBe(false);
     expect(harness.controls.enabled).toBe(true);
     expect(harness.toolEvents).toEqual([]);
+  });
+
+  it('should schedule no hover pick and take no press while Section is off', () => {
+    harness = mountHandles();
+    harness.send({ type: 'setSectionViewActive', payload: false });
+    const frames = vi.mocked(globalThis.requestAnimationFrame);
+    frames.mockClear();
+
+    harness.pointer('pointermove', { x: 400, y: 300, buttons: 0 });
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointerup', { x: 400, y: 300 });
+
+    expect(frames).not.toHaveBeenCalled();
+    expect(isHoverSuppressed(harness)).toBe(false);
+    expect(harness.toolEvents).toEqual(['pointermove', 'pointerdown', 'pointerup']);
   });
 
   it('should keep a dragged plane within the bounds centre ± 2 × radius along its axis', () => {

@@ -61,8 +61,8 @@ export function CheckEmail({ className, email, reason, onUseDifferentEmail }: Ch
         <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
           <MailCheck className='size-5' aria-hidden='true' />
         </div>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>Check your email</h1>
+        <CardTitle level={1} variant='title'>
+          Check your email
         </CardTitle>
         <CardDescription>
           {reason === 'sign-up'

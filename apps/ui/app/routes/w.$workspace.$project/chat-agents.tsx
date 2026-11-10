@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useEffect, useReducer } from 'react';
@@ -280,7 +281,9 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
         </div>
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-1.5'>
-            <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{agent.name}</h3>
+            <Heading level={3} variant='label' className='min-w-0 flex-1 truncate text-foreground'>
+              {agent.name}
+            </Heading>
             {agent.focused ? (
               <Badge
                 variant='outline'

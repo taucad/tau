@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { MetaFunction } from 'react-router';
@@ -52,7 +53,9 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
   if (!handoff.isBridgeAvailable) {
     return (
       <div className='w-full max-w-md text-center'>
-        <h1 className='text-lg font-medium'>Sign-in is unavailable</h1>
+        <Heading level={1} variant='title'>
+          Sign-in is unavailable
+        </Heading>
         <p className='mt-2 text-sm text-muted-foreground'>
           Tau could not reach the desktop app&apos;s sign-in service. Restart Tau and try again.
         </p>
@@ -66,7 +69,9 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
 
   return (
     <div className='w-full max-w-md text-center'>
-      <h1 className='text-lg font-medium'>Continue in your browser</h1>
+      <Heading level={1} variant='title'>
+        Continue in your browser
+      </Heading>
       <p className='mt-2 text-sm text-muted-foreground'>
         Tau signs you in through your browser, then hands the session back to this window.
       </p>

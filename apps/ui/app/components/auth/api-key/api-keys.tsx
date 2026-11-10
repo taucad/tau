@@ -1,5 +1,6 @@
 'use client';
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useListApiKeys } from '@better-auth-ui/react/plugins/api-key';
 
 import { useAuth, useAuthPlugin } from '@better-auth-ui/react';
@@ -30,7 +31,9 @@ export function ApiKeys({ className }: ApiKeysProps): React.JSX.Element {
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <div className='flex items-end justify-between gap-3'>
-        <h2 className='truncate text-sm font-semibold'>{apiKeyLocalization.apiKeys}</h2>
+        <Heading level={2} variant='label' className='truncate'>
+          {apiKeyLocalization.apiKeys}
+        </Heading>
 
         <Button
           className='shrink-0'

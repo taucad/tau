@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { Check } from 'lucide-react';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -101,10 +102,10 @@ export function ImportProcessingView({
         aria-busy={!isComplete}
         className='grid gap-4 border-y py-6 md:grid-cols-[12rem_minmax(0,1fr)]'
       >
-        <h2 className='flex items-center gap-2 self-start text-sm font-medium'>
+        <Heading level={2} variant='label' className='flex items-center gap-2 self-start'>
           {isComplete ? <Check aria-hidden className='size-4 shrink-0' /> : undefined}
           {isComplete ? 'Import complete' : 'Importing'}
-        </h2>
+        </Heading>
         <div className='max-w-xl min-w-0 space-y-4'>
           <p className='font-mono text-sm break-all'>{title}</p>
           {isComplete ? (

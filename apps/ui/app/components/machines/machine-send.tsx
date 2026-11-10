@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Bot, Check, CircleAlert, Eye, Hand, Info, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
@@ -276,7 +277,9 @@ function JobReview({
           <ShieldCheck aria-hidden className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
         )}
         <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <h3 className='truncate text-sm font-medium'>{job.program.name}</h3>
+          <Heading level={3} variant='label' className='truncate'>
+            {job.program.name}
+          </Heading>
           <p className='text-xs text-muted-foreground'>
             {[
               describeProgram(job.program),

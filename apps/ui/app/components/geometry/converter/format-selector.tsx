@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
@@ -24,7 +25,9 @@ export function FormatSelector({
   return (
     <div className='space-y-3'>
       <div className='flex min-h-7 flex-row items-center justify-between'>
-        <h3 className='text-sm font-medium'>{headingText}</h3>
+        <Heading level={3} variant='label'>
+          {headingText}
+        </Heading>
         {selectedFormats.length > 0 ? (
           <Button variant='ghost' size='xs' onClick={onClearSelection}>
             {clearButtonText}

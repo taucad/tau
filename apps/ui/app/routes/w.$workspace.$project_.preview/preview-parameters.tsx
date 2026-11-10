@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { RefreshCcw, ChevronRight, Search } from 'lucide-react';
@@ -40,7 +41,9 @@ export function PreviewParameters(): React.JSX.Element {
   return (
     <div className='flex h-full flex-col'>
       <div className='flex items-center justify-between border-b p-2'>
-        <h3 className='text-sm font-semibold'>Parameters</h3>
+        <Heading level={3} variant='label'>
+          Parameters
+        </Heading>
         <div className='flex items-center gap-1'>
           <Tooltip>
             <TooltipTrigger asChild>

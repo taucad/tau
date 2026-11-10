@@ -79,9 +79,7 @@ vi.mock('#components/ui/collapsible-code-block.js', () => ({
 }));
 
 const { ErrorPage } = await import('#components/error-page.js');
-const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
 const { buildId, offerReload } = await import('#filesystem/build-skew.js');
-const { useReloadPromptOwned } = await import('#components/nav/browser-update.js');
 
 /** A deploy explains the failure: the recovery offers the reload, as `recoverFromStaleBuild` does, and says so. */
 const supersededOutcome = (): void => {
@@ -186,23 +184,6 @@ describe('ErrorPage', () => {
     expect(screen.queryByText(/Our team has been notified/u)).not.toBeInTheDocument();
   });
 
-  it('should own the reload prompt, so the floating banner does not repeat it', async () => {
-    supersededOutcome();
-    mocks.routeError = moduleImportFailure();
-    render(
-      <MemoryRouter>
-        <ErrorPage />
-        <BuildSkewBanner />
-      </MemoryRouter>,
-    );
-    act(() => {
-      offerReload(buildId + 1);
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
   it('should enable the reload once the recovery calls its own reload stalled, with no timer of its own', async () => {
     mocks.recoverFromStaleBuild.mockResolvedValue('reloading');
     mocks.reloadState = 'pending';
@@ -225,16 +206,13 @@ describe('ErrorPage', () => {
   it('should withdraw the update prompt once the server confirms this build live, reporting nothing itself', async () => {
     supersededOutcome();
     const error = moduleImportFailure();
-    const Owned = (): React.JSX.Element => <output aria-label='Prompt owned'>{String(useReloadPromptOwned())}</output>;
     mocks.routeError = error;
     render(
       <MemoryRouter>
         <ErrorPage />
-        <Owned />
       </MemoryRouter>,
     );
     expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('true');
 
     // The rollback ends: `build-skew` confirms this build live, and the page claims no update.
     act(() => {
@@ -242,7 +220,6 @@ describe('ErrorPage', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
     expect(mocks.reportUiError).not.toHaveBeenCalled();
   });
 

@@ -11,7 +11,6 @@ import { isWeakKey } from '#lib/weak-key.js';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
-import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import {
   isStaleModuleError,
   readReloadState,
@@ -73,8 +72,6 @@ export function ErrorPage(): React.JSX.Element {
    * has not named this build since, or once the server confirms another build, and gives way to the
    * error itself when the server confirms this build live (a rollback ended). */
   const isExplained = isModuleLoadFailure && showsUpdatePrompt(staleOutcome, verdict);
-  // This screen is the reload prompt while it shows; the floating banner would only repeat it.
-  useReloadPromptOwner(isExplained);
 
   const conflictingChatId = observationConflict?.chatId;
   useEffect(() => {

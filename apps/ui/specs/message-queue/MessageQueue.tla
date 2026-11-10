@@ -80,6 +80,11 @@
 \* wrapper (ui-kit extraction); only an import moved, and queue paths unchanged.
 \* The queue store and the queue view moved into the chat-ui library (UI wave B) with no change
 \* to their code beyond import specifiers; queue paths unchanged.
+\* The session machine now holds the chat's automatic-resume wait and the run-elsewhere pull
+\* heartbeat as `after` delays the store drives (audit R5). A wait that ends sends a `continue`
+\* gesture, which never enters the queue; a gesture ends the wait. Submit, Prepare and delivery unchanged.
+\* Only a viewed chat with a published admission waits; the resumed plan stays in hand until its
+\* failure leaves, or the run returns to failed under it; neither touches the queue.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

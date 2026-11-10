@@ -223,7 +223,8 @@ const gitDirectories = async (
     const linked = real.gitDirectory !== real.commonDirectory;
     if (
       linked &&
-      (basename(dirname(real.gitDirectory)) !== 'worktrees' || dirname(dirname(real.gitDirectory)) !== real.commonDirectory)
+      (basename(dirname(real.gitDirectory)) !== 'worktrees' ||
+        dirname(dirname(real.gitDirectory)) !== real.commonDirectory)
     ) {
       return undefined;
     }

@@ -236,11 +236,11 @@ function distance(first: Vector3, second: Vector3): number {
   return Math.hypot(first[0] - second[0], first[1] - second[1], first[2] - second[2]);
 }
 
-function expectSecondDragPoseKept(pair: DragPair, gapMilliseconds: number): void {
+function expectSecondDragPoseKept(pair: DragPair, requestedGapMilliseconds: number): void {
   const { beforeFirstDrag, endOfFirstDrag, endOfSecondDrag, settled } = pair;
   const firstArc = distance(endOfFirstDrag.position, beforeFirstDrag.position);
   const secondArc = distance(endOfSecondDrag.position, endOfFirstDrag.position);
-  const evidence = JSON.stringify({ gapMilliseconds, ...pair });
+  const evidence = JSON.stringify({ requestedGapMilliseconds, ...pair });
   expect(firstArc, `the first drag should orbit the camera: ${evidence}`).toBeGreaterThan(toleranceMeters);
   /* Both drags are the same azimuth-only gesture, so they must sweep the same arc. A backstop: an
    * adoption that lands before the end-of-drag-2 read shows as no arc at all. */
@@ -268,37 +268,42 @@ test.describe('Viewer camera persistence', () => {
       await recordPointerMarks();
 
       const isWitnessRow = gapMilliseconds === witnessRowMilliseconds;
-      const timelines: DragTimeline[] = [];
+      const attempts: Array<{ requestedGapMilliseconds: number; timeline: DragTimeline }> = [];
+      const timelines = (): DragTimeline[] => attempts.map(({ timeline }) => timeline);
       let requestedGapMilliseconds = gapMilliseconds;
       /* oxlint-disable no-await-in-loop -- Each pair needs the page quiet after the one before. */
-      for (let attempt = 1; attempt <= (isWitnessRow ? witnessAttempts : 1); attempt += 1) {
-        const pair = await runDragPair(center, requestedGapMilliseconds);
-        timelines.push(pair.timeline);
-        expectSecondDragPoseKept(pair, gapMilliseconds);
-        if (isInSnapWindow(pair.timeline)) {
-          break;
-        }
+      try {
+        for (let attempt = 1; attempt <= (isWitnessRow ? witnessAttempts : 1); attempt += 1) {
+          const pair = await runDragPair(center, requestedGapMilliseconds);
+          attempts.push({ requestedGapMilliseconds, timeline: pair.timeline });
+          expectSecondDragPoseKept(pair, requestedGapMilliseconds);
+          if (isInSnapWindow(pair.timeline)) {
+            break;
+          }
 
-        /* Steer the next pair's achieved gap toward the middle of the window. Raising it fixes a fast
-         * host's short gap, or a drag 2 under 50 ms that would end the drags too close together.
-         * Lowering it removes only requested delay above the release round trip: when the release and
-         * press round trips alone reach 750 ms, every pair misses and the row fails as proving nothing. */
-        const targetGapMilliseconds = Math.max(
-          witnessTargetGapMilliseconds,
-          secondDragEndAfterFirstMilliseconds + 50 - pair.timeline.secondDragMilliseconds,
-        );
-        requestedGapMilliseconds = Math.max(
-          0,
-          requestedGapMilliseconds + targetGapMilliseconds - pair.timeline.gapMilliseconds,
-        );
+          /* Steer the next pair's achieved gap toward the middle of the window. Raising it fixes a fast
+           * host's short gap, or a drag 2 under 50 ms that would end the drags too close together.
+           * Lowering it removes only requested delay above the release round trip: when the release and
+           * press round trips alone reach 750 ms, every pair misses and the row fails as proving nothing. */
+          const targetGapMilliseconds = Math.max(
+            witnessTargetGapMilliseconds,
+            secondDragEndAfterFirstMilliseconds + 50 - pair.timeline.secondDragMilliseconds,
+          );
+          requestedGapMilliseconds = Math.max(
+            0,
+            requestedGapMilliseconds + targetGapMilliseconds - pair.timeline.gapMilliseconds,
+          );
+        }
+      } finally {
+        /* Annotated on red runs too: the attempts show a product regression from a lost witness. */
+        await annotate(`drag attempts (page clock): ${JSON.stringify(attempts)}`);
       }
       /* oxlint-enable no-await-in-loop */
 
-      await annotate(`drag timelines (page clock): ${JSON.stringify(timelines)}`);
       if (isWitnessRow) {
         expect(
-          timelines.some((timeline) => isInSnapWindow(timeline)),
-          `one pair should land in the snap window, or this row proves nothing: ${JSON.stringify(timelines)}`,
+          timelines().some((timeline) => isInSnapWindow(timeline)),
+          `one pair should land in the snap window, or this row proves nothing: ${JSON.stringify(attempts)}`,
         ).toBe(true);
       }
     },

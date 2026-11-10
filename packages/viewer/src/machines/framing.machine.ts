@@ -24,8 +24,10 @@
  * - The camera is the only owner of the pose and of its revisions (MC-R1). This actor keeps no copy of either: which
  *   change was the automatic first frame is the camera's `lastChange.source` (D2), so there is no first-frame
  *   revision here.
- * - The camera arrives in `input` (MC-R3, MC-R13); the configured orientation and margin are the host's resolved
- *   stage options. No host object enters context (D4), and nothing here keeps time (D3).
+ * - The camera arrives in `input` (MC-R3, MC-R13). The configured orientation and margin are the host's resolved
+ *   stage options: `input` holds the first, and a measurement or Fit view that carries `stage` replaces them, so a
+ *   changed up direction or fit margin reaches the next frame. No host object enters context (D4), and nothing here
+ *   keeps time (D3).
  *
  * Every fact here is ephemeral: it is derived from the view's entry and the measured geometry and never persisted.
  *
@@ -35,7 +37,7 @@
 import { createActor, setup, types } from 'xstate';
 import type { Actor, ActorOptions, ActorRef, EnqueueObject, SnapshotFrom, Snapshot } from 'xstate';
 import type { CameraBounds } from '@taucad/camera';
-import type { CameraMachineEvent, CameraOrientation, CameraPose } from '@taucad/camera/machine';
+import type { CameraMachineEmitted, CameraMachineEvent, CameraOrientation, CameraPose } from '@taucad/camera/machine';
 import { eventSchemas } from '#machines/machine-schemas.js';
 
 /**
@@ -43,7 +45,7 @@ import { eventSchemas } from '#machines/machine-schemas.js';
  *
  * @public
  */
-export type FramingCameraRef = ActorRef<Snapshot<unknown>, CameraMachineEvent>;
+export type FramingCameraRef = ActorRef<Snapshot<unknown>, CameraMachineEvent, CameraMachineEmitted>;
 
 /**
  * A drawing surface's size, as the camera takes it in `setViewport`.
@@ -64,6 +66,14 @@ export type FramingPendingPose =
   | Readonly<{ requestId: string; orientation: CameraOrientation; pose?: undefined }>;
 
 /**
+ * The host's resolved stage options: the configured orientation a first frame faces, with an up the host resolved
+ * against the camera's current up, and the fractional fit margin, from 0 to 0.5.
+ *
+ * @public
+ */
+export type FramingStage = Readonly<{ orientation: CameraOrientation; margin: number }>;
+
+/**
  * Input of {@link framingMachine}.
  *
  * @public
@@ -74,9 +84,9 @@ export type FramingInput = Readonly<{
   identity?: string;
   /** The record's camera fields for that entry. */
   pendingPose?: FramingPendingPose;
-  /** The configured stage orientation the first frame faces, with an up the host resolved against it. */
+  /** The configured stage orientation the first frame faces, until an event carries a newer {@link FramingStage}. */
   orientation: CameraOrientation;
-  /** The fractional fit margin, from 0 to 0.5. */
+  /** The fractional fit margin, until an event carries a newer {@link FramingStage}. */
   margin: number;
 }>;
 
@@ -97,11 +107,15 @@ export type FramingEvent =
       radius: number;
       /** The drawing surface at measurement, published to the camera before it frames. */
       viewport?: FramingViewport;
+      /** The stage options at measurement; kept for every later frame until another event carries them. */
+      stage?: FramingStage;
     }>
   | Readonly<{
       type: 'fitRequested';
       /** The drawing surface now, published to the camera before it fits. */
       viewport?: FramingViewport;
+      /** The stage options now; kept for every later frame until another event carries them. */
+      stage?: FramingStage;
     }>
   | Readonly<{ type: 'entryChanged'; identity: string; pendingPose?: FramingPendingPose }>;
 
@@ -168,6 +182,10 @@ const publishViewport = (context: FramingContext, viewport: FramingViewport | un
   }
 };
 
+/* The stage options an event carries replace the ones held; the host resolves them when it measures or fits. */
+const staged = <Context extends FramingContext>(context: Context, stage: FramingStage | undefined): Context =>
+  stage === undefined ? context : { ...context, orientation: stage.orientation, margin: stage.margin };
+
 /* The measurement becomes the reference a later refit compares against. */
 const framedWith = (context: FramingContext, measurement: Measurement): FramedContext => ({
   camera: context.camera,
@@ -204,10 +222,11 @@ const framingMachineDefinition = setup({
   states: {
     awaitingGeometry: {
       on: {
-        geometryBoundsMeasured: ({ context, event }, enq) => {
+        geometryBoundsMeasured: ({ context: held, event }, enq) => {
+          const context = staged(held, event.stage);
           if (!hasGeometry(event)) {
             // Nothing to frame yet: empty geometry is not a first frame, and the camera keeps its pose.
-            return {};
+            return { context };
           }
           const { pendingPose } = context;
           publishViewport(context, event.viewport, enq);
@@ -230,21 +249,20 @@ const framingMachineDefinition = setup({
           }
           return { target: 'framed', context: { ...framedWith(context, event), pendingPose: undefined } };
         },
-        entryChanged: ({ context, event }) => {
-          if (event.identity === context.identity) {
-            // Idempotent re-delivery: the view already waits on this entry's geometry.
-            return {};
-          }
+        entryChanged: ({ event }) => {
+          // The latest record before the first frame wins, also for the same entry: a record can load after the view
+          // knows its entry. A true re-delivery carries the same fields, so this stays idempotent.
           return { context: { identity: event.identity, pendingPose: event.pendingPose } };
         },
       },
     },
     framed: {
       on: {
-        geometryBoundsMeasured: ({ context, event }, enq) => {
+        geometryBoundsMeasured: ({ context: held, event }, enq) => {
+          const context = staged(held, event.stage);
           if (!hasGeometry(event)) {
             // The model is momentarily empty (a rebuild in flight): the camera keeps the pose and bounds it has.
-            return {};
+            return { context };
           }
           if (event.key === context.key) {
             // The same presentation re-measured: refresh the bounds the clip planes derive from, keep the pose.
@@ -263,9 +281,10 @@ const framingMachineDefinition = setup({
             return { context: framedWith(context, event) };
           }
           // Under the threshold the camera is left alone and the reference stays, so drift adds up to a refit (D14).
-          return { context: { key: event.key, measuredBounds: event.bounds } };
+          return { context: { ...context, key: event.key, measuredBounds: event.bounds } };
         },
-        fitRequested: ({ context, event }, enq) => {
+        fitRequested: ({ context: held, event }, enq) => {
+          const context = staged(held, event.stage);
           publishViewport(context, event.viewport, enq);
           // Fit view zooms and recentres on the model; it never turns the camera.
           enq.sendTo(context.camera, {
@@ -274,7 +293,7 @@ const framingMachineDefinition = setup({
             margin: context.margin,
             source: 'fit',
           });
-          return {};
+          return { context };
         },
         entryChanged: ({ context, event }) => {
           if (event.identity === context.identity) {

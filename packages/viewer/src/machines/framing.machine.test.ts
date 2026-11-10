@@ -9,7 +9,7 @@
  */
 import { createCameraView } from '@taucad/camera';
 import type { CameraBounds } from '@taucad/camera';
-import { createCameraActor } from '@taucad/camera/machine';
+import { cameraIgnoredEvents, createCameraActor } from '@taucad/camera/machine';
 import type { CameraMachineEvent, CameraPose } from '@taucad/camera/machine';
 import { createFakeCallbackActors } from '@taucad/xstate-testing/fakes';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -31,7 +31,11 @@ const box = (half: number, center: readonly [number, number, number] = [0, 0, 0]
   max: [center[0] + half, center[1] + half, center[2] + half],
 });
 const surface = (width: number, height: number) => ({ width, height, pixelRatio: 2 });
-const measured = (key: string, bounds: CameraBounds, radius: number): FramingEvent => ({
+const measured = (
+  key: string,
+  bounds: CameraBounds,
+  radius: number,
+): Extract<FramingEvent, { type: 'geometryBoundsMeasured' }> => ({
   type: 'geometryBoundsMeasured',
   key,
   bounds,
@@ -40,10 +44,20 @@ const measured = (key: string, bounds: CameraBounds, radius: number): FramingEve
 const savedPose: CameraPose = { target: [8, 9, 10], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 7 };
 const pending = (requestId = 'record-1'): FramingPendingPose => ({ requestId, pose: savedPose });
 
+/* One guard per test over every actor the test starts: the framing actor and its camera (MC-R23). */
+let current: { test: string | undefined; guard: ReturnType<typeof guardActors> } | undefined;
+const testGuard = (): ReturnType<typeof guardActors> => {
+  const test = expect.getState().currentTestName;
+  if (current === undefined || current.test !== test || test === undefined) {
+    current = { test, guard: guardActors({ ignore: { framing: framingIgnoredEvents, camera: cameraIgnoredEvents } }) };
+  }
+  return current.guard;
+};
+
 /** A scripted camera child: it records every event the framing actor sends it, and answers nothing. */
-const scriptCamera = () => {
+const scriptCamera = (inspect = true) => {
   const fakes = createFakeCallbackActors();
-  const camera = createActor(fakes.actor('camera')).start();
+  const camera = createActor(fakes.actor('camera'), inspect ? { inspect: testGuard().inspect } : {}).start();
   let from = 0;
   const sent = (): CameraMachineEvent[] => fakes.deliveries.slice(from).map(({ event }) => event as CameraMachineEvent);
   const clear = (): void => {
@@ -53,10 +67,9 @@ const scriptCamera = () => {
 };
 
 const startFraming = (input: Partial<FramingInput> & Pick<FramingInput, 'camera'>) => {
-  const guard = guardActors({ ignore: { framing: framingIgnoredEvents } });
   const actor = createFramingActor({
     input: { identity: 'file-a', orientation: configured, margin: 0.1, ...input },
-    inspect: guard.inspect,
+    inspect: testGuard().inspect,
   });
   actor.start();
   return actor;
@@ -78,6 +91,7 @@ const startCamera = () =>
         viewport: { width: 800, height: 600, pixelRatio: 2 },
       }),
     },
+    inspect: testGuard().inspect,
   }).start();
 
 const samples: Record<FramingEvent['type'], readonly FramingEvent[]> = {
@@ -87,7 +101,7 @@ const samples: Record<FramingEvent['type'], readonly FramingEvent[]> = {
 };
 const pathOptions = {
   input: {
-    camera: scriptCamera().camera,
+    camera: scriptCamera(false).camera,
     identity: 'file-a',
     orientation: configured,
     margin: 0.1,
@@ -300,19 +314,51 @@ describe('framing machine', () => {
       expect(scripted.sent().map(({ type }) => type)).toEqual(['frameGeometry']);
     });
 
-    it('should treat an entry change to the same identity as a re-delivery', () => {
+    it('should apply the latest record that loads before the first frame of the same entry', () => {
       const scripted = scriptCamera();
-      const framing = startFraming({ camera: scripted.camera, pendingPose: pending() });
-      framing.send({ type: 'entryChanged', identity: 'file-a', pendingPose: pending('other') });
+      const framing = startFraming({ camera: scripted.camera });
+      // The view knew its entry before the record loaded (use-view-settings-sync re-arms the pending pose today).
+      framing.send({ type: 'entryChanged', identity: 'file-a', pendingPose: pending('late') });
 
       framing.send(measured('a', box(1), 2));
-      framing.send({ type: 'entryChanged', identity: 'file-a' });
+
+      expect(scripted.sent().filter(({ type }) => type === 'adoptPersistedPose')).toEqual([
+        { type: 'adoptPersistedPose', requestId: 'late', pose: savedPose },
+      ]);
+    });
+
+    it('should treat an entry change to the framed identity as a re-delivery', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera, pendingPose: pending() });
+      framing.send(measured('a', box(1), 2));
+
+      framing.send({ type: 'entryChanged', identity: 'file-a', pendingPose: pending('other') });
       framing.send(measured('a', box(1), 2));
 
       expect(scripted.sent().filter(({ type }) => type === 'adoptPersistedPose')).toEqual([
         { type: 'adoptPersistedPose', requestId: 'record-1', pose: savedPose },
       ]);
       expect(framing.getSnapshot().value).toBe('framed');
+    });
+
+    it('should frame with the stage options the latest event carries', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera });
+      const turned = { direction: [0, 0, 1], up: [1, 0, 0] } as const;
+      framing.send(measured('a', box(1), 2));
+      // Fit view after the person changed the fit margin.
+      framing.send({ type: 'fitRequested', stage: { orientation: configured, margin: 0.3 } });
+      // A file switch after the person changed the up direction: the host resolved the up against it.
+      framing.send({ type: 'entryChanged', identity: 'file-b' });
+      framing.send({ ...measured('b', box(2), 4), stage: { orientation: turned, margin: 0.2 } });
+      framing.send(measured('b2', box(4), 8));
+
+      expect(scripted.sent()).toEqual([
+        { type: 'frameGeometry', bounds: box(1), margin: 0.1, orientation: configured, source: 'framing' },
+        { type: 'frameGeometry', bounds: box(1), margin: 0.3, source: 'fit' },
+        { type: 'frameGeometry', bounds: box(2), margin: 0.2, orientation: turned, source: 'framing' },
+        { type: 'frameGeometry', bounds: box(4), margin: 0.2, source: 'framing' },
+      ]);
     });
 
     it('should drop a pending pose when the entry changes again before its geometry', () => {

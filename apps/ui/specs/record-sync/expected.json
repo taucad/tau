@@ -13,7 +13,7 @@
     "RecordSync.liveness-flush.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost, and the lost write need not land"
+      "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost, and the lost write need not land. A bounded claim: two edits, one foreign write and one lost reply need at most 5 writes, and the same configuration violates EditEventuallySettled at 4 writes, or with a second foreign write, by exhausting MaxWrites, so a liveness failure after widening a bound is first a bound artefact"
     },
     "RecordSync.today-slots.cfg": {
       "tier": "pr",
@@ -32,7 +32,7 @@
     "RecordSync.post-1602-slots.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "Handoff review R17: over a reliable reply channel and with no forced read, the three-slot view store has no OwnWriteAttributed counterexample at 3 writes, 2 foreign writes and 2 repeated change events; the pass rests on publish returning early for bytes already shown"
+      "ref": "Handoff review R17: over a reliable reply channel, with no forced read and with one write in flight at a time, the three-slot view store has no OwnWriteAttributed counterexample at 3 writes, 2 foreign writes and 2 repeated change events; the pass rests on publish returning early for bytes already shown"
     },
     "RecordSync.post-1602-lost-reply.cfg": {
       "tier": "pr",
@@ -148,7 +148,7 @@
         "violated": "EditEventuallySettled"
       },
       "kind": "witness",
-      "ref": "WaitLatestRead off: a watch read that supersedes the conflict or refresh read frees the writer, which issues its next write on a base it already knows is stale, and that write and its retry conflict until the write bound runs out"
+      "ref": "WaitLatestRead off: a watch read that supersedes the conflict or refresh read frees the writer, which issues its next write on a base it already knows is stale; that write conflicts with the write bound then spent, so the second edit is never written"
     },
     "RecordSync.no-fence.cfg": {
       "tier": "pr",

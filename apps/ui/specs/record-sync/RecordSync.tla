@@ -11,8 +11,9 @@
 (*   watch     every change emits a change event; an event is delivered    *)
 (*             after any delay, and any number of times                    *)
 (*   reads     started by a change event, by a conflict, by the person's   *)
-(*             retry, or as the refresh of an overlapped write; only the   *)
-(*             latest read reaches the store                               *)
+(*             retry, as the refresh of an overlapped write, or, in the    *)
+(*             slot modes, as the read-back of a write whose reply was     *)
+(*             lost (`Resolve`); only the latest read reaches the store    *)
 (*   foreign   another writer of the same file (a second window, an agent, *)
 (*             sync)                                                       *)
 (*                                                                         *)
@@ -285,7 +286,7 @@ FsDecide(w) ==
             /\ wr' = [wr EXCEPT ![w].fs = "applied", ![w].ver = file.ver + 1]
             /\ watch' = TRUE
        ELSE /\ wr' = [wr EXCEPT ![w].fs = "refused"]
-            /\ UNCHANGED <<file, watch, echoes>>
+            /\ UNCHANGED <<file, watch>>
   /\ UNCHANGED <<nextId, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, foreign, lost, forced, superseded>>
 
 \* The applied reply arrives. Any read still in flight is superseded. When no read overlapped the

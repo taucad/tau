@@ -1070,9 +1070,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               'source.failed': refines('Unmodelled', ({ context }, enq) =>
                 context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'saved' }) : { target: 'idle' },
               ),
-              'source.abandoned': refines('Unmodelled', ({ context }, enq) =>
-                context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'saved' }) : { target: 'idle' },
-              ),
+              /* Target rule 6: the writer waits for the latest read, so an abandoned refresh is asked for again. */
+              'source.abandoned': refines('Unmodelled', (_, enq) => {
+                enq.raise({ type: 'write.readRequested' });
+                return {};
+              }),
             },
           },
           /** A write failed; it is tried again after `retryDelay`, or at once on an edit, a command or a flush. */

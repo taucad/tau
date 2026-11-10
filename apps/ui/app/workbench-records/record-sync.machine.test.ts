@@ -1111,6 +1111,34 @@ describe('recordSync', () => {
       expect(store.published()).toHaveLength(published + 1);
     });
 
+    it('should read again before the next write when the refresh read is abandoned (rule 6)', async () => {
+      const store = harness();
+      await store.observe();
+      const one = store.commands.edit({ name: 'one' });
+      void store.commands.read();
+      await flush();
+      await store.reply();
+
+      expect(store.value()).toMatchObject({ write: 'awaitingRefresh' });
+
+      const two = store.commands.edit({ name: 'one', x: '2' });
+      store.commands.invalidate();
+      await flush();
+
+      expect(store.writes).toHaveLength(1);
+
+      await store.serve();
+      await flush();
+
+      expect(await one).toBe(true);
+      expect(store.writes).toHaveLength(2);
+      expect(store.writes[1]?.input.expected && decoder.decode(store.writes[1].input.expected)).toBe('name=one');
+
+      await store.reply();
+
+      expect(await two).toBe(true);
+    });
+
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
       const store = harness();
       await store.observe();

@@ -181,6 +181,20 @@ describe('createShellGitView', () => {
     );
   });
 
+  it('should give no view when a linked checkout names a store that does not hold it', async () => {
+    await seedRepository();
+    const linked = join(base, 'linked');
+    git(checkout, 'worktree', 'add', '--quiet', linked, 'feature');
+    const own = join(checkout, '.git', 'worktrees', 'linked', 'commondir');
+    const other = join(base, 'other');
+    git(base, 'init', '--quiet', other);
+    await writeFile(own, `${join(other, '.git')}\n`);
+
+    expect(await createShellGitView(linked, privateRoot)).toBeUndefined();
+    await writeFile(own, '../..\n');
+    expect(await createShellGitView(linked, privateRoot)).toBeDefined();
+  });
+
   it('should copy the index so status compares against it: clean prints nothing, an edit shows as modified', async () => {
     await seedRepository();
     const environment = shellGitEnvironment((await createShellGitView(checkout, privateRoot))!);

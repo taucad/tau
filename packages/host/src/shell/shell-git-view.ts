@@ -20,7 +20,7 @@
  * shell then finds no repository, as before.
  */
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
  * One launch's read-only git view of a checkout: where the view's git directory is, the real object store it reads
@@ -215,7 +215,19 @@ const gitDirectories = async (
   const common = pointed?.trim();
   const commonDirectory = common === undefined || common === '' ? gitDirectory : resolve(gitDirectory, common);
   try {
-    return { gitDirectory: await realpath(gitDirectory), commonDirectory: await realpath(commonDirectory) };
+    const real = { gitDirectory: await realpath(gitDirectory), commonDirectory: await realpath(commonDirectory) };
+    /*
+     * `commondir` is a file in the checkout's git directory, so it alone cannot say whose store this is. A linked
+     * checkout git made lives at `<common>/worktrees/<name>`; any other pointer could name another project's store.
+     */
+    const linked = real.gitDirectory !== real.commonDirectory;
+    if (
+      linked &&
+      (basename(dirname(real.gitDirectory)) !== 'worktrees' || dirname(dirname(real.gitDirectory)) !== real.commonDirectory)
+    ) {
+      return undefined;
+    }
+    return real;
   } catch {
     return undefined;
   }

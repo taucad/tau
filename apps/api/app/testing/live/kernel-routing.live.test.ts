@@ -48,7 +48,7 @@ import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
  * - `TAU_KR_LIMIT`: run only the first N cases of each arm (the 10-case smoke sets the caps).
  * - `TAU_KR_CASES`: comma-separated case ids to run.
  * - `TAU_KR_CONCURRENCY`: parallel turns (default 4). `TAU_KR_MAX_USD`: stop scheduling past this spend.
- * - `TAU_KR_OUT`: output directory (default `apps/api/.kernel-routing-runs/<time>`).
+ * - `TAU_KR_OUT`: output directory (default `<tmpdir>/tau-kernel-routing-runs/<time>`).
  */
 
 const gateModel = 'anthropic-claude-sonnet-5.5';
@@ -67,7 +67,7 @@ const maxUsd = Number(process.env['TAU_KR_MAX_USD'] ?? 'Infinity');
 /** Milliseconds. */
 const caseTimeout = Number(process.env['TAU_KR_CASE_TIMEOUT_MS'] ?? '360000');
 const outDirectory = resolve(
-  process.env['TAU_KR_OUT'] ?? join(import.meta.dirname, '../../../.kernel-routing-runs', new Date().toISOString()),
+  process.env['TAU_KR_OUT'] ?? join(tmpdir(), 'tau-kernel-routing-runs', new Date().toISOString()),
 );
 
 /** Twenty routing cases spread over the families, for the pointer subset. */

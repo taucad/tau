@@ -110,6 +110,11 @@ const summary = z.discriminatedUnion('kind', [
       })
       .nullable(),
     purpose: z.enum(['generation', 'compaction', 'helper']),
+    /*
+     * Which kind of model call this was, as the API declared it: a host run's call (nested under the run's root), a
+     * helper endpoint's or another direct call (each its own trace). Optional so an older API's fact still admits.
+     */
+    callKind: z.enum(['run', 'helper', 'direct']).optional(),
     stop: z.enum(['stop', 'length', 'toolUse', 'error', 'aborted', 'pending', 'deferred']),
     usage,
   }),

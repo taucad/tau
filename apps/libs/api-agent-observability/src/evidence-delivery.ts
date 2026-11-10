@@ -8,7 +8,7 @@ import type { SourceProtection } from '#evidence-admission.js';
 export type LeasedDelivery = Readonly<
   Pick<
     typeof agentEvidenceOutbox.$inferSelect,
-    'receiptId' | 'payload' | 'attempts' | 'traceId' | 'observedAt' | 'sentAt' | 'expiresAt'
+    'receiptId' | 'payload' | 'attempts' | 'traceId' | 'objectId' | 'observedAt' | 'sentAt' | 'expiresAt'
   > &
     Pick<typeof agentEvidenceReceipt.$inferSelect, 'principalId' | 'projectId' | 'plane'> & {
       /** The strictest server-recorded protection across the receipt's lineage. */
@@ -29,7 +29,9 @@ export type DeliverySettlement =
   | Readonly<{ kind: 'retry'; reason: string; notBefore: Date }>
   | Readonly<{ kind: 'confirmed' }>
   | Readonly<{ kind: 'recheck'; notBefore: Date }>
-  | Readonly<{ kind: 'rejected' | 'expired'; reason: string }>;
+  | Readonly<{ kind: 'rejected' | 'expired'; reason: string }>
+  /** The receipt writes nothing: another receipt writes its Langfuse object, or it maps to none (LD12). */
+  | Readonly<{ kind: 'superseded'; reason: 'object' | 'no-object' }>;
 
 type LeaseInput = Readonly<{ owner: string; leaseMilliseconds: number; limit: number; now: Date }>;
 
@@ -103,6 +105,7 @@ const lease = async (
               payload: row.payload,
               attempts: row.attempts,
               traceId: row.traceId,
+              objectId: row.objectId,
               observedAt: row.observedAt,
               sentAt: row.sentAt,
               expiresAt: row.expiresAt,
@@ -132,32 +135,56 @@ export const leasePending = async (database: Database, input: LeaseInput): Promi
 export const leaseUncertain = async (database: Database, input: LeaseInput): Promise<LeasedDelivery[]> =>
   lease(database, 'uncertain', input);
 
+/** Whether an error is the outbox's one-object-one-receipt constraint refusing a second claim. */
+const claimsTakenObject = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    if (
+      Reflect.get(current, 'code') === '23505' &&
+      Reflect.get(current, 'constraint_name') === 'agent_evidence_outbox_object_idx'
+    ) {
+      return true;
+    }
+    current = Reflect.get(current, 'cause');
+  }
+  return false;
+};
+
 /**
  * Record the observation's identity before its send begins, so a worker that
- * dies mid-send leaves a row the reconciler can still read for.
+ * dies mid-send leaves a row the reconciler can still read for. The object id
+ * is unique across the outbox: a receipt whose Langfuse object another
+ * receipt already claimed is answered `taken` and must settle `superseded`.
  *
  * @param database - The API database.
  * @param lease - The leased row and its owner.
- * @param identity - The trace id and the observation's start time.
- * @returns Whether this worker still holds the lease; send nothing otherwise.
+ * @param identity - The trace id, the object (span) id and the observation's start time.
+ * @returns `claimed` when this worker may send, `taken` when another receipt writes the object, `lost` when the lease lapsed.
  */
 export const prepareSend = async (
   database: Database,
   { receiptId, owner }: DeliveryLease,
-  identity: Readonly<{ traceId: string; observedAt: Date }>,
-): Promise<boolean> => {
-  const rows = await database
-    .update(agentEvidenceOutbox)
-    .set(identity)
-    .where(
-      and(
-        eq(agentEvidenceOutbox.receiptId, receiptId),
-        eq(agentEvidenceOutbox.leaseOwner, owner),
-        eq(agentEvidenceOutbox.state, 'sending'),
-      ),
-    )
-    .returning({ receiptId: agentEvidenceOutbox.receiptId });
-  return rows.length > 0;
+  identity: Readonly<{ traceId: string; objectId: string; observedAt: Date }>,
+): Promise<'claimed' | 'taken' | 'lost'> => {
+  try {
+    const rows = await database
+      .update(agentEvidenceOutbox)
+      .set(identity)
+      .where(
+        and(
+          eq(agentEvidenceOutbox.receiptId, receiptId),
+          eq(agentEvidenceOutbox.leaseOwner, owner),
+          eq(agentEvidenceOutbox.state, 'sending'),
+        ),
+      )
+      .returning({ receiptId: agentEvidenceOutbox.receiptId });
+    return rows.length > 0 ? 'claimed' : 'lost';
+  } catch (error) {
+    if (claimsTakenObject(error)) {
+      return 'taken';
+    }
+    throw error;
+  }
 };
 
 /**
@@ -192,6 +219,7 @@ export const settleDelivery = async (
           ...released,
           state: 'pending',
           traceId: null,
+          objectId: null,
           observedAt: null,
           reason: settlement.reason,
           leaseExpiresAt: settlement.notBefore,
@@ -203,9 +231,31 @@ export const settleDelivery = async (
       case 'recheck': {
         return { ...released, leaseExpiresAt: settlement.notBefore };
       }
-      case 'rejected':
+      case 'rejected': {
+        /* Refused for good, so nothing was stored: a later projection of the fact may write the object. */
+        return {
+          ...released,
+          state: 'rejected',
+          payload: null,
+          objectId: null,
+          reason: settlement.reason,
+          leaseExpiresAt: null,
+        };
+      }
       case 'expired': {
-        return { ...released, state: settlement.kind, payload: null, reason: settlement.reason, leaseExpiresAt: null };
+        return { ...released, state: 'expired', payload: null, reason: settlement.reason, leaseExpiresAt: null };
+      }
+      case 'superseded': {
+        return {
+          ...released,
+          state: 'superseded',
+          payload: null,
+          traceId: null,
+          objectId: null,
+          observedAt: null,
+          reason: settlement.reason,
+          leaseExpiresAt: null,
+        };
       }
     }
   })();

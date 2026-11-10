@@ -9,13 +9,13 @@ import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import type { AgentEvidenceDeliveryOutcome } from '@taucad/api-observability/metrics';
+import type { AgentEvidenceDeliveryOutcome, AgentEvidenceSupersededReason } from '@taucad/api-observability/metrics';
 import { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#evidence-seal.js';
 import { leasePending, leaseUncertain, prepareSend, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
 import type { DeliverySettlement, LeasedDelivery } from '#evidence-delivery.js';
 import { LangfuseClient } from '#langfuse-client.js';
-import { langfuseObservation, observationSpanId, pseudonymKey } from '#langfuse-observation.js';
+import { langfuseObservation, pseudonymKey, receiptSpanId } from '#langfuse-observation.js';
 
 /** Delivery pacing. Fixed and low: vendor availability never gates the API. */
 export const deliveryTiming = Object.freeze({
@@ -56,6 +56,11 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
   }
 };
 
+const supersededReason: Readonly<Record<'object' | 'no-object', AgentEvidenceSupersededReason>> = {
+  object: 'object',
+  'no-object': 'no_object',
+};
+
 /** What a failure log may carry: the error's class and driver code, never its message, which can embed row values. */
 const errorFacts = (error: unknown): Readonly<{ name: string; code?: string }> => {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
@@ -82,8 +87,11 @@ const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) 
  *
  * Each pass sweeps expired and abandoned rows, leases a bounded batch, opens
  * each payload, rechecks the plane's purpose and the project's deletion fence,
- * sends one span per request and settles the row by what the vendor's answer
- * proves. Only a send that provably never reached ingestion is retried; an
+ * maps it to the one Langfuse object it writes, claims that object's id on
+ * the row and sends its spans in one request, settling the row by what the
+ * vendor's answer proves. A receipt for an object another receipt already
+ * claimed, or for a fact that maps to no object, settles `superseded` and
+ * sends nothing (LD12). Only a send that provably never reached ingestion is retried; an
  * acknowledged or uncertain one is reconciled by reading it back and, if it
  * never becomes visible, recorded as a gap. No transaction is held across a
  * vendor call, and only counts and bounded codes are logged.
@@ -280,6 +288,9 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (!held) {
       return 'lease-lost';
     }
+    if (settlement.kind === 'superseded') {
+      this.metrics.agentEvidenceSuperseded.add(1, { reason: supersededReason[settlement.reason] });
+    }
     return 'reason' in settlement ? `${settlement.kind}:${settlement.reason}` : settlement.kind;
   }
 
@@ -349,27 +360,33 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (revoked !== undefined) {
       return this.settle(row, { kind: 'expired', reason: revoked });
     }
-    const { span } = langfuseObservation(
+    const observation = langfuseObservation(
       evidence,
-      { environment: this.environment, receipt: row.receiptId, protection: row.protection },
+      { environment: this.environment, protection: row.protection },
       pseudonym,
     );
-    const observedAt = new Date(Number(BigInt(span.startTimeUnixNano) / 1_000_000n));
-    if (
-      !(await prepareSend(
-        this.databaseService.database,
-        { receiptId: row.receiptId, owner: this.owner },
-        {
-          traceId: span.traceId,
-          observedAt,
-        },
-      ))
-    ) {
+    if (observation === undefined) {
+      return this.settle(row, { kind: 'superseded', reason: 'no-object' });
+    }
+    const [object] = observation.spans;
+    const claim = await prepareSend(
+      this.databaseService.database,
+      { receiptId: row.receiptId, owner: this.owner },
+      {
+        traceId: observation.identity.traceId,
+        objectId: observation.identity.spanId,
+        observedAt: new Date(Number(BigInt(object!.startTimeUnixNano) / 1_000_000n)),
+      },
+    );
+    if (claim === 'taken') {
+      return this.settle(row, { kind: 'superseded', reason: 'object' });
+    }
+    if (claim === 'lost') {
       this.metrics.agentEvidenceDeliveries.add(1, { outcome: 'lease_lost' });
       return 'lease-lost';
     }
     progress.identified = true;
-    const outcome = await client.send(span, this.shutdown.signal);
+    const outcome = await client.send(observation.spans, this.shutdown.signal);
     switch (outcome.kind) {
       case 'accepted': {
         return this.settle(row, { kind: 'sent', reason: 'acknowledged' });
@@ -394,8 +411,9 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (row.traceId === null || row.observedAt === null) {
       return this.settle(row, { kind: 'expired', reason: 'unidentified' });
     }
+    /* A send made before v5 stored no object id; its span id was its receipt's digest. */
     const found = await client.lookup(
-      { traceId: row.traceId, spanId: observationSpanId(this.environment, row.receiptId) },
+      { traceId: row.traceId, spanId: row.objectId ?? receiptSpanId(this.environment, row.receiptId) },
       new Date(row.observedAt.getTime() - 60_000),
       this.shutdown.signal,
     );

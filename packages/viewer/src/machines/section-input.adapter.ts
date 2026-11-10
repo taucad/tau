@@ -143,7 +143,8 @@ const isLengthParameter = (cut: SectionCut): boolean => cut.kind === 'plane';
  * - picks hover once per frame, the latest pointer winning (graphics policy §10);
  * - lands drag steps at most once per frame through {@link createSectionDragSteps}, and the release at once;
  * - keeps the drawing up to date with the graphics actor's cuts, the camera's bounds and the rig's render frame (read
- *   each frame), none of which restarts it, so none of them ends a drag;
+ *   each frame and before every press, hover pick, drag step and tile click), none of which restarts it, so none of
+ *   them ends a drag;
  * - paints the handles and the picker and sets the cursor for the gesture the section input reports.
  *
  * @param host - The surface and the host objects behind it.
@@ -163,7 +164,8 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
     const listeners = new AbortController();
     let graphicsContext = selectGraphicsSnapshot(graphics).context;
     let { bounds } = selectCameraSnapshot(cameraRig).context.view;
-    // The rig's live render frame, read again at every frame: a rebase re-lays the drawing in place.
+    // The rig's render frame the drawing was laid out in, followed each frame and before every pointer step: the rig
+    // moves the cameras at once on a rebase, so a step must not mix the new camera's ray with the old frame's layout.
     let { renderFrame } = cameraRig;
     let gesture: SectionInputGesture = {};
     let held: Held | undefined;
@@ -256,6 +258,7 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
     // Hover picks run once per frame, the latest pointer winning (graphics policy §10).
     const hoverPicks = createRafCoalescer((point: Readonly<{ x: number; y: number }>) => {
       if (!held && isActive()) {
+        followRenderFrame();
         const picked = pickAt(point.x, point.y);
         // A dimmed picker takes no hover.
         reportHover(picked.tile === undefined || isPickerLive() ? picked : {});
@@ -358,6 +361,7 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
      * way the plane is new to its cut, so it removes the side facing the camera.
      */
     const clickTile = (tile: SectionPlane): void => {
+      followRenderFrame();
       if (!isPickerLive()) {
         return;
       }
@@ -410,6 +414,14 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
       paint();
     };
 
+    /** Re-lays the drawing in the rig's render frame when it was rebased since the drawing was laid out. */
+    const followRenderFrame = (): void => {
+      if (cameraRig.renderFrame !== renderFrame) {
+        ({ renderFrame } = cameraRig);
+        sync();
+      }
+    };
+
     /** Section turned off: drop the press and hover, and draw nothing until it comes back. */
     const deactivate = (): void => {
       hoverPicks.cancel();
@@ -432,6 +444,7 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
       if (!isActive() || event.button !== 0 || held !== undefined || !isOnCanvas(event)) {
         return;
       }
+      followRenderFrame();
       const { tile, handle } = pickAt(event.offsetX, event.offsetY);
       const cut = handle && graphicsContext.sectionCuts.find((candidate) => candidate.id === handle.target.cutId);
       if (!tile && !cut) {
@@ -534,6 +547,7 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
           if (drag) {
             const { x, y } = message;
             steps.schedule(() => {
+              followRenderFrame();
               applyDrag(drag, x, y);
             });
           }
@@ -600,16 +614,10 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
     });
     // Before any other frame callback (the layout and the overlays draw after it), so a rebase is drawn the frame it
     // lands. R3F counts only positive priorities as taking over its render, so this leaves its render loop alone.
-    const followRenderFrame = {
-      current(): void {
-        if (cameraRig.renderFrame !== renderFrame) {
-          ({ renderFrame } = cameraRig);
-          sync();
-        }
-      },
-    };
     const subscribeFrame = get().internal.subscribe as FrameSubscribe;
-    const unsubscribeFrame = subscribeFrame(followRenderFrame, renderFrameFollowPriority, { getState: get });
+    const unsubscribeFrame = subscribeFrame({ current: followRenderFrame }, renderFrameFollowPriority, {
+      getState: get,
+    });
     const releaseMatcap = subscribeToMatcapLoad(invalidate);
     sync();
 

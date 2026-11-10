@@ -92,9 +92,12 @@ type Harness = Readonly<{
   runFrame: () => void;
   /**
    * Rebases the view's render frame onto `originMeters`, moving the camera with it so the same pixel casts the same
-   * physical ray, as the view does when its target moves far from the frame's origin.
+   * physical ray, as the view does when its target moves far from the frame's origin. The rig moves the cameras at
+   * once; R3F's frame loop runs its subscribers on the next frame, here at once unless `isFrameDrawn` is false.
    */
-  rebase: (originMeters: readonly [number, number, number]) => void;
+  rebase: (originMeters: readonly [number, number, number], options?: Readonly<{ isFrameDrawn?: boolean }>) => void;
+  /** Runs every callback subscribed to R3F's frame loop, as its next frame does. */
+  drawFrame: () => void;
   /** Dispatched on the surface under an event source, else on the canvas, or on `target`. */
   pointer: (type: string, at: Point & Readonly<{ buttons?: number; target?: HTMLElement }>) => void;
   send: (event: Parameters<GraphicsActor['send']>[0]) => void;
@@ -194,6 +197,14 @@ const mountHandles = ({
     mocks.frame?.({ camera, size: state.size });
   });
 
+  const drawFrame = (): void => {
+    act(() => {
+      for (const subscriber of mocks.frameSubscribers) {
+        subscriber.current();
+      }
+    });
+  };
+
   const frames = new Map<number, FrameRequestCallback>();
   let nextFrame = 0;
   vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -223,7 +234,8 @@ const mountHandles = ({
         }
       });
     },
-    rebase: (originMeters) => {
+    drawFrame,
+    rebase: (originMeters, { isFrameDrawn = true } = {}) => {
       const previous = mocks.renderFrame;
       const next: RenderFrame = { ...previous, originMeters: [...originMeters] };
       const shift = new THREE.Vector3(...originMeters)
@@ -233,12 +245,12 @@ const mountHandles = ({
       camera.updateMatrixWorld();
       act(() => {
         mocks.renderFrame = next;
-        // The view draws the rebased frame; its frame loop runs every subscriber.
-        for (const subscriber of mocks.frameSubscribers) {
-          subscriber.current();
-        }
         rendered.rerender(element());
       });
+      if (isFrameDrawn) {
+        // The view draws the rebased frame; its frame loop runs every subscriber.
+        drawFrame();
+      }
     },
     pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1, target }) => {
       const event = new MouseEvent(type, {
@@ -378,6 +390,69 @@ describe('SectionHandles', () => {
     expect(expected).toBeGreaterThan(0.05);
     expect(harness.controls.enabled).toBe(true);
     expect(isHoverSuppressed(harness)).toBe(false);
+  });
+
+  describe('a render-frame rebase before the next frame', () => {
+    const releaseAt = (current: Harness, press: Point, steps: readonly Point[]): number => {
+      current.pointer('pointerdown', press);
+      for (const step of steps) {
+        current.pointer('pointermove', step);
+        current.runFrame();
+      }
+      const last = steps.at(-1) ?? press;
+      current.pointer('pointerup', last);
+      const [cut] = current.cuts();
+      return cut?.kind === 'plane' ? cut.offset : Number.NaN;
+    };
+
+    /** Where the same drag lands without a rebase. */
+    const landsWithoutRebase = (steps: readonly Point[]): number => {
+      const reference = mountHandles();
+      const offset = releaseAt(reference, { x: 400, y: 300 }, steps);
+      cleanup();
+      reference.actor.stop();
+      reference.canvas.parentElement?.remove();
+      vi.restoreAllMocks();
+      return offset;
+    };
+
+    it('should land a drag step taken between the rebase and the next frame where the pointer is', () => {
+      const expected = landsWithoutRebase([
+        { x: 400, y: 250 },
+        { x: 400, y: 200 },
+      ]);
+      harness = mountHandles();
+      harness.pointer('pointerdown', { x: 400, y: 300 });
+      harness.pointer('pointermove', { x: 400, y: 250 });
+      harness.runFrame();
+
+      // The rig moved the camera; the frame that redraws the handles has not run yet.
+      harness.rebase([0, 0.02, 0.01], { isFrameDrawn: false });
+      // The frame's first step lands at once, before the next frame.
+      harness.pointer('pointermove', { x: 400, y: 200 });
+      const [cut] = harness.cuts();
+
+      expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+      expect(expected).toBeGreaterThan(0.05);
+      harness.pointer('pointerup', { x: 400, y: 200 });
+    });
+
+    it('should pick and start a drag pressed between the rebase and the next frame where the pointer is', () => {
+      const expected = landsWithoutRebase([{ x: 400, y: 250 }]);
+      harness = mountHandles();
+
+      harness.rebase([0, 0.02, 0.01], { isFrameDrawn: false });
+      harness.pointer('pointerdown', { x: 400, y: 300 });
+      expect(isHoverSuppressed(harness)).toBe(true);
+      // The next frame lands before the drag's first step.
+      harness.drawFrame();
+      harness.pointer('pointermove', { x: 400, y: 250 });
+      harness.pointer('pointerup', { x: 400, y: 250 });
+
+      const [cut] = harness.cuts();
+      expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+      expect(expected).toBeGreaterThan(0.05);
+    });
   });
 
   it('should listen on the surface once under StrictMode, giving a press back once', async () => {

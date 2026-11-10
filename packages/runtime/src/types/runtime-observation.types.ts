@@ -171,6 +171,15 @@ export type RuntimeOperationObservation = Readonly<{
 }>;
 
 /**
+ * An attempt began: emitted as the client submits it, before any work, so a host can record what was in flight when
+ * the page died (a browser tab kill runs no code). Carries only the closed operation name and the attempt id. @public
+ */
+export type RuntimeOperationBegin = Readonly<{
+  operationId: string;
+  operation: RuntimeOperation;
+}>;
+
+/**
  * The worker's terminal reply arrived after the attempt had already settled as `timed-out`, `cancelled` or
  * `abandoned`. Not a second outcome: it says the worker kept running past the caller. Emitted only within ten minutes
  * of the settlement. @public

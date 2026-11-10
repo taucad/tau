@@ -300,6 +300,7 @@ describe('createTauAgentHost', () => {
     ['BILLING_RECOVERY_UNAVAILABLE', 503],
     ['MODEL_ROUTE_PAUSED', 503],
     ['BILLING_ACCOUNT_RESTRICTED', 403],
+    ['REASONING_REPLAY_REJECTED', 502],
   ] as const)('retains %s as a typed failed-run snapshot', async (code, status) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -811,6 +812,8 @@ describe('createTauAgentHost', () => {
       MODEL_ROUTE_PAUSED: false,
       // Spending on the account is held; neither a resume nor another model changes it (W11a).
       BILLING_ACCOUNT_RESTRICTED: false,
+      // The resumed run replays the same reasoning, which meets the same refusal; another model reads it as text.
+      REASONING_REPLAY_REJECTED: false,
       // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
       SUMMARY_REQUIRED: true,
       NO_EVICTABLE_HISTORY: true,

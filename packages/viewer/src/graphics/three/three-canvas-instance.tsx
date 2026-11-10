@@ -377,7 +377,10 @@ export function ThreeCanvasInstance({
       }
 
       const backend = renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
-      viewerRendererCreated(backend);
+      viewerRendererCreated(backend, () => ({
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures,
+      }));
       setInitializedRenderer({ factory: glProperty, backend });
     },
     [glProperty],

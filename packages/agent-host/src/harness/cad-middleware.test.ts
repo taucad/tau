@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessageEventStream, Context, Model } from '@earendil-works/pi-ai';
 import {
   createClientContextMiddleware,
   createRecentSkillsMiddleware,
   createTurnContextSnapshot,
-  latexDelimiterMiddleware,
+  normalizeLatexDelimiters,
   pinnedSkillsBlock,
   skillsUpdateMessageId,
   trimToolResultContext,
@@ -14,29 +14,6 @@ import { toPiToolContent } from '#harness/tools.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { ModelCallRequest } from '#harness/model-call-middleware.js';
-
-const usage = {
-  input: 1,
-  output: 1,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 2,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
-const assistant = (text: string): AssistantMessage => ({
-  role: 'assistant',
-  content: [
-    { type: 'thinking', thinking: String.raw`reason \(a\)` },
-    { type: 'text', text },
-  ],
-  api: 'openai-responses',
-  provider: 'stub',
-  model: 'stub',
-  usage,
-  stopReason: 'stop',
-  timestamp: 0,
-});
 
 const model: Model<Api> = {
   id: 'stub',
@@ -235,35 +212,13 @@ describe('ToolResultTrimmer', () => {
   });
 });
 
-describe('LatexDelimiterNormalizer', () => {
-  it('returns the same assistant object when no delimiter changes', async () => {
-    const upstream = dummyStream();
-    const message: AssistantMessage = {
-      ...assistant('plain text'),
-      content: [
-        { type: 'thinking', thinking: 'plain reasoning' },
-        { type: 'text', text: 'plain text' },
-      ],
-    };
-    const transformed = await latexDelimiterMiddleware(request({ messages: [] }), async () => upstream);
-    upstream.push({ type: 'start', partial: message });
-    upstream.push({ type: 'done', reason: 'stop', message });
-
-    expect(await transformed.result()).toBe(message);
+describe('normalizeLatexDelimiters', () => {
+  it('should return text without those delimiters unchanged', () => {
+    expect(normalizeLatexDelimiters('plain $x$ text')).toBe('plain $x$ text');
   });
 
-  it('rewrites final text and thinking while preserving code spans', async () => {
-    const upstream = dummyStream();
-    const transformed = await latexDelimiterMiddleware(request({ messages: [] }), async () => upstream);
-    upstream.push({ type: 'start', partial: assistant('') });
-    upstream.push({ type: 'done', reason: 'stop', message: assistant('\\(x\\) and `\\(code\\)`') });
-
-    const final = await transformed.result();
-
-    expect(final.content).toEqual([
-      { type: 'thinking', thinking: 'reason $a$' },
-      { type: 'text', text: '$x$ and `\\(code\\)`' },
-    ]);
+  it('should rewrite inline and display delimiters and leave code spans alone', () => {
+    expect(normalizeLatexDelimiters('\\(x\\) and `\\(code\\)` then \\[y\\]')).toBe('$x$ and `\\(code\\)` then $$y$$');
   });
 });
 

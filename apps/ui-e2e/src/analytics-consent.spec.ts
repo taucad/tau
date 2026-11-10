@@ -11,9 +11,7 @@ const consentStatus = async (): Promise<string | undefined> => {
 };
 
 const hasCookiePrompt = async (): Promise<boolean> =>
-  target.evaluate(() =>
-    [...document.querySelectorAll('h1, h2, h3')].some(({ textContent }) => textContent === 'Cookies'),
-  );
+  target.evaluate(() => document.querySelector('aside[aria-label="Optional analytics"]') !== null);
 
 const posthogState = async (): Promise<{ cookies: string[]; storage: string[]; requests: string[] }> => {
   const cookies = await target.cookies();
@@ -65,12 +63,26 @@ const decide = async (status: 'accepted' | 'declined'): Promise<void> => {
   });
 };
 
-test('has no consent UI and applies only the decision recorded by the website', async () => {
+test('offers analytics to an undecided visitor and records the choice in the shared cookie', async () => {
+  await target.commands.uiOpenTarget({ consentBanner: true });
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
   await target.expectVisible(selectors.getByRole('main'), 30_000);
-  expect(await hasCookiePrompt()).toBe(false);
+  await expect.poll(hasCookiePrompt).toBe(true);
   expect(await posthogState()).toEqual({ cookies: [], storage: [], requests: [] });
+
+  await target.click(selectors.getByRole('button', { name: 'Allow analytics', exact: true }));
+  await expect.poll(consentStatus).toBe('accepted');
+  await expect.poll(hasCookiePrompt).toBe(false);
+  await expect.poll(storedIdentifiers).toBeGreaterThan(0);
+  await expect.poll(async () => hasEvent('$opt_in')).toBe(true);
+});
+
+test('applies a decision recorded by the website without showing the banner again', async () => {
+  await target.commands.uiOpenTarget({ consentBanner: true });
+  await target.installPostHogFixture('phc_test_key');
+  await target.navigate('/');
+  await target.expectVisible(selectors.getByRole('main'), 30_000);
 
   await decide('declined');
   await target.reload();

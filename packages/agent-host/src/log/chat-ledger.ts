@@ -31,6 +31,7 @@ import type {
   JsonValue,
   LogEventBase,
   ProviderMessage,
+  ProviderMessageMetadata,
   RunFailureDetail,
   RunLifecycleEvent,
   RunLifecycleState,
@@ -90,7 +91,28 @@ export type LedgerPrefixBreak = Readonly<{
   provider?: string;
   /** Native reasoning blocks the request left out because of the break. */
   dropped: number;
+  /**
+   * What the break cost in prompt cache, read from the usage its reply reported: `hit` when cache reads are at least
+   * half of the prompt the request sent, `partial` below that, `miss` with none. The gateway classifies a step the
+   * same way (`tau.prompt_cache.outcome`). Absent when the reply reported no prompt tokens.
+   */
+  cache?: 'hit' | 'partial' | 'miss';
 }>;
+
+/**
+ * How much of one request's prompt the provider read from its cache.
+ *
+ * @param usage - The usage the request's reply reported.
+ * @returns The outcome, or `undefined` when the reply reported no prompt tokens.
+ */
+const cacheOutcomeOf = (usage: ProviderMessageMetadata['usage']): LedgerPrefixBreak['cache'] => {
+  const read = usage?.cacheRead ?? 0;
+  const prompt = read + (usage?.input ?? 0) + (usage?.cacheWrite ?? 0);
+  if (prompt === 0) {
+    return undefined;
+  }
+  return read === 0 ? 'miss' : read * 2 >= prompt ? 'hit' : 'partial';
+};
 
 /** @public */
 export type RunEntry = Readonly<{
@@ -572,9 +594,15 @@ const createFold = (ledger: ChatLedger) => {
         if (stamp?.break !== undefined) {
           const entry = entryOf(event.runId);
           const provider = message.metadata?.provider;
+          const cache = cacheOutcomeOf(message.metadata?.usage);
           entry.prefixBreaks = [
             ...(entry.prefixBreaks ?? []),
-            { cause: stamp.break, ...(provider === undefined ? {} : { provider }), dropped: stamp.dropped ?? 0 },
+            {
+              cause: stamp.break,
+              ...(provider === undefined ? {} : { provider }),
+              dropped: stamp.dropped ?? 0,
+              ...(cache === undefined ? {} : { cache }),
+            },
           ];
         }
         if (

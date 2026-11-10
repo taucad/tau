@@ -1,0 +1,28 @@
+diff --git a/dist/utils/which.js b/dist/utils/which.js
+index cc8770074ab28a821acc56269a8868ba2a9746d2..46012841946fe1cbe9253e2f43b82606e87f1c48 100644
+--- a/dist/utils/which.js
++++ b/dist/utils/which.js
+@@ -1,4 +1,5 @@
+ import { spawnSync } from 'node:child_process';
++import { accessSync, constants, statSync } from 'node:fs';
+ /**
+  * Find the path to an executable, similar to the `which` command.
+  * Uses Bun.which when running in Bun, falls back to spawnSync for Node.js.
+@@ -7,6 +8,17 @@ import { spawnSync } from 'node:child_process';
+  * @returns The full path to the executable, or null if not found
+  */
+ export function whichSync(bin) {
++    // Tau: an absolute path needs no PATH search. Resolving it through a `which` child with a 1 s
++    // timeout reported a present /bin/sh as missing whenever the host was busy (MAC-X S04).
++    if (bin.startsWith('/')) {
++        try {
++            accessSync(bin, constants.X_OK);
++            return statSync(bin).isFile() ? bin : null;
++        }
++        catch {
++            return null;
++        }
++    }
+     // Check if we're running in Bun
+     if (typeof globalThis.Bun !== 'undefined') {
+         return globalThis.Bun.which(bin);

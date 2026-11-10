@@ -259,7 +259,7 @@ export function AutoReloadSettings({
       );
     }
     /* Terms come from the consent this setup belongs to; after a failed re-read the cached consent may carry older terms. */
-    if (action?.state === 'prepared' && terms && consent?.setupAction?.actionId === action.actionId) {
+    if (action?.state === 'prepared' && terms && consent.setupAction?.actionId === action.actionId) {
       return (
         <>
           <div className='flex flex-col gap-1'>

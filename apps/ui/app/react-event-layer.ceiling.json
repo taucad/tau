@@ -3,6 +3,7 @@
   "apps/ui/app/chat-clients/debug-probes.tsx": 4,
   "apps/ui/app/cloud/root-billing.cloud.tsx": 2,
   "apps/ui/app/components/animate-ui/effects/motion-highlight.tsx": 1,
+  "apps/ui/app/components/auth/check-email.tsx": 1,
   "apps/ui/app/components/auth/magic-link-verify.tsx": 1,
   "apps/ui/app/components/auth/verify-email.tsx": 1,
   "apps/ui/app/components/billing/topup-modal.tsx": 1,

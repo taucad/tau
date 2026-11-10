@@ -22,6 +22,7 @@ import type { useFileManager } from '#hooks/use-file-manager.js';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project, ProjectManifest } from '@taucad/types';
+import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
@@ -3152,7 +3153,11 @@ describe('useProjectManager.createProject', () => {
     );
 
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
-    expect(prepared?.files).toBe(pendingCreate.files);
+    /* A6: the create adds the record its first open mints the Start version from. */
+    expect(prepared?.files).toStrictEqual({
+      ...pendingCreate.files,
+      [startRecordPath]: { content: serializeStartRecord('created') },
+    });
     expect(prepared?.storage).toMatchObject({ backend: 'opfs' });
     expect(mockPinHomeStorageBackend).toHaveBeenCalledWith('opfs');
     expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith({
@@ -3200,6 +3205,7 @@ describe('useProjectManager.createProject', () => {
       result.current.createProject({
         project: { name: fakeProject.name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
         files: {},
+        origin: 'zip',
         location: target.location,
         staging: { operationId: 'req_staged', carriesWorkbenchLayout: true },
       }),
@@ -3208,10 +3214,30 @@ describe('useProjectManager.createProject', () => {
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
     expect(prepared['staging']).toStrictEqual({ operationId: 'req_staged' });
     expect(prepared['seedWorkbench']).toBe(false);
-    expect(prepared['files']).toStrictEqual({});
+    /* A6: the only file the create adds is the record its first open mints the Start version from. */
+    expect(prepared['files']).toStrictEqual({ [startRecordPath]: { content: serializeStartRecord('zip') } });
     expect(mockCommitPendingProjectDirectory).toHaveBeenLastCalledWith(
       expect.objectContaining({ files: {}, staging: { operationId: 'req_staged' }, scope: { backend: 'opfs' } }),
     );
+  });
+
+  /* A6: a project that brings its own history (a Tau Cloud open, a linked GitHub import) asks for no Start version. */
+  it('asks no Start version of a project created under an id it brings', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+        project: fakeProject,
+        files: {},
+        chat: false,
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as { files: Record<string, unknown> };
+    expect(Object.keys(prepared.files)).not.toContain(startRecordPath);
   });
 
   /* W7.3: a linked repository's own tau.json is committed as authored while it declares the journaled manifest. */

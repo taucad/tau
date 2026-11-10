@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { backupCopy, selectStripVerbs } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import {
+  backupCopy,
+  revisionTitle,
+  selectStripVerbs,
+  startFact,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 
 /**
  * D17 on the strip: a storage refusal's *Upgrade* belongs to the owner whose
@@ -75,5 +81,36 @@ describe('a GitHub remote while signed out of Tau', () => {
 
   it('should keep GitHub’s refusal when signed in (D68)', () => {
     expect(backupCopy(refused.sync, {}, refused.remote)).toBe('Backed up · GitHub refused access');
+  });
+});
+
+/* A6, Q8: the first entry is the Start version, V1, whatever its commit says. */
+describe('the Start version', () => {
+  const card = (over: Partial<RevisionCard> & Pick<RevisionCard, 'revisionId'>): RevisionCard => ({
+    n: undefined,
+    createdAt: 1,
+    summary: 'Agent turn t1',
+    actor: 'You',
+    turnId: undefined,
+    conflicted: false,
+    trigger: undefined,
+    ...over,
+  });
+
+  it('is titled Start, and a restore of it is Restored V1', () => {
+    const start = card({ revisionId: 'r1', n: 1, start: 'created' });
+    const restore = card({ revisionId: 'r3', n: 3, trigger: 'restore', restoredFrom: 'r1' });
+
+    expect(revisionTitle(start, [restore, start])).toBe('Start');
+    expect(revisionTitle(restore, [restore, start])).toBe('Restored V1');
+  });
+
+  it.each([
+    ['created', 'Version · project created'],
+    ['github', 'Version · imported from GitHub'],
+    ['folder', 'Version · imported from a folder'],
+    ['zip', 'Version · imported from a zip'],
+  ] as const)('says %s as “%s”', (start, fact) => {
+    expect(startFact(start)).toBe(fact);
   });
 });

@@ -1293,6 +1293,40 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
 
+  /* A6, Q8: every project starts with the Start version, V1, in the column where other rows show Rev and time. */
+  it.each([
+    ['created', 'Version · project created'],
+    ['github', 'Version · imported from GitHub'],
+    ['folder', 'Version · imported from a folder'],
+    ['zip', 'Version · imported from a zip'],
+  ] as const)('reads a new project’s first entry as V1 · Start, %s, before any turn', async (start, fact) => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Project created', trigger: 'create', start }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+
+    renderPane();
+
+    const start1 = await screen.findByRole('button', { name: 'V1 · Start' });
+    expect(start1).toHaveTextContent(fact);
+    expect(start1).toHaveTextContent('V1');
+    expect(start1).not.toHaveTextContent('Rev 1');
+    expect(start1).not.toHaveTextContent('Project created');
+  });
+
+  it('keeps Start under the agent’s first entry, and the agent’s entry its own Rev', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', trigger: 'turn' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', trigger: 'turn', start: 'created' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 2 · Add vent slots' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'V1 · Start' })).toHaveTextContent('Version · project created');
+  });
+
   it('never renders an actor id, and names the agent (HQ4)', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2, actor: 'claude-opus-4', source: 'agent' }),

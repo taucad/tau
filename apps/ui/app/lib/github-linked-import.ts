@@ -5,7 +5,7 @@ import {
   serializeProjectManifest,
 } from '@taucad/types';
 import type { ProjectManifest, ProjectManifestParseResult } from '@taucad/types';
-import { largeObjectThresholdBytes } from '@taucad/revisions';
+import { largeObjectThresholdBytes, startSummary, startTrigger } from '@taucad/revisions';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { ENV } from '#environment.config.js';
 import { githubConnections } from '#lib/github-connections.js';
@@ -170,10 +170,11 @@ export async function prepareLinkedGithubImport({
         /* The Tau person who linked it, so History reads it as theirs (D33). */
         actorId,
         actor: { kind: 'user', id: actorId, ...author },
-        trigger: 'save',
+        /* The Start version, V1 (A6): History reads it as "imported from GitHub". */
+        trigger: startTrigger('github'),
         createdAt: Date.now(),
       },
-      summary: { generated: 'Set up this repository as a Tau project' },
+      summary: { generated: startSummary('github') },
     },
   };
   return { request, generation: credential.generation };

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
-import type { ImportPlanner } from '#machines/import-disk.machine.js';
+import type { ImportOrigin, ImportPlanner } from '#machines/import-disk.machine.js';
 import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -23,7 +23,11 @@ const listing: ImportListing = {
 function createTestActor(options?: {
   throwOnRead?: boolean;
   plan?: ImportPlanner;
-  onCreate?: (input: { listing: ImportListing; onProgress: (processed: number, total: number) => void }) => void;
+  onCreate?: (input: {
+    listing: ImportListing;
+    origin: ImportOrigin;
+    onProgress: (processed: number, total: number) => void;
+  }) => void;
 }) {
   const plan: ImportPlanner =
     options?.plan ??
@@ -37,7 +41,7 @@ function createTestActor(options?: {
     actors: {
       createProjectActor: fromSafeAsync<
         { type: 'projectCreated'; projectId: string },
-        { listing: ImportListing; onProgress: (processed: number, total: number) => void }
+        { listing: ImportListing; origin: ImportOrigin; onProgress: (processed: number, total: number) => void }
       >(async ({ input }) => {
         options?.onCreate?.(input);
         return { type: 'projectCreated', projectId: 'proj_123' };
@@ -190,6 +194,44 @@ describe('importDiskMachine', () => {
       expect(actor.getSnapshot().context.projectId).toBe('proj_123');
       expect(progress).toStrictEqual([{ processed: 1, total: 2 }]);
       actor.stop();
+    });
+  });
+
+  /* A6: the project's Start version reads "imported from a zip" or "imported from a folder". */
+  describe('the Start version’s origin', () => {
+    const originOf = async (send: (actor: ReturnType<typeof createTestActor>) => void): Promise<ImportOrigin> => {
+      let origin: ImportOrigin | undefined;
+      const actor = createTestActor({
+        plan: async () => listing,
+        onCreate: (input) => {
+          origin = input.origin;
+        },
+      });
+      actor.start();
+      send(actor);
+      await waitFor(actor, (s) => s.value === 'selectingMainFile');
+      actor.send({ type: 'confirmImport' });
+      await waitFor(actor, (s) => s.value === 'success');
+      actor.stop();
+      return origin!;
+    };
+
+    it('creates a zip as imported from a zip, and picked files or a folder as imported from a folder', async () => {
+      await expect(
+        originOf((actor) => {
+          actor.send({ type: 'processZip', file: new File(['zip'], 'gear.zip') });
+        }),
+      ).resolves.toBe('zip');
+      await expect(
+        originOf((actor) => {
+          actor.send({ type: 'processDirectoryHandle', handle: mock<FileSystemDirectoryHandle>() });
+        }),
+      ).resolves.toBe('folder');
+      await expect(
+        originOf((actor) => {
+          actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
+        }),
+      ).resolves.toBe('folder');
     });
   });
 

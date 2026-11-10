@@ -180,6 +180,7 @@ import type {
 } from '#restore.machine.js';
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
+import { parseStartRecord, startRecordPath, startSummary, startTrigger } from '#start-version.js';
 import type {
   Checkout,
   CheckoutRecord,
@@ -1128,9 +1129,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   let opened: Promise<void> | undefined;
   /* The store is created — with the ignore file the registry generates — before
-   * the first question is asked of it. Idempotent on both legs. */
+   * the first question is asked of it, and a new project's Start version is
+   * minted in it (A6). Idempotent on both legs. */
   const ensureStore = async (): Promise<void> => {
-    opened ??= port.init({ author: hostAuthor });
+    opened ??= (async () => {
+      await port.init({ author: hostAuthor });
+      try {
+        await mintStart();
+      } catch (error) {
+        /* The record stays, so the next open asks again; the project opens without its Start meanwhile. */
+        console.warn('[revisions] the Start version could not be recorded', error);
+      }
+    })();
     await opened;
   };
 
@@ -1840,6 +1850,96 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
+
+  /**
+   * The live checkout, asked of a store that already exists, without waiting
+   * for {@link ensureStore}: the Start mint runs inside it.
+   *
+   * @returns The project directory's checkout, or `undefined` when the port lists none.
+   */
+  const livePlaceOfStore = async (): Promise<Checkout | undefined> => {
+    const descriptor = await describePort();
+    if (port.listCheckouts !== undefined && descriptor.checkouts) {
+      const checkouts = await port.listCheckouts();
+      return checkouts.find((candidate) => candidate.kind === 'live');
+    }
+    const head = await port.readHead();
+    return Object.freeze<Checkout>({
+      id: 'live',
+      projectId,
+      root: `/projects/${projectId}`,
+      kind: 'live',
+      branch: head?.branch,
+      baseRevisionId: head?.head,
+    });
+  };
+
+  /**
+   * Mint the Start version, V1, where a creation flow asked for it (A6).
+   *
+   * Runs once, as the store is opened, before any question is asked of it. A
+   * project Tau created carries {@link startRecordPath}; Tau creating the store
+   * is what makes it Tau's, so its files gain both generated blocks — the
+   * ignore block merged into a folder's own `.gitignore`, the large-object
+   * block into its `.gitattributes` — and the first entry records them with
+   * everything else, large files as LFS pointers. Only an unborn line with no
+   * remote is minted on: a project that arrives from a remote already has its
+   * history, and its record is removed unminted. A line that already has
+   * revisions is not opened at all.
+   *
+   * Not an operation of the log: *Undo* never reaches the Start version.
+   */
+  const mintStart = async (): Promise<void> => {
+    const place = await livePlaceOfStore();
+    /* A line with revisions already has its first entry: its files are not opened at all. */
+    if (place === undefined || (await headOf(place)) !== undefined) {
+      return;
+    }
+    await useFileSystem(place, async (rooted) => {
+      if (!(await rooted.exists(startRecordPath))) {
+        return;
+      }
+      const origin = parseStartRecord(await rooted.readFile(startRecordPath));
+      const remotes = await port.listRemotes();
+      if (origin !== undefined && place.branch !== undefined && remotes.length === 0) {
+        const readText = async (path: string): Promise<string | undefined> =>
+          (await rooted.exists(path)) ? rooted.readFile(path, 'utf8') : undefined;
+        for (const [path, generate] of [
+          [generatedIgnorePath, generatedIgnoreContent],
+          [generatedGitattributesPath, generatedGitattributesContent],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- two files, in order: the ignore block decides what the capture holds.
+          const existing = await readText(path);
+          const content = generate(existing);
+          if (content !== existing) {
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            await rooted.writeFile(path, content);
+          }
+        }
+        const tree = await captureCheckout(place, { bypassMemo: true });
+        const trigger = startTrigger(origin);
+        const actor = options.actor?.({ runId: undefined, trigger });
+        const receipt = await options.port.writeRevision({
+          parents: [],
+          tree,
+          provenance: Object.freeze({
+            source: trigger === 'create' ? 'user' : 'import',
+            actorId: actor?.id ?? actorId,
+            ...(actor === undefined ? {} : { actor }),
+            trigger,
+            createdAt: now(),
+          }),
+          summary: Object.freeze({ generated: startSummary(origin) }),
+        });
+        await options.port.updateRef({
+          name: place.branch,
+          expectedHead: undefined,
+          head: revisionId(receipt.commitId),
+        });
+      }
+      await unlinkIfPresent(rooted, startRecordPath);
+    });
+  };
   /* A decision that discards or replaces a working copy on the strength of
    * "nothing here is unrevisioned" never trusts metadata an external replacement
    * can preserve (same size, restored mtime). The turn's own captures keep the

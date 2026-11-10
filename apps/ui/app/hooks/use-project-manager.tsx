@@ -26,6 +26,8 @@ import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
+import type { StartOrigin } from '@taucad/revisions';
 import type { Remote } from 'comlink';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
@@ -236,6 +238,12 @@ type CreateProjectFromData = CreateProjectChatOptions & {
   project: Omit<ProjectManifest, '$schema'>;
   /** The files for the project */
   files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
+  /**
+   * Where the files came from, for the project's Start version (A6): History
+   * reads "imported from GitHub", "a folder" or "a zip". Absent, the project
+   * reads "project created" (a fork, a remix, a template).
+   */
+  origin?: Exclude<StartOrigin, 'created'>;
   /**
    * An import already staged on the creation location's storage root (W7,
    * charter D12): its files move into the project at commit, so the journal
@@ -1680,6 +1688,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         // CreateProjectFromData: Use provided project data and files
         projectData = options.project;
         files = options.files;
+      }
+
+      /* A6: a project born here, with no remote of its own, asks its first open to mint the Start version, V1. A
+         caller that supplies the id brings history of its own (a Tau Cloud open, a linked GitHub import). */
+      if (options.id === undefined) {
+        files = {
+          ...files,
+          [startRecordPath]: {
+            content: serializeStartRecord('kernel' in options ? 'created' : (options.origin ?? 'created')),
+          },
+        };
       }
 
       const manifest = projectToManifest(projectData);

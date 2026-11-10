@@ -81,7 +81,12 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import {
+  revisionName,
+  revisionTriggerLabel,
+  startFact,
+  startVersionName,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** Whether a revision is one of the autosaves History folds. */
 export const isAutosave = (revision: RevisionCard): boolean =>
@@ -967,6 +972,14 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
+  /* A6: a version is the larger solid dot (blueprint "History, Version, Revision"). */
+  if (revision.start !== undefined) {
+    return (
+      <span className={timelineMarker}>
+        <span aria-label='Version' className='size-2.5 rounded-full bg-foreground' />
+      </span>
+    );
+  }
   if ((revision.tags?.length ?? 0) > 0) {
     return (
       <span className={timelineMarker}>
@@ -1041,13 +1054,15 @@ export function RevisionRow({
     consumeRevisionReveal(projectId, revision.revisionId);
   }, [isRevealed, projectId, revision.revisionId]);
 
-  const name = revisionName(revision.n);
+  const { start } = revision;
+  /* A6: the Start version is named V1, in the column where other rows show their number and time. */
+  const name = start === undefined ? revisionName(revision.n) : startVersionName;
   const time =
     revision.createdAt > 0
       ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
       : undefined;
-  /* Your own revisions need no attribution; everyone else's say who (HQ4). */
-  const actor = revision.actor === 'You' || revision.actor === '' ? undefined : revision.actor;
+  /* Your own revisions need no attribution; everyone else's say who (HQ4). The Start version says how it began. */
+  const actor = start !== undefined || revision.actor === 'You' || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
      device's restore machine holds its undo target — never after a reload or another device's restore. */
@@ -1082,14 +1097,25 @@ export function RevisionRow({
                 <span
                   className={cn(
                     'line-clamp-2 min-w-0 text-sm break-words',
-                    isAutosave(revision) ? 'text-muted-foreground' : 'font-medium',
+                    start === undefined
+                      ? isAutosave(revision)
+                        ? 'text-muted-foreground'
+                        : 'font-medium'
+                      : 'font-semibold',
                   )}
                 >
                   {title}
                 </span>
-                {isCurrent || actor !== undefined ? (
+                {isCurrent || actor !== undefined || start !== undefined ? (
                   <span className='flex min-w-0 flex-wrap items-center gap-x-2 text-xs leading-4 text-muted-foreground'>
                     {isCurrent ? <span className='text-foreground'>Current</span> : null}
+                    {start === undefined ? null : (
+                      <span className='min-w-0'>
+                        {startFact(start)}
+                        {/* The time the right-hand column gives other rows, where the pane has room for it. */}
+                        {time === undefined ? null : <span className='hidden @[22rem]:inline'> · {time}</span>}
+                      </span>
+                    )}
                     {actor === undefined ? null : (
                       <span className='flex min-w-0 items-center gap-1'>
                         {actor === 'Tau agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
@@ -1100,8 +1126,10 @@ export function RevisionRow({
                 ) : null}
               </span>
               <span className='flex shrink-0 items-center gap-1.5 pt-0.5 text-xs text-muted-foreground'>
-                {name === undefined ? null : <span className='font-mono'>{name}</span>}
-                {time === undefined ? null : (
+                {name === undefined ? null : (
+                  <span className={cn('font-mono', start !== undefined && 'font-medium text-foreground')}>{name}</span>
+                )}
+                {time === undefined || start !== undefined ? null : (
                   <time
                     dateTime={new Date(revision.createdAt).toISOString()}
                     className='hidden min-w-[8ch] text-right tabular-nums @[22rem]:inline'

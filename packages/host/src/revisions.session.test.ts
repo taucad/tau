@@ -16,7 +16,7 @@ it('should pull the remote again when the page reports a session change (audit R
     filesystem,
     checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => filesystem },
   });
-  const listRemoteRefs = vi.fn(async () => []);
+  const listRemoteReferences = vi.fn(async () => []);
   const revisions = createProjectRevisions({
     workspaceRoot,
     projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
@@ -25,23 +25,23 @@ it('should pull the remote again when the page reports a session change (audit R
     port: {
       ...port,
       listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
-      listRemoteRefs,
+      listRemoteRefs: listRemoteReferences,
     },
   });
   try {
     await revisions.opened();
     await vi.waitFor(() => {
-      expect(listRemoteRefs).toHaveBeenCalled();
+      expect(listRemoteReferences).toHaveBeenCalled();
     });
     await vi.waitFor(() => {
       expect(revisions.status().sync.state).not.toBe('opening');
     });
-    const reads = listRemoteRefs.mock.calls.length;
+    const reads = listRemoteReferences.mock.calls.length;
 
     await revisions.channel.request({ command: 'sessionChanged' });
 
     await vi.waitFor(() => {
-      expect(listRemoteRefs.mock.calls.length).toBeGreaterThan(reads);
+      expect(listRemoteReferences.mock.calls.length).toBeGreaterThan(reads);
     });
   } finally {
     await revisions.release();

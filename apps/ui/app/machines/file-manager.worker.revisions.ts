@@ -2068,9 +2068,9 @@ export type WorkerRevisionResult =
    */
   | Readonly<{ kind: 'saved' }>
   /**
-   * The root has taken a `sessionChanged` (audit R6). Every frame posted before
-   * this one was projected before the change; the page reads a refusal after
-   * it as the new session's.
+   * The root has taken a `sessionChanged` (audit R6). Every frame posted after
+   * this one was projected after the change; frames before it may be from
+   * either side, so the page reads only a refusal after it as the new session's.
    */
   | Readonly<{ kind: 'sessionChanged' }>
   /** What recording an editor's overlapping edit did (D14). */

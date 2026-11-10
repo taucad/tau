@@ -157,7 +157,13 @@ type SyncMachineContextFields = Readonly<{
    * and the state that finishes the current effect fetches for it.
    */
   pendingFetch: boolean;
-  /** The signed-in person changed while the host was quiescing (audit R6): the remote is read afresh on release. */
+  /**
+   * A session change not yet read under the new session (audit R6): a refusal
+   * of an answer asked under the last session that lands in `failed` opens
+   * again, and a busy `manual` remote reads again once it settles. Cleared by
+   * `opening`, `pushing` and a disconnect; the pull held through quiescing is
+   * `heldSessionPull`'s.
+   */
   pendingSession: boolean;
   /**
    * A session change not yet pulled when the host began quiescing, or one that

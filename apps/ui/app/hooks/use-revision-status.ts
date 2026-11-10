@@ -1010,6 +1010,10 @@ const revisionIdentityCommands = (
       } else {
         /* An account switch: the last person's credential is withdrawn before the next one's is minted. */
         await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+        if (asked !== generation) {
+          /* Superseded during the withdrawal: the newer identity mints its own. */
+          return;
+        }
       }
     }
     const minted = await setCredential({ kind: 'github' });

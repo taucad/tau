@@ -69,7 +69,8 @@ export type RevisionClient = Readonly<{
   /**
    * Tell the root the signed-in person changed (audit R6), so it reads the
    * remote afresh under the new session. Resolves once the root has taken it:
-   * every projection received before then was the last session's.
+   * every projection received after then was made after the change (one
+   * received before may be from either side).
    */
   sessionChanged: () => Promise<void>;
   /** Send a credential for one explicit push; the host discards it when the operation settles. */

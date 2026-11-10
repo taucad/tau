@@ -954,6 +954,10 @@ const answerPushes = (
 
 /* A close cannot promise a new push. Answer the request without retaining a
  * wake-up that could restart transport as the successful close releases its hold. */
+/** A session change the conflict line's push waited for (audit R6): the pull follows its answer. */
+const sessionPullOf = (context: SyncMachineContext): '#sync.opening' | undefined =>
+  context.pendingSession && !context.quiescing ? '#sync.opening' : undefined;
+
 const holdPushRequest = (context: SyncMachineContext, event: Readonly<{ pushId?: string }>, enq: SyncEnqueue) => {
   answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
   return {};
@@ -1319,7 +1323,9 @@ const syncMachineDefinition = setup({
       if (event.phase === 'release') {
         const hasRemote = guards.hasRemote(context);
         /* `failed.settled` opens again on its own once quiescing ends. */
-        if (context.heldSessionPull && hasRemote && (typeof value === 'string' || value['failed'] === undefined)) {
+        /* `conflicted.offering` pulls once its push settles, so the line's answer is not dropped. */
+        const busy = typeof value !== 'string' && (value['failed'] !== undefined || value['conflicted'] === 'offering');
+        if (context.heldSessionPull && hasRemote && !busy) {
           /* A session change held through the close is pulled now (audit R6). */
           enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
         }
@@ -1372,7 +1378,8 @@ const syncMachineDefinition = setup({
      * read afresh under the new session without abandoning anything in flight:
      * the move stream is watched again (a refused one is never re-read for the
      * remote it already watches), and the remote is pulled as a move would be,
-     * at once from an idle state and when a busy one settles. `pendingSession`
+     * at once from an idle state and when a busy one settles (`conflicted.offering`
+     * takes the change itself, so its push is answered first). `pendingSession`
      * survives the busy state: an answer it gets under the last session that
      * lands in `failed` opens again from there. Every `opening` clears it.
      */
@@ -2400,6 +2407,20 @@ const syncMachineDefinition = setup({
       states: {
         offering: {
           always: ({ context }) => (context.automaticPush ? undefined : { target: 'offered' }),
+          on: {
+            /* The conflict line's push is kept (audit R6): its answer is recorded, then the pull follows. */
+            sessionChanged: ({ context, guards }, enq) => {
+              if (!guards.hasRemote(context)) {
+                /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
+                return {};
+              }
+              enq.sendTo('remoteMoves', { type: 'unwatch' });
+              enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote ?? '' });
+              return {
+                context: { pendingSession: true, heldSessionPull: context.heldSessionPull || context.quiescing },
+              };
+            },
+          },
           invoke: {
             src: 'push',
             input: ({ context }) => ({
@@ -2419,12 +2440,15 @@ const syncMachineDefinition = setup({
               };
               const refused = event.output.refs.find((entry) => entry.status === 'rejected');
               if (refused === undefined) {
-                return { target: 'offered', context: { leases, attempt: 0, retryAfterMilliseconds: undefined } };
+                return {
+                  target: sessionPullOf(context) ?? 'offered',
+                  context: { leases, attempt: 0, retryAfterMilliseconds: undefined },
+                };
               }
               enq(reportConflictLineFailure, 'refused', refused.name, refused.reason);
               const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
               return {
-                target: quota ? 'offered' : 'owed',
+                target: sessionPullOf(context) ?? (quota ? 'offered' : 'owed'),
                 context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
               };
             },
@@ -2432,7 +2456,7 @@ const syncMachineDefinition = setup({
               const { error } = event;
               enq(reportConflictLineFailure, 'push', error);
               return {
-                target: isFatal(error) ? 'offered' : 'owed',
+                target: sessionPullOf(context) ?? (isFatal(error) ? 'offered' : 'owed'),
                 context: { attempt: context.attempt + 1, retryAfterMilliseconds: retryAfterOf(error) },
               };
             },

@@ -91,6 +91,7 @@
  * | 84 | `quiesce(hold) --sessionChanged--> … --quiesce(release)--> opening` | **audit R6**: the pull is held through quiescing and made on release, even when a push ran during the hold |
  * | 85 | `failed --quiesce(hold), sessionChanged, quiesce(release)--> failed.settled → opening` | **audit R6**: a release in `failed` pulls once |
  * | 86 | `quiesce(hold) --sessionChanged, remoteDisconnected--> noRemote` | **audit R6**: a held change is forgotten with the remote |
+ * | 87 | `conflicted.offering --sessionChanged--> offering --onDone--> opening` | **audit R6**: the conflict line's push is kept and its answer recorded, then the pull follows, at once or after a release |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -2903,6 +2904,40 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
     });
+    harness.stop();
+  });
+
+  it.each([
+    ['at once', false],
+    ['held through quiescing', true],
+  ])('keeps the conflict line’s push through a session change %s, then pulls (audit R6)', async (_label, held) => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: {}, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches({ conflicted: 'offering' })).toBe(true);
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    if (held) {
+      harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    }
+    harness.actor.send({ type: 'sessionChanged' });
+    if (held) {
+      harness.actor.send({ type: 'quiesce', phase: 'release' });
+    }
+    await Promise.resolve();
+    expect(harness.actor.getSnapshot().matches({ conflicted: 'offering' })).toBe(true);
+    expect(harness.effects.running('push')).toBe(1);
+
+    harness.effects.settle('push', { output: pushResult({ name: syncRef, status: 'updated', head: 'line-head' }) });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    expect(harness.actor.getSnapshot().context.leases[syncRef]).toBe('line-head');
     harness.stop();
   });
 

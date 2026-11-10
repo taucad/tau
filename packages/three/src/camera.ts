@@ -398,13 +398,15 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   const initialView = createCameraView(options.initialView);
   /*
    * The mirror: the rig's render frame and clip policy, which the native cameras present with the latest camera
-   * snapshot's view. A rig setter changes the mirror and presents at once; while the rig's own actor is live (started,
-   * not stopped) it then sends the actor the value, unless a reentrant change already replaced it in the mirror.
+   * snapshot's view. A rig setter changes the mirror and presents at once.
    *
-   * The reconciliation rule, the only one: in a snapshot of the rig's own actor, a frame (or policy) that equals the
-   * mirror confirms it; one that differs from the mirror and from what that actor's previous snapshot carried is a
-   * change the actor took from elsewhere, and becomes the mirror; one that differs from the mirror only is stale (the
-   * rig's later value is still on its way to the actor) and is ignored. Another actor run on this driver, such as one
+   * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the rig's
+   * own actor. The rig sends that actor the mirror (at start, after a setter, after a snapshot) only while the actor runs
+   * (started, neither stopped nor errored), nothing of that kind is in flight and the actor's last snapshot does not
+   * already carry it, so a later snapshot always carries the sent value, even when the actor answers it as a duplicate.
+   * While a value is in flight, a snapshot that carries it confirms it (the rig then sends the mirror if it has moved
+   * on) and one that differs is stale and is ignored; with nothing in flight, a snapshot that differs from the mirror is
+   * a change the actor took from elsewhere and becomes the mirror. Another actor run on this driver, such as one
    * restored from a persisted snapshot, is sent the mirror when it starts and never changes it.
    */
   let renderFrame = validateRenderFrameForView(
@@ -414,7 +416,25 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   let clipPlanes = options.clipPlanes ? validateClipPlanes(options.clipPlanes) : undefined;
   let activeCamera: ThreeCamera =
     initialView.requestedVerticalFieldOfView === 0 ? orthographicCamera : perspectiveCamera;
-  let live = false;
+  // The value of each kind in flight to the rig's own actor, boxed because no clip policy is a value.
+  let sentFrame: readonly [RenderFrame] | undefined;
+  let sentClip: readonly [ThreeCameraClipPlanePolicy | undefined] | undefined;
+  // The last snapshot of the rig's own actor, once it started.
+  let held: CameraDriverSnapshot | undefined;
+  /* Sends the rig's own actor each mirrored value the rule allows. */
+  const flush = (): void => {
+    if (!held || actorRef.getSnapshot().status !== 'active') {
+      return;
+    }
+    if (!sentFrame && !sameRenderFrame(held.renderFrame, renderFrame)) {
+      sentFrame = [renderFrame];
+      actorRef.send({ type: 'setRenderFrame', renderFrame });
+    }
+    if (!sentClip && !sameClipPlanes(held.clipPolicy, clipPlanes)) {
+      sentClip = [clipPlanes];
+      actorRef.send({ type: 'setClipPolicy', clipPolicy: clipPlanes });
+    }
+  };
   let disposed = false;
   // The last presentation, so a synchronization that changes nothing presented does not notify again. A view is a new
   // object on every camera change, of any actor, so its identity (not the revision) tells a change.
@@ -437,41 +457,40 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
     ({ input, receive, sendBack, system }) => {
       // The driver is shared by every actor made from this logic, such as one restored from a persisted snapshot.
       const own = system === actorRef.system;
-      live ||= own;
-      // The actor learns the mirror in one event each, where it may differ: always for an actor this rig did not
-      // create, whose driver input is the one it was first invoked with, not its restored context.
-      if (!own || !sameRenderFrame(renderFrame, input.snapshot.renderFrame)) {
+      if (own) {
+        held = input.snapshot;
+        flush();
+      } else {
+        // An actor this rig did not create learns the mirror in one event each: its driver input is the one it was
+        // first invoked with, not its restored context.
         sendBack({ type: 'setRenderFrame', renderFrame });
-      }
-      if (!own || !sameClipPlanes(clipPlanes, input.snapshot.clipPolicy)) {
         sendBack({ type: 'setClipPolicy', clipPolicy: clipPlanes });
       }
-      // What the previous snapshot of this actor carried, from its own context at start, never another actor's.
-      let previous = input.snapshot;
       presented = undefined;
       present();
       receive(({ snapshot }) => {
-        if (
-          own &&
-          !sameRenderFrame(snapshot.renderFrame, renderFrame) &&
-          !sameRenderFrame(snapshot.renderFrame, previous.renderFrame)
-        ) {
-          ({ renderFrame } = snapshot);
+        // Another actor never changes the mirror.
+        if (own) {
+          held = snapshot;
+          if (!sentFrame) {
+            if (!sameRenderFrame(snapshot.renderFrame, renderFrame)) {
+              ({ renderFrame } = snapshot);
+            }
+          } else if (sameRenderFrame(snapshot.renderFrame, sentFrame[0])) {
+            sentFrame = undefined;
+          }
+          if (!sentClip) {
+            if (!sameClipPlanes(snapshot.clipPolicy, clipPlanes)) {
+              clipPlanes = snapshot.clipPolicy;
+            }
+          } else if (sameClipPlanes(snapshot.clipPolicy, sentClip[0])) {
+            sentClip = undefined;
+          }
         }
-        if (
-          own &&
-          !sameClipPlanes(snapshot.clipPolicy, clipPlanes) &&
-          !sameClipPlanes(snapshot.clipPolicy, previous.clipPolicy)
-        ) {
-          clipPlanes = snapshot.clipPolicy;
-        }
-        previous = snapshot;
         latest = snapshot;
+        flush();
         present();
       });
-      return () => {
-        live &&= !own;
-      };
     },
   );
   const actorRef = createCameraActor({
@@ -501,9 +520,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       }
       renderFrame = validated;
       present();
-      if (live && renderFrame === validated) {
-        actorRef.send({ type: 'setRenderFrame', renderFrame: validated });
-      }
+      flush();
     },
     readState() {
       return readThreeCameraState({
@@ -519,9 +536,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       }
       clipPlanes = validated;
       present();
-      if (live && clipPlanes === validated) {
-        actorRef.send({ type: 'setClipPolicy', clipPolicy: validated });
-      }
+      flush();
     },
     dispose() {
       if (disposed) {

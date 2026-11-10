@@ -217,6 +217,204 @@ describe('createThreeCameraRig mirror', () => {
     rig.dispose();
   });
 
+  /* Starts a rig, runs `inside` once from the next notification, and returns what each notification presented. */
+  const presentations = (inside: (rig: Rig) => void, before?: (rig: Rig) => void) => {
+    const presented: Array<readonly [metersPerRenderUnit: number, farPadding: number | undefined]> = [];
+    let armed = false;
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate(_camera, snapshot) {
+        presented.push([rig.renderFrame.metersPerRenderUnit, snapshot.clipPolicy?.farPaddingVerticalSpans]);
+        if (armed) {
+          armed = false;
+          inside(rig);
+        }
+      },
+    });
+    if (before) {
+      before(rig);
+      armed = true;
+      rig.actorRef.start();
+    } else {
+      rig.actorRef.start();
+      presented.length = 0;
+      armed = true;
+      rig.actorRef.send({ type: 'setViewport', viewport });
+    }
+    expectAgreement(rig);
+    rig.dispose();
+    return presented;
+  };
+
+  it.each<
+    readonly [label: string, inside: (rig: Rig) => void, expected: ReadonlyArray<readonly [number, number | undefined]>]
+  >([
+    [
+      'two frames',
+      (rig) => {
+        rig.setRenderFrame(frameAt(4));
+        rig.setRenderFrame(frameAt(8));
+      },
+      [
+        [1, undefined],
+        [4, undefined],
+        [8, undefined],
+      ],
+    ],
+    [
+      'a frame and then the frame it replaced',
+      (rig) => {
+        rig.setRenderFrame(frameAt(4));
+        rig.setRenderFrame(frameAt(1));
+      },
+      [
+        [1, undefined],
+        [4, undefined],
+        [1, undefined],
+      ],
+    ],
+    [
+      'two policies',
+      (rig) => {
+        rig.setClipPlanes({ farPaddingVerticalSpans: 4 });
+        rig.setClipPlanes({ farPaddingVerticalSpans: 8 });
+      },
+      [
+        [1, undefined],
+        [1, 4],
+        [1, 8],
+      ],
+    ],
+    [
+      'a policy and then a frame',
+      (rig) => {
+        rig.setClipPlanes({ farPaddingVerticalSpans: 6 });
+        rig.setRenderFrame(frameAt(4));
+      },
+      [
+        [1, undefined],
+        [1, 6],
+        [4, 6],
+      ],
+    ],
+  ])('should present each of %s set from inside a notification once, in order', (_label, inside, expected) => {
+    expect(presentations(inside)).toEqual(expected);
+  });
+
+  it('should present a frame set from inside the start notification after a frame set before start once', () => {
+    const presented = presentations(
+      (rig) => {
+        rig.setRenderFrame(frameAt(8));
+      },
+      (rig) => {
+        rig.setRenderFrame(frameAt(2));
+      },
+    );
+
+    expect(presented).toEqual([
+      [2, undefined],
+      [2, undefined],
+      [8, undefined],
+    ]);
+  });
+
+  it('should present each of two frames set from an actor subscriber once, in order', () => {
+    const presented: number[] = [];
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate() {
+        presented.push(rig.renderFrame.metersPerRenderUnit);
+      },
+    });
+    rig.actorRef.start();
+    let first = true;
+    rig.actorRef.subscribe(() => {
+      if (first) {
+        first = false;
+        rig.setRenderFrame(frameAt(4));
+        rig.setRenderFrame(frameAt(8));
+      }
+    });
+    presented.length = 0;
+
+    rig.actorRef.send({ type: 'setViewport', viewport });
+
+    expect(presented).toEqual([1, 4, 8]);
+    expectAgreement(rig);
+    rig.dispose();
+  });
+
+  it('should take an actor frame change after a rig frame the actor already held when it arrived', () => {
+    let reenter = false;
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate() {
+        if (reenter) {
+          reenter = false;
+          rig.actorRef.send({ type: 'setRenderFrame', renderFrame: frameAt(2) });
+        }
+      },
+    });
+    rig.actorRef.start();
+    reenter = true;
+    rig.setRenderFrame(frameAt(2));
+
+    rig.actorRef.send({ type: 'setRenderFrame', renderFrame: frameAt(4) });
+
+    expect(rig.renderFrame).toEqual(frameAt(4));
+    expectAgreement(rig);
+    rig.dispose();
+  });
+
+  it('should keep the rig frame when an actor the rig did not create is sent a frame', () => {
+    const rig = createThreeCameraRig({ initialView });
+    rig.actorRef.start();
+    const persisted = rig.actorRef.getPersistedSnapshot();
+    rig.actorRef.stop();
+    const restored = createActor(rig.actorRef.logic, { snapshot: persisted }).start();
+
+    restored.send({ type: 'setRenderFrame', renderFrame: frameAt(16) });
+
+    expect(restored.getSnapshot().context.renderFrame).toEqual(frameAt(16));
+    expect(rig.renderFrame).toEqual(frameAt(1));
+    restored.stop();
+    rig.dispose();
+  });
+
+  it('should not send its own actor a frame after the actor errored', () => {
+    const rejected: string[] = [];
+    let fail = false;
+    const rig = createThreeCameraRig({
+      initialView,
+      onRejectedEvent(rejection) {
+        rejected.push(rejection.event.type);
+      },
+      onUpdate() {
+        if (fail) {
+          fail = false;
+          throw new Error('host failed');
+        }
+      },
+    });
+    const errors: unknown[] = [];
+    rig.actorRef.subscribe({
+      error(error) {
+        errors.push(error);
+      },
+    });
+    rig.actorRef.start();
+    fail = true;
+    rig.actorRef.send({ type: 'setViewport', viewport });
+
+    rig.setRenderFrame(frameAt(4));
+
+    expect(errors).toHaveLength(1);
+    expect(rig.actorRef.getSnapshot().status).toBe('error');
+    expect(rig.renderFrame).toEqual(frameAt(4));
+    expect(rejected).toEqual([]);
+    rig.dispose();
+  });
+
   it.each([11, 23])(
     'should agree on the frame, the policy and the native cameras after seeded reentrant sequences (seed %i)',
     (initialSeed) => {

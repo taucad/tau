@@ -1078,6 +1078,30 @@ describe('ready.operation.ensuringFocusedChat', () => {
     actor.stop();
   });
 
+  it('keeps the focused chat when the route names that same chat instead of revalidating it', async () => {
+    let ensureInvocationCount = 0;
+    const actor = await startAndLoad({
+      loadResult: stubEditorState,
+      ensureResult: async (input) => {
+        ensureInvocationCount += 1;
+        return {
+          type: 'focusedChatEnsured',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
+        };
+      },
+    });
+    expect(ensureInvocationCount).toBe(1);
+    const { focusedChatId } = actor.getSnapshot().context;
+
+    actor.send({ type: 'setRequestedChatId', chatId: focusedChatId });
+
+    expect(actor.getSnapshot().context.requestedChatId).toBe(focusedChatId);
+    expect(actor.getSnapshot().context.focusedChatId).toBe(focusedChatId);
+    expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    expect(ensureInvocationCount).toBe(1);
+    actor.stop();
+  });
+
   it('re-enters ensuringFocusedChat from idle when focusedChatId becomes undefined', async () => {
     let ensureInvocationCount = 0;
     const actor = await startAndLoad({

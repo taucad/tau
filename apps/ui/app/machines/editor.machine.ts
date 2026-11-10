@@ -538,9 +538,12 @@ export const editorMachine = setup({
             },
             /* A bare project URL (no `searchParameterName.chat`) names no chat, so a chat already focused
              * still satisfies it — revalidating would enter `ensuringFocusedChat` and
-             * flash the chat pane's skeleton before the route rewrites the URL. */
+             * flash the chat pane's skeleton before the route rewrites the URL. The rewritten URL then
+             * names the chat that is already focused, which the ensure has just established, so
+             * revalidating it would swap the live composer for that skeleton a second time. */
             setRequestedChatId: ({ context, event }) =>
-              event.chatId === undefined && context.focusedChatId !== undefined
+              context.focusedChatId !== undefined &&
+              (event.chatId === undefined || event.chatId === context.focusedChatId)
                 ? { context: { requestedChatId: event.chatId } }
                 : { target: '.ensuringFocusedChat', context: { requestedChatId: event.chatId } },
             registerMaterialiseModel: { context: ({ event }) => ({ materialiseModel: event.materialiseModel }) },

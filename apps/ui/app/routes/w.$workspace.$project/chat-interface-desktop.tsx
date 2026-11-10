@@ -102,6 +102,17 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     };
   }, []);
 
+  /* Allotment observes its container only after its first paint and adds its panes on the render that
+   * observation triggers, so its first frames have no laid-out panes and show the bare window behind
+   * them. The skeleton stays on top until the first layout with real pane sizes, which Allotment
+   * reports from a layout effect, so the swap lands in one painted frame. */
+  const [areLanesLaidOut, setAreLanesLaidOut] = useState(false);
+  const handleLanesChange = useCallback((sizes: readonly number[]) => {
+    if (sizes.some((size) => size > 0)) {
+      setAreLanesLaidOut(true);
+    }
+  }, []);
+
   const persistWidths = useCallback(
     (sizes: readonly number[]) => {
       const chatWidth = sizes[0];
@@ -142,67 +153,75 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
               lanes stand in at their default widths rather than a blank page. */}
           <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
             {isClient && isEditorReady ? (
-              <Allotment
-                paneLabels={['Chat', 'Viewer', 'Workbench']}
-                separator={false}
-                proportionalLayout={false}
-                /* The lanes land rather than snap in: the skeleton they replace holds the same
+              <>
+                <Allotment
+                  paneLabels={['Chat', 'Viewer', 'Workbench']}
+                  separator={false}
+                  proportionalLayout={false}
+                  /* The lanes land rather than snap in: the skeleton they replace holds the same
                    background, so a short fade reads as the workspace resolving (soft land). */
-                className='size-full animate-in duration-200 fade-in-50 motion-reduce:animate-none [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
-                onDragEnd={persistWidths}
-              >
-                <Allotment.Pane
-                  key='chat'
-                  minSize={panelMinSizeChat}
-                  preferredSize={desktopLayout.chatWidth}
-                  priority={LayoutPriority.Low}
-                  visible={chatVisible}
+                  className='size-full animate-in duration-200 fade-in-50 motion-reduce:animate-none [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+                  onChange={handleLanesChange}
+                  onDragEnd={persistWidths}
                 >
-                  <ChatHistoryGate>
-                    <ChatHistory
-                      /* The chat lane toggle leads the header on the pixel it holds at the head of the
+                  <Allotment.Pane
+                    key='chat'
+                    minSize={panelMinSizeChat}
+                    preferredSize={desktopLayout.chatWidth}
+                    priority={LayoutPriority.Low}
+                    visible={chatVisible}
+                  >
+                    <ChatHistoryGate>
+                      <ChatHistory
+                        /* The chat lane toggle leads the header on the pixel it holds at the head of the
                          viewer's tab bar while the lane is closed: one step in from the lane's edge, or
                          straight after the host's controls. */
-                      className={cn(
-                        sidebarOpen
-                          ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
-                          : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
-                      )}
-                      isExpanded={desktopLayout.chatOpen}
-                      setIsExpanded={(value) => {
-                        setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
-                      }}
-                    />
-                  </ChatHistoryGate>
-                </Allotment.Pane>
+                        className={cn(
+                          sidebarOpen
+                            ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
+                            : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+                        )}
+                        isExpanded={desktopLayout.chatOpen}
+                        setIsExpanded={(value) => {
+                          setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
+                        }}
+                      />
+                    </ChatHistoryGate>
+                  </Allotment.Pane>
 
-                <Allotment.Pane
-                  key='viewer'
-                  minSize={isTight ? panelMinSizeViewerTight : panelMinSizeViewer}
-                  priority={LayoutPriority.High}
-                >
-                  <div
-                    className={cn(
-                      '@container/viewer relative size-full overflow-hidden',
-                      !sidebarOpen && !chatVisible && topLeftTabBarInset,
-                    )}
+                  <Allotment.Pane
+                    key='viewer'
+                    minSize={isTight ? panelMinSizeViewerTight : panelMinSizeViewer}
+                    priority={LayoutPriority.High}
                   >
-                    <ViewerDockview />
-                    <ProjectManifestIssueBanner />
-                    <ProjectUnavailableOverlay />
-                  </div>
-                </Allotment.Pane>
+                    <div
+                      className={cn(
+                        '@container/viewer relative size-full overflow-hidden',
+                        !sidebarOpen && !chatVisible && topLeftTabBarInset,
+                      )}
+                    >
+                      <ViewerDockview />
+                      <ProjectManifestIssueBanner />
+                      <ProjectUnavailableOverlay />
+                    </div>
+                  </Allotment.Pane>
 
-                <Allotment.Pane
-                  key='workbench'
-                  minSize={panelMinSizeWorkbench}
-                  preferredSize={desktopLayout.workbenchWidth}
-                  priority={LayoutPriority.Low}
-                  visible={workbenchVisible}
-                >
-                  <WorkbenchDockview onApiChange={setWorkbenchApi} />
-                </Allotment.Pane>
-              </Allotment>
+                  <Allotment.Pane
+                    key='workbench'
+                    minSize={panelMinSizeWorkbench}
+                    preferredSize={desktopLayout.workbenchWidth}
+                    priority={LayoutPriority.Low}
+                    visible={workbenchVisible}
+                  >
+                    <WorkbenchDockview onApiChange={setWorkbenchApi} />
+                  </Allotment.Pane>
+                </Allotment>
+                {areLanesLaidOut ? null : (
+                  <div className='absolute inset-0 z-20'>
+                    <WorkspaceSkeleton />
+                  </div>
+                )}
+              </>
             ) : (
               <WorkspaceSkeleton />
             )}

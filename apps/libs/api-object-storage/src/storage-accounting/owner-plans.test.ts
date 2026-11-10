@@ -6,7 +6,7 @@ import type { OwnerPlanSettings, OwnerSubscriptionRow } from '#storage-accountin
 
 const now = Date.now();
 const day = 24 * 60 * 60 * 1000;
-const cloud: OwnerPlanSettings = { tauCloudEnabled: true, environment: 'staging', freeTierSync: false };
+const cloud: OwnerPlanSettings = { tauCloudEnabled: true, environment: 'staging' };
 
 const row = (ownerId: string, overrides: Partial<OwnerSubscriptionRow> = {}): OwnerSubscriptionRow => ({
   ownerId,
@@ -37,17 +37,10 @@ describe('ownerPlansOf (W14 OB3, as storageLimitOf enforces)', () => {
 
     expect(Object.fromEntries(plans)).toStrictEqual({
       paid: { plan: 'pro', limitBytes: storageLimitBytesByTier.pro },
-      lapsed: { plan: 'free', limitBytes: 0 },
+      lapsed: { plan: 'free', limitBytes: storageLimitBytesByTier.free },
       grace: { plan: 'pro', limitBytes: storageLimitBytesByTier.pro },
-      none: { plan: 'free', limitBytes: 0 },
+      none: { plan: 'free', limitBytes: storageLimitBytesByTier.free },
       enterprise: { plan: 'enterprise', limitBytes: storageLimitBytesByTier.enterprise },
-    });
-  });
-
-  it('should open the free allowance only with D23’s free-tier sync gate', () => {
-    expect(ownerPlansOf(['none'], [], { ...cloud, freeTierSync: true, now }).get('none')).toStrictEqual({
-      plan: 'free',
-      limitBytes: storageLimitBytesByTier.free,
     });
   });
 

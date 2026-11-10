@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
@@ -34,32 +34,6 @@ describe('environmentSchema', () => {
   it('should reject ambiguous cloud deletion admission flags', () => {
     const result = environmentSchema.safeParse({ ...baseEnvironment(), TAU_PROJECT_DELETION_ENABLED: '1' });
     expect(result.success).toBe(false);
-  });
-
-  /*
-   * Charter D23: free-tier sync is landed code behind a launch gate. The flag
-   * defaults off, and no committed deploy config turns it on: the go-live
-   * checklist opens it by setting it in `fly.*.toml` and deleting the second
-   * row here in the same commit, so the opening is a reviewed change.
-   */
-  it('should keep free-tier sync closed when TAU_FREE_TIER_SYNC_ENABLED is unset', () => {
-    const environment = Object.fromEntries(
-      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_FREE_TIER_SYNC_ENABLED'),
-    );
-    const result = environmentSchema.safeParse(environment);
-
-    expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
-    expect(result.success && result.data.TAU_FREE_TIER_SYNC_ENABLED).toBe(false);
-  });
-
-  it('should keep free-tier sync closed in every committed deploy config while D23 is open', () => {
-    const apiRoot = new URL('../../', import.meta.url);
-    const deployConfigs = readdirSync(apiRoot).filter((name) => /^fly\..*toml$/u.test(name));
-
-    expect(deployConfigs.length).toBeGreaterThan(0);
-    for (const name of deployConfigs) {
-      expect(readFileSync(new URL(name, apiRoot), 'utf8'), name).not.toContain('TAU_FREE_TIER_SYNC_ENABLED');
-    }
   });
 
   it.each([

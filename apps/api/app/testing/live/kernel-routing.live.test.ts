@@ -139,7 +139,12 @@ const emptyRegistry: ToolRegistry = {
   }),
 };
 
-const runnable = models.filter((modelId) => hasLiveCredential(modelId));
+/**
+ * Only `vitest.live.config.ts` sets `TAU_LIVE_TEST_DEFAULTED`. Under any other config (the integration config's glob
+ * also matches this file) `.env.test` placeholders would read as credentials and the spike would fire real turns.
+ */
+const underLiveConfig = process.env['TAU_LIVE_TEST_DEFAULTED'] !== undefined;
+const runnable = underLiveConfig ? models.filter((modelId) => hasLiveCredential(modelId)) : [];
 
 describe.skipIf(runnable.length === 0)(
   `kernel routing spike AKS-S1 (set ${liveCredentialName(gateModel)} in apps/api/.env to run)`,

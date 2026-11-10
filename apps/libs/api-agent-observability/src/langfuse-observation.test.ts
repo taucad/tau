@@ -9,6 +9,7 @@ import { evidenceFixture, privateMarker, toolFact } from '#testing/evidence.fixt
 import {
   exportableEvidence,
   langfuseObservation,
+  langfuseScores,
   observationGroup,
   observationMapperVersion,
   otlpBody,
@@ -602,6 +603,114 @@ describe('langfuseObservation v5: generation content (LW3)', () => {
     expect(JSON.stringify(input)).toContain('not kept: 90000 bytes');
     expect(JSON.stringify(input)).not.toContain('f'.repeat(64));
     expect(metadata(langfuseObservation(big, withIdentity, pseudonym)!.spans[0]!, 'input_omitted_parts')).toBe('2');
+  });
+});
+
+describe('langfuseScores (LW7): ratings and outcomes as scores on the run root', () => {
+  const rated = async (value: 'positive' | 'negative'): Promise<Evidence> => {
+    const { evidence } = await projectRun(hostRun({ rating: { value, at: at + 45_000 } }), {
+      ...hostContext,
+      plane: 'feedback',
+    });
+    return evidence[0]!;
+  };
+  const checked = (result: 'passed' | 'failed'): ProjectedRun['tools'] => [
+    {
+      call: 'call-1',
+      toolName: 'test_model',
+      outcome: 'completed',
+      input: row(3),
+      output: row(4),
+      startedAt: at + 1000,
+      settledAt: at + 3000,
+      check: { result, revision: ['file-a'], requirements: ['requirement-a'] },
+    },
+  ];
+
+  it('should map a rating to no observation and one user-rating score on the run root', async () => {
+    const negative = await rated('negative');
+    const positive = await rated('positive');
+    const root = map(await outcomeOf(hostRun()));
+
+    expect(negative.payload.plane).toBe('feedback');
+    expect(langfuseObservation(negative, context, pseudonym)).toBeUndefined();
+    const scores = langfuseScores(negative, context);
+    expect(scores).toEqual([
+      {
+        id: expect.stringMatching(/^[a-f\d]{32}$/u) as unknown,
+        traceId: root.identity.traceId,
+        observationId: root.identity.spanId,
+        name: 'user-rating',
+        value: 0,
+        dataType: 'BOOLEAN',
+        timestamp: new Date(at + 45_000).toISOString(),
+        environment: 'staging',
+      },
+    ]);
+    expect(langfuseScores(positive, context)).toMatchObject([{ name: 'user-rating', value: 1 }]);
+    /* The id is the source fact's and the name's: the same rating always names the same score. */
+    expect(langfuseScores(negative, context)).toEqual(scores);
+    expect(JSON.stringify(scores)).not.toContain('user-a');
+  });
+
+  it('should write run-termination and task-success from an outcome, beside its root, ids from the fact', async () => {
+    const outcome = await outcomeOf(hostRun({ tools: checked('passed') }));
+    const root = map(outcome);
+    const scores = langfuseScores(outcome, context);
+    const on = { traceId: root.identity.traceId, observationId: root.identity.spanId, environment: 'staging' };
+    const timestamp = new Date(at + 30_000).toISOString();
+
+    expect(scores).toEqual([
+      {
+        ...on,
+        id: expect.any(String) as unknown,
+        name: 'run-termination',
+        value: 'completed',
+        dataType: 'CATEGORICAL',
+        timestamp,
+      },
+      { ...on, id: expect.any(String) as unknown, name: 'task-success', value: 1, dataType: 'BOOLEAN', timestamp },
+    ]);
+    expect(new Set(scores.map((score) => score.id)).size).toBe(2);
+    expect(langfuseScores(outcome, context)).toEqual(scores);
+    expect(langfuseScores(await outcomeOf(hostRun({ tools: checked('failed') })), context)).toMatchObject([
+      { name: 'run-termination', value: 'completed' },
+      { name: 'task-success', value: 0 },
+    ]);
+  });
+
+  it('should leave task-success out when the rule cannot decide, and run-termination out for an unknown ending', async () => {
+    expect(langfuseScores(await outcomeOf(hostRun({ termination: 'cancelled' })), context)).toMatchObject([
+      { name: 'run-termination', value: 'cancelled' },
+    ]);
+    expect(langfuseScores(await outcomeOf(hostRun({ termination: 'unknown' })), context)).toEqual([]);
+  });
+
+  it("should write a resumed run's second outcome as a second run-termination on the same root", async () => {
+    const failed = await outcomeOf(
+      hostRun({
+        termination: 'failed',
+        ending: { source: row(8), at: at + 30_000, failure: { code: 'MODEL_ATTEMPT_PENDING', wrapped: undefined } },
+      }),
+    );
+    const resumed = await outcomeOf(hostRun({ ending: { source: row(14), at: at + 90_000 } }));
+    const [first] = langfuseScores(failed, context);
+    const [second] = langfuseScores(resumed, context);
+
+    expect(first).toMatchObject({ name: 'run-termination', value: 'failed' });
+    expect(second).toMatchObject({ name: 'run-termination', value: 'completed' });
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.observationId).toBe(first?.observationId);
+  });
+
+  it('should write no score for a generation, a tool, a check or a settlement', async () => {
+    const evidence = await projected(hostRun({ tools: checked('passed') }));
+
+    expect(langfuseScores(await generation(), context)).toEqual([]);
+    for (const kind of ['tool', 'cad'] as const) {
+      expect(langfuseScores(evidence.find((item) => item.semantic.kind === kind)!, context)).toEqual([]);
+    }
+    expect(langfuseScores(await evidenceFixture(), context)).toEqual([]);
   });
 });
 

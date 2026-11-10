@@ -181,13 +181,13 @@ def main(params: Params) -> smlibpy.Part | None:
     dimensions: [3],
     language: 'openscad',
     ecosystem: 'none',
-    description: 'Constructive Solid Geometry for 3D printing',
+    description: 'Simple prints and customisers',
     mainFile: 'main.scad',
     backendProvider: 'manifold',
     longDescription:
       'Constructive Solid Geometry (CSG) — build complex geometries by combining primitives with boolean operations. Supports customizer parameters, dependency resolution, and native GLB and 3MF output for 3D printing.',
     emptyCode: ``,
-    recommended: '3D Printing & Prototyping',
+    recommended: 'Simple Prints & Customisers',
     tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
     features: ['Boolean operations', 'Parametric design', 'GLB export', '3MF export'],
   },
@@ -262,7 +262,7 @@ export default function main(p = defaultParams) {}
     dimensions: [2, 3],
     language: 'typescript',
     ecosystem: 'npm',
-    description: 'TypeScript CAD for Constructive Solid Geometry',
+    description: 'JavaScript CSG modelling',
     mainFile: 'main.ts',
     backendProvider: 'jscad',
     longDescription:
@@ -273,7 +273,7 @@ export const defaultParams = {};
 
 export default function main(p = defaultParams) {}
 `,
-    recommended: '3D Printing & Web-Based CAD',
+    recommended: 'JavaScript CSG Modelling',
     tags: ['TypeScript', 'CSG', 'Browser-Native', '3D Printing'],
     features: [
       'Constructive Solid Geometry (CSG)',

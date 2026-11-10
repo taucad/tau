@@ -138,7 +138,7 @@ describe('Community route', () => {
     expect(tiles.map((tile) => tile.textContent)).toEqual([
       'All kernels 25 Every example',
       'Replicad 21 TypeScript CAD for precise engineering',
-      'JSCAD 4 TypeScript CAD for Constructive Solid Geometry',
+      'JSCAD 4 JavaScript CSG modelling',
     ]);
     expect(within(shelf).getByRole('radio', { name: /^All kernels/u })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('searchbox', { name: 'Search examples' })).toHaveAttribute(

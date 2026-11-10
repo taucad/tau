@@ -506,7 +506,7 @@ export const bundleOwners: readonly BundleOwner[] = [
       prefix: 'tau',
       groupBy: byKind,
     },
-    authoredReferences: ['materials-reference.md', 'kinematics-reference.md'],
+    authoredReferences: ['materials-reference.md', 'kinematics-reference.md', 'characters-reference.md'],
     core: {
       budgetTokens: 4500,
       pins: ['Pico', 'Voxels', 'BaseBox', 'ImplicitGyroid'],

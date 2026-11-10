@@ -42,6 +42,8 @@ import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
  * case plus a summary against the development thresholds to `TAU_KR_OUT`. The run records; it asserts only that every
  * case produced an observation, because AKS-S1's thresholds decide a design ruling (D1), not a build.
  *
+ * Credential: `ANTHROPIC_API_KEY` in `apps/api/.env`, or `TAU_TEST_ANTHROPIC_API_KEY` in a cloud agent session (`vitest.live.config.ts`).
+ *
  * Environment:
  * - `TAU_KR_MODELS`: comma-separated catalog ids (default Sonnet 5.5, Opus 5.5 and Haiku 5.5).
  * - `TAU_KR_ARMS`: `in-turn,pointer,template,prompt-only` (default all; the pointer arm runs on Sonnet only).

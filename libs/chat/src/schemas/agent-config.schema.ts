@@ -1,6 +1,6 @@
 // oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- standard zod default import
 import z from 'zod';
-import { kernelProviders } from '@taucad/types/constants';
+import { kernelPreferences } from '@taucad/types/constants';
 import { chatModes } from '#constants/chat-mode.constants.js';
 import { reasoningLevels } from '#constants/model.constants.js';
 import { toolModes, toolNames } from '#constants/tool.constants.js';
@@ -126,7 +126,12 @@ export const cadAgentConfigSchema = z
   .object({
     profile: z.literal('cad'),
     execution: cadAgentExecutionSchema,
-    kernel: z.enum(kernelProviders),
+    /**
+     * The chat's kernel preference: `auto`, which lets the working agent choose under the routing rubric, or one
+     * kernel (automatic kernel selection blueprint D2). The owner and the host profile ride the snapshot's `kernel`
+     * object, so preference and facts are frozen with the turn.
+     */
+    kernel: z.enum(kernelPreferences),
     mode: z.enum(chatModes),
     toolChoice: toolChoiceSchema,
     testingEnabled: z.boolean(),

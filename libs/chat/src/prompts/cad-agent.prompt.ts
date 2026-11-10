@@ -56,12 +56,14 @@
 // EVAL(screenshot-pose): pending benchmark-2026-10-21 — screenshot takes pose { animation: { id, time } } | { coordinates } and its message lists every coordinate at that pose (LRP-7). Validates the agent captures a mechanism at two poses to show motion without a viewer page, and never edits geometry to move a part.
 // EVAL(test-model-responsive): pending benchmark-2026-10-23 — within one test_model run every load of the same model, format, parameters, mesh tolerance and region reuses one Runtime export while the files it read are unchanged (a failed export is never reused), and get_parameters answers from the resolved manifest without a runtime round-trip while every source it names keeps its digest (LRP-11). Validates GeoSpec runs that load main.ts many times finish sooner with the same rows, and that a parameter read right after an edit still reports the edited values.
 // EVAL(chat-state-note): measured 2026-11-10 (`chat-settings.live.test.ts`; passes of each row with the setting written into the system prompt and tool list, the composition before → with it said in the state note). Plan mode from the first turn, plan mode turned on mid-chat, testing off: 3/3 → 3/3 on anthropic-claude-fable-5.2, openai-gpt-6.1-terra, google-gemini-3.8-flash, together-kimi-k3.1-pro and xai-grok-4.7. Agent mode restored after a plan: 3/3 → 3/3 on Fable 5.2, Kimi K3.1 Pro and Grok 4.7; 1/3 → 3/3 on GPT 6.1 Terra; 9/9 → 8/9 on Gemini 3.8 Flash. Every tool off (note only; nothing to compare): 3/3 on all five. Moves plan mode, the testing switch and the tool mask out of the system prompt and the tool list into `getChatStateNote` (provider reasoning replay contract, WP6, rulings U10 and U16). Pending benchmark: every other catalog model, google-gemini-4-argon first (its stream stalled at the provider on most runs of both arms).
+// EVAL(auto-kernel-routing): pending AKS-S1 — the kernel_skill section renders one of the four D2 states from the preference, the owner and the host profile (automatic kernel selection blueprint D2, D4): under Auto with no entry file it carries the conditional sentence and the routing card in place of the retired /create-model skill; a manual pick that matches the owner, or a project with no entry, keeps the pin sentence byte for byte; a manual pick over another owner names both kernels. Validates an in-turn choice from an acceptable set, the announced trade-off and skill activation before the first write; AKS-S1 runs the arms when keys exist.
 
 import { toolName } from '#constants/index.js';
 import type { ChatMode } from '#constants/index.js';
 import type { ToolSelection } from '#types/tool.types.js';
-import { resolveKernel } from '@taucad/types/constants';
-import type { KernelId } from '@taucad/types/constants';
+import type { KernelPreference } from '@taucad/types/constants';
+import { renderKernelGuidance } from '#prompts/kernel-routing.js';
+import type { KernelOwner, KernelRoutingProfile } from '#prompts/kernel-routing.js';
 import { createSectionRegistry } from '#prompts/prompt-section-registry.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
 
@@ -178,7 +180,7 @@ ${sections.join('\n\n')}
  */
 // oxlint-disable-next-line max-params -- Parameters match independent concerns (kernel, mode, testing, options)
 export function getCadSystemPrompt(
-  kernel: KernelId,
+  kernel: KernelPreference,
   mode: ChatMode = 'agent',
   testingEnabled = true,
   options: {
@@ -195,9 +197,15 @@ export function getCadSystemPrompt(
      * section in Grafana.
      */
     onSectionResolved?: (resolved: ResolvedSection) => void;
+    /** The kernel the runtime binds for the project's main entry; absent while the project is entry-less (D2). */
+    kernelOwner?: KernelOwner;
+    /**
+     * What this host can run for the person now (D4), computed at admission and frozen with the turn. Absent, no
+     * kernel is available, so an Auto turn fails closed rather than routing to a kernel the host never offered.
+     */
+    kernelProfile?: KernelRoutingProfile;
   } = {},
 ): CadSystemPrompt {
-  const kernelConfiguration = resolveKernel(kernel);
   const supportsImageInput = options.supportsImageInput ?? true;
 
   const decomposeStep = `0. **Decompose**: For multi-component, real-world, reference-based, high-fidelity, or spec/SysML requests, write a mini design brief before any code: assembly tree, major visible features, parametric relationships, key dimensions/assumptions, materials/surface treatments, and verification targets. Skip when the request is only a single shape or trivial parameter change.`;
@@ -451,12 +459,16 @@ For work with three or more steps, keep the person's task list at \`.tau/chats/<
 
   // ── Dynamic sections (per-request, uncached) ──────────────────────
 
-  // KS-6 seam: when the agent config admits Auto, branch here to the
-  // create-model + entitled-kernels pointer without changing Block 1.
+  // The KS-6 seam: one of D2's four states, in the dynamic block, so Block 1 is the same for every preference.
   registry.register({
     name: 'kernel_skill',
     cacheBreak: true,
-    compute: () => `This project uses ${kernelConfiguration.name}; activate the cad-${kernelConfiguration.id} skill.`,
+    compute: () =>
+      renderKernelGuidance({
+        preference: kernel,
+        ...(options.kernelOwner === undefined ? {} : { owner: options.kernelOwner }),
+        profile: options.kernelProfile ?? { available: [] },
+      }),
   });
 
   registry.register({

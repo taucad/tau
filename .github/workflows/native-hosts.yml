@@ -36,6 +36,13 @@ permissions:
 env:
   pnpm_config_verify_deps_before_run: warn
   NX_NO_CLOUD: 'true'
+  # `NX_NO_CLOUD` turns off Nx Cloud only; the self-hosted cache below is Nx's HTTP remote cache, which it
+  # leaves on. Nx remote cache, provisioned by tau-cloud `tau-ci-cache`, read with the read token only: no job
+  # here has an environment or `id-token: write`, so none can write (`ci.yml` writes, from `main` and its queue).
+  # The server is set only when a token is present (fork and Dependabot runs get none, and Nx fails on
+  # a tokenless 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
 # A newer push to a pull request cancels its outdated run. Pushes to `main` share one group and are
 # never cancelled once running: a newer push replaces the run still waiting for a runner, so `main`
@@ -239,8 +246,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # This row qualifies the suites on this host, and their task hash names no host, so a remote entry
+      # (written by `ci.yml` on linux-x64) must never stand in for running them here.
       - name: Run the Build123d suites
-        run: pnpm nx run build123d:test --outputStyle=static
+        run: pnpm nx run build123d:test --outputStyle=static --skip-remote-cache
 
       # These selection checks use the read-only checkout and an empty store without networking.
       # glibc 2.28 is the supported floor: --offline must reach OFFLINE_MISS after target selection.
@@ -431,8 +440,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The Intel runner needs more than Vitest's default 5 s to import OCP in the sandbox.
+      # Never from a remote entry: the hash names no host (see the Linux row).
       - name: Run the Build123d suites
-        run: pnpm nx run build123d:test --outputStyle=static --testTimeout=120000
+        run: pnpm nx run build123d:test --outputStyle=static --testTimeout=120000 --skip-remote-cache
 
       # D13: PicoGK declares darwin-arm64 and linux-x64 on glibc, so an Intel Mac refuses on `arch`;
       # forcing `TAU_DEPENDENCY_TARGET` to a target PicoGK does not declare is refused on `os`. Both

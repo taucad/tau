@@ -1145,15 +1145,11 @@ describe('recordSync', () => {
       const first = store.commands.edit({ name: 'one' });
       const flushed = store.commands.flush();
       await flush();
-      let answered: boolean | undefined;
-      void flushed.then((ok) => {
-        answered = ok;
-      });
       const later = store.commands.edit({ name: 'two' });
       await store.reply();
 
       expect(await first).toBe(true);
-      expect(answered).toBe(true);
+      expect(await flushed).toBe(true);
       expect(store.writes).toHaveLength(1);
 
       store.clock.advance(500);

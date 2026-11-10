@@ -212,8 +212,10 @@ const ok = (content: Record<string, JsonValue>): HostToolResult => ({
   isError: false,
 });
 
-const asObject = (input: JsonValue): Readonly<Record<string, JsonValue>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input) ? input : {};
+const isJsonObject = (input: JsonValue): input is Readonly<Record<string, JsonValue>> =>
+  input !== null && typeof input === 'object' && !Array.isArray(input);
+
+const asObject = (input: JsonValue): Readonly<Record<string, JsonValue>> => (isJsonObject(input) ? input : {});
 
 const stringField = (input: JsonValue, field: string): string | undefined => {
   const value = asObject(input)[field];

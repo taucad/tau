@@ -36,6 +36,11 @@
       "import": "./src/prompts/index.ts",
       "default": "./src/prompts/index.ts"
     },
+    "./prompts/kernel-routing-surfaces": {
+      "types": "./src/prompts/kernel-routing-surfaces.ts",
+      "import": "./src/prompts/kernel-routing-surfaces.ts",
+      "default": "./src/prompts/kernel-routing-surfaces.ts"
+    },
     "./rpc": {
       "types": "./src/rpc/index.ts",
       "import": "./src/rpc/index.ts",

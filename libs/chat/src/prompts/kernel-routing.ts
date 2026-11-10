@@ -210,9 +210,9 @@ export const renderKernelGuidance = ({ preference, owner, profile }: KernelGuida
 };
 
 /**
- * The self-sufficient digest for MCP `initialize` instructions and the `llms.md` "Which kernel" paragraph: the
- * conditional sentence, each narrow rule in one line, and one phrase per available kernel. It points at no table a
- * standalone MCP client cannot reach (D4).
+ * The self-sufficient digest for the ACP `tau://agent-guidance` block and the `llms.md` "Which kernel" paragraph: the
+ * conditional sentence, each narrow rule in one line, and one phrase per available kernel. It points at no table an
+ * ACP client cannot reach (D4).
  *
  * @param profile - The host's available kernels.
  * @returns Plain text lines joined by newlines.

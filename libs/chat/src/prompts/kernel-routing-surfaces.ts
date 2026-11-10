@@ -1,0 +1,149 @@
+import { kernelConfigurations } from '@taucad/types/constants';
+import type { KernelId } from '@taucad/types/constants';
+import { kernelChoiceCondition, renderKernelRoutingCard, renderKernelRoutingDigest } from '#prompts/kernel-routing.js';
+import type { KernelRoutingProfile } from '#prompts/kernel-routing.js';
+
+/*
+ * The static surfaces of the routing generator (automatic kernel selection blueprint D4, AKS-2): the plugin `tau`
+ * skill's Kernels section, the `llms.md` "Which kernel" digest and the ACP guidance digest. Each is rendered for a host
+ * profile of Appendix C; the files hold the rendering between generated-region markers, and a test fails when a region
+ * is stale. Regenerate with `pnpm nx run chat:generate-kernel-routing`. MCP `initialize` carries no kernel text: its
+ * instructions keep the 2,048-character budget (blueprint Appendix G, AKS-2 delivery amended).
+ */
+
+/** Every catalog kernel except Zoo, in catalog order: no plugin or `tau mcp` host has a credential path to Zoo. */
+const withoutZoo: readonly KernelId[] = kernelConfigurations.map(({ id }) => id).filter((id) => id !== 'zoo');
+
+/**
+ * The Codex and Claude Code plugin: Zoo has no credential path, and OpenCascade runs but its skill is not in the
+ * plugin's folder (the `assemble` list in `packages/agent-plugin/project.json`).
+ *
+ * @public
+ */
+export const pluginKernelProfile: KernelRoutingProfile = {
+  available: withoutZoo,
+  withoutSkill: ['opencascadejs'],
+};
+
+/**
+ * A standalone `tau mcp` client: Zoo has no credential path, and the server serves every skill bundle.
+ *
+ * @public
+ */
+export const tauMcpKernelProfile: KernelRoutingProfile = { available: withoutZoo };
+
+/**
+ * The plugin `tau` skill's Kernels section, under its `## Kernels` heading.
+ *
+ * @returns Markdown for the generated region.
+ * @public
+ */
+export const renderPluginKernelsSection = (): string =>
+  [
+    kernelChoiceCondition,
+    renderKernelRoutingCard(pluginKernelProfile),
+    "After choosing, load that kernel's skill before writing model code; a kernel whose skill is none has no skill in this plugin.",
+  ].join('\n\n');
+
+/**
+ * The `llms.md` "Which kernel" digest an installing agent reads: the plugin profile, since the page installs the plugin.
+ *
+ * @returns Plain text for the generated region.
+ * @public
+ */
+export const renderLlmsKernelDigest = (): string => renderKernelRoutingDigest(pluginKernelProfile);
+
+/**
+ * The digest the ACP `tau://agent-guidance` block carries after the MCP instructions: self-sufficient, for the
+ * `tau mcp` profile.
+ *
+ * @public
+ */
+export const tauMcpKernelDigest: string = renderKernelRoutingDigest(tauMcpKernelProfile);
+
+/**
+ * The files that hold a generated kernel routing region, relative to the workspace root, and the region each holds.
+ *
+ * @public
+ */
+export const kernelRoutingRegions = [
+  {
+    path: 'packages/agent-plugin/skills/tau/SKILL.md',
+    region: 'kernel-routing-card',
+    render: renderPluginKernelsSection,
+  },
+  { path: 'apps/www/content/agent/llms.md', region: 'kernel-routing-digest', render: renderLlmsKernelDigest },
+] as const;
+
+/**
+ * The markers around one generated region of a Markdown file.
+ *
+ * @param name - The region's name.
+ * @returns The start and end comments.
+ * @public
+ */
+export const generatedRegionMarkers = (name: string): { readonly start: string; readonly end: string } => ({
+  start: `<!-- generated:${name}:start (pnpm nx run chat:generate-kernel-routing) -->`,
+  end: `<!-- generated:${name}:end -->`,
+});
+
+/**
+ * The text between a region's markers, without the blank lines that frame it.
+ *
+ * @param text - The whole file.
+ * @param name - The region's name.
+ * @returns The region's content, or undefined when the file lacks the markers.
+ * @public
+ */
+export const readGeneratedRegion = (text: string, name: string): string | undefined => {
+  const { start, end } = generatedRegionMarkers(name);
+  const from = text.indexOf(start);
+  const to = text.indexOf(end);
+  if (from === -1 || to === -1 || to < from) {
+    return undefined;
+  }
+  return text.slice(from + start.length, to).trim();
+};
+
+/**
+ * Replace a region's content, keeping everything outside its markers.
+ *
+ * @param text - The whole file.
+ * @param name - The region's name.
+ * @param content - The new content.
+ * @returns The file with the region replaced.
+ * @throws When the file lacks the region's markers.
+ * @public
+ */
+export const writeGeneratedRegion = (text: string, name: string, content: string): string => {
+  const { start, end } = generatedRegionMarkers(name);
+  const from = text.indexOf(start);
+  const to = text.indexOf(end);
+  if (from === -1 || to === -1 || to < from) {
+    throw new Error(`The file has no generated ${name} region.`);
+  }
+  return `${text.slice(0, from + start.length)}\n\n${content}\n\n${text.slice(to)}`;
+};
+
+/**
+ * Compare a region with its rendering as Markdown formatting leaves it: table cells are compared trimmed and a
+ * separator row by its columns, since the formatter pads tables.
+ *
+ * @param markdown - Markdown text.
+ * @returns The text with table padding removed.
+ * @public
+ */
+export const normalizeMarkdownTables = (markdown: string): string =>
+  markdown
+    .split('\n')
+    .map((line) => {
+      if (!line.startsWith('|')) {
+        return line.trimEnd();
+      }
+      const cells = line
+        .slice(1, line.endsWith('|') ? -1 : undefined)
+        .split(/(?<!\\)\|/u)
+        .map((cell) => cell.trim());
+      return `| ${cells.map((cell) => (/^:?-+:?$/u.test(cell) ? '---' : cell)).join(' | ')} |`;
+    })
+    .join('\n');

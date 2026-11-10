@@ -103,6 +103,7 @@
     "./hooks/use-webgl-context-tracker": "./src/hooks/use-webgl-context-tracker.tsx",
     "./lib/renderer-telemetry": "./src/lib/renderer-telemetry.ts",
     "./lib/viewer-load-timing": "./src/lib/viewer-load-timing.ts",
+    "./machines/canvas.machine": "./src/machines/canvas.machine.ts",
     "./machines/graphics.machine": "./src/machines/graphics.machine.ts",
     "./machines/kinematics.machine": "./src/machines/kinematics.machine.ts",
     "./machines/model-interaction.machine": "./src/machines/model-interaction.machine.ts",
@@ -466,6 +467,11 @@
         "types": "./dist/lib/viewer-load-timing.d.mts",
         "import": "./dist/lib/viewer-load-timing.mjs",
         "default": "./dist/lib/viewer-load-timing.mjs"
+      },
+      "./machines/canvas.machine": {
+        "types": "./dist/machines/canvas.machine.d.mts",
+        "import": "./dist/machines/canvas.machine.mjs",
+        "default": "./dist/machines/canvas.machine.mjs"
       },
       "./machines/graphics.machine": {
         "types": "./dist/machines/graphics.machine.d.mts",

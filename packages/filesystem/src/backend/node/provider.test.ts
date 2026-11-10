@@ -13,7 +13,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -33,6 +35,8 @@ vi.mock('node:fs', async (importOriginal) => {
     }) as typeof actual.statSync,
   };
 });
+
+const pbkdf2Async = promisify(pbkdf2);
 
 const roots: string[] = [];
 
@@ -180,6 +184,37 @@ describe('NodeFsProvider atomic writes', () => {
     } finally {
       admission.resolve({ unsubscribe: close });
       subscribe.mockRestore();
+    }
+  });
+
+  it('delivers to a watch opened while the last native subscription is still closing', async () => {
+    /* @parcel/watcher tears down its process-wide backend when the last subscription closes, on a pool thread. A
+     * subscribe sent before that closing settles binds to the dying backend, resolves, and is never told of anything. */
+    const closing = new NodeFsProvider(createRoot());
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const events: unknown[] = [];
+    let stop: (() => void) | undefined;
+    try {
+      const stopClosing = await closing.watch({ paths: ['target.txt'], recursive: false }, () => undefined);
+      /* Busy every libuv pool thread, as a loaded runner's file I/O does, so the native close is still queued when
+       * the next watch opens. */
+      const poolSize = Number(process.env['UV_THREADPOOL_SIZE'] ?? 4);
+      const busy = Array.from({ length: poolSize }, async () => pbkdf2Async('busy', 'pool', 200_000, 32, 'sha256'));
+      stopClosing();
+      stop = await provider.watch({ paths: ['target.txt'], recursive: false }, (event) => events.push(event));
+      writeFileSync(join(root, 'target.txt'), 'new');
+      await vi.waitFor(
+        () => {
+          expect(events).toContainEqual({ type: 'change', path: 'target.txt', kind: 'file' });
+        },
+        { timeout: 2000 },
+      );
+      await Promise.all(busy);
+    } finally {
+      stop?.();
+      await drainNodeFsProviderWatchClosures(closing);
+      await drainNodeFsProviderWatchClosures(provider);
     }
   });
 

@@ -701,13 +701,19 @@ for (const { from, to } of parallelRows) {
  * Reasoning replay under an edited prefix (provider reasoning replay contract, WP3).
  *
  * Fable 5.2 answers 400 when a replayed thinking block follows content that changed since the block was minted, on
- * every account. Each row edits the prefix the way Tau really does — clearing tool results, summarising, changing
+ * every account. Opus 5.5, Sonnet 5.5 and Haiku 5.5 do so because every live leg asks them to: the harness sends
+ * the binding control as `refuse` where production sends `drop` (WP5). Each row edits the prefix the way Tau really does — clearing tool results, summarising, changing
  * mode, changing the tool list — and continues the chat. A row proves nothing unless reasoning existed to be refused,
  * so each asserts signed reasoning in the durable log behind the edit, and that the first reply after the edit
  * records the typed break with reasoning left out.
  */
 
-const replayModelId = 'anthropic-claude-fable-5.2';
+const replayModelIds = [
+  'anthropic-claude-fable-5.2',
+  'anthropic-claude-opus-5.5',
+  'anthropic-claude-sonnet-5.5',
+  'anthropic-claude-haiku-5.5',
+] as const;
 
 const replayTitle = (modelId: string, row: string): string =>
   `live reasoning replay (${row}): ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`;
@@ -921,264 +927,259 @@ const expectClearableHistory = (legs: readonly HostRunSnapshot[]): void => {
   ).toEqual(expect.arrayContaining([...smallFiles]));
 };
 
-describe.skipIf(!hasLiveCredential(replayModelId))(
-  replayTitle(replayModelId, 'tool results cleared between turns'),
-  { repeats: liveRepeats },
-  () => {
-    it('should continue a chat whose reasoning followed tool results that were then cleared', async () => {
-      const compactions: CompactionOutcome[] = [];
-      let logged: Awaited<ReturnType<typeof beforeClearing>>;
-      const legs = await liveSwitch('replay-clearing', async (thread) => {
-        compactions.length = 0;
-        const done = await inOrder([
-          ...clearableHistory(thread, replayModelId),
-          async (earlier) =>
-            runLeg({
-              thread,
-              modelId: replayModelId,
-              index: 3,
-              effort: 'high',
-              prompt: thinkTurn(31_415),
-              contextWindow: windowThatEvicts(
-                anchorTokens(earlier.at(-1)!),
-                bulkFiles.reduce((total, file) => total + estimatedTokens(file), 0),
-              ),
-              maxTokens: compactionMaxTokens,
-              onCompaction: (outcome) => compactions.push(outcome),
-            }),
-          async () => runLeg({ thread, modelId: replayModelId, index: 4, effort: 'high', prompt: thinkTurn(27_183) }),
-        ]);
-        logged = await beforeClearing(thread.filePath, 3);
-        return done;
-      });
-      const [bulk] = legs;
-      const cleared = legs[2];
-      const after = legs[3];
-
-      expectClearableHistory(legs);
-      expect(
-        compactions.map((outcome) => outcome.tier),
-        `the compacting leg did not clear tool results: ${tiersOf(compactions)}`,
-      ).toEqual(['tool_result_clearing']);
-      expect(
-        logged?.atRisk ?? 0,
-        'no signed reasoning followed the cleared results, so the row proves nothing',
-      ).toBeGreaterThan(0);
-      expect(reasoningIn(repliesOf(bulk!, 1).slice(0, 1)), 'no reasoning preceded the cleared results').toBeGreaterThan(
-        0,
-      );
-      expectAllCompleted(legs, 4, ` after ${tiersOf(compactions)}`);
-      expectBreak(cleared!, 3, 'clearing');
-      expectReplayed(cleared!, 3, 'the reasoning minted before the cleared results, which the edit did not touch');
-      expect(
-        reasoningIn(repliesOf(cleared!, 3)),
-        'the leg after the edit minted no reasoning to replay',
-      ).toBeGreaterThan(0);
-      expect(breaksOf(after!, 4), 'the prefix broke again with nothing edited').toEqual([]);
-      expectReplayed(after!, 4, 'the reasoning minted after the edit');
-    });
-  },
-);
-
-/**
- * Clearing inside a run: the reasoning that chose the pending tool call is itself behind the edit.
- *
- * Gemini runs the same row because a strip inside a run has to send the current-turn call without its thought
- * signature (docs/research/chat-compaction-morph-google-thought-signature-failure.md).
- */
-for (const modelId of [replayModelId, 'google-gemini-3.8-flash']) {
-  describe.skipIf(!hasLiveCredential(modelId))(
-    replayTitle(modelId, 'tool results cleared mid tool loop'),
+for (const replayModelId of replayModelIds) {
+  describe.skipIf(!hasLiveCredential(replayModelId))(
+    replayTitle(replayModelId, 'tool results cleared between turns'),
     { repeats: liveRepeats },
     () => {
-      it('should finish a run whose tool results were cleared between its own steps', async () => {
+      it('should continue a chat whose reasoning followed tool results that were then cleared', async () => {
         const compactions: CompactionOutcome[] = [];
         let logged: Awaited<ReturnType<typeof beforeClearing>>;
-        const legs = await liveSwitch('replay-mid-loop', async (thread) => {
+        const legs = await liveSwitch('replay-clearing', async (thread) => {
           compactions.length = 0;
           const done = await inOrder([
-            ...clearableHistory(thread, modelId),
+            ...clearableHistory(thread, replayModelId),
             async (earlier) =>
               runLeg({
                 thread,
-                modelId,
+                modelId: replayModelId,
                 index: 3,
                 effort: 'high',
-                prompt: thinkThenReadLedger(31_415),
-                contextWindow: Math.ceil((anchorTokens(earlier.at(-1)!) + midLoopHeadroom) / 0.8),
+                prompt: thinkTurn(31_415),
+                contextWindow: windowThatEvicts(
+                  anchorTokens(earlier.at(-1)!),
+                  bulkFiles.reduce((total, file) => total + estimatedTokens(file), 0),
+                ),
                 maxTokens: compactionMaxTokens,
                 onCompaction: (outcome) => compactions.push(outcome),
               }),
-            async () => runLeg({ thread, modelId, index: 4, effort: 'high', prompt: thinkTurn(27_183) }),
+            async () => runLeg({ thread, modelId: replayModelId, index: 4, effort: 'high', prompt: thinkTurn(27_183) }),
           ]);
           logged = await beforeClearing(thread.filePath, 3);
           return done;
         });
-        const looped = legs[2];
+        const [bulk] = legs;
+        const cleared = legs[2];
         const after = legs[3];
 
         expectClearableHistory(legs);
         expect(
           compactions.map((outcome) => outcome.tier),
-          `the looping leg did not clear tool results: ${tiersOf(compactions)}`,
+          `the compacting leg did not clear tool results: ${tiersOf(compactions)}`,
         ).toEqual(['tool_result_clearing']);
         expect(
-          logged?.inOpenLoop ?? 0,
-          'clearing did not land behind signed reasoning of the running leg, so the row proves nothing',
+          logged?.atRisk ?? 0,
+          'no signed reasoning followed the cleared results, so the row proves nothing',
+        ).toBeGreaterThan(0);
+        expect(
+          reasoningIn(repliesOf(bulk!, 1).slice(0, 1)),
+          'no reasoning preceded the cleared results',
         ).toBeGreaterThan(0);
         expectAllCompleted(legs, 4, ` after ${tiersOf(compactions)}`);
-        expectPairedToolMessages(looped!);
-        expect(finalText(looped!)).toContain(ledgerMarker);
-        expectBreak(looped!, 3, 'clearing');
+        expectBreak(cleared!, 3, 'clearing');
+        expectReplayed(cleared!, 3, 'the reasoning minted before the cleared results, which the edit did not touch');
+        expect(
+          reasoningIn(repliesOf(cleared!, 3)),
+          'the leg after the edit minted no reasoning to replay',
+        ).toBeGreaterThan(0);
         expect(breaksOf(after!, 4), 'the prefix broke again with nothing edited').toEqual([]);
+        expectReplayed(after!, 4, 'the reasoning minted after the edit');
       });
     },
   );
-}
 
-describe.skipIf(!hasLiveCredential(replayModelId))(
-  replayTitle(replayModelId, 'summary with a reasoning tail'),
-  { repeats: liveRepeats },
-  () => {
-    it('should continue a chat whose retained tail holds reasoning minted before the summary', async () => {
-      const compactions: CompactionOutcome[] = [];
-      const legs = await liveSwitch('replay-summary', async (thread) => {
-        compactions.length = 0;
-        const leg = async (index: number, prompt: string, window?: number): Promise<HostRunSnapshot> =>
-          runLeg({
-            thread,
-            modelId: replayModelId,
-            index,
-            effort: 'high',
-            prompt,
-            ...(window === undefined
-              ? {}
-              : {
-                  contextWindow: window,
+  /**
+   * Clearing inside a run: the reasoning that chose the pending tool call is itself behind the edit.
+   *
+   * Gemini runs the same row because a strip inside a run has to send the current-turn call without its thought
+   * signature (docs/research/chat-compaction-morph-google-thought-signature-failure.md).
+   */
+  for (const modelId of replayModelId === replayModelIds[0]
+    ? [replayModelId, 'google-gemini-3.8-flash']
+    : [replayModelId]) {
+    describe.skipIf(!hasLiveCredential(modelId))(
+      replayTitle(modelId, 'tool results cleared mid tool loop'),
+      { repeats: liveRepeats },
+      () => {
+        it('should finish a run whose tool results were cleared between its own steps', async () => {
+          const compactions: CompactionOutcome[] = [];
+          let logged: Awaited<ReturnType<typeof beforeClearing>>;
+          const legs = await liveSwitch('replay-mid-loop', async (thread) => {
+            compactions.length = 0;
+            const done = await inOrder([
+              ...clearableHistory(thread, modelId),
+              async (earlier) =>
+                runLeg({
+                  thread,
+                  modelId,
+                  index: 3,
+                  effort: 'high',
+                  prompt: thinkThenReadLedger(31_415),
+                  contextWindow: Math.ceil((anchorTokens(earlier.at(-1)!) + midLoopHeadroom) / 0.8),
                   maxTokens: compactionMaxTokens,
-                  onCompaction: (outcome: CompactionOutcome) => compactions.push(outcome),
+                  onCompaction: (outcome) => compactions.push(outcome),
                 }),
+              async () => runLeg({ thread, modelId, index: 4, effort: 'high', prompt: thinkTurn(27_183) }),
+            ]);
+            logged = await beforeClearing(thread.filePath, 3);
+            return done;
           });
-        return inOrder([
-          async () => leg(1, readFileTurn('rows-a.ts')),
-          async () => leg(2, thinkTurn(48_271)),
-          async () => leg(3, thinkTurn(31_415)),
-          // One result is within what clearing keeps, so only a summary can evict it; the two turns after it are the tail.
-          async (earlier) =>
-            leg(4, thinkTurn(27_183), windowThatEvicts(anchorTokens(earlier.at(-1)!), estimatedTokens('rows-a.ts'))),
-          async () => leg(5, thinkTurn(16_180)),
-        ]);
+          const looped = legs[2];
+          const after = legs[3];
+
+          expectClearableHistory(legs);
+          expect(
+            compactions.map((outcome) => outcome.tier),
+            `the looping leg did not clear tool results: ${tiersOf(compactions)}`,
+          ).toEqual(['tool_result_clearing']);
+          expect(
+            logged?.inOpenLoop ?? 0,
+            'clearing did not land behind signed reasoning of the running leg, so the row proves nothing',
+          ).toBeGreaterThan(0);
+          expectAllCompleted(legs, 4, ` after ${tiersOf(compactions)}`);
+          expectPairedToolMessages(looped!);
+          expect(finalText(looped!)).toContain(ledgerMarker);
+          expectBreak(looped!, 3, 'clearing');
+          expect(breaksOf(after!, 4), 'the prefix broke again with nothing edited').toEqual([]);
+        });
+      },
+    );
+  }
+
+  describe.skipIf(!hasLiveCredential(replayModelId))(
+    replayTitle(replayModelId, 'summary with a reasoning tail'),
+    { repeats: liveRepeats },
+    () => {
+      it('should continue a chat whose retained tail holds reasoning minted before the summary', async () => {
+        const compactions: CompactionOutcome[] = [];
+        const legs = await liveSwitch('replay-summary', async (thread) => {
+          compactions.length = 0;
+          const leg = async (index: number, prompt: string, window?: number): Promise<HostRunSnapshot> =>
+            runLeg({
+              thread,
+              modelId: replayModelId,
+              index,
+              effort: 'high',
+              prompt,
+              ...(window === undefined
+                ? {}
+                : {
+                    contextWindow: window,
+                    maxTokens: compactionMaxTokens,
+                    onCompaction: (outcome: CompactionOutcome) => compactions.push(outcome),
+                  }),
+            });
+          return inOrder([
+            async () => leg(1, readFileTurn('rows-a.ts')),
+            async () => leg(2, thinkTurn(48_271)),
+            async () => leg(3, thinkTurn(31_415)),
+            // One result is within what clearing keeps, so only a summary can evict it; the two turns after it are the tail.
+            async (earlier) =>
+              leg(4, thinkTurn(27_183), windowThatEvicts(anchorTokens(earlier.at(-1)!), estimatedTokens('rows-a.ts'))),
+            async () => leg(5, thinkTurn(16_180)),
+          ]);
+        });
+        const summarised = legs[3];
+        const after = legs[4];
+
+        expect(summarised, `the compacting leg never ran: ${refusal(legs.at(-1)!)}`).toBeDefined();
+        const tail = summarised!.messages.slice(0, askedAt(summarised!.messages, 4));
+        expect(
+          compactions.map((outcome) => outcome.tier),
+          `the compacting leg did not summarise: ${tiersOf(compactions)}`,
+        ).toEqual(['summarization']);
+        expect(
+          tail.some((message) => message.role === 'user' && textOf(message).includes('<summary>')),
+          'the history was never summarised',
+        ).toBe(true);
+        expect(
+          reasoningIn(tail),
+          'the retained tail holds no signed reasoning, so the row proves nothing',
+        ).toBeGreaterThan(0);
+        expectAllCompleted(legs, 5, ` after ${tiersOf(compactions)}`);
+        expectBreak(summarised!, 4, 'compaction');
+        expect(
+          reasoningIn(repliesOf(summarised!, 4)),
+          'the leg after the edit minted no reasoning to replay',
+        ).toBeGreaterThan(0);
+        expect(breaksOf(after!, 5), 'the prefix broke again with nothing edited').toEqual([]);
+        expectReplayed(after!, 5, 'the reasoning minted after the summary');
       });
-      const summarised = legs[3];
-      const after = legs[4];
+    },
+  );
 
-      expect(summarised, `the compacting leg never ran: ${refusal(legs.at(-1)!)}`).toBeDefined();
-      const tail = summarised!.messages.slice(0, askedAt(summarised!.messages, 4));
-      expect(
-        compactions.map((outcome) => outcome.tier),
-        `the compacting leg did not summarise: ${tiersOf(compactions)}`,
-      ).toEqual(['summarization']);
-      expect(
-        tail.some((message) => message.role === 'user' && textOf(message).includes('<summary>')),
-        'the history was never summarised',
-      ).toBe(true);
-      expect(
-        reasoningIn(tail),
-        'the retained tail holds no signed reasoning, so the row proves nothing',
-      ).toBeGreaterThan(0);
-      expectAllCompleted(legs, 5, ` after ${tiersOf(compactions)}`);
-      expectBreak(summarised!, 4, 'compaction');
-      expect(
-        reasoningIn(repliesOf(summarised!, 4)),
-        'the leg after the edit minted no reasoning to replay',
-      ).toBeGreaterThan(0);
-      expect(breaksOf(after!, 5), 'the prefix broke again with nothing edited').toEqual([]);
-      expectReplayed(after!, 5, 'the reasoning minted after the summary');
-    });
-  },
-);
+  describe.skipIf(!hasLiveCredential(replayModelId))(
+    replayTitle(replayModelId, 'mode change'),
+    { repeats: liveRepeats },
+    () => {
+      it('should continue a chat across a change of mode and back', async () => {
+        const legs = await liveSwitch('replay-mode', async (thread) => {
+          const leg = async (index: number, prompt: string, mode: ChatMode): Promise<HostRunSnapshot> =>
+            runLeg({ thread, modelId: replayModelId, index, effort: 'high', prompt, mode });
+          return inOrder([
+            async () => leg(1, thinkThenRead(4001, ['alpha.ts']), 'agent'),
+            async () => leg(2, thinkTurn(31_415), 'plan'),
+            async () => leg(3, thinkTurn(27_183), 'agent'),
+          ]);
+        });
+        const [agent, plan, back] = legs;
 
-describe.skipIf(!hasLiveCredential(replayModelId))(
-  replayTitle(replayModelId, 'mode change'),
-  { repeats: liveRepeats },
-  () => {
-    it('should continue a chat across a change of mode and back', async () => {
-      const legs = await liveSwitch('replay-mode', async (thread) => {
-        const leg = async (index: number, prompt: string, mode: ChatMode): Promise<HostRunSnapshot> =>
-          runLeg({ thread, modelId: replayModelId, index, effort: 'high', prompt, mode });
-        return inOrder([
-          async () => leg(1, thinkThenRead(4001, ['alpha.ts']), 'agent'),
-          async () => leg(2, thinkTurn(31_415), 'plan'),
-          async () => leg(3, thinkTurn(27_183), 'agent'),
-        ]);
+        expect(agent, 'the first leg produced no snapshot').toBeDefined();
+        expect(
+          reasoningIn(repliesOf(agent!, 1)),
+          'agent mode minted no signed reasoning, so the row proves nothing',
+        ).toBeGreaterThan(0);
+        expectAllCompleted(legs, 3);
+        expectBreak(plan!, 2, 'instructions');
+        expect(breaksOf(back!, 3).map((prefix) => prefix.break)).toEqual(['instructions']);
+        expectReplayed(back!, 3, 'the reasoning minted in agent mode, whose prefix the change back restored');
       });
-      const [agent, plan, back] = legs;
+    },
+  );
 
-      expect(agent, 'the first leg produced no snapshot').toBeDefined();
-      expect(
-        reasoningIn(repliesOf(agent!, 1)),
-        'agent mode minted no signed reasoning, so the row proves nothing',
-      ).toBeGreaterThan(0);
-      expectAllCompleted(legs, 3);
-      expectBreak(plan!, 2, 'instructions');
-      expect(breaksOf(back!, 3).map((prefix) => prefix.break)).toEqual(['instructions']);
-      expectReplayed(back!, 3, 'the reasoning minted in agent mode, whose prefix the change back restored');
-    });
-  },
-);
+  describe.skipIf(!hasLiveCredential(replayModelId))(
+    replayTitle(replayModelId, 'tool list change'),
+    { repeats: liveRepeats },
+    () => {
+      it('should continue a chat after its tool list changed', async () => {
+        const legs = await liveSwitch('replay-tools', async (thread) => {
+          const leg = async (index: number, prompt: string, testingTools: boolean): Promise<HostRunSnapshot> =>
+            runLeg({ thread, modelId: replayModelId, index, effort: 'high', prompt, testingTools });
+          return inOrder([
+            async () => leg(1, thinkThenRead(4001, ['alpha.ts']), false),
+            async () => leg(2, thinkTurn(31_415), true),
+            async () => leg(3, thinkTurn(27_183), true),
+          ]);
+        });
+        const [before, changed, after] = legs;
 
-describe.skipIf(!hasLiveCredential(replayModelId))(
-  replayTitle(replayModelId, 'tool list change'),
-  { repeats: liveRepeats },
-  () => {
-    it('should continue a chat after its tool list changed', async () => {
-      const legs = await liveSwitch('replay-tools', async (thread) => {
-        const leg = async (index: number, prompt: string, testingTools: boolean): Promise<HostRunSnapshot> =>
-          runLeg({ thread, modelId: replayModelId, index, effort: 'high', prompt, testingTools });
-        return inOrder([
-          async () => leg(1, thinkThenRead(4001, ['alpha.ts']), false),
-          async () => leg(2, thinkTurn(31_415), true),
-          async () => leg(3, thinkTurn(27_183), true),
-        ]);
+        expect(before, 'the first leg produced no snapshot').toBeDefined();
+        expect(
+          reasoningIn(repliesOf(before!, 1)),
+          'the first leg minted no signed reasoning, so the row proves nothing',
+        ).toBeGreaterThan(0);
+        expectAllCompleted(legs, 3);
+        expectBreak(changed!, 2, 'tools');
+        expect(
+          reasoningIn(repliesOf(changed!, 2)),
+          'the leg after the edit minted no reasoning to replay',
+        ).toBeGreaterThan(0);
+        expect(breaksOf(after!, 3), 'the prefix broke again with nothing edited').toEqual([]);
+        expectReplayed(after!, 3, 'the reasoning minted under the new tool list');
       });
-      const [before, changed, after] = legs;
+    },
+  );
 
-      expect(before, 'the first leg produced no snapshot').toBeDefined();
-      expect(
-        reasoningIn(repliesOf(before!, 1)),
-        'the first leg minted no signed reasoning, so the row proves nothing',
-      ).toBeGreaterThan(0);
-      expectAllCompleted(legs, 3);
-      expectBreak(changed!, 2, 'tools');
-      expect(
-        reasoningIn(repliesOf(changed!, 2)),
-        'the leg after the edit minted no reasoning to replay',
-      ).toBeGreaterThan(0);
-      expect(breaksOf(after!, 3), 'the prefix broke again with nothing edited').toEqual([]);
-      expectReplayed(after!, 3, 'the reasoning minted under the new tool list');
-    });
-  },
-);
-
-/** How much of one reply's input the provider read back from its prompt cache. */
-const cacheReadShare = (reply: ProviderMessage | undefined): number => {
-  const usage = reply?.metadata?.usage;
-  const input = usage === undefined ? 0 : usage.input + usage.cacheRead + usage.cacheWrite;
-  return usage === undefined || input === 0 ? 0 : usage.cacheRead / input;
-};
-
-/* What a person's own toggles cost after ruling U10: nothing. The settings ride in the state note and the tool
- * choice, so every leg only appends, and the row holds that against the provider's own cache and binding, on a model
- * of each wire that returns signed reasoning. */
-for (const settingsModelId of [replayModelId, 'openai-gpt-6.1-terra', 'google-gemini-3.8-flash']) {
-  describe.skipIf(!hasLiveCredential(settingsModelId))(
-    replayTitle(settingsModelId, 'settings change'),
+  /* What a person's own toggles cost after ruling U10: nothing. The settings ride in the state note and the tool
+   * choice, so every leg only appends, and the row holds that against the provider's own cache and binding. */
+  describe.skipIf(!hasLiveCredential(replayModelId))(
+    replayTitle(replayModelId, 'settings change'),
     { repeats: liveRepeats },
     () => {
       it('should keep the prefix, the cache and every reply’s reasoning across the chat’s settings', async () => {
         const legs = await liveSwitch('replay-settings', async (thread) => {
           const leg = async (index: number, prompt: string, settings: LiveChatSettings): Promise<HostRunSnapshot> =>
-            runLeg({ thread, modelId: settingsModelId, index, effort: 'high', prompt, settings });
+            runLeg({ thread, modelId: replayModelId, index, effort: 'high', prompt, settings });
           return inOrder([
             async () => leg(1, thinkThenRead(4001, ['alpha.ts']), {}),
             async () => leg(2, thinkTurn(31_415), { mode: 'plan' }),
@@ -1203,7 +1204,7 @@ for (const settingsModelId of [replayModelId, 'openai-gpt-6.1-terra', 'google-ge
         }
         /* Vertex caches implicitly and at its own discretion: a turn that changes nothing can read nothing back, so
          * a share there says nothing about the prefix. Anthropic and OpenAI read what the prefix allows. */
-        if (settingsModelId.startsWith('google-')) {
+        if (replayModelId.startsWith('google-')) {
           return;
         }
         const control = cacheReadShare(repliesOf(later[3]!, 5)[0]);
@@ -1216,6 +1217,90 @@ for (const settingsModelId of [replayModelId, 'openai-gpt-6.1-terra', 'google-ge
             `leg ${String(index)} read ${share.toFixed(3)} from the cache, the control ${control.toFixed(3)}`,
           ).toBeGreaterThan(control - 0.1);
         }
+      });
+    },
+  );
+}
+
+/**
+ * Effort changes mid-chat (ruling U14).
+ *
+ * A model whose catalog row declares `effortInTranscript` carries the level in the transcript, so the change is
+ * appended and the provider reads its cached history back. Any other model changes a request field, which rewrites
+ * the cached messages: one counted `settings` break.
+ */
+
+/** How much of one reply's input the provider read back from its prompt cache. */
+const cacheReadShare = (reply: ProviderMessage | undefined): number => {
+  const usage = reply?.metadata?.usage;
+  const input = usage === undefined ? 0 : usage.input + usage.cacheRead + usage.cacheWrite;
+  return usage === undefined || input === 0 ? 0 : usage.cacheRead / input;
+};
+
+const effortThread = async (
+  modelId: string,
+  efforts: readonly ReasoningEffort[],
+): Promise<readonly HostRunSnapshot[]> =>
+  liveSwitch('effort', async (thread) =>
+    inOrder(
+      efforts.map(
+        (effort, position) => async () =>
+          runLeg({
+            thread,
+            modelId,
+            index: position + 1,
+            effort,
+            prompt: position === 0 ? thinkThenRead(4001, ['alpha.ts']) : thinkTurn(31_415 - position * 4232),
+          }),
+      ),
+    ),
+  );
+
+for (const modelId of ['anthropic-claude-fable-5.2', 'anthropic-claude-haiku-5.5', 'openai-gpt-6.1-terra']) {
+  describe.skipIf(!hasLiveCredential(modelId))(
+    `live effort change in the transcript: ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
+    { repeats: liveRepeats },
+    () => {
+      it('should read the cached history back after an effort change, as after a turn with none', async () => {
+        expect(
+          liveSessionModel(modelId).reasoning?.effortInTranscript,
+          'the catalog row no longer declares the form',
+        ).toBe(true);
+        /* Change, then no change: the second boundary is the control the first is read against. */
+        const legs = await effortThread(modelId, ['high', 'medium', 'medium']);
+        const [first, changed, control] = legs;
+
+        expectAllCompleted(legs, 3);
+        expect(repliesOf(first!, 1).at(-1)?.metadata?.reasoningLevel, 'the reply did not record its level').toBe(
+          'high',
+        );
+        expect(breaksOf(changed!, 2), 'the effort change broke the prefix').toEqual([]);
+        expect(breaksOf(control!, 3)).toEqual([]);
+        const afterChange = cacheReadShare(repliesOf(changed!, 2)[0]);
+        const afterNone = cacheReadShare(repliesOf(control!, 3)[0]);
+        expect(afterNone, 'the control read nothing from the cache, so the row proves nothing').toBeGreaterThan(0.5);
+        expect(
+          afterChange,
+          `cache read ${afterChange.toFixed(3)} after the change, ${afterNone.toFixed(3)} after none`,
+        ).toBeGreaterThan(afterNone - 0.1);
+      });
+    },
+  );
+}
+
+for (const modelId of ['anthropic-claude-sonnet-4.6', 'google-gemini-3.8-flash']) {
+  describe.skipIf(!hasLiveCredential(modelId))(
+    `live effort change on the request: ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
+    { repeats: liveRepeats },
+    () => {
+      it('should record one settings break on the turn the effort changed, and none after', async () => {
+        expect(liveSessionModel(modelId).reasoning?.effortInTranscript).toBeUndefined();
+        const legs = await effortThread(modelId, ['high', 'medium', 'medium']);
+        const [, changed, control] = legs;
+
+        expectAllCompleted(legs, 3);
+        expect(breaksOf(changed!, 2).map((prefix) => prefix.break)).toEqual(['settings']);
+        expect(breaksOf(control!, 3)).toEqual([]);
       });
     },
   );

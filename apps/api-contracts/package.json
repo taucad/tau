@@ -1,0 +1,13 @@
+{
+  "name": "@taucad/api-contracts",
+  "version": "0.0.1",
+  "description": "Contract tests that pin API tables against workspace packages the API must not depend on, run outside the API lane.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@taucad/api-projects": "workspace:*",
+    "@taucad/cli": "workspace:*",
+    "vitest": "catalog:"
+  }
+}

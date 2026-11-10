@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useSyncExternalStore } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -12,8 +13,17 @@ const load = async () => {
   vi.resetModules();
   const skew = await import('#filesystem/build-skew.js');
   loaded.push(skew);
-  const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
-  return { ...skew, BuildSkewBanner };
+  const recovery = await import('#lib/stale-build-recovery.js');
+  /** The reload prompt as every update surface words it, shown exactly while the offer stands. */
+  function ReloadPrompt(): React.JSX.Element | undefined {
+    const offered = useSyncExternalStore(skew.subscribeReloadOffer, skew.isReloadOffered);
+    const reloadState = useSyncExternalStore(recovery.subscribeReloadState, recovery.readReloadState);
+    const supersedingBuildId = useSyncExternalStore(skew.subscribeSupersedingBuildId, skew.readSupersedingBuildId);
+    return recovery.isReloadPromptShown(offered, reloadState) ? (
+      <div role='alert'>{skew.describeSupersession(supersedingBuildId)}</div>
+    ) : undefined;
+  }
+  return { ...skew, ReloadPrompt };
 };
 
 const announce = (message: unknown): void => {
@@ -118,10 +128,10 @@ describe('build-id skew guard (DF20)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(1000);
     const reload = vi.fn();
     vi.stubGlobal('location', { ...globalThis.location, reload });
-    const { BuildSkewBanner, buildId, isReloadOffered } = await load();
+    const { ReloadPrompt, buildId, isReloadOffered } = await load();
     const { recoverFromStaleBuild, readReloadState, reloadTimeout } = await import('#lib/stale-build-recovery.js');
     answerLiveBuild(buildId + 1);
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
 
     await act(async () => {
       void recoverFromStaleBuild(new TypeError('Importing a module script failed.'));
@@ -142,9 +152,9 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it('stops durable writes at once when a newer build announces itself, before the server answers', async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded, isReloadOffered } = await load();
+    const { ReloadPrompt, buildId, isBuildSuperseded, isReloadOffered } = await load();
     const server = serveLiveBuild();
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
 
     announce(buildId + 1);
     await pause();
@@ -161,10 +171,10 @@ describe('build-id skew guard (DF20)', () => {
 
   it('lifts the provisional write stop once the server has confirmed this build, and says so', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { BuildSkewBanner, buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
+    const { ReloadPrompt, buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     answerLiveBuild(buildId);
     const heard = listen();
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
 
     announce(buildId + 1);
     await pause();
@@ -193,17 +203,11 @@ describe('build-id skew guard (DF20)', () => {
 
   it("resumes writing once the server names this build, when it was superseded only on a peer's word", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const {
-      BuildSkewBanner,
-      buildId,
-      isBuildSuperseded,
-      readSupersedingBuildId,
-      peerRecheckDelay,
-      serverConfirmations,
-    } = await load();
+    const { ReloadPrompt, buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay, serverConfirmations } =
+      await load();
     answerLiveBuild('unreachable');
     const heard = listen();
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
     announce(buildId + 1);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(isBuildSuperseded()).toBe(true);
@@ -632,9 +636,9 @@ describe('build-id skew guard (DF20)', () => {
   );
 
   it("supersedes this tab on a peer's live claim the server confirms, worded as a replacement", async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded, readSupersedingBuildId } = await load();
+    const { ReloadPrompt, buildId, isBuildSuperseded, readSupersedingBuildId } = await load();
     answerLiveBuild(buildId - 1);
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
 
     announce({ buildId: buildId - 1, live: true });
 
@@ -672,8 +676,8 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it('offers the reload for a deploy without stopping writes, since no other bundle owns storage', async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded, isReloadOffered, offerReload } = await load();
-    render(<BuildSkewBanner />);
+    const { ReloadPrompt, buildId, isBuildSuperseded, isReloadOffered, offerReload } = await load();
+    render(<ReloadPrompt />);
 
     act(() => {
       offerReload(buildId + 1);
@@ -706,9 +710,9 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it('leaves an equal or older build untouched', async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded } = await load();
+    const { ReloadPrompt, buildId, isBuildSuperseded } = await load();
     answerLiveBuild('unreachable');
-    render(<BuildSkewBanner />);
+    render(<ReloadPrompt />);
 
     announce(buildId);
     announce(buildId - 1);

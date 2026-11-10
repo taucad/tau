@@ -16,7 +16,11 @@ const readPackageJson = async (): Promise<PackageJson> =>
  * kernel package may be a production dependency here.
  *
  * A production edge on any of these also drags browser-worker code and
- * dependency-owned runtime assets into a service that renders nothing.
+ * dependency-owned runtime assets into a service that renders nothing. A
+ * development edge ships nothing, but Nx still counts it: it puts every kernel
+ * in the API's project graph, so a kernel or CLI change selects the API lane
+ * (PostgreSQL, MinIO and the image smoke build). The publication kernel table's
+ * parity with the CLI runtime is pinned from `apps/api-contracts` instead.
  *
  * See docs/research/api-server-side-geometry-prune.md.
  */
@@ -30,17 +34,23 @@ describe('@taucad/api package metadata', () => {
     },
   );
 
-  it('keeps the runtime, substrate and CLI runtime available to tests only', async () => {
+  it.each(['@taucad/runtime', '@taucad/cli', '@taucad/api-extractor'])(
+    'does not depend on %s at all, even for tests',
+    async (name) => {
+      const packageJson = await readPackageJson();
+
+      expect(packageJson.dependencies?.[name]).toBeUndefined();
+      expect(packageJson.devDependencies?.[name]).toBeUndefined();
+    },
+  );
+
+  it('keeps the GeoSpec substrate available to tests only', async () => {
     const packageJson = await readPackageJson();
 
-    // `app/testing/**` boots headless GeoSpec against an in-memory filesystem,
-    // and `main.ts` is bundled from source, so these must resolve at build and
-    // test time without shipping. The CLI's runtime pins the publication
-    // kernel table (`publication-runtime.parity.test.ts`). `geospec` is
-    // published from taucad/geospec and comes from its catalog pin.
-    expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
+    // `app/testing/tau-geospec-harness.ts` runs GeoSpec headlessly against an
+    // in-memory filesystem. `geospec` is published from taucad/geospec and comes
+    // from its catalog pin.
     expect(packageJson.devDependencies?.['geospec']).toBe('catalog:');
-    expect(packageJson.devDependencies?.['@taucad/cli']).toBe('workspace:*');
   });
 
   it('has no reference to the dissolved @taucad/testing package', async () => {

@@ -190,11 +190,11 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     /* The remote holds exactly the revision the verb reported, with the new file in it. */
     expect(git(bare, ['rev-parse', 'refs/heads/main'])).toBe(saved);
     expect(git(bare, ['show', `${saved}:bracket.ts`])).toBe('export const bracket = 2;');
-    /* AC15: the person, not the opaque `tau-host` an unwired host records. */
+    /* A1: no account was given, so this device's pseudonym — never the opaque `tau-host`, never the OS login. */
     const person = hostRevisionActor()({ runId: undefined, trigger: 'save' });
-    expect(person?.kind).toBe('user');
-    expect(git(bare, ['log', '-1', '--format=%an', saved])).toBe(
-      person?.kind === 'user' ? (person.name ?? person.id) : '',
+    expect(person).toMatchObject({ kind: 'user', name: 'Anonymous', anonymous: true });
+    expect(git(bare, ['log', '-1', '--format=%an|%ae', saved])).toBe(
+      person?.kind === 'user' ? `Anonymous|${person.id}@users.noreply.tau.new` : '',
     );
   }, 120_000);
 
@@ -365,6 +365,28 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       expect(outcome).not.toHaveProperty('reason');
       expect(git(workspaceRoot, ['rev-parse', 'refs/heads/main'])).toBe(
         outcome.status === 'saved' ? outcome.revisionId : '',
+      );
+    } finally {
+      await revisions.close();
+    }
+  }, 120_000);
+
+  it('records a save as the account the terminal holds a token for (A1)', async () => {
+    const workspaceRoot = await directory('account');
+    process.env['TAU_CONFIG_DIR'] = await directory('config');
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', workspaceRoot]);
+    await writeFile(join(workspaceRoot, 'part.ts'), 'export const part = 1;\n');
+    const revisions = await openProjectRevisions({
+      workspaceRoot,
+      projectId: 'proj_MMMMMMMMMMMMMMMMMMMMM',
+      actor: { kind: 'user', id: 'usr_token1' },
+    });
+    try {
+      const outcome = await revisions.save();
+      expect(outcome).toMatchObject({ status: 'saved' });
+      const saved = outcome.status === 'saved' ? outcome.revisionId : '';
+      expect(git(workspaceRoot, ['log', '-1', '--format=%an|%ae', saved])).toBe(
+        'usr_token1|usr_token1@users.noreply.tau.new',
       );
     } finally {
       await revisions.close();

@@ -2092,6 +2092,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }> = {},
   ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
     const { fillFrom, ...materialization } = write;
+    /* The generation before this write: a write refused before its bracket opened leaves that generation's word alone. */
+    const generationBefore = generationOf(place.id);
     let written: ImmutableRevisionTree | undefined;
     const built = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
       written = typeof target === 'function' ? await target(before) : target;
@@ -2130,8 +2132,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return answer;
     } catch (error) {
       if (written === undefined) {
-        /* Nothing was written, so no fill speaks for this generation: the next capture checks it. */
-        unanswerFill(place.id);
+        /* A bracket opened and nothing was written: no fill speaks for its generation, so the next capture checks it. */
+        if (generationOf(place.id) !== generationBefore) {
+          unanswerFill(place.id);
+        }
       } else {
         fillSoon(undefined);
       }
@@ -2168,9 +2172,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (head === undefined || fillsStopped) {
         return;
       }
-      answeredFills.set(place.id, generationOf(place.id));
+      const generation = generationOf(place.id);
+      /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
+      const placeholders = largeObjectPlaceholders(await capture(place));
+      if (fillsStopped || generationOf(place.id) !== generation) {
+        return;
+      }
+      answeredFills.set(place.id, generation);
       /* Given its placeholders, the fill is registered before this returns, so the caller's wait finds it. */
-      void largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(await capture(place)));
+      void largeObjects.fill(place, revisionId(head), placeholders);
     },
   });
   /* A checkout by id; the project directory when none is named. */

@@ -16,18 +16,23 @@ export const availableKernelConfigurations = (): readonly KernelEntry[] => {
   });
 };
 
-/**
- * Kernels whose supplier is closed to routing on every plan: Zoo, while its cloud dispatch is closed (automatic kernel
- * selection blueprint D4). Zoo is also the only kernel a plan gates, so leaving it out keeps the list fail-closed on the
- * plan as well. AKS-4 replaces this with the client-visible supplier flag the change that opens dispatch flips.
- */
-const supplierClosedKernels: ReadonlySet<KernelId> = new Set<KernelId>(['zoo']);
+/** Kernels whose supplier must be open before routing may offer them: Zoo runs on Zoo's cloud engine. */
+const supplierKernels: ReadonlySet<KernelId> = new Set<KernelId>(['zoo']);
 
-/** What this host can offer routing now: the kernels the runtime executes, less those whose supplier is closed. */
-export const routingKernelProfile = (): KernelRoutingProfile => ({
+/**
+ * What this host can offer routing now (automatic kernel selection blueprint D4): the three entitlement facts, each
+ * failing closed. The runtime executes the kernel; the plan, once resolved, allows it; and a kernel that runs on a
+ * supplier's engine is offered only while that supplier is open (the `zooCloudDispatch` flag).
+ *
+ * @param facts - The plan fact (fail-closed) and whether Zoo's cloud dispatch is open.
+ * @returns The routing profile, in catalog order.
+ */
+export const routingKernelProfile = (
+  facts: Readonly<{ isPlanAllowed: (kernel: KernelId) => boolean; isSupplierOpen: boolean }>,
+): KernelRoutingProfile => ({
   available: availableKernelConfigurations()
     .map(({ id }) => id)
-    .filter((id) => !supplierClosedKernels.has(id)),
+    .filter((id) => facts.isPlanAllowed(id) && (facts.isSupplierOpen || !supplierKernels.has(id))),
 });
 
 /** Whether one persisted catalog id is executable by this runtime. */

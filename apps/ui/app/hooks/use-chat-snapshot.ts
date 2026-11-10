@@ -23,7 +23,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { viewName } from '#workbench-records/view-titles.js';
 import { useFeature } from '#flags/use-feature.js';
-import { routingKernelProfile } from '#constants/available-kernel-configurations.js';
+import { useRoutingKernelProfile } from '#hooks/use-routing-kernel-profile.js';
 
 const emptyLayoutSnapshot = (): undefined => undefined;
 const emptyLayoutSubscribe = (): (() => void) => () => undefined;
@@ -265,6 +265,7 @@ export function useChatSnapshot(preference: KernelPreference): ChatSnapshot | un
     };
   }, [treeService, mainEntryPath]);
 
+  const routingProfile = useRoutingKernelProfile();
   const mainUnit = mainEntryPath === undefined ? undefined : projectContext?.geometryUnits.get(mainEntryPath);
   const mainRuntimeKernelId = useSelector(mainUnit, (state) => state?.context.activeKernelId);
 
@@ -366,7 +367,7 @@ export function useChatSnapshot(preference: KernelPreference): ChatSnapshot | un
         resolves: mainResolves,
         runtimeKernelId: mainRuntimeKernelId,
       }),
-      profile: routingKernelProfile(),
+      profile: routingProfile,
     });
 
     return snapshot;
@@ -387,5 +388,6 @@ export function useChatSnapshot(preference: KernelPreference): ChatSnapshot | un
     mainEntryPath,
     mainResolves,
     mainRuntimeKernelId,
+    routingProfile,
   ]);
 }

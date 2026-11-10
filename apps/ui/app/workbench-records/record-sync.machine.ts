@@ -106,6 +106,8 @@ type Cycle<T, P> = Readonly<{
   attempt: number;
   /** A flush was waiting when the cycle began, so its outcome is the flush's answer. */
   flushed: boolean;
+  /** Reset only: what was deferred when it formed, which a saved reset replaces and any other outcome still owes. */
+  replaces?: P;
 }>;
 
 type Command<T> =
@@ -396,8 +398,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           requests: [command.requestId],
           attempt: 0,
           flushed,
+          ...(command.kind === 'reset' && context.deferred !== undefined ? { replaces: context.deferred } : {}),
         },
-        patch: { commands },
+        patch: command.kind === 'reset' ? { commands, deferred: undefined } : { commands },
       };
     }
     if (context.pending) {
@@ -447,10 +450,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       } else if (outcome === 'retry' && cycle.trigger === 'timer') {
         patch.retryDelay = Math.min(context.retryDelay * 2, maxRetryDelay);
       }
-    } else if (cycle.kind === 'reset' && saved) {
-      deferred = undefined;
-      if (latest) {
-        patch.intended = context.published.record;
+    } else if (cycle.kind === 'reset') {
+      /* A saved reset replaces what was deferred when it formed; edits folded in since (a later reset, the close) stay owed. */
+      if (saved) {
+        if (latest && deferred === undefined) {
+          patch.intended = context.published.record;
+        }
+      } else if (cycle.replaces !== undefined) {
+        deferred = deferred === undefined ? cycle.replaces : policy.combine(cycle.replaces, deferred);
       }
     }
     patch.deferred = deferred;

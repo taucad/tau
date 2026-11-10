@@ -1177,6 +1177,47 @@ describe('recordSync', () => {
       expect(store.published()).toHaveLength(published + 1);
     });
 
+    it('should keep the edits a second reset folded in when the first reset is saved', async () => {
+      const store = harness({ file: '!bad' });
+      await store.observe();
+      const first = store.commands.reset({ name: 'fresh' }, bytesOf('!bad'));
+      await flush();
+
+      expect(store.writes).toHaveLength(1);
+
+      const edited = store.commands.edit({ name: 'fresh', p: '1' });
+      const second = store.commands.reset({ name: 'fresh' }, bytesOf('!bad'));
+      await flush();
+      await store.reply();
+
+      expect(await first).toBe(true);
+      expect(await edited).toBe(false);
+      expect(await second).toBe(false);
+      expect(store.context().deferred).toEqual({ name: 'fresh', p: '1' });
+
+      const flushed = store.commands.flush();
+      await flush();
+      await store.reply();
+
+      expect(await flushed).toBe(true);
+      expect(store.file.bytes && decoder.decode(store.file.bytes)).toBe('name=fresh;p=1');
+    });
+
+    it('should still owe an edit the close folded in when the reset on the wire is saved', async () => {
+      const store = harness({ file: '!bad' });
+      await store.observe();
+      const reset = store.commands.reset({ name: 'fresh' }, bytesOf('!bad'));
+      await flush();
+      void store.commands.edit({ name: 'fresh', p: '1' });
+      store.commands.close();
+      await store.reply();
+
+      expect(await reset).toBe(true);
+      expect(store.actor.getSnapshot().status).toBe('done');
+      expect(store.context().deferred).toEqual({ name: 'fresh', p: '1' });
+      expect(await store.commands.flush()).toBe(false);
+    });
+
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
       const store = harness();
       await store.observe();

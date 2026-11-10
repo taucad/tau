@@ -1127,13 +1127,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  let created: Promise<void> | undefined;
   let opened: Promise<void> | undefined;
-  /* The store is created — with the ignore file the registry generates — before
-   * the first question is asked of it, and a new project's Start version is
-   * minted in it (A6). Idempotent on both legs. */
+  /* The store alone, with the ignore file the registry generates: what a
+   * background resume needs to ask where the project's files are. It never
+   * mints the Start version, whose remote check belongs to the host's first
+   * question, after the host has set the project up (A6). */
+  const createStore = async (): Promise<void> => {
+    created ??= port.init({ author: hostAuthor });
+    await created;
+  };
+  /* The store is created before the first question is asked of it, and a new
+   * project's Start version is minted in it (A6). Idempotent on both legs. */
   const ensureStore = async (): Promise<void> => {
     opened ??= (async () => {
-      await port.init({ author: hostAuthor });
+      await createStore();
       try {
         await mintStart();
       } catch (error) {
@@ -1149,6 +1157,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * actor that started it. */
   const settled = async (): Promise<void> => {
     try {
+      await created;
       await opened;
     } catch {
       /* A store that could not be created is reported where it was asked for,
@@ -1266,11 +1275,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * A port without the `checkouts` capability has exactly one: the live tree it
    * was constructed over.
    */
-  const listPlaces = async (): Promise<readonly Checkout[]> => {
+  const listPlaces = async (opening: 'question' | 'background' = 'question'): Promise<readonly Checkout[]> => {
     /* Before any question is asked of the store, including the first sweep:
      * an engine that has no repository yet cannot answer what its object
-     * format is, let alone where its checkouts are. */
-    await ensureStore();
+     * format is, let alone where its checkouts are. A background resume only
+     * creates it: the Start mint waits for the host's own first question. */
+    await (opening === 'question' ? ensureStore() : createStore());
     /* The advertised capability, not the presence of the method: an adapter
      * that has one but was constructed without a checkouts directory refuses
      * the call, and this project still has exactly one place. */
@@ -1885,14 +1895,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * everything else, large files as LFS pointers. Only an unborn line with no
    * remote is minted on: a project that arrives from a remote already has its
    * history, and its record is removed unminted. A line that already has
-   * revisions is not opened at all.
+   * revisions is never minted on, and a record a lost race left on it is
+   * removed.
    *
    * Not an operation of the log: *Undo* never reaches the Start version.
    */
   const mintStart = async (): Promise<void> => {
     const place = await livePlaceOfStore();
-    /* A line with revisions already has its first entry: its files are not opened at all. */
-    if (place === undefined || (await headOf(place)) !== undefined) {
+    if (place === undefined) {
+      return;
+    }
+    /* A line with revisions already has its first entry: a record left by a lost race is dropped, never minted on. */
+    if ((await headOf(place)) !== undefined) {
+      await useFileSystem(place, async (rooted) => unlinkIfPresent(rooted, startRecordPath));
       return;
     }
     await useFileSystem(place, async (rooted) => {
@@ -2067,7 +2082,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         let target = place;
         try {
           if (target === undefined) {
-            const places = await listPlaces();
+            const places = await listPlaces('background');
             target = places.find((candidate) => candidate.kind === 'live');
           }
           const head = target === undefined ? undefined : await headOf(target);

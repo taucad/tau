@@ -1981,6 +1981,9 @@ describe('the checkout registry', () => {
     await vi.waitFor(() => {
       expect(events).toEqual(['open:live', 'close:live']);
     });
+    /* The host's first question opens the store, and a line with a head has any Start record dropped from the project directory. */
+    await run(actors.checkout.readHead, { checkoutId: 'live' });
+    expect(events).toEqual(['open:live', 'close:live', 'open:live', 'close:live']);
     events.length = 0;
 
     await run(actors.turn.prepare, {
@@ -5974,6 +5977,22 @@ for (const actorSet of actorSets) {
       /* The open warns and goes on; the record is what lets a later open mint V1 once the line is settled. */
       await openHead(racing);
       expect(await filesystem.exists(startRecordPath)).toBe(true);
+
+      /* The racer's head lands: the next open, with the real port, mints no second Start and drops the record. */
+      const racer = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['main.scad', 'cube(2);\n']]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+        summary: { generated: 'Racing work' },
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(racer.commitId) });
+      const reopened = createRevisionActors({ port, projectId: 'project-1', filesystem: actorFilesystem });
+
+      const head = await openHead(reopened);
+      expect(head.revisionId).toBe(racer.commitId);
+      const rows = await readRevisionLog(port, { branch: 'main' });
+      expect(rows.map((row) => row.summary)).toStrictEqual(['Racing work']);
+      expect(await filesystem.exists(startRecordPath)).toBe(false);
     }, 30_000);
 
     it('mints nothing where no creation flow asked, as an older build’s project opens', async () => {

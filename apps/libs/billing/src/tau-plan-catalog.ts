@@ -21,11 +21,16 @@ const comingSoon = (label: string): PlanCatalogFeature => ({ label, isComingSoon
 
 /*
  * The backup line each plan advertises, from the table the Hosted Remote's
- * quota enforces (charter D16). Cloud backup is live on every plan, so the
- * line is an included feature.
+ * quota enforces (charter D16). Enterprise storage is sold as custom, so its
+ * line names no figure. Free sync stays closed in production until the D23
+ * gate opens (go-live checklist STO-14).
  */
 const backupFeature = (tier: BillingTier): PlanCatalogFeature =>
-  included(`${formatStorageLimit(storageLimitBytesByTier[tier])} cloud backup and sync`);
+  included(
+    tier === 'enterprise'
+      ? 'Custom cloud backup and sync'
+      : `${formatStorageLimit(storageLimitBytesByTier[tier])} cloud backup and sync`,
+  );
 
 /**
  * Call-to-action kinds for a plan card (ui-patterns doc Finding 5):

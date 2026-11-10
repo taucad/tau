@@ -116,7 +116,7 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    for (const size of ['1 GB', '10 GB', '100 GB']) {
+    for (const size of ['1 GB', '100 GB', 'Custom']) {
       const item = screen.getByText(`${size} cloud backup and sync`).closest('li');
       expect(item).not.toHaveAttribute('data-coming-soon');
     }

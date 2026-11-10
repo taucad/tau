@@ -200,7 +200,7 @@ describe('quota refusal (D17)', () => {
 
     expect(refused.status).toBe(413);
     expect(refused.status === 413 ? refused.body.message : '').toBe(
-      'This push needs more room than your 100 GB storage plan has left, so it was not backed up. Remove or stop tracking the largest files to make room.',
+      'This push needs more room than your 1 TB storage plan has left, so it was not backed up. Remove or stop tracking the largest files to make room.',
     );
   });
 

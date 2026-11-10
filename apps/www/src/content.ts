@@ -251,7 +251,7 @@ export const pricingFaq: Array<[string, string]> = [
   ],
   [
     'What does cloud backup and sync include?',
-    'On every plan, each project’s files and revision history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 1 GB on Free, 10 GB on Pro, 100 GB on Enterprise. You need to be signed in; while offline you keep working on your local copy.',
+    'On every plan, each project’s files and revision history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 1 GB on Free, 100 GB on Pro and a custom amount on Enterprise. You need to be signed in; while offline you keep working on your local copy.',
   ],
   [
     'Can I back up on the Free plan?',

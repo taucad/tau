@@ -102,14 +102,15 @@ describe('storageLimitBytesByTier', () => {
   it('should give each plan its advertised account allowance (D16)', () => {
     expect(storageLimitBytesByTier).toStrictEqual({
       free: 1024 ** 3,
-      pro: 10 * 1024 ** 3,
-      enterprise: 100 * 1024 ** 3,
+      pro: 100 * 1024 ** 3,
+      enterprise: 1024 ** 4,
     });
   });
 
   it('should quote an allowance without a trailing zero', () => {
     expect(formatStorageLimit(storageLimitBytesByTier.free)).toBe('1 GB');
-    expect(formatStorageLimit(storageLimitBytesByTier.enterprise)).toBe('100 GB');
+    expect(formatStorageLimit(storageLimitBytesByTier.enterprise)).toBe('1 TB');
+    expect(formatStorageLimit(storageLimitBytesByTier.pro)).toBe('100 GB');
     expect(formatStorageLimit(2.5 * 1024 ** 3)).toBe('2.5 GB');
     expect(formatStorageLimit(512 * 1024 ** 2)).toBe('512 MB');
     expect(formatStorageLimit(0)).toBe('0 B');

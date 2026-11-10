@@ -57,8 +57,9 @@ export type Entitlements = {
  */
 export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
   free: 1024 ** 3,
-  pro: 10 * 1024 ** 3,
-  enterprise: 100 * 1024 ** 3,
+  pro: 100 * 1024 ** 3,
+  /* Enterprise is sold as custom storage; this is the default allowance until a contract sets another. */
+  enterprise: 1024 ** 4,
 };
 
 /**

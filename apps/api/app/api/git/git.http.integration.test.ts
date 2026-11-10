@@ -1060,7 +1060,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     /* D17: largest first, in the sentence addressed to the owner of a Pro plan. */
     expect(body.files?.map((file) => file.oid)).toEqual(objects.toReversed().map((object) => object.oid));
     expect(body.message).toBe(
-      'This push needs more room than your 10 GB storage plan has left, so it was not backed up.',
+      'This push needs more room than your 100 GB storage plan has left, so it was not backed up.',
     );
   });
 

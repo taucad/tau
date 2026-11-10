@@ -60,7 +60,7 @@ test('should advertise cloud backup as included on every plan and never as comin
   const { pricingFaq, storyChapters } = await import('#www/content.js');
   const { tauPlanCatalog } = await import('@taucad/billing/plan-catalog');
   const copy = JSON.stringify({ pricingFaq, storyChapters });
-  const sizes = { free: '1 GB', pro: '10 GB', enterprise: '100 GB' } as const;
+  const sizes = { free: '1 GB', pro: '100 GB', enterprise: 'Custom' } as const;
   for (const plan of tauPlanCatalog) {
     const backup = plan.features.filter((feature) => /sync|backup/iu.test(feature.label));
     assert.equal(backup.length, 1, `${plan.name} lists cloud backup once`);
@@ -69,7 +69,9 @@ test('should advertise cloud backup as included on every plan and never as comin
       assert.ok(feature.label.includes(sizes[plan.id]), `${plan.name} names its ${sizes[plan.id]} allowance`);
     }
     // The FAQ quotes the same allowances as the cards.
-    assert.ok(copy.includes(`${sizes[plan.id]} on ${plan.name}`));
+    assert.ok(
+      copy.includes(plan.id === 'enterprise' ? 'a custom amount on Enterprise' : `${sizes[plan.id]} on ${plan.name}`),
+    );
   }
   assert.doesNotMatch(copy, /sync[^"]*coming soon|coming soon[^"]*sync/iu);
 });

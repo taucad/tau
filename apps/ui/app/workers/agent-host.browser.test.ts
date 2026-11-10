@@ -11,7 +11,7 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostProjectProvide } from '#workers/agent-host.contract.js';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import { createProjectHosts } from '#workers/agent-host-projects.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 import {
   controlOf,
   disposeOpfsProject,

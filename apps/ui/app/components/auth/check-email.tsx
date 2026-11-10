@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { cn } from '@taucad/ui/utils/cn';
-import { authErrorMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 
 /** Seconds before another verification email may be requested from this view. */
 export const resendCooldownSeconds = 60;

@@ -16,7 +16,7 @@ import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { Commands } from '#components/layout/command-palette.js';
-import { BrowserUpdate } from '#components/nav/browser-update.js';
+import { BrowserUpdate, BrowserUpdateReveal } from '#components/nav/browser-update.js';
 import { DesktopUpdate } from '#components/nav/desktop-update.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -70,48 +70,52 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   );
 
   return (
-    <Sidebar
-      {...properties}
-      id={isMobile ? undefined : 'app-sidebar'}
-      role={isMobile ? undefined : 'complementary'}
-      aria-label={isMobile ? undefined : 'Application sidebar'}
-      aria-hidden={isNonMobileCollapsed || undefined}
-      inert={isNonMobileCollapsed || undefined}
-      variant='sidebar'
-      collapsible={isMobile ? 'offcanvas' : 'none'}
-      className={cn(
-        'w-full border-r border-sidebar-border',
-        isCompact && '[&_[data-slot=sidebar-group-label]]:text-muted-foreground',
-        properties.className,
-      )}
-    >
-      <SidebarHeader
+    <>
+      {/* Outside the sidebar, so it still listens while the mobile sheet is closed. */}
+      {desktopTarget ? null : <BrowserUpdateReveal />}
+      <Sidebar
+        {...properties}
+        id={isMobile ? undefined : 'app-sidebar'}
+        role={isMobile ? undefined : 'complementary'}
+        aria-label={isMobile ? undefined : 'Application sidebar'}
+        aria-hidden={isNonMobileCollapsed || undefined}
+        inert={isNonMobileCollapsed || undefined}
+        variant='sidebar'
+        collapsible={isMobile ? 'offcanvas' : 'none'}
         className={cn(
-          'flex flex-row items-center gap-1',
-          isMobile && 'p-1',
-          !isMobile && 'h-9 p-0',
-          isMobile && desktopTarget && 'h-9 pl-(--desktop-titlebar-inset) [&_:is(a,button)]:[app-region:no-drag]',
+          'w-full border-r border-sidebar-border',
+          isCompact && '[&_[data-slot=sidebar-group-label]]:text-muted-foreground',
+          properties.className,
         )}
       >
-        {isMobile ? <PhoneSidebarHeaderControls isDesktopTarget={desktopTarget} /> : null}
-      </SidebarHeader>
-      <SidebarContent className='gap-0'>
-        <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
-          {/* Global search entries register when search opens. */}
-          {isMobile ? null : <Commands />}
-          <NavChat isCompact={isCompact} isTouchSized={isMobile && !desktopTarget} />
-        </div>
-        <div className='flex-1 overflow-y-auto'>
-          <div className='flex flex-col justify-between'>
-            <NavMain items={navRoutes.navMain} moreItems={navMoreItems} className={isCompact ? 'py-1' : undefined} />
-            <ProjectNavigation className={isCompact ? 'py-1' : undefined} />
+        <SidebarHeader
+          className={cn(
+            'flex flex-row items-center gap-1',
+            isMobile && 'p-1',
+            !isMobile && 'h-9 p-0',
+            isMobile && desktopTarget && 'h-9 pl-(--desktop-titlebar-inset) [&_:is(a,button)]:[app-region:no-drag]',
+          )}
+        >
+          {isMobile ? <PhoneSidebarHeaderControls isDesktopTarget={desktopTarget} /> : null}
+        </SidebarHeader>
+        <SidebarContent className='gap-0'>
+          <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
+            {/* Global search entries register when search opens. */}
+            {isMobile ? null : <Commands />}
+            <NavChat isCompact={isCompact} isTouchSized={isMobile && !desktopTarget} />
           </div>
-        </div>
-      </SidebarContent>
-      {desktopTarget ? <DesktopUpdate /> : <BrowserUpdate />}
-      <SidebarFooter className='border-t p-1'>
-        <NavUser />
-      </SidebarFooter>
-    </Sidebar>
+          <div className='flex-1 overflow-y-auto'>
+            <div className='flex flex-col justify-between'>
+              <NavMain items={navRoutes.navMain} moreItems={navMoreItems} className={isCompact ? 'py-1' : undefined} />
+              <ProjectNavigation className={isCompact ? 'py-1' : undefined} />
+            </div>
+          </div>
+        </SidebarContent>
+        {desktopTarget ? <DesktopUpdate /> : <BrowserUpdate />}
+        <SidebarFooter className='border-t p-1'>
+          <NavUser />
+        </SidebarFooter>
+      </Sidebar>
+    </>
   );
 }

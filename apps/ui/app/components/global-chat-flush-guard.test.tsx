@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
 import type { Mock } from 'vitest';
 
 const harness = vi.hoisted(() => ({

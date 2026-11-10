@@ -15,7 +15,7 @@ import {
   placementFacts,
   retireWorkers,
 } from '#workers/test/agent-host-resident.fixture.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 
 afterEach(disposeOpfsProject);
 

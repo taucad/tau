@@ -13,7 +13,7 @@ import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';

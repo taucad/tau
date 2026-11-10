@@ -1,7 +1,7 @@
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { PageContent } from '#components/layout/page-content.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { sidebarDefaultOpen, sidebarPreferredWidth } from '#constants/sidebar.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { sidebarDefaultOpen, sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';

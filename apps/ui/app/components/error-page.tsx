@@ -3,15 +3,14 @@ import { Loader } from '@taucad/ui/components/loader';
 import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
+import { chatObservationConflict, quarantineChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { isTransientNetworkFailure } from '#lib/network-failure.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isTransientNetworkFailure } from '@taucad/ui-core/lib/network-failure';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
-import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import {
   isStaleModuleError,
   readReloadState,
@@ -73,8 +72,6 @@ export function ErrorPage(): React.JSX.Element {
    * has not named this build since, or once the server confirms another build, and gives way to the
    * error itself when the server confirms this build live (a rollback ended). */
   const isExplained = isModuleLoadFailure && showsUpdatePrompt(staleOutcome, verdict);
-  // This screen is the reload prompt while it shows; the floating banner would only repeat it.
-  useReloadPromptOwner(isExplained);
 
   const conflictingChatId = observationConflict?.chatId;
   useEffect(() => {

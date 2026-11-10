@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { webPosthogOptions } from '#lib/web-posthog.lib.js';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { PostHogAnalyticsProvider } from '#providers/posthog-analytics-provider.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /**

@@ -31,6 +31,7 @@
 @source '../../../libs/ui-kit/src';
 @source '../../../libs/chat-ui/src';
 @source '../../../libs/project-workspace/src';
+@source '../../../libs/ui-core/src';
 @source '../../../../packages/ui/src';
 @source '../../../../packages/viewer/src';
 @source '../../../../packages/workbench-panes/src';

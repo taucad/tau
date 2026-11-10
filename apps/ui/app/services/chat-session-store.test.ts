@@ -25,14 +25,14 @@ import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { resetAutoResumes } from '#utils/run-auto-resume.js';
+import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,

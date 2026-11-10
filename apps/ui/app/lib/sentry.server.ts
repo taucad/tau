@@ -4,7 +4,7 @@ import { isRouteErrorResponse } from 'react-router';
 import type { EntryContext } from 'react-router';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
 import { automatedRunEnvironment, scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
 

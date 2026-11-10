@@ -4,7 +4,7 @@ import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 
 export const desktopProjectRoot = async (projectId: string): Promise<string> => {
   const config = await getProjectFileSystemConfig(projectId);

@@ -435,7 +435,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * The machine plus the account, which is what "this device" means on disk: two
  * users on one machine hold two checkouts and write two chat segments. Stable
  * across restarts, needs no record of its own, and is never a credential — the
- * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
+ * browser's equivalent is `apps/libs/ui-core/src/lib/device-id.ts` and neither mints the
  * other's.
  */
 export const hostDeviceId = `${hostname()}:${userInfo().username}`;

@@ -8,7 +8,7 @@ import {
   DataTableColumnVisibilityDropdown,
 } from '@taucad/ui-kit/components/data-table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';

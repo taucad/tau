@@ -22,7 +22,7 @@ import { isUndecidedFailure, summarizeTestModelOutput } from '@taucad/chat/schem
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
-import { formatExportDate } from '#utils/date.utils.js';
+import { formatExportDate } from '@taucad/ui-core/utils/date.utils';
 import { getRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { AttachmentName, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';

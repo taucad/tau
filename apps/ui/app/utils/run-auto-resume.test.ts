@@ -154,7 +154,7 @@ describe('lookUpModelAttempt', () => {
   });
 });
 
-/* Regression review R6: the LangChain plane retried a transient provider failure twice; the Pi gateway retries none. */
+/* Regression review R6: the server agent plane retried a transient provider failure twice; the Pi gateway retries none. */
 describe('nextProviderUnavailableRetry', () => {
   beforeEach(() => {
     resetAutoResumes();

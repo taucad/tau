@@ -43,8 +43,9 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(30);
-    expect(new Set(billableModelRouteIds).size).toBe(30);
+    expect(billableModelRouteIds).toHaveLength(31);
+    expect(new Set(billableModelRouteIds).size).toBe(31);
+    expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');
@@ -250,6 +251,83 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
         priceHeaders: { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'computer-use-2024-10-22' },
       }),
     ).toThrow('Provider header is outside the funded request contract');
+  });
+
+  it('should admit the thinking binding controls at the price of the same request without them', () => {
+    const body = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const plain = resolver.resolve({ ...intent(body), providerWire: 'anthropic', priceHeaders: headers });
+    const bound = resolver.resolve({
+      ...intent({
+        ...body,
+        thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+      }),
+      providerWire: 'anthropic',
+      priceHeaders: { ...headers, 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+    });
+
+    expect(bound.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+      body: { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } },
+    });
+    /* The control changes which replayed blocks the provider reads, never what a token costs. */
+    expect(bound.sku).toBe(plain.sku);
+    expect(bound.invocation.supplierRates).toStrictEqual(plain.invocation.supplierRates);
+  });
+
+  it('should price an effort level carried in the transcript as the same request with a top-level effort', () => {
+    const anthropic = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    };
+    const responses = {
+      model: 'openai-gpt-5.6-sol',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 16,
+      stream: true,
+      reasoning: { effort: 'medium' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const resolve = (providerWire: 'anthropic' | 'openai-responses', body: unknown, beta?: string) =>
+      resolver.resolve({
+        ...intent(body),
+        providerWire,
+        ...(providerWire === 'anthropic'
+          ? { priceHeaders: beta === undefined ? headers : { ...headers, 'anthropic-beta': beta } }
+          : {}),
+      });
+    const marker = { role: 'system', content: [], output_config: { effort: 'low' } };
+    const update = { type: 'configuration_update', reasoning: { effort: 'high' } };
+
+    const anthropicPlain = resolve('anthropic', anthropic);
+    const anthropicMarked = resolve(
+      'anthropic',
+      { ...anthropic, messages: [...anthropic.messages, marker] },
+      'mid-conversation-output-config-2026-07-01',
+    );
+    const responsesPlain = resolve('openai-responses', responses);
+    const responsesMarked = resolve('openai-responses', { ...responses, input: [...responses.input, update] });
+
+    expect(anthropicMarked.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'mid-conversation-output-config-2026-07-01' },
+      body: { messages: [anthropic.messages[0], marker] },
+    });
+    expect(responsesMarked.normalizedRequest).toMatchObject({ body: { input: [responses.input[0], update] } });
+    /* The marker selects how hard the model thinks, as the top-level field does; tokens cost what they cost. */
+    expect(anthropicMarked.sku).toBe(anthropicPlain.sku);
+    expect(anthropicMarked.invocation.supplierRates).toStrictEqual(anthropicPlain.invocation.supplierRates);
+    expect(responsesMarked.sku).toBe(responsesPlain.sku);
+    expect(responsesMarked.invocation.supplierRates).toStrictEqual(responsesPlain.invocation.supplierRates);
   });
 
   it('should accept the authoritative OpenAI-compatible host stream options and strict function shape', () => {

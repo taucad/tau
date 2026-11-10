@@ -38,6 +38,7 @@ import type {
   RuntimeLateRecord,
   RuntimeOperationRecord,
   RuntimeTelemetryMode,
+  RuntimeKillRecord,
   RuntimeViewerRecord,
   TelemetryPolicyAnswer,
 } from '@taucad/telemetry';
@@ -482,6 +483,10 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
         this.recordViewer(entry);
         return;
       }
+      case RuntimeEntryName.KILL: {
+        this.recordKill(entry, context.population);
+        return;
+      }
       default: {
         this.recordDelivery(entry);
       }
@@ -780,6 +785,20 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       'tau.runtime.operation': entry.detail.operation,
       'tau.runtime.settled_as': entry.detail.settledAs,
       'tau.runtime.route': entry.detail.route,
+    });
+  }
+
+  /** A browser tab kill the next load reported (crash capture blueprint): outcome `terminated`, by ruling. */
+  private recordKill(entry: RuntimeKillRecord, population: Population): void {
+    const { detail } = entry;
+    this.runtimeMetrics.count('runtimePageKills', 1, {
+      'kernel.id': detail.kernel ?? absentLabel,
+      'tau.runtime.kill_phase': detail.phase,
+      'tau.runtime.kill_class': detail.classification,
+      'tau.runtime.outcome': 'terminated',
+      'tau.runtime.route': detail.route,
+      ...(detail.device === undefined ? {} : { 'tau.runtime.device': detail.device }),
+      'tau.runtime.population': population,
     });
   }
 

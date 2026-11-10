@@ -4,53 +4,124 @@
  *
  * Mounted under the sessions registry and the chat store so the marker carries the counts that
  * matter on a phone: how many projects were live and how many chats were loaded when the tab died.
- * A detected kill goes to the error tracker as a `TabKilledError` (`#lib/tab-kill-reporting`) and
- * leaves the marker only once its report is handed over, so a kill loop still reports its first
- * kill (G17).
+ * A detected kill goes to the error tracker as a `TabKilledError` (`#lib/tab-kill-reporting`) only
+ * when "Share usage and diagnostics" resolves to `granted` (crash capture blueprint). While the
+ * consent is `unknown` (a signed-in preference still loading) the kill waits in the marker's
+ * `pending` list and is sent if it resolves to on in this tab; on `denied` it is settled and dropped
+ * at once. It leaves the marker only once handed over or dropped, so a kill loop still reports its
+ * first kill (G17). Nothing about reporting is shown in any state.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { offerCrashFeedback } from '#lib/crash-feedback.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
-import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
+import { busyKillPhases, getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { installKillWorkReaders } from '#lib/kill-work-context.js';
+import { killMemory } from '#lib/kill-memory.js';
+import type { KillMemory } from '#lib/kill-memory.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
-import type { MemoryKillSignal } from '#lib/memory-kill-signal.js';
+import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
+
+/** Where the reporter reads the telemetry consent (the page composition's one rule) and counts a kill. @public */
+export type KillReportConsent = Readonly<{
+  read: () => ReportingConsent;
+  /** Listen for each resolved change; returns the unsubscribe. */
+  subscribe: (listener: () => void) => () => void;
+  /** Count one consented kill in runtime telemetry (`tau.runtime.page_kills`), by kernel and phase. */
+  count: (kill: DetectedMemoryKill) => void;
+}>;
+
+/** The page composition's consent; `unknown` (wait) where there is none, as during SSR. */
+const pageConsent: KillReportConsent = {
+  read: () => pageTelemetry()?.consent() ?? 'unknown',
+  subscribe: (listener) => pageTelemetry()?.onConsentChange(listener) ?? (() => undefined),
+  count: (kill) => {
+    pageTelemetry()?.recordKill({
+      ...(kill.work.kernel === undefined ? {} : { kernel: kill.work.kernel }),
+      ...(kill.work.phase === undefined ? {} : { phase: kill.work.phase }),
+      classification: kill.classification,
+    });
+  },
+};
 
 export function MemoryKillReporter({
   signal,
   liveProjectCount,
   chatCount,
+  consent = pageConsent,
+  memory = killMemory,
 }: {
   readonly signal: MemoryKillSignal | undefined;
   readonly liveProjectCount: number;
   readonly chatCount: number;
+  readonly consent?: KillReportConsent;
+  readonly memory?: KillMemory;
 }): undefined {
-  const reported = useRef(false);
+  const waiting = useRef<DetectedMemoryKill[] | undefined>(undefined);
 
   useEffect(() => {
-    if (signal === undefined || reported.current) {
-      return;
+    if (signal === undefined) {
+      return undefined;
     }
-    reported.current = true;
-    const report = async (): Promise<void> => {
-      for (const kill of signal.takeDetectedKills()) {
-        // Each kill in turn; one whose report does not land stays pending for the next load (G17).
-        // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
-        const { delivered, eventId } = await reportDetectedKill(kill);
-        if (delivered) {
-          signal.settleKill(kill.id);
-          // Ask what the person was doing, where it is theirs to answer (SB12).
-          offerCrashFeedback(kill, eventId);
+    if (waiting.current === undefined) {
+      waiting.current = [...signal.takeDetectedKills()];
+      // Kill memory, in every consent state: a model that stopped the page while opening or rendering is paused
+      // the next time it opens on this device. Local functional state; nothing is sent.
+      for (const kill of waiting.current) {
+        const { model, phase } = kill.work;
+        if (
+          kill.classification === 'foreground' &&
+          model !== undefined &&
+          phase !== undefined &&
+          busyKillPhases.has(phase)
+        ) {
+          memory.record(model, kill.buildId, kill.diedAt);
         }
       }
+    }
+    let isSending = false;
+    const process = async (): Promise<void> => {
+      const decided = consent.read();
+      const queue = waiting.current ?? [];
+      if (isSending || decided === 'unknown' || queue.length === 0) {
+        return;
+      }
+      isSending = true;
+      try {
+        for (const kill of queue.splice(0)) {
+          if (decided === 'denied') {
+            // Off means off: the kill never leaves the device and is not kept waiting.
+            signal.settleKill(kill.id);
+            continue;
+          }
+          // Each kill in turn; one whose report does not land stays pending for the next load (G17).
+          // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
+          if (await reportDetectedKill(kill)) {
+            signal.settleKill(kill.id);
+            // Counted once, as it leaves the marker: a kill still pending is counted when it is delivered.
+            consent.count(kill);
+          }
+        }
+      } finally {
+        isSending = false;
+      }
     };
+    const unsubscribe = consent.subscribe(() => {
+      // async-iife: bootstrap -- a consent change re-checks what waits; it never blocks the change.
+      void process();
+    });
     // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
-    void report();
-  }, [signal]);
+    void process();
+    return unsubscribe;
+  }, [consent, memory, signal]);
+
+  // SB2's kernel heap and renderer readers, which nothing registered before (crash capture, Finding 2).
+  useEffect(() => installKillWorkReaders(), []);
 
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });
@@ -97,9 +168,10 @@ export function MemoryKillReporter({
     if (signal === undefined) {
       return undefined;
     }
+    // Every 5 s; the signal writes each time while a model opens or renders, else every 30 s.
     const beat = globalThis.setInterval(() => {
       signal.heartbeat();
-    }, killHeartbeatMilliseconds);
+    }, killBusyHeartbeatMilliseconds);
     return () => {
       globalThis.clearInterval(beat);
     };

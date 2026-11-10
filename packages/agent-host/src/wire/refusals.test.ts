@@ -90,10 +90,11 @@ describe('the refusal registry (D11, I17)', () => {
   });
 });
 
-describe('the route and account denials (W6, W11a)', () => {
+describe('the route and account denials (W6, W11a) and a refused reasoning replay', () => {
   it.each([
     ['MODEL_ROUTE_PAUSED', 503],
     ['BILLING_ACCOUNT_RESTRICTED', 403],
+    ['REASONING_REPLAY_REJECTED', 502],
   ] as const)('should register %s as a gateway code no resume continues', (code, status) => {
     expect(gatewayErrorCodes).toContain(code);
     expect(refusalOf(code)).toEqual({ owner: 'gateway', retry: 'never' });

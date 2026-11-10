@@ -26,7 +26,15 @@ export default defineConfig({
      * env loading auto-injects `.env.test` (mock keys) into workers and the
      * integration tests then hit 401s against the test fixtures.
      */
-    exclude: ['app/api/billing/*.foundation.test.ts', 'app/testing/**', 'node_modules/**', 'dist/**', 'out-tsc/**'],
+    /* `helper-path.live.test.ts` calls real providers and runs only under `test:live`. */
+    exclude: [
+      'app/api/billing/*.foundation.test.ts',
+      'app/api/llm/helper-path.live.test.ts',
+      'app/testing/**',
+      'node_modules/**',
+      'dist/**',
+      'out-tsc/**',
+    ],
     reporters: ['default'],
     testTimeout: 120_000,
   },

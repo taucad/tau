@@ -10,7 +10,6 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 
 const { instrumentationConfigs, exporterConfigs, sdkConfigs } = vi.hoisted(() => ({
   instrumentationConfigs: [] as Array<Record<string, unknown>>,
@@ -38,7 +37,6 @@ vi.mock('@opentelemetry/exporter-prometheus', () => ({
 vi.mock('@opentelemetry/exporter-trace-otlp-http', () => ({ OTLPTraceExporter: vi.fn() }));
 vi.mock('@opentelemetry/exporter-logs-otlp-http', () => ({ OTLPLogExporter: vi.fn() }));
 vi.mock('@opentelemetry/sdk-logs', () => ({ BatchLogRecordProcessor: vi.fn() }));
-vi.mock('@traceloop/instrumentation-langchain', () => ({ LangChainInstrumentation: vi.fn() }));
 vi.mock('@opentelemetry/auto-instrumentations-node', () => ({
   getNodeAutoInstrumentations: (config: Record<string, unknown>) => {
     instrumentationConfigs.push(config);
@@ -62,14 +60,6 @@ const incomingSpanHook = async (): Promise<NonNullable<HttpInstrumentationConfig
   return hook;
 };
 const request = (url: string): IncomingMessage => mock<IncomingMessage>({ url, headers: {} });
-
-describe('OTEL LangChain instrumentation', () => {
-  it('should trace helper calls without their prompts or completions', async () => {
-    await import('#otel.js');
-
-    expect(LangChainInstrumentation).toHaveBeenCalledWith({ traceContent: false });
-  });
-});
 
 describe('OTEL incoming request span redaction', () => {
   it.each(['/v1/github/callback?code=oauth-code&state=oauth-state', '/v1/auth/callback/github?code=oauth-code'])(

@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import ollama from 'ollama';
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ToolName } from '@taucad/chat';
 import { filterProviderFacingToolNamesByModelSupport } from '@taucad/chat/schemas';
 import type { Model, ModelFamily, ModelProviderKind, ModelSupport, ProviderId } from '@taucad/chat/model-catalog';
@@ -15,7 +14,6 @@ import {
   modelList,
   modelListEntryToModel,
 } from '#models/model.constants.js';
-import { Span } from '@taucad/api-observability';
 import {
   isFundedGatewayProviderId,
   isGatewayProviderConfigured,
@@ -33,35 +31,6 @@ export class ModelService implements OnModuleInit {
     private readonly providerService: ProviderService,
     private readonly configService: ConfigService<Environment>,
   ) {}
-
-  @Span()
-  public buildModel(
-    modelId: string,
-    options: { maximumOutputTokens?: number } = {},
-  ): { model: BaseChatModel; support?: ModelSupport } {
-    const modelConfig = this.models.find((model) => model.id === modelId);
-
-    if (!modelConfig) {
-      throw new Error(`Could not find model ${modelId}`);
-    }
-
-    const provider = this.providerService.getProvider(modelConfig.provider.id);
-
-    const modelClass = this.providerService.createModelClass(
-      modelConfig.provider.id,
-      {
-        model: modelConfig.model,
-        ...modelConfig.configuration,
-        configuration: provider.configuration,
-      },
-      { maximumOutputTokens: options.maximumOutputTokens },
-    );
-
-    return {
-      model: modelClass,
-      support: modelConfig.support,
-    };
-  }
 
   public async onModuleInit(): Promise<void> {
     await this.getModels();

@@ -187,8 +187,9 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
           additionalArguments: [`--tau-bootstrap=${JSON.stringify(options.rendererBootstrap)}`],
           contextIsolation: true,
           nodeIntegration: false,
-          preload: `${app.getAppPath()}/dist/preload/preload.mjs`,
-          sandbox: false,
+          /* The same sandboxed CommonJS preload the main window gets (#975); the ESM preload is no longer packaged. */
+          preload: `${app.getAppPath()}/dist/preload/preload.cjs`,
+          sandbox: true,
         },
       });
       await window.loadURL('app://tau/convert');

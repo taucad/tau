@@ -16,6 +16,7 @@ const kill = (over: Partial<DetectedMemoryKill> = {}): DetectedMemoryKill => ({
   chatCount: 5,
   lastActivity: 'render',
   aliveForMilliseconds: 8000,
+  diedAt: 1_793_324_765_000,
   consecutiveKills: 1,
   highWaterWasmBytes: 512_000_000,
   sample: { at: 7500, liveProjects: 2 },
@@ -23,6 +24,7 @@ const kill = (over: Partial<DetectedMemoryKill> = {}): DetectedMemoryKill => ({
     { at: 1_793_324_757_000, name: 'open' },
     { at: 1_793_324_760_000, name: 'render' },
   ],
+  work: {},
   ...over,
 });
 
@@ -34,12 +36,14 @@ describe('tab kill reporting (SB3, A11)', () => {
   it('reports a synthetic TabKilledError grouped by classification and route, with the dead page’s trail', async () => {
     const reported = await reportDetectedKill(kill());
 
-    expect(reported).toEqual({ delivered: true, eventId: undefined });
+    expect(reported).toBe(true);
     const [error, details] = vi.mocked(reportUiError).mock.calls[0] ?? [];
     expect(error).toBeInstanceOf(TabKilledError);
     expect((error as Error).name).toBe('TabKilledError');
     expect(details).toMatchObject({
-      fingerprint: ['tab-killed', 'foreground', 'routes/w.$workspace.$project'],
+      /* Usage and diagnostics data: never stored against an account (crash capture blueprint). */
+      anonymous: true,
+      fingerprint: ['tab-killed', 'foreground', 'routes/w.$workspace.$project', 'unknown', 'unknown'],
       level: 'warning',
       tags: {
         classification: 'foreground',
@@ -74,7 +78,7 @@ describe('tab kill reporting (SB3, A11)', () => {
     );
 
     const [, details] = vi.mocked(reportUiError).mock.calls[0] ?? [];
-    expect(details?.fingerprint).toEqual(['tab-killed', 'foreground', 'unknown']);
+    expect(details?.fingerprint).toEqual(['tab-killed', 'foreground', 'unknown', 'unknown', 'unknown']);
     expect(details?.tags).not.toHaveProperty('route');
     expect(details?.tags).not.toHaveProperty('last_activity');
     expect(details?.contexts?.['tau.kill']).not.toHaveProperty('memory');
@@ -93,7 +97,7 @@ describe('tab kill reporting (SB3, A11)', () => {
   it('says the report did not land when the reporting path throws, so the kill stays pending', async () => {
     vi.mocked(reportUiError).mockRejectedValueOnce(new Error('no'));
 
-    await expect(reportDetectedKill(kill())).resolves.toEqual({ delivered: false, eventId: undefined });
+    await expect(reportDetectedKill(kill())).resolves.toBe(false);
   });
 
   it('reports how long a background page had been hidden', async () => {
@@ -101,5 +105,59 @@ describe('tab kill reporting (SB3, A11)', () => {
 
     const [, details] = vi.mocked(reportUiError).mock.calls[0] ?? [];
     expect(details?.contexts?.['tau.kill']).toMatchObject({ hiddenForSeconds: 61 });
+  });
+
+  it('names the kernel and the step in tags, the numbers in tau.work, and groups by both (crash capture)', async () => {
+    await reportDetectedKill(
+      kill({
+        work: {
+          kernel: 'replicad',
+          builtin: 'replicad.worm-gear-system',
+          shareProvider: 'builtin',
+          phase: 'gpu-upload',
+          phaseStartedAt: 1_793_324_762_000,
+          renderCount: 1,
+          lastRender: 4321,
+          triangles: 2_400_000,
+          geometryBytes: 96 * 1024 * 1024,
+          peakWasmBytes: 700 * 1024 * 1024,
+          backend: 'webgl',
+          lastInteraction: 'open',
+          interactionAt: 1_793_324_757_000,
+        },
+      }),
+    );
+
+    const [, details] = vi.mocked(reportUiError).mock.calls[0] ?? [];
+    expect(details?.fingerprint).toEqual([
+      'tab-killed',
+      'foreground',
+      'routes/w.$workspace.$project',
+      'replicad',
+      'gpu-upload',
+    ]);
+    expect(details?.tags).toMatchObject({
+      kernel: 'replicad',
+      /* eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag names. */
+      kill_phase: 'gpu-upload',
+      builtin: 'replicad.worm-gear-system',
+      /* eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag names. */
+      last_interaction: 'open',
+    });
+    expect(details?.contexts?.['tau.work']).toEqual({
+      kernel: 'replicad',
+      builtin: 'replicad.worm-gear-system',
+      shareProvider: 'builtin',
+      phase: 'gpu-upload',
+      phaseSeconds: 3,
+      renderCount: 1,
+      lastRenderSeconds: 4.3,
+      triangles: 2_400_000,
+      geometryMiB: 96,
+      peakWasmMiB: 700,
+      backend: 'webgl',
+      lastInteraction: 'open',
+      interactionSeconds: 8,
+    });
   });
 });

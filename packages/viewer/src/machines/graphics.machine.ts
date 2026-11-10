@@ -546,6 +546,107 @@ export type GraphicsEvent =
     };
 
 /**
+ * The graphics machine's public alphabet: every {@link GraphicsEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const graphicsEventTypes = [
+  'updateGridSize',
+  'setGridSizeLocked',
+  'setGridUnit',
+  'fitView',
+  'cameraViewChanged',
+  'setSurfaceVisibility',
+  'setLinesVisibility',
+  'setGizmoVisibility',
+  'setGridVisibility',
+  'setAxesVisibility',
+  'setMatcapVisibility',
+  'setPostProcessingVisibility',
+  'setUpDirection',
+  'setGraphicsBackendPreference',
+  'webGpuCanvasLost',
+  'rendererInitialized',
+  'rendererRemoved',
+  'canvasMounted',
+  'rendererPresented',
+  'canvasUnmounted',
+  'setSectionViewActive',
+  'adoptSectionView',
+  'addSectionCut',
+  'updateSectionCut',
+  'removeSectionCut',
+  'selectSectionCut',
+  'hoverSectionCut',
+  'commitSectionCuts',
+  'setMeasureActive',
+  'setMeasureInputReady',
+  'adoptPinnedMeasurements',
+  'startMeasurement',
+  'completeMeasurement',
+  'startFeatureMeasurement',
+  'completeFeatureMeasurement',
+  'setMeasureMode',
+  'setMeasureFrame',
+  'setMeasureSnapEnabled',
+  'setMeasureOperation',
+  'setMeasureFilter',
+  'setMeasureCandidates',
+  'chooseMeasureCandidate',
+  'clearMeasureChosenCandidate',
+  'requestMeasureCandidateCommit',
+  'requestMeasureCatalog',
+  'setMeasureMessage',
+  'setMeasurePreviewDistance',
+  'setMeasureLockedTarget',
+  'measurementSourceChanged',
+  'measurementPoseChanged',
+  'measurementCutChanged',
+  'addMeasurementRecord',
+  'resolveMeasurementRecord',
+  'cancelPendingMeasurements',
+  'cancelCurrentMeasurement',
+  'clearMeasurement',
+  'clearAllMeasurements',
+  'clearUnpinnedMeasurements',
+  'setHoveredMeasurement',
+  'setMeasurementName',
+  'toggleMeasurementPinned',
+  'controlsInteractionStart',
+  'controlsInteractionMoved',
+  'controlsInteractionEnd',
+  'beginViewerModelHoverSuppression',
+  'endViewerModelHoverSuppression',
+  'markModelPointerGestureMoved',
+  'clearModelPointerClickGuard',
+  'updateArtifact',
+  'clearArtifact',
+  'gltfPreparationStarted',
+  'gltfDisplayReady',
+  'gltfAnalysisReady',
+  'gltfPresentationCommitted',
+  'gltfPresentationFailed',
+  'gltfPresentationMeasured',
+  'loadModelComponentManifest',
+  'clearModelComponentManifest',
+  'setHoveredModelComponent',
+  'toggleModelComponentSelection',
+  'selectModelComponent',
+  'clearModelComponentSelection',
+  'hideModelComponent',
+  'showModelComponent',
+  'showHiddenModelComponents',
+  'isolateModelComponent',
+  'clearModelComponentIsolation',
+  'setModelComponentOpacity',
+  'resetModelComponentOpacities',
+  'focusModelComponent',
+  'clearModelComponentFocus',
+  'sceneRadiusUpdated',
+] as const satisfies ReadonlyArray<GraphicsEvent['type']>;
+
+/**
  * The cut to add. A plane defaults to the first of XZ, YZ and XY the list lacks, and a cutaway to the up axis;
  * both pass through the geometry centre. `viewDirection` points from the view's target toward the camera (the camera
  * view's `direction`): a plane then removes the side facing the camera and a cutaway opens toward it.
@@ -1804,6 +1905,35 @@ const graphicsMachineDefinition = setup({
     },
   },
 });
+
+/**
+ * The (state, event) pairs the graphics machine leaves unanswered today (MC-R17): its totality baseline. Each
+ * state is a dotted path or `'*'`. The list records the gaps without changing them; a later change that answers one of
+ * these events removes its pair here, and the totality test fails on a stale pair or an unlisted gap.
+ *
+ * @public
+ */
+export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  // Declared in the alphabet but handled in no state.
+  ['*', 'startFeatureMeasurement'],
+  // Turning the section on while on, or off while off, returns `undefined`.
+  ['operational.section.off', 'setSectionViewActive'],
+  ['operational.section.on', 'setSectionViewActive'],
+  // Turning the measuring tool on while on, or off while off, returns `undefined`.
+  ['operational.measure.off', 'setMeasureActive'],
+  ['operational.measure.on', 'setMeasureActive'],
+  // The measuring tool's own events, handled only inside `measure.on`.
+  ['operational.measure.off', 'setMeasureInputReady'],
+  ['operational.measure.off', 'clearAllMeasurements'],
+  ['operational.measure.off', 'startMeasurement'],
+  ['operational.measure.off', 'completeMeasurement'],
+  ['operational.measure.off', 'completeFeatureMeasurement'],
+  ['operational.measure.off', 'cancelCurrentMeasurement'],
+  // A point is placed only while selecting, and completed or cancelled only once placed.
+  ['operational.measure.on.selected', 'startMeasurement'],
+  ['operational.measure.on.selecting', 'completeMeasurement'],
+  ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
+];
 
 /** The graphics machine's state value: the operational section and measure regions. @public */
 export type GraphicsStateValue = {

@@ -1750,6 +1750,8 @@ describe.runIf(enabled)('shell qualification', () => {
       git(undefined, 'config', 'http.extraheader', `Authorization: Bearer ${secret}`);
       git(undefined, 'pack-refs', '--all');
       git(undefined, 'gc', '--quiet');
+      /* Tau's derived ignores, as a Tau store carries them, for the records the service creates and the stand-ins. */
+      writeFileSync(join(history, '.git', 'info', 'exclude'), '/.tau/*\n/thumbnail.webp\n/exports/\n');
       const store = join(history, '.git');
       const before = treeDigestOf(store);
 
@@ -1792,7 +1794,16 @@ describe.runIf(enabled)('shell qualification', () => {
       ].map((command, index) => shellCall(`e14-write-${String(index)}`, { command }));
       /* On Linux a write beside the objects lands in the denied `.git`'s masking tmpfs (as in E03): judged outside. */
       const masked = [shellCall('e14-masked', { command: 'touch .git/forged; printf forged > .git/HEAD' })];
-      const { outputs } = await drive('e14', [...reads, ...probes, ...writes, ...masked], { cwd: history });
+      /* The view carries a copy of the checkout's index, so status compares against it, never against an empty one. */
+      const status = [
+        shellCall('e14-status-clean', { command: 'git status --porcelain' }),
+        shellCall('e14-status-edited', { command: "printf 'cube(9);\\n' > part.scad && git status --porcelain" }),
+      ];
+      const { outputs } = await drive('e14', [...reads, ...probes, ...writes, ...masked, ...status], {
+        cwd: history,
+      });
+      expect(ok(outputs.at(-2)).stdout.text).toBe('');
+      expect(ok(outputs.at(-1)).stdout.text).toBe(' M part.scad\n');
 
       expect(ok(outputs[0]).stdout.text).toBe('Grow the part\nFirst part\n');
       expect(ok(outputs[1]).stdout.text).toMatch(/-cube\(1\);\n\+cube\(2\);/u);
@@ -1818,10 +1829,12 @@ describe.runIf(enabled)('shell qualification', () => {
       expect(`${leaked.stdout.text}${leaked.stderr.text}`).not.toContain(secret);
       expect(leaked.stdout.text).not.toMatch(/\[remote|refs\/tau/u);
       expect(completed(outputs[8]).exitCode).not.toBe(0);
-      const failed = outputs.slice(reads.length + probes.length, -masked.length).map((output, index) => ({
-        command: writes[index]!.input,
-        exitCode: completed(output).exitCode,
-      }));
+      const failed = outputs
+        .slice(reads.length + probes.length, reads.length + probes.length + writes.length)
+        .map((output, index) => ({
+          command: writes[index]!.input,
+          exitCode: completed(output).exitCode,
+        }));
       expect(failed.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
       /* Outside bytes are the judge: the real store is byte for byte what it was. */
       expect(treeDigestOf(store)).toBe(before);

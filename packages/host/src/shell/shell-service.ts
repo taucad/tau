@@ -866,8 +866,12 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     /* Set once custody is prepared: from then on only `finish` may delete the private roots (I7). */
     let custody: Readonly<{ executionId: string; holds: ShellExecutionHolds | undefined }> | undefined;
     try {
-      /* Read-only git (E1): a fresh view of the branches and tags, written per command so it never goes stale. */
-      const git = platform === 'win32' ? undefined : await createShellGitView(admitted.root, session.root);
+      /*
+       * Read-only git (E1): a fresh view of the branches and tags, written per command so it never goes stale. A view
+       * the host cannot write (a full disk, a refused folder) leaves the command without git rather than failing it.
+       */
+      const git =
+        platform === 'win32' ? undefined : await createShellGitView(admitted.root, session.root).catch(() => undefined);
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
         checkoutProtected: admitted.checkoutProtected,

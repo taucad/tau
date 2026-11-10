@@ -12,7 +12,7 @@ import { join, relative } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createShellGitView, shellGitEnvironment } from '#shell/shell-git-view.js';
+import { createShellGitView, indexExtensions, shellGitEnvironment } from '#shell/shell-git-view.js';
 
 /** A token-shaped secret seeded into every place the real store keeps settings. */
 const secret = 'ghp_SEEDEDSECRETVALUE0123456789';
@@ -103,6 +103,8 @@ describe('createShellGitView', () => {
     expect(await filesUnder(view!.directory)).toStrictEqual([
       'HEAD',
       'config',
+      'index',
+      'info/exclude',
       'objects/info/alternates',
       'packed-refs',
       'refs/heads/loose',
@@ -129,7 +131,9 @@ describe('createShellGitView', () => {
       // oxlint-disable-next-line no-await-in-loop -- a handful of files.
       const text = await readFile(join(view!.directory, file), 'utf8');
       expect(text, file).not.toContain(secret);
-      expect(text, file).not.toMatch(/remote|credential|lfs|extraheader|hooks|url/iu);
+      if (file !== 'index') {
+        expect(text, file).not.toMatch(/remote|credential|lfs|extraheader|hooks|url/iu);
+      }
     }
     const listed = throughView(shellGitEnvironment(view!), 'config', '--list', '--local');
     expect(listed).toBe('core.repositoryformatversion=0\ncore.bare=false\n');
@@ -171,6 +175,141 @@ describe('createShellGitView', () => {
     expect(view?.objects).toBe(join(checkout, '.git', 'objects'));
     expect(view?.workTree).toBe(linked);
     expect(await readFile(join(view!.directory, 'HEAD'), 'utf8')).toBe('ref: refs/heads/feature\n');
+    /* Its own index, not the main checkout's. */
+    expect(await readFile(join(view!.directory, 'index'))).toStrictEqual(
+      await readFile(join(checkout, '.git', 'worktrees', 'linked', 'index')),
+    );
+  });
+
+  it('should copy the index so status compares against it: clean prints nothing, an edit shows as modified', async () => {
+    await seedRepository();
+    const environment = shellGitEnvironment((await createShellGitView(checkout, privateRoot))!);
+
+    expect(throughView(environment, 'status', '--porcelain')).toBe('');
+    expect(throughView(environment, 'diff')).toBe('');
+    /* The store's own ignores still apply. */
+    await writeFile(join(checkout, '.git', 'info', 'exclude'), '/thumbnail.webp\n');
+    await writeFile(join(checkout, 'thumbnail.webp'), '');
+    const ignoring = shellGitEnvironment((await createShellGitView(checkout, privateRoot))!);
+    expect(throughView(ignoring, 'status', '--porcelain')).toBe('');
+    await writeFile(join(checkout, 'part.scad'), 'cube(3);\n');
+    expect(throughView(ignoring, 'status', '--porcelain')).toBe(' M part.scad\n');
+    expect(throughView(environment, 'diff', '--stat')).toMatch(/part\.scad \| 2 \+-/u);
+  });
+
+  it('should keep an index whose extensions git can read from the view, in every index version', async () => {
+    for (const version of ['2', '3', '4']) {
+      // oxlint-disable-next-line no-await-in-loop -- one repository per version, in turn.
+      await rm(checkout, { recursive: true, force: true });
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await seedRepository(version === '4' ? 'sha256' : 'sha1');
+      git(checkout, 'update-index', `--index-version=${version}`);
+      git(checkout, 'update-index', '--untracked-cache');
+      git(checkout, '-c', 'core.untrackedCache=true', 'status', '--porcelain');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      const extensions = indexExtensions(new Uint8Array(await readFile(join(checkout, '.git', 'index'))));
+      expect(extensions, version).toStrictEqual(expect.arrayContaining(['TREE', 'UNTR']));
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      const view = await createShellGitView(checkout, privateRoot);
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      expect(await filesUnder(view!.directory), version).toContain('index');
+      expect(throughView(shellGitEnvironment(view!), 'status', '--porcelain'), version).toBe('');
+    }
+  });
+
+  it('should keep an index carrying the fsmonitor extension, which the view ignores and never writes back', async () => {
+    await seedRepository();
+    const hook = join(base, 'fsmonitor-hook');
+    await writeFile(hook, "#!/bin/sh\nprintf 'tau-token\\0/'\n", { mode: 0o755 });
+    git(checkout, '-c', `core.fsmonitor=${hook}`, '-c', 'core.fsmonitorHookVersion=2', 'update-index', '--fsmonitor');
+    git(checkout, '-c', `core.fsmonitor=${hook}`, '-c', 'core.fsmonitorHookVersion=2', 'status', '--porcelain');
+    const real = new Uint8Array(await readFile(join(checkout, '.git', 'index')));
+    expect(indexExtensions(real)).toContain('FSMN');
+    const view = await createShellGitView(checkout, privateRoot);
+    const environment = shellGitEnvironment(view!);
+
+    expect(throughView(environment, 'status', '--porcelain')).toBe('');
+    await writeFile(join(checkout, 'part.scad'), 'cube(4);\n');
+    expect(throughView(environment, 'status', '--porcelain')).toBe(' M part.scad\n');
+    /* With optional locks off, status never rewrote the copy. */
+    expect(new Uint8Array(await readFile(join(view!.directory, 'index')))).toStrictEqual(real);
+  });
+
+  it('should give no view for a split index, whose shared part lives in the real git directory, or a malformed one', async () => {
+    await seedRepository();
+    git(checkout, 'update-index', '--split-index');
+    expect(indexExtensions(new Uint8Array(await readFile(join(checkout, '.git', 'index'))))).toContain('link');
+    expect(await createShellGitView(checkout, privateRoot)).toBeUndefined();
+    git(checkout, 'update-index', '--no-split-index');
+    await writeFile(join(checkout, '.git', 'index'), 'DIRC-not-an-index');
+    expect(await createShellGitView(checkout, privateRoot)).toBeUndefined();
+    expect(indexExtensions(new TextEncoder().encode('DIRC-not-an-index'))).toBeUndefined();
+  });
+
+  it('should leave out an absent index, packed-refs, shallow or exclude, as git would', async () => {
+    await seedRepository();
+    for (const name of ['index', 'packed-refs', 'shallow', join('info', 'exclude')]) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time.
+      await rm(join(checkout, '.git', name), { force: true });
+    }
+    const view = await createShellGitView(checkout, privateRoot);
+
+    expect(await filesUnder(view!.directory)).toStrictEqual([
+      'HEAD',
+      'config',
+      'objects/info/alternates',
+      'refs/heads/loose',
+    ]);
+  });
+
+  it('should give no view when a copied file exists but cannot be copied exactly', async () => {
+    await seedRepository();
+    const store = join(checkout, '.git');
+    const packed = await readFile(join(store, 'packed-refs'), 'utf8');
+    const first = git(checkout, 'rev-parse', 'HEAD~1').trim();
+    const cases: ReadonlyArray<readonly [string, () => Promise<void>, () => Promise<void>]> = [
+      [
+        'packed-refs with a line that is not a ref',
+        async () => writeFile(join(store, 'packed-refs'), `${packed}not a ref line\n`),
+        async () => writeFile(join(store, 'packed-refs'), packed),
+      ],
+      [
+        'packed-refs that is a folder',
+        async () => {
+          await rm(join(store, 'packed-refs'));
+          await mkdir(join(store, 'packed-refs'));
+        },
+        async () => {
+          await rm(join(store, 'packed-refs'), { recursive: true });
+          await writeFile(join(store, 'packed-refs'), packed);
+        },
+      ],
+      [
+        'shallow with a line that is not an object id',
+        async () => writeFile(join(store, 'shallow'), `${first}\nnot-an-id\n`),
+        async () => rm(join(store, 'shallow')),
+      ],
+      [
+        'a loose branch that holds no ref value',
+        async () => writeFile(join(store, 'refs', 'heads', 'loose'), 'garbage\n'),
+        async () => writeFile(join(store, 'refs', 'heads', 'loose'), `${first}\n`),
+      ],
+      [
+        'an exclude file holding a NUL',
+        async () => writeFile(join(store, 'info', 'exclude'), 'a\0b\n'),
+        async () => writeFile(join(store, 'info', 'exclude'), '\n'),
+      ],
+    ];
+    for (const [label, spoil, mend] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- each case spoils and mends one file in turn.
+      await spoil();
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      expect(await createShellGitView(checkout, privateRoot), label).toBeUndefined();
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await mend();
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      expect(await createShellGitView(checkout, privateRoot), `${label}, mended`).toBeDefined();
+    }
   });
 
   it('should copy a shallow boundary', async () => {

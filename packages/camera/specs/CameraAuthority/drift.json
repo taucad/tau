@@ -3,6 +3,8 @@
     "camera.frame#0": "Changed",
     "camera.frameBounds#0": "Changed",
     "camera.frameGeometry#0": "Changed",
+    "camera.gesture.held.interactionEnded#0": "Unmodelled",
+    "camera.gesture.released.interactionStarted#0": "Unmodelled",
     "camera.input.dragging.adoptPersistedPose#0": "Observe",
     "camera.input.dragging.interactionEnded#0": "InteractionEnded",
     "camera.input.dragging.poseObserved#0": "EchoObserved",
@@ -41,7 +43,7 @@
     "setViewport"
   ],
   "specs": {
-    "CameraAuthority.tla": "5d279233a3df30dc647fdcab30715d1f878ed266a0d6fc1f386944cb31c61f43"
+    "CameraAuthority.tla": "8a1c7a0bf8e5f7f67c9d3c82e43ca6cba4675d5b87b967e5ca3f8e8a0055ebef"
   },
   "tables": {
     "CameraAuthority.export.cfg": "c6c84e03505b8bda410364bafe73cff1d8a7ea900dd93386df605a83375596da",

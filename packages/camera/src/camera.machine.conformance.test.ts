@@ -308,9 +308,10 @@ const cameraActions = (
   Object.fromEntries(
     [
       ...[...(node.transitions ?? [])].flatMap(([eventType, candidates]) =>
-        candidates.flatMap((candidate, index): Array<[string, string]> => {
+        candidates.map((candidate, index): [string, string] => {
           const label = candidate.meta?.tla;
-          return typeof label === 'string' ? [[`${node.id}.${eventType}#${String(index)}`, label]] : [];
+          // An unlabelled transition is kept so the test below can refuse it (MC-R27).
+          return [`${node.id}.${eventType}#${String(index)}`, typeof label === 'string' ? label : 'unlabelled'];
         }),
       ),
       ...Object.values(node.states ?? {}).flatMap((child) => Object.entries(cameraActions(child))),
@@ -365,11 +366,17 @@ describe('cameraMachine conforms to CameraAuthority.tla', () => {
 
   it('should name every camera action of the spec, and only actions the spec defines', () => {
     const labelled = cameraActions();
-    // The render frame and the clip policy change no spec variable: the spec does not model them (MC-R27).
+    // The render frame, the clip policy and the gesture change no spec variable: the spec does not model them (MC-R27).
     const unmodelled = Object.keys(labelled).filter((key) => labelled[key] === 'Unmodelled');
     const actions = Object.fromEntries(Object.entries(labelled).filter(([, action]) => action !== 'Unmodelled'));
 
-    expect(unmodelled).toEqual(['camera.setClipPolicy#0', 'camera.setRenderFrame#0']);
+    expect(Object.keys(labelled).filter((key) => labelled[key] === 'unlabelled')).toEqual([]);
+    expect(unmodelled).toEqual([
+      'camera.gesture.held.interactionEnded#0',
+      'camera.gesture.released.interactionStarted#0',
+      'camera.setClipPolicy#0',
+      'camera.setRenderFrame#0',
+    ]);
     expect(new Set(Object.values(actions))).toEqual(
       new Set(['PoseObserved', 'EchoObserved', 'InteractionEnded', 'SettleElapsed', 'Changed', 'Observe']),
     );

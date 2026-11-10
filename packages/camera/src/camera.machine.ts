@@ -688,8 +688,9 @@ const cameraMachineDefinition = setup({
     gesture: {
       initial: 'released',
       states: {
-        released: { on: { interactionStarted: { target: 'held' } } },
-        held: { on: { interactionEnded: { target: 'released' } } },
+        // The spec has no gesture variable: whether a gesture is held is the adapter's, not the model's.
+        released: { on: { interactionStarted: { target: 'held', meta: { tla: 'Unmodelled' } } } },
+        held: { on: { interactionEnded: { target: 'released', meta: { tla: 'Unmodelled' } } } },
       },
     },
   },
@@ -818,7 +819,7 @@ export const createCameraActor = (options: CameraActorOptions): Actor<CameraMach
       sourceRef: undefined,
       eventOrigin: event.sourceRef === undefined ? 'external' : 'actor',
       reason: cameraRefusedPayloadReason,
-      error: new RangeError(`The camera refused the payload of '${type}'.`),
+      error: new RangeError(`The camera refused '${type}'.`),
     });
   };
   const actor: Actor<CameraMachine> = createActor(machine, {

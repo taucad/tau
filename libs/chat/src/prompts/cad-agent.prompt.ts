@@ -58,6 +58,7 @@
 
 import { toolName } from '#constants/index.js';
 import type { ChatMode } from '#constants/index.js';
+import type { ToolSelection } from '#types/tool.types.js';
 import { resolveKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import { createSectionRegistry } from '#prompts/prompt-section-registry.js';
@@ -86,6 +87,83 @@ Create a \`.plan.md\` file outlining your approach:
 
 Stop after creating the plan. Do not begin implementation until the user approves.
 </plan_mode>`;
+}
+
+/**
+ * What a chat's settings say to the model when they differ from the defaults the system prompt describes.
+ *
+ * @public
+ */
+export type ChatStateNote = {
+  /** The note, a whole statement of the settings: it supersedes any earlier one. */
+  text: string;
+  /** Whether every setting is at its default, so a chat that never left them needs no note. */
+  isDefault: boolean;
+};
+
+/**
+ * State a chat's mode, testing switch and tool mask for the model, as a note in the conversation.
+ *
+ * The Tau host renders the system prompt for agent mode with testing on and declares every tool the model supports,
+ * whatever these settings are: a setting that edited the prompt or the tool list would cost the provider's prompt
+ * cache and withhold the reasoning bound to that prefix on every toggle. The host adds this note to a turn's context
+ * only when it differs from the last one the conversation carries.
+ *
+ * @param state - The chat's settings for the turn.
+ * @returns The note and whether it states the defaults.
+ * @public
+ *
+ * @example <caption>A chat switched to plan mode</caption>
+ * ```typescript
+ * import { getChatStateNote } from '@taucad/chat/prompts';
+ *
+ * const note = getChatStateNote({ mode: 'plan', testingEnabled: true, toolChoice: 'auto' });
+ * // note.isDefault === false; note.text holds the <plan_mode> rules
+ * ```
+ */
+export function getChatStateNote(state: {
+  mode: ChatMode;
+  testingEnabled: boolean;
+  toolChoice: ToolSelection;
+}): ChatStateNote {
+  const { mode, testingEnabled, toolChoice } = state;
+  const toolsOff = toolChoice === 'none';
+  const toolsNamed = Array.isArray(toolChoice) ? toolChoice : undefined;
+  const isDefault = mode === 'agent' && testingEnabled && !toolsOff && toolsNamed === undefined;
+  if (isDefault) {
+    return {
+      isDefault,
+      text: `<system-reminder>
+This chat is at its defaults, as the system prompt describes them: agent mode, testing on, every tool available. This supersedes any earlier note about the chat's settings.
+</system-reminder>`,
+    };
+  }
+  const sections = [
+    mode === 'plan' ? getPlanModeSection().trim() : '',
+    testingEnabled
+      ? ''
+      : `<testing_off>
+Testing is turned off. Leave out the workflow's Test Setup and Test steps and the TDD pattern: write no \`*.geospec.ts\` checks and do not call \`${toolName.testModel}\`, which is refused while testing is off. After \`${toolName.evaluateModel}\`, go straight to Inspect & iterate.
+</testing_off>`,
+    toolsOff
+      ? `<tools_off>
+Every tool is turned off: a tool call is refused. Answer from the conversation alone.
+</tools_off>`
+      : '',
+    toolsNamed === undefined
+      ? ''
+      : `<tools_limited>
+Only these tools are turned on: ${toolsNamed.map((name) => `\`${name}\``).join(', ') || 'none'}. A call to any other tool is refused.
+</tools_limited>`,
+  ].filter(Boolean);
+  return {
+    isDefault,
+    text: `<system-reminder>
+The person set this chat as follows: ${mode} mode, testing ${testingEnabled ? 'on' : 'off'}, ${toolsOff ? 'every tool off' : toolsNamed === undefined ? 'every tool available' : 'some tools off'}. This supersedes the system prompt where they differ, and any earlier note about the chat's settings.
+
+${sections.join('\n\n')}
+</system-reminder>`,
+  };
 }
 
 /**

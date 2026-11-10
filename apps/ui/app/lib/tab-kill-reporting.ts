@@ -6,8 +6,10 @@
  * classification and route rather than by its stack, which is the same stack every time, and it
  * replays the dead page's activity trail as the event's breadcrumbs.
  *
- * Sentry does not wait for consent (D1), so a kill is reported for every user. The PostHog
- * `memory.suspected_kill` event this replaces is gone: a kill is an error signal, not a product one.
+ * A kill report is usage and diagnostics data (crash capture blueprint, overturning D1 for this one
+ * event): the reporter sends it only when "Share usage and diagnostics" resolves to `granted`
+ * (`#components/memory-kill-reporter`), and the event carries no `user`, because the switch promises
+ * that such data is not stored against an account. Nothing about reporting is ever shown.
  */
 
 import { reportUiError } from '#lib/error-reporting.js';
@@ -45,20 +47,18 @@ const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Re
 /**
  * Report one detected kill, and say whether it was handed over: only then may it leave the marker,
  * so a page that dies again while reporting still reports this kill on the load after that (G17).
+ * The caller has already checked consent.
  *
  * @param kill - The kill the marker carried into this load.
- * @returns Whether the report reached the error tracker, and the event that took it when the SDK
- * captured it on the spot: the crash prompt attaches its feedback to that event (SB12).
+ * @returns Whether the report reached the error tracker.
  * @public
  */
-export const reportDetectedKill = async (
-  kill: DetectedMemoryKill,
-): Promise<Readonly<{ delivered: boolean; eventId: string | undefined }>> => {
+export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<boolean> => {
   const error = new TabKilledError(kill.classification);
   /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context names, filtered on by operators. */
-  let eventId: string | undefined;
   try {
-    eventId = await reportUiError(error, {
+    await reportUiError(error, {
+      anonymous: true,
       fingerprint: ['tab-killed', kill.classification, kill.route ?? 'unknown'],
       level: killLevel(kill),
       tags: defined({
@@ -93,8 +93,8 @@ export const reportDetectedKill = async (
     });
   } catch {
     // `reportUiError` does not reject; a report that somehow fails stays pending for the next load.
-    return { delivered: false, eventId: undefined };
+    return false;
   }
   /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag and context names, filtered on by operators. */
-  return { delivered: true, eventId };
+  return true;
 };

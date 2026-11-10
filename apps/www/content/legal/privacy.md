@@ -1,6 +1,6 @@
 # Privacy Policy
 
-*Effective date: November 8, 2026*
+*Effective date: November 9, 2026*
 
 This policy explains what TAUCAD LIMITED ("Tau", "we", "us") collects when you use tau.new, the Tau web and desktop apps, the Tau command line and the Tau API, why we collect it, who sees it and what you can do about it. TAUCAD LIMITED, a New Zealand company, is the controller of your personal information.
 
@@ -30,7 +30,7 @@ This policy explains what TAUCAD LIMITED ("Tau", "we", "us") collects when you u
 
 **Product analytics.** On the web, PostHog records pages, clicks, feature use and session replays only after you accept analytics; replays mask all text and inputs. The desktop app records the same events, without replay, unless you turn this off in **Settings → Data controls**. Details are in our [Storage and Cookie Policy](/legal/cookies).
 
-**Error and crash reports.** When Tau hits an error, it sends Sentry the error message and stack trace, the app version and route, your browser, operating system and device, and recent technical events; desktop crash reports may include a memory snapshot of the crashed process. Reports may carry your internal account id so we can tell how many people a fault affects, never your name or email, and cookies, tokens and authorization headers are stripped first. If the browser kills a Tau tab for running out of memory, Tau may ask what you were doing; anything you type is sent with that report, nothing is collected automatically.
+**Error and crash reports.** When Tau hits an error, it sends Sentry the error message and stack trace, the app version and route, your browser, operating system and device, and recent technical events; desktop crash reports may include a memory snapshot of the crashed process. Reports may carry your internal account id so we can tell how many people a fault affects, never your name or email, and cookies, tokens and authorization headers are stripped first. If the browser stops a Tau page (for example because it ran out of memory), the next load sends a short diagnostic report: which kernel was running, which step it had reached, memory and geometry sizes and recent technical events, never your code, parameter values, file names or geometry. That report is usage and diagnostics data: it is sent only while **Share usage and diagnostics** is on and never carries your account id. Tau does not ask you about it.
 
 **Voice.** If you dictate a prompt, the audio is sent to OpenAI for transcription and is not kept.
 

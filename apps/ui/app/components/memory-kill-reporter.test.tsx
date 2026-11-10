@@ -4,10 +4,45 @@ import { MemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { createMemoryKillSignal } from '#lib/memory-kill-signal.js';
 import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '#lib/memory-sampler.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
+import type { KillReportConsent } from '#components/memory-kill-reporter.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 
 vi.mock('#lib/tab-kill-reporting.js', () => ({
-  reportDetectedKill: vi.fn(async () => ({ delivered: true, eventId: 'event-1' })),
+  reportDetectedKill: vi.fn(async () => true),
 }));
+
+/** A consent source the test moves by hand. */
+const consentSource = (initial: ReportingConsent): KillReportConsent & { set: (next: ReportingConsent) => void } => {
+  let current = initial;
+  const listeners = new Set<() => void>();
+  return {
+    read: () => current,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set: (next) => {
+      current = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+};
+
+/** A previous page that died during a render, and this load's signal over the same storage. */
+const killedPage = (): ReturnType<typeof createMemoryKillSignal> => {
+  const storage = globalThis.sessionStorage;
+  const previous = createMemoryKillSignal({ storage, navigationType: 'navigate', deviceClass: 'standard' });
+  previous.takeDetectedKills();
+  previous.breadcrumb('render');
+  return createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'standard' });
+};
+
+const pendingInMarker = (): unknown[] =>
+  (JSON.parse(globalThis.sessionStorage.getItem('tau:alive') ?? '{}') as { pending?: unknown[] }).pending ?? [];
 
 afterEach(() => {
   resetMemorySampler();
@@ -24,8 +59,11 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
     previous.breadcrumb('export');
 
     const signal = createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'constrained' });
-    const { rerender } = render(<MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} />);
-    rerender(<MemoryKillReporter signal={signal} liveProjectCount={1} chatCount={1} />);
+    const consent = consentSource('granted');
+    const { rerender } = render(
+      <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consent} />,
+    );
+    rerender(<MemoryKillReporter signal={signal} liveProjectCount={1} chatCount={1} consent={consent} />);
 
     expect(reportDetectedKill).toHaveBeenCalledTimes(1);
     expect(reportDetectedKill).toHaveBeenCalledWith(
@@ -46,14 +84,16 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
   });
 
   it('keeps a kill whose report never landed, so the load after a kill loop still reports it', async () => {
-    vi.mocked(reportDetectedKill).mockResolvedValueOnce({ delivered: false, eventId: undefined });
+    vi.mocked(reportDetectedKill).mockResolvedValueOnce(false);
     const storage = globalThis.sessionStorage;
     const previous = createMemoryKillSignal({ storage, navigationType: 'navigate', deviceClass: 'standard' });
     previous.takeDetectedKills();
     previous.breadcrumb('render');
 
     const signal = createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'standard' });
-    render(<MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} />);
+    render(
+      <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consentSource('granted')} />,
+    );
 
     await vi.waitFor(() => {
       expect(reportDetectedKill).toHaveBeenCalledTimes(1);
@@ -72,7 +112,9 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
       navigationType: 'navigate',
       deviceClass: 'standard',
     });
-    const { unmount } = render(<MemoryKillReporter signal={signal} liveProjectCount={3} chatCount={0} />);
+    const { unmount } = render(
+      <MemoryKillReporter signal={signal} liveProjectCount={3} chatCount={0} consent={consentSource('granted')} />,
+    );
 
     takeMemorySample();
     expect(readLastMemorySample()?.liveProjects).toBe(3);
@@ -80,5 +122,61 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
     unmount();
     takeMemorySample();
     expect(readLastMemorySample()).not.toHaveProperty('liveProjects');
+  });
+
+  describe('consent (crash capture blueprint: the telemetry switch decides)', () => {
+    it('sends nothing on denied, and drops the kill from the marker at once', async () => {
+      const signal = killedPage();
+      render(
+        <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consentSource('denied')} />,
+      );
+
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+      expect(reportDetectedKill).not.toHaveBeenCalled();
+    });
+
+    it('holds the kill while consent is unknown and sends it once it resolves to granted', async () => {
+      const signal = killedPage();
+      const consent = consentSource('unknown');
+      render(<MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consent} />);
+
+      await Promise.resolve();
+      expect(reportDetectedKill).not.toHaveBeenCalled();
+      expect(pendingInMarker()).toHaveLength(1);
+
+      consent.set('granted');
+      await vi.waitFor(() => {
+        expect(reportDetectedKill).toHaveBeenCalledTimes(1);
+      });
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+    });
+
+    it('holds the kill while consent is unknown and drops it once it resolves to denied', async () => {
+      const signal = killedPage();
+      const consent = consentSource('unknown');
+      render(<MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consent} />);
+
+      consent.set('denied');
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+      expect(reportDetectedKill).not.toHaveBeenCalled();
+    });
+
+    it('offers nothing after a delivered kill: no prompt, only the report', async () => {
+      const signal = killedPage();
+      const { container } = render(
+        <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consentSource('granted')} />,
+      );
+
+      await vi.waitFor(() => {
+        expect(reportDetectedKill).toHaveBeenCalledTimes(1);
+      });
+      expect(container).toBeEmptyDOMElement();
+    });
   });
 });

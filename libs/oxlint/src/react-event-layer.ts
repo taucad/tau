@@ -3,7 +3,8 @@
  *
  * React effects should not send events, subscribe or run timers, and components
  * should not read actor snapshots imperatively; that work belongs to actors
- * (the graphics charter's lint ratchet, scoped UI-wide by its D17). Until each capability moves, a per-file ceiling holds
+ * (scoped to the whole UI so no capability regresses while it waits for its own
+ * move). Until each capability moves, a per-file ceiling holds
  * today's sites and may only go down. One thin test per Nx project calls
  * {@link checkReactEventLayerCeiling}, so Nx reruns the check whenever that
  * project's own files change.
@@ -345,7 +346,7 @@ export function reactEventLayerViolations(
     }
     const hint = listed
       ? `exceeds its ceiling of ${allowed} in ${manifestName}`
-      : `has no line in ${manifestName}, so its ceiling is 0 (a moved file carries its old line, charter D21)`;
+      : `has no line in ${manifestName}, so its ceiling is 0 (a moved file carries its old line to its new path)`;
     violations.push(
       [
         `${path}: ${sites.length} React event-layer site(s) ${hint}. Move the work into an actor.`,

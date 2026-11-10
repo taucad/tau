@@ -4,7 +4,7 @@
  * run timers, and `getSnapshot()` reads outside `select*` helpers, move to actors. Today's sites are
  * held per file in react-event-layer.ceiling.json, which only goes down. Remove
  * a site and lower its line (delete it at 0); a file moved elsewhere carries
- * its line with it (charter D21). The counter is `@taucad/oxlint/react-event-layer`.
+ * its line with it. The counter is `@taucad/oxlint/react-event-layer`.
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this

@@ -149,7 +149,7 @@ describe('reactEventLayerViolations', () => {
         '  9:5 getSnapshot()',
       ].join('\n'),
       [
-        'app/b.tsx: 1 React event-layer site(s) has no line in m.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
+        'app/b.tsx: 1 React event-layer site(s) has no line in m.json, so its ceiling is 0 (a moved file carries its old line to its new path). Move the work into an actor.',
         '  1:1 effect calls setTimeout',
       ].join('\n'),
     ]);
@@ -206,11 +206,11 @@ describe('checkReactEventLayerCeiling', () => {
       }),
     ).toEqual([
       [
-        'pkg/src/data.fixture.ts: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
+        'pkg/src/data.fixture.ts: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line to its new path). Move the work into an actor.',
         '  2:1 effect calls .send',
       ].join('\n'),
       [
-        'pkg/src/nested/counted.tsx: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line, charter D21). Move the work into an actor.',
+        'pkg/src/nested/counted.tsx: 1 React event-layer site(s) has no line in pkg/src/react-event-layer.ceiling.json, so its ceiling is 0 (a moved file carries its old line to its new path). Move the work into an actor.',
         '  2:1 effect calls .send',
       ].join('\n'),
     ]);

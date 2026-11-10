@@ -287,6 +287,10 @@ const cutsChanged = ({ context, event, children }: TransitionArgs<'cutsChanged'>
     context.hovered && event.handles.some((handle) => isSameTarget(handle, context.hovered))
       ? context.hovered
       : undefined;
+  if (context.hovered && !hovered) {
+    // The hovered handle is no longer drawn: its cut's chip is no longer lit.
+    command(children, enq, { type: 'hoverCutChanged', cutId: undefined });
+  }
   const hoveredTile = event.isPickerLive ? context.hoveredTile : undefined;
   const next = { ...context, hovered, hoveredTile };
   const dragged = context.press?.cut;

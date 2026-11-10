@@ -220,7 +220,12 @@ describe('section input gesture', () => {
 
     input.actor.send(cutsChanged([cut, other], other.id, [fan]));
     expect(input.actor.getSnapshot().value).toBe('idle');
-    expect(input.take()).toEqual(['gestureChanged']);
+    expect(input.commands[0]).toEqual({ type: 'hoverCutChanged', cutId: undefined });
+    expect(input.take()).toEqual(['hoverCutChanged', 'gestureChanged']);
+
+    // Nothing hovered, nothing to unlink.
+    input.actor.send(cutsChanged([cut, other], cut.id, [arrow]));
+    expect(input.take()).toEqual([]);
   });
 
   it('should give everything back when Section turns off', () => {

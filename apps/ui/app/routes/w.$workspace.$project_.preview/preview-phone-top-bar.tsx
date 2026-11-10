@@ -72,7 +72,6 @@ export function PreviewPhoneTopBar({
       </SidebarTrigger>
       {/* The shell's back-to-parent crumb; here it shrinks first, so the title stays. */}
       <PageParentCrumb to={editorUrl} label={parent} className='shrink' />
-      {/* oxlint-disable-next-line tau-lint/no-raw-page-heading -- The route draws its own 48px bar (`enablePageHeader: false`); `PageHeader` is the 36px page title row, so this bar title is the page's one heading. */}
       <Heading level={1} variant='label' className='min-w-fit flex-1 truncate px-1'>
         <span className='sr-only'>{parent} </span>
         Preview

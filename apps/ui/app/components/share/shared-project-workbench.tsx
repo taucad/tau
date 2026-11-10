@@ -55,7 +55,6 @@ const SharedRunConsent = ({
       <div className='mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-muted/50 dark:bg-muted/30'>
         <Code className='size-6 text-muted-foreground' aria-hidden />
       </div>
-      {/* oxlint-disable-next-line tau-lint/no-raw-page-heading -- Full-screen gate, laid out like PublicationLockScreen rather than a product page. */}
       <Heading level={1} variant='title' id='shared-run-title'>
         {title}
       </Heading>

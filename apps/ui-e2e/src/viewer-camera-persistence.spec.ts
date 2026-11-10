@@ -279,9 +279,10 @@ test.describe('Viewer camera persistence', () => {
           break;
         }
 
-        /* Steer the next pair's achieved gap toward the middle of the window, in either direction:
-         * slow round trips push it past 750 ms, and on a fast host drag 2 can end too soon after drag 1
-         * for its save to miss drag 1's write, which a longer gap fixes. */
+        /* Steer the next pair's achieved gap toward the middle of the window. Raising it fixes a fast
+         * host's short gap, or a drag 2 under 50 ms that would end the drags too close together.
+         * Lowering it removes only requested delay above the release round trip: when the release and
+         * press round trips alone reach 750 ms, every pair misses and the row fails as proving nothing. */
         const targetGapMilliseconds = Math.max(
           witnessTargetGapMilliseconds,
           secondDragEndAfterFirstMilliseconds + 50 - pair.timeline.secondDragMilliseconds,

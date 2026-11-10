@@ -21,7 +21,7 @@ import {
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveChatSettings, LiveGateway } from '#testing/live/live-gateway.harness.js';
-import { expectCompleted, runUsage, toolCalls } from '#testing/live/live-assertions.js';
+import { expectCompleted, finalText, runUsage, toolCalls } from '#testing/live/live-assertions.js';
 
 /**
  * Chat settings said in a note (provider reasoning replay contract, ruling U10; eval evidence under ruling U16).
@@ -39,11 +39,14 @@ import { expectCompleted, runUsage, toolCalls } from '#testing/live/live-asserti
  * every other tool, and every call past a budget, ends the check, so a turn costs a handful of steps.
  */
 
-/** One model per provider that has a recommended row; `TAU_LIVE_MODEL` (comma-separated) picks others. */
+/**
+ * One model per provider that has a recommended row; `TAU_LIVE_MODEL` (comma-separated) picks others. Google's is
+ * Gemini 3.8 Flash, not the recommended Gemini 4 Argon, whose stream stalled on most runs when this was measured.
+ */
 const modelIds = process.env['TAU_LIVE_MODEL']?.split(',') ?? [
   'anthropic-claude-fable-5.2',
   'openai-gpt-6.1-terra',
-  'google-gemini-4-argon',
+  'google-gemini-3.8-flash',
   'together-kimi-k3.1-pro',
   'xai-grok-4.7',
 ];
@@ -268,7 +271,16 @@ for (const modelId of modelIds) {
           const { snapshot, observed, costUsd } = await run(scenario, arm);
           const pass = snapshot.state === 'completed' && scenario.holds(observed);
           console.log(
-            `[settings-live] metric ${JSON.stringify({ modelId, scenario: scenario.name, arm, pass, ...observed, costUsd })}`,
+            `[settings-live] metric ${JSON.stringify({
+              modelId,
+              scenario: scenario.name,
+              arm,
+              pass,
+              ...observed,
+              costUsd,
+              /* What the agent said when it did not do what the setting asks: the reason is usually in it. */
+              ...(pass || snapshot.state !== 'completed' ? {} : { said: finalText(snapshot).slice(0, 400) }),
+            })}`,
           );
           expectCompleted(snapshot);
           expect(scenario.holds(observed), `${scenario.expectation}: ${JSON.stringify(observed)}`).toBe(true);

@@ -905,8 +905,12 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 }
               }
               if (cycle.kind === 'edit') {
-                if (cycle.patch === undefined || policy.isEmpty(cycle.patch) || cycle.next === undefined) {
+                if (cycle.patch === undefined || policy.isEmpty(cycle.patch)) {
                   return end('saved');
+                }
+                if (cycle.next === undefined) {
+                  /* Fields are owed but there is no record to carry them onto: they stay owed for the next edit. */
+                  return end('blocked');
                 }
                 if (cycle.attempt >= maxWriteAttempts) {
                   return end('retry', {

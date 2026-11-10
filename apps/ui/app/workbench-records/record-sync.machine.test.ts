@@ -1218,6 +1218,33 @@ describe('recordSync', () => {
       expect(await store.commands.flush()).toBe(false);
     });
 
+    it('should keep owing fields when no record is left to carry them onto', async () => {
+      const store = harness({ file: 'a=1' });
+      await store.observe();
+      const first = store.commands.edit({ a: '1', p: '1' });
+      void store.commands.read();
+      store.foreign('!bad');
+      await store.serve();
+      // The authority applied the write before the foreign bytes landed.
+      store.writes[0]?.settle({ status: 'applied', content: bytesOf('a=1;p=1') });
+      await flush();
+
+      expect(store.value()).toMatchObject({ write: 'awaitingRefresh' });
+
+      void store.commands.edit({ a: '1', p: '1', q: '2' });
+      const reset = store.commands.reset({ r: '1' }, bytesOf('!bad'));
+      await flush();
+      store.foreign(null);
+      await store.serve();
+
+      expect(await first).toBe(true);
+      expect(await reset).toBe(false);
+
+      expect(await store.commands.flush()).toBe(false);
+      expect(store.writes).toHaveLength(1);
+      expect(store.context().deferred).toBeDefined();
+    });
+
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
       const store = harness();
       await store.observe();

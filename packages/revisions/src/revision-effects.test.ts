@@ -1338,7 +1338,10 @@ const startTree = async (
     await expect.poll(() => answers().length, { timeout: 20_000 }).toBeGreaterThanOrEqual(count);
     const answer = answers()[count - 1];
     if (answer?.type !== 'revisionMinted' || answer.revisionId === undefined) {
-      throw new Error(`The ${trigger} cut answered ${String(answer?.type)}.`);
+      const reason = (answer as { reason?: unknown } | undefined)?.reason;
+      throw new Error(
+        `The ${trigger} cut answered ${String(answer?.type)}${reason === undefined ? '' : `: ${JSON.stringify(reason)}`}.`,
+      );
     }
     return answer.revisionId;
   };

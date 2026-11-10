@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evidenceSchema, parseEvidence, evidenceLimits } from '#contract.js';
+import { evidenceSchema, parseEvidence, evidenceLimits, contentLimits } from '#contract.js';
 import type { Evidence } from '#contract.js';
 import { authorizeEvidence, operationalEvidence } from '#authority.js';
 import type { EvidenceAuthority } from '#authority.js';
@@ -76,24 +76,76 @@ const authority = (evidence: Evidence): EvidenceAuthority => ({
   sourceProofs: new Map(evidence.lineage.map((source) => [source.source, { ...source, proof: source.proof! }])),
   retentionProofs: new Map([[evidence.retention.proof, { ...evidence.retention }]]),
 });
+const textPart = (text: string) => {
+  const bytes = new TextEncoder().encode(text).byteLength;
+  return { text, originalBytes: bytes, retainedBytes: bytes, redaction: 'none' } as const;
+};
 const content = (evidence: Evidence): Evidence => ({
   ...evidence,
   payload: {
     plane: 'content',
-    family: 'instruction',
-    stage: 'admitted',
-    blocks: [
-      {
-        kind: 'text',
-        role: 'system',
-        format: 'text',
-        text: 'PRIVATE_CONTENT',
-        source: digest,
-        originalBytes: 15,
-        retainedBytes: 15,
-        redaction: 'none',
-      },
-    ],
+    fact: { kind: 'instruction', mode: 'initial', message: 'original-user-message' },
+    input: { messages: [{ role: 'user', parts: [{ kind: 'text', ...textPart('PRIVATE_CONTENT') }] }], omitted: 0 },
+    output: null,
+    context: null,
+    parameters: {},
+  },
+});
+const providerFact = {
+  kind: 'provider',
+  logicalCall: 'logical-1',
+  attempt: null,
+  billing: null,
+  requestedModel: null,
+  resolvedModel: null,
+  provider: null,
+  response: null,
+  firstOutput: null,
+  purpose: 'generation',
+  callKind: 'run',
+  stop: 'toolUse',
+  usage: { input: 1, output: 2, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
+} as const;
+/** A generation's content: the new message and tool result in, readable thinking, text and a tool call out. */
+const generation = (): Evidence => ({
+  ...fixture(),
+  source: { kind: 'invocation', invocation: 'call-1', digest },
+  semantic: { kind: 'provider', id: 'call-1' },
+  payload: {
+    plane: 'content',
+    fact: providerFact,
+    input: {
+      messages: [
+        {
+          role: 'tool',
+          parts: [{ kind: 'tool-result', call: 'toolu_1', error: false, digest: null, ...textPart('{"ok":true}') }],
+        },
+        {
+          role: 'user',
+          parts: [
+            { kind: 'text', ...textPart('Make it taller') },
+            { kind: 'media', mime: 'image/png', bytes: 2048, digest },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    output: {
+      messages: [
+        {
+          role: 'assistant',
+          parts: [
+            { kind: 'thinking', ...textPart('The user wants height') },
+            { kind: 'text', ...textPart('Raising it.') },
+            { kind: 'tool-call', call: 'toolu_2', name: 'edit_file', ...textPart('{"path":"main.ts"}') },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    context: { historyMessages: 9, history: digest, system: digest, tools: digest },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- provider request parameter names
+    parameters: { max_tokens: 8192, 'thinking.type': 'enabled', 'thinking.budget_tokens': 4096 },
   },
 });
 const parse = (value: unknown) => parseEvidence(new TextEncoder().encode(JSON.stringify(value)));
@@ -359,13 +411,13 @@ it('should reject omitted protected ancestors, unscoped diagnosis and host finan
   });
 });
 
-it('should reject dishonest content lengths, duplicate lineage and unbound media', () => {
+it('should reject dishonest content lengths and duplicate lineage', () => {
   const evidence = content(fixture());
   expect(parse(evidence).ok).toBe(true);
   if (evidence.payload.plane !== 'content') {
     throw new Error('fixture');
   }
-  const text = evidence.payload.blocks[0]!;
+  const text = evidence.payload.input!.messages[0]!.parts[0]!;
   if (text.kind !== 'text') {
     throw new Error('fixture');
   }
@@ -374,18 +426,54 @@ it('should reject dishonest content lengths, duplicate lineage and unbound media
   text.originalBytes = 2;
   text.retainedBytes = 2;
   expect(parse(evidence).ok).toBe(true);
-  evidence.payload.blocks.push({
-    kind: 'media',
-    artifact: 'media',
-    digest,
-    source: 'b'.repeat(64),
-    mime: 'image/png',
-    bytes: 42,
-  });
-  expect(parse(evidence).ok).toBe(false);
-  evidence.payload.blocks.pop();
   evidence.lineage.push({ ...evidence.lineage[0]! });
   expect(parse(evidence).ok).toBe(false);
+});
+
+it("should parse a generation's input and output in one envelope, bound to the fact it describes", () => {
+  expect(parse(generation()).ok).toBe(true);
+  const wrongFamily = { ...generation(), semantic: { kind: 'tool', id: 'call-1' } };
+  expect(parse(wrongFamily).ok).toBe(false);
+});
+
+it('should refuse signatures, encrypted reasoning and raw image bytes in a content part', () => {
+  const withPart = (extra: Readonly<Record<string, unknown>>): unknown => {
+    const evidence = generation();
+    if (evidence.payload.plane !== 'content') {
+      throw new Error('fixture');
+    }
+    const [assistant] = evidence.payload.output!.messages;
+    return {
+      ...evidence,
+      payload: {
+        ...evidence.payload,
+        output: { messages: [{ ...assistant, parts: [...assistant!.parts, extra] }], omitted: 0 },
+      },
+    };
+  };
+  expect(parse(withPart({ kind: 'thinking', ...textPart('x'), signature: 'sig' })).ok).toBe(false);
+  expect(parse(withPart({ kind: 'redacted-thinking', data: 'encrypted' })).ok).toBe(false);
+  expect(parse(withPart({ kind: 'media', mime: 'image/png', bytes: 3, digest: null, data: 'AAAA' })).ok).toBe(false);
+});
+
+it('should bound messages, parts and parameters', () => {
+  const evidence = generation();
+  if (evidence.payload.plane !== 'content') {
+    throw new Error('fixture');
+  }
+  const [message] = evidence.payload.input!.messages;
+  const tooMany = {
+    ...evidence,
+    payload: {
+      ...evidence.payload,
+      input: { messages: Array.from({ length: contentLimits.messages + 1 }, () => message), omitted: 0 },
+    },
+  };
+  expect(parse(tooMany).ok).toBe(false);
+  const parameters = Object.fromEntries(
+    Array.from({ length: contentLimits.parameters + 1 }, (_, index) => [`p_${String.fromCodePoint(97 + index)}`, 1]),
+  );
+  expect(parse({ ...evidence, payload: { ...evidence.payload, parameters } }).ok).toBe(false);
 });
 
 it('should represent direct, funded and compaction calls without inventing a billing link or missing usage', () => {

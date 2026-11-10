@@ -28,12 +28,7 @@ type Overrides = Readonly<{
   semantic?: string;
 }>;
 
-const payloadOf = (
-  overrides: Overrides,
-  plane: Evidence['payload']['plane'],
-  text: string,
-  source: string,
-): Evidence['payload'] => {
+const payloadOf = (overrides: Overrides, plane: Evidence['payload']['plane'], text: string): Evidence['payload'] => {
   if (plane === 'summary') {
     return { plane, fact: overrides.fact ?? { kind: 'instruction', mode: 'initial', message: 'message-1' } };
   }
@@ -43,20 +38,19 @@ const payloadOf = (
   const bytes = new TextEncoder().encode(text).byteLength;
   return {
     plane,
-    family: 'instruction',
-    stage: 'admitted',
-    blocks: [
-      {
-        kind: 'text',
-        role: 'user',
-        format: 'text',
-        text,
-        source,
-        originalBytes: bytes,
-        retainedBytes: bytes,
-        redaction: 'none',
-      },
-    ],
+    fact: overrides.fact ?? { kind: 'instruction', mode: 'initial', message: 'message-1' },
+    input: {
+      messages: [
+        {
+          role: 'user',
+          parts: [{ kind: 'text', text, originalBytes: bytes, retainedBytes: bytes, redaction: 'none' }],
+        },
+      ],
+      omitted: 0,
+    },
+    output: null,
+    context: null,
+    parameters: {},
   };
 };
 
@@ -132,7 +126,7 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: payloadOf(overrides, plane, text, lineageDigest),
+    payload: payloadOf(overrides, plane, text),
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };

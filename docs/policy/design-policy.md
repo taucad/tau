@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-10-15'
+updated: '2026-11-10'
 ---
 
 # Design Policy
@@ -256,7 +256,7 @@ The token architecture is three-tier — primitive → semantic → component �
 ## Typography
 
 - **Geist Variable** (`--font-sans`) for UI and prose; **Geist Mono** (`--font-mono`) for code, data, paths, and kickers. Self-hosted, `font-display: swap`. No third face, ever.
-- Scale per `docs/policy/ui-policy.md` §3: body 16/14px, code 14px, minimum 12px, H1 36px at −0.02em. Every scale step carries size, line-height, and weight together — never size alone.
+- Scale, weights and heading roles per `docs/policy/ui-policy.md` §3; minimum 12px. Headings render through `Heading` and the title slots that compose it, so every scale step carries size, line-height, and weight together — never size alone.
 - Numbers that align vertically (tables, timers, metrics) use `tabular-nums`.
 - Placeholders use normal weight; selected filenames may retain their existing
   emphasis. Active sidebar navigation and project/chat rows do not gain weight
@@ -388,5 +388,5 @@ behavior still follows actual access metadata, never a path or label alone.
 ## Governance
 
 - Changes to this document are reviewed diffs with rationale, like any code change. Rules only get stricter by default; loosening one names the cost that justifies it.
-- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
+- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `tau-lint/no-raw-heading-type`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
 - Promote new durable design law through [the shared learning owner](../../.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.

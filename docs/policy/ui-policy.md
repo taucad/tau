@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-09-28'
+updated: '2026-11-10'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -76,22 +76,55 @@ Tailwind v4 `@theme inline` in the shared stylesheet maps semantic tokens to uti
 
 ## 3. Typography
 
-Geist Sans for UI text. Geist Mono for code, terminals, and numeric data.
+Geist Sans for UI text. Geist Mono for code, terminals, and numeric data. Product UI uses three weights: 400 for text; 500 for the `display` and `page` headings, labels and controls; 600 for headings of 24px and below, object names and metric values. `font-light` and `font-bold` are not part of the scale; rendered Markdown keeps its own.
 
-| Element           | Size               | Weight  | Line-height | Letter-spacing    |
-| ----------------- | ------------------ | ------- | ----------- | ----------------- |
-| Body (prose)      | 16px (`text-base`) | 400     | 1.6         | 0                 |
-| Body (dense UI)   | 14px (`text-sm`)   | 400     | 1.5         | 0                 |
-| Code              | 14px (`text-sm`)   | 400     | 1.7         | 0                 |
-| H1                | 36px (`text-4xl`)  | 500     | 1.1         | -0.02em           |
-| H2                | 28px (`text-3xl`)  | 600     | 1.2         | -0.02em           |
-| H3                | 22px (`text-2xl`)  | 600     | 1.3         | -0.01em           |
-| H4                | 18px (`text-lg`)   | 600     | 1.4         | 0                 |
-| Metadata/captions | 12px (`text-xs`)   | 400-500 | 1.4         | +0.02em           |
-| Diagram labels    | 14-16px            | 500     | 1.3         | 0                 |
-| Tabular data      | 14px               | 400     | 1.4         | 0, `tabular-nums` |
+| Element           | Size               | Weight  | Line-height                              | Letter-spacing    |
+| ----------------- | ------------------ | ------- | ---------------------------------------- | ----------------- |
+| Body (prose)      | 16px (`text-base`) | 400     | 24px in product UI; 28px in docs `prose` | 0                 |
+| Body (dense UI)   | 14px (`text-sm`)   | 400     | 20px                                     | 0                 |
+| Code              | 14px (`text-sm`)   | 400     | 1.7                                      | 0                 |
+| Metadata/captions | 12px (`text-xs`)   | 400-500 | 16px                                     | 0                 |
+| Metric value      | 24px (`text-2xl`)  | 600     | 32px                                     | 0, `tabular-nums` |
+| Diagram labels    | 14-16px            | 500     | 1.3                                      | 0                 |
+| Tabular data      | 14px               | 400     | 1.4                                      | 0, `tabular-nums` |
 
 **Minimum text size**: 12px. The only exception is icon labels in constrained spaces (e.g., file format badges at 9.5px) which must have a `title` attribute for accessibility.
+
+### Headings
+
+Render every heading through `Heading` (`@taucad/ui/components/heading`) or a title slot that composes `headingVariants`. `level` is the outline and picks the element; `variant` is the role and picks the look. Choose the level from the document outline (one `h1` per route, each nested heading one level below the heading that owns its region) and the variant from the table. Never pick a level for its size, and never put size, weight, line-height or tracking utilities on a heading or a title slot.
+
+| Role (`variant`)  | Use and owner                                                                                                 | Size / line-height                        | Weight | Letter-spacing |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------ | -------------- |
+| `display`         | The one hero line of the start surface (`routes/_index` only)                                                 | 30 / 36px, 48 / 48px from `md`            | 500    | -0.025em       |
+| `page`            | The page title (`PageHeader` only)                                                                            | 36 / 39.6px (`text-4xl`, `leading-[1.1]`) | 500    | -0.025em       |
+| `section`         | A section of a page (`SectionHeader`)                                                                         | 24 / 32px (`text-2xl`)                    | 600    | -0.025em       |
+| `title`           | A dialog, a gate screen or a standalone card (`DialogTitle`, `AlertDialogTitle`, `CardTitle variant='title'`) | 18 / 28px (`text-lg`)                     | 600    | 0              |
+| `item`            | The name of an object in a card, row or drawer (`CardTitle`, `DrawerTitle`, `SheetTitle`)                     | 16 / 24px (`text-base`)                   | 600    | 0              |
+| `label`           | A group or pane heading in dense UI (`CardTitle variant='label'`)                                             | 14 / 20px (`text-sm`)                     | 500    | 0              |
+| `overline`        | A quiet label over a short group                                                                              | 12 / 16px (`text-xs`)                     | 500    | 0              |
+| Empty-state title | `PanelEmptyState`                                                                                             | 16 / 24px (`text-base`)                   | 500    | 0              |
+
+A title slot that sets `leading-none` (`DialogTitle`, `CardTitle`) keeps the role's size and weight and renders one line at the font size. A heading never renders larger than the page's `h1` at any breakpoint. Marketing and docs display headings keep their own scale ([DESIGN](design-policy.md) Typography).
+
+**Why**: the same role rendered at three sizes and two weights across pages because each site wrote its own utilities, and levels were picked for their default size, which broke the outline.
+
+CORRECT:
+
+```tsx
+<Heading level={3} variant='label'>
+  Materials
+</Heading>
+```
+
+INCORRECT:
+
+```tsx
+<h3 className='text-sm font-semibold'>Materials</h3>
+<Heading level={2} variant='item' className='text-xl' />
+```
+
+**Enforced by**: `tau-lint/no-raw-heading-type` (error): size, weight, line-height and tracking utilities on `h1`–`h6`, `Heading` and the title slots, and the `page` and `display` variants outside their owners.
 
 ## 4. Spacing
 
@@ -153,6 +186,7 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 - Animation durations exceeding 500ms
 - Shadows for elevation in dark mode (use tonal elevation via surface token lightness)
 - `text-[11px]` or any arbitrary size below 12px without accessibility justification
+- Size, weight, line-height or tracking utilities on a heading or title slot, or a heading level picked for its size (use `Heading` and its variants; see §3)
 
 ## References
 

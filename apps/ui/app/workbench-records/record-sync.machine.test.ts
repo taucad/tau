@@ -70,8 +70,11 @@ const policy: RecordPolicy<Fields, Fields> = {
 
 type Held<Input, Outcome> = { input: Input; settle: (outcome: Outcome) => void; fail: (error: unknown) => void };
 
-const lostReply = (): RecordReadOutcome & CheckedWriteOutcome =>
-  ({ status: 'failed', error: new Error('reply lost'), lost: true }) as RecordReadOutcome & CheckedWriteOutcome;
+const lostReply = (): RecordReadOutcome & CheckedWriteOutcome => ({
+  status: 'failed',
+  error: new Error('reply lost'),
+  lost: true,
+});
 
 /**
  * One `recordSync` actor over a file the row controls.
@@ -97,12 +100,12 @@ const harness = (
     },
     ports: {
       read: async () =>
-        new Promise<RecordReadOutcome>((settle, fail) => {
-          reads.push({ input: undefined, settle, fail });
+        new Promise<RecordReadOutcome>((resolve, reject) => {
+          reads.push({ input: undefined, settle: resolve, fail: reject });
         }),
       write: async (input) =>
-        new Promise<CheckedWriteOutcome>((settle, fail) => {
-          writes.push({ input, settle, fail });
+        new Promise<CheckedWriteOutcome>((resolve, reject) => {
+          writes.push({ input, settle: resolve, fail: reject });
         }),
     },
   });
@@ -171,7 +174,7 @@ const harness = (
 describe('recordSync', () => {
   describe('composition (MC-R4)', () => {
     it('should export no machine or actor instance from the machine module', () => {
-      const instances = Object.entries(machineModule).filter(
+      const instances = Object.entries<unknown>(machineModule).filter(
         ([, value]) => typeof value === 'object' && value !== null && ('getSnapshot' in value || 'transition' in value),
       );
 
@@ -269,9 +272,9 @@ describe('recordSync', () => {
       expect(store.context().health).toMatchObject({ read: 'retrying', error: 'disk busy' });
       expect(store.reads).toHaveLength(1);
 
-      for (const delay of [250, 500, 1000]) {
-        store.clock.advance(delay - 1);
-        expect(store.reads).toHaveLength([250, 500, 1000].indexOf(delay) + 1);
+      for (const backoffDelay of [250, 500, 1000]) {
+        store.clock.advance(backoffDelay - 1);
+        expect(store.reads).toHaveLength([250, 500, 1000].indexOf(backoffDelay) + 1);
         store.clock.advance(1);
         store.reads.at(-1)?.settle({ status: 'failed', error: new Error('disk busy') });
         // oxlint-disable-next-line no-await-in-loop -- each failure settles before the next backoff.

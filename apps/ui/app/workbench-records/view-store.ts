@@ -14,9 +14,10 @@ import type { RecordHealth } from '#workbench-records/record-health.js';
 import { createRecordSync } from '#workbench-records/record-sync.js';
 import { createRecordSyncMachine } from '#workbench-records/record-sync.machine.js';
 import { viewRecordPolicy } from '#workbench-records/view-record-policy.js';
-import type { ViewRecordPatch } from '#workbench-records/view-record-policy.js';
+import type { ViewRecordPatch as PolicyPatch } from '#workbench-records/view-record-policy.js';
 
-export type { ViewRecordPatch } from '#workbench-records/view-record-policy.js';
+/** The fields of a view record one person changed. */
+export type ViewRecordPatch = PolicyPatch;
 
 type Files = Readonly<{
   exists: (path: string) => Promise<boolean>;

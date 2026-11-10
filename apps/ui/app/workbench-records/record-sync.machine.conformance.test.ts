@@ -125,12 +125,12 @@ const start = (plan: ReadonlyArray<string | undefined>) => {
     inspect: guard.inspect,
     ports: {
       read: async () =>
-        new Promise<RecordReadOutcome>((settle) => {
-          state.read = { bytes: state.file, settle };
+        new Promise<RecordReadOutcome>((resolve) => {
+          state.read = { bytes: state.file, settle: resolve };
         }),
       write: async (input) =>
-        new Promise<CheckedWriteOutcome>((settle) => {
-          state.writes.set(input.writeId, { input, settle, fs: 'pending' });
+        new Promise<CheckedWriteOutcome>((resolve) => {
+          state.writes.set(input.writeId, { input, settle: resolve, fs: 'pending' });
         }),
     },
   });
@@ -142,7 +142,7 @@ const bytesOf = (content: string): RecordBytes => encoder.encode(content);
 
 const apply = async (harness: Harness, state: SpecState): Promise<void> => {
   const { actor, commands, clock, state: held } = harness;
-  const context = actor.getSnapshot().context;
+  const { context } = actor.getSnapshot();
   held.step += 1;
   switch (state.act) {
     case 'Edit': {
@@ -358,7 +358,7 @@ describe('recordSync conforms to RecordSync.tla', () => {
 
     // No forced read is in the export's bounds: in the target it differs from a change event only in publishing
     // bytes that are already shown, which the model does not observe.
-    expect([...taken].toSorted()).toEqual([
+    expect([...taken].map(String).toSorted((left, right) => left.localeCompare(right))).toEqual([
       'CloseFence',
       'CompleteRead',
       'Edit',

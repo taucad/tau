@@ -37,6 +37,7 @@
  * conflict read or read-back it waited for. A refusal, `ensure`, `reset` and the health report take no part in
  * attribution and are not modelled.
  */
+/* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 import { createAsyncLogic, matchesState, setup, types } from 'xstate';
 import type { StateValue } from 'xstate';
 import { eventSchemas } from '#lib/xstate.lib.js';
@@ -44,8 +45,6 @@ import { maxReadAttempts, slowWriteMilliseconds } from '#workbench-records/recor
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { sameBytes } from '#workbench-records/record-sync-policy.js';
 import type { RecordBytes, RecordPolicy, RecordRefusal } from '#workbench-records/record-sync-policy.js';
-
-/* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 
 /** Checked writes one edit may issue before it reports that the record keeps changing under it. */
 export const maxWriteAttempts = 3;
@@ -246,17 +245,6 @@ const refines = <F>(tla: RecordSyncAction, to: F): F =>
   ({ meta: { tla }, to }) as unknown as F;
 
 /**
- * Labelled transitions for one event: xstate takes the first that returns a transition. Setup types admit no
- * transition arrays, so the steps are typed here and the array is cast to whatever the config expects.
- *
- * @param transitions - The transitions in the order tried; each returns `undefined` where a later one applies.
- * @returns The transitions.
- */
-const either = <Step>(...transitions: Step[]): never =>
-  // oxlint-disable-next-line typescript/consistent-type-assertions -- see above.
-  transitions as never;
-
-/**
  * Events a state takes on purpose without a transition (MC-R17). The ports answer only the state that asked, and a
  * closed store's regions are final: the command surface answers for them without sending.
  */
@@ -310,6 +298,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       throw new Error('recordSync: the checkedWrite port was not provided; createRecordSync provides it.');
     },
   });
+
+  /**
+   * Labelled transitions for a port's answer: xstate takes the first that returns a transition. Setup types admit
+   * no transition arrays, so the steps are typed here and the array stands in for whatever the config expects.
+   */
+  type Either = <Output>(...transitions: Array<DoneStep<Output>>) => never;
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- see above.
+  const either = ((...transitions: unknown[]) => transitions) as unknown as Either;
 
   /** A context patch with the health it implies, announced when it changed. */
   const reported = (context: Context, patch: Patch, enq: Emit): Patch => {
@@ -412,11 +408,10 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   /** The cycle ends: its requesters are answered, what it still owes is deferred, and a waiting flush learns the result. */
   const settle = (
     context: Context,
-    cycle: Cycle<T, P>,
-    outcome: 'saved' | 'retry' | 'blocked',
     enq: Emit,
-    failure?: { error: unknown },
+    ending: { cycle: Cycle<T, P>; outcome: 'saved' | 'retry' | 'blocked'; failure?: { error: unknown } },
   ): { target: 'idle' | 'retrying' | 'fenced'; context: Patch } => {
+    const { cycle, outcome, failure } = ending;
     const saved = outcome === 'saved';
     answer(enq, cycle.requests, saved);
     if (failure) {
@@ -494,10 +489,10 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   /** A write's call failed. A lost reply keeps the write's entry (target rule 1) and owes a read-back. */
   const writeFailed = (
     context: Context,
-    error: unknown,
-    lost: boolean,
     enq: Emit,
+    failure: { error: unknown; lost: boolean },
   ): { target: 'idle' | 'retrying' | 'fenced'; context: Patch } => {
+    const { error, lost } = failure;
     const { cycle, inFlight } = context;
     if (!cycle || !inFlight) {
       return { target: 'idle', context: { cycle: undefined, inFlight: undefined } };
@@ -512,7 +507,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     const ownWrites = oldest ? kept.filter((write) => write !== oldest) : kept;
     const readBack = lost ? 'owed' : context.readBack;
     const landed: Context = { ...context, ownWrites, readBack, inFlight: undefined, slow: false };
-    const settled = settle(landed, cycle, context.closeFenced ? 'blocked' : 'retry', enq, { error });
+    const settled = settle(landed, enq, {
+      cycle,
+      outcome: context.closeFenced ? 'blocked' : 'retry',
+      failure: { error },
+    });
     return {
       target: settled.target,
       context: { ...settled.context, ownWrites, readBack, inFlight: undefined, slow: false },
@@ -617,7 +616,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           reading: {
             invoke: {
               src: 'readRecord',
-              onDone: either<DoneStep<RecordReadOutcome>>(
+              onDone: either<RecordReadOutcome>(
                 refines('Unmodelled', ({ context, event }, enq) =>
                   event.output.status === 'failed' ? readFailed(context, event.output.error, enq) : undefined,
                 ),
@@ -834,7 +833,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 outcome: 'saved' | 'retry' | 'blocked',
                 failure?: { error: unknown },
               ): { target: 'idle' | 'retrying' | 'fenced'; context: Patch } => {
-                const settled = settle(current, cycle, outcome, enq, failure);
+                const settled = settle(current, enq, { cycle, outcome, failure });
                 return { target: settled.target, context: { ...formed.patch, ...settled.context } };
               };
               if (context.closeFenced) {
@@ -930,7 +929,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
             on: {
               'source.completed': { target: 'starting' },
               'source.failed': refines('Unmodelled', ({ context }, enq) =>
-                context.cycle ? settle(context, context.cycle, 'retry', enq) : { target: 'idle' },
+                context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'retry' }) : { target: 'idle' },
               ),
               'source.abandoned': refines('Unmodelled', (_, enq) => {
                 enq.raise({ type: 'write.readRequested' });
@@ -948,7 +947,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 kind: context.cycle?.kind ?? 'edit',
                 requestId: context.inFlight?.requestId ?? '',
               }),
-              onDone: either<DoneStep<CheckedWriteOutcome>>(
+              onDone: either<CheckedWriteOutcome>(
                 refines('ReplyConflict', ({ context, event }, enq) => {
                   const { cycle, inFlight } = context;
                   if (
@@ -962,7 +961,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   const ownWrites = context.ownWrites.filter((write) => write.writeId !== inFlight.writeId);
                   const landed: Context = { ...context, ownWrites, inFlight: undefined, slow: false };
                   if (context.closeFenced || event.output.status === 'ineligible') {
-                    const settled = settle(landed, cycle, 'blocked', enq);
+                    const settled = settle(landed, enq, { cycle, outcome: 'blocked' });
                     return {
                       target: settled.target,
                       context: { ...settled.context, ownWrites, inFlight: undefined, slow: false },
@@ -976,7 +975,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 }),
                 refines('LoseReply', ({ context, event }, enq) =>
                   event.output.status === 'failed'
-                    ? writeFailed(context, event.output.error, event.output.lost, enq)
+                    ? writeFailed(context, enq, { error: event.output.error, lost: event.output.lost })
                     : undefined,
                 ),
                 refines('ReplyApplied', ({ context, event }, enq) => {
@@ -994,7 +993,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   const acknowledged = ownWrites.find((write) => write.writeId === inFlight.writeId);
                   const landed: Context = { ...context, ownWrites, inFlight: undefined, slow: false };
                   if (context.closeFenced) {
-                    const settled = settle(landed, cycle, 'saved', enq);
+                    const settled = settle(landed, enq, { cycle, outcome: 'saved' });
                     return {
                       target: settled.target,
                       context: { ...settled.context, ownWrites, inFlight: undefined, slow: false },
@@ -1016,7 +1015,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   }
                   enq.raise({ type: 'write.published' });
                   const shown: Context = { ...landed, published, origin: 'own', patch: acknowledged?.patch };
-                  const settled = settle(shown, cycle, 'saved', enq);
+                  const settled = settle(shown, enq, { cycle, outcome: 'saved' });
                   return {
                     target: settled.target,
                     context: {
@@ -1033,7 +1032,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               ),
               /* A defect in the port itself; the store treats it as a write that reached no authority. */
               onError: refines('Unmodelled', ({ context, event }: FailedStep, enq: Enqueue) =>
-                writeFailed(context, event.error, false, enq),
+                writeFailed(context, enq, { error: event.error, lost: false }),
               ),
             },
             after: {
@@ -1046,14 +1045,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           awaitingRefresh: {
             on: {
               'source.completed': refines('CompleteRead', ({ context }, enq) =>
-                context.cycle ? settle(context, context.cycle, 'saved', enq) : { target: 'idle' },
+                context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'saved' }) : { target: 'idle' },
               ),
               /* The write is on the file whether or not it could be read back. */
               'source.failed': refines('Unmodelled', ({ context }, enq) =>
-                context.cycle ? settle(context, context.cycle, 'saved', enq) : { target: 'idle' },
+                context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'saved' }) : { target: 'idle' },
               ),
               'source.abandoned': refines('Unmodelled', ({ context }, enq) =>
-                context.cycle ? settle(context, context.cycle, 'saved', enq) : { target: 'idle' },
+                context.cycle ? settle(context, enq, { cycle: context.cycle, outcome: 'saved' }) : { target: 'idle' },
               ),
             },
           },

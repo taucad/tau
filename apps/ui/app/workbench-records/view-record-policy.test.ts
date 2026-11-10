@@ -23,9 +23,9 @@ type KernelView = NonNullable<WorkbenchView['kernelViews']>[number];
 const optional = <T>(arbitrary: Arbitrary<T>): Arbitrary<T | undefined> => option(arbitrary, { nil: undefined });
 
 const cameraArbitrary: Arbitrary<WorkbenchView['camera']> = oneof(
-  record({ kind: constant('preset' as const), preset: constantFrom('isometric' as const, 'front' as const) }),
+  record({ kind: constant('preset'), preset: constantFrom('isometric', 'front') }),
   record({
-    kind: constant('look' as const),
+    kind: constant('look'),
     direction: tuple(integer({ min: 1, max: 2 }), constant(0), constant(1)),
   }),
 );
@@ -39,12 +39,12 @@ const kernelViewArbitrary = (id: string): Arbitrary<KernelView> =>
   });
 
 const viewArbitrary: Arbitrary<WorkbenchView> = record({
-  version: constant(1 as const),
+  version: constant(1),
   entryPath: constantFrom(null, 'main.ts', 'part.ts'),
   name: optional(constantFrom('Front', 'Joint')),
   camera: cameraArbitrary,
   fieldOfView: constantFrom(0, 45, 60),
-  upDirection: constantFrom('y' as const, 'z' as const),
+  upDirection: constantFrom('y', 'z'),
   display: record({
     surfaces: boolean(),
     lines: boolean(),
@@ -54,7 +54,7 @@ const viewArbitrary: Arbitrary<WorkbenchView> = record({
     matcap: boolean(),
     postProcessing: boolean(),
   }),
-  grid: record({ unit: constantFrom('mm' as const, 'in' as const) }),
+  grid: record({ unit: constantFrom('mm', 'in') }),
   section: constant({ active: false, cuts: [] }),
   measurements: array(
     record({
@@ -82,7 +82,8 @@ const sorted = (value: unknown): unknown => {
     return Object.fromEntries(
       Object.entries(value)
         .toSorted(([left], [right]) => left.localeCompare(right))
-        .map(([key, item]) => [key, item === undefined ? '<undefined>' : sorted(item)]),
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, sorted(item)]),
     );
   }
   return value;
@@ -94,23 +95,19 @@ const sorted = (value: unknown): unknown => {
  */
 const viewValue = (view: WorkbenchView): string =>
   JSON.stringify(
-    sorted(
-      JSON.parse(
-        JSON.stringify({
-          ...view,
-          kernelViews:
-            view.kernelViews === undefined || view.kernelViews.length === 0
-              ? undefined
-              : view.kernelViews
-                  .map((kernelView) => ({
-                    ...kernelView,
-                    options:
-                      kernelView.options && Object.keys(kernelView.options).length > 0 ? kernelView.options : undefined,
-                  }))
-                  .toSorted((left, right) => left.id.localeCompare(right.id)),
-        }),
-      ),
-    ),
+    sorted({
+      ...view,
+      kernelViews:
+        view.kernelViews === undefined || view.kernelViews.length === 0
+          ? undefined
+          : view.kernelViews
+              .map((kernelView) => ({
+                ...kernelView,
+                options:
+                  kernelView.options && Object.keys(kernelView.options).length > 0 ? kernelView.options : undefined,
+              }))
+              .toSorted((left, right) => left.id.localeCompare(right.id)),
+    }),
   );
 
 const { diff, combine, merge, isEmpty } = viewRecordPolicy;
@@ -144,12 +141,9 @@ describe('viewRecordPolicy patch algebra', () => {
   it('should combine the patches of one edit history associatively: either grouping merges to the same record', () => {
     assert(
       property(
-        optional(viewArbitrary),
-        optional(viewArbitrary),
-        viewArbitrary,
-        viewArbitrary,
-        viewArbitrary,
-        (current, base, first, second, third) => {
+        tuple(optional(viewArbitrary), optional(viewArbitrary)),
+        tuple(viewArbitrary, viewArbitrary, viewArbitrary),
+        ([current, base], [first, second, third]) => {
           const patches = [diff(base, first), diff(first, second), diff(second, third)] as const;
           const left = combine(combine(patches[0], patches[1]), patches[2]);
           const right = combine(patches[0], combine(patches[1], patches[2]));

@@ -5,6 +5,7 @@
  * The machine holds every fact about the record. What lives here is only what a machine may not hold: the port
  * functions, and the resolvers of the commands that are waiting for their answer.
  */
+/* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, Subscription } from 'xstate';
 import type {
@@ -16,8 +17,6 @@ import type {
   RecordSyncMachine,
 } from '#workbench-records/record-sync.machine.js';
 import type { RecordBytes } from '#workbench-records/record-sync-policy.js';
-
-/* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 
 /** The two effects of a record file. Both answer with a typed outcome; a rejection is a defect in the port. */
 export type RecordSyncPorts = Readonly<{
@@ -99,7 +98,7 @@ export function createRecordSync<T, P>(
     ...(inspect === undefined ? {} : { inspect }),
     ...(onRejectedEvent === undefined ? {} : { onRejectedEvent }),
     input: { editDebounce },
-  }) as Actor<RecordSyncMachine<T, P>>;
+  });
   const waiting = new Map<string, (ok: boolean) => void>();
   let requests = 0;
   const nextRequestId = (): string => `r${++requests}`;

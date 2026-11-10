@@ -1030,21 +1030,13 @@ jobs:
       # file three steps away. An inherited value wins over anything a Vitest config
       # loads, which is what makes naming it work at all.
       #
-      # The `TAU_S3_CONFORMANCE_*` family is the env gate on the R2 half of the
-      # repository-store conformance suite (charter D32). These secrets deliberately
-      # do not exist in this repository: the scratch-bucket credentials are read from
-      # Terraform outputs at run time and are never placed in CI. Absent, they expand
-      # to empty strings, `conformanceAccountFromEnvironment` answers `undefined` and
-      # that half skips; the MinIO half above it still runs on every push. The suite
-      # itself refuses any bucket outside the scratch allowlist before a credential is
-      # used, so this can never be pointed at a staging content bucket.
+      # The R2 half of the repository-store conformance suite (charter D32) is an
+      # operator run: its `TAU_S3_CONFORMANCE_*` scratch-bucket credentials are read
+      # from Terraform outputs at run time and never reach CI, so no step here names
+      # them and that half skips; the MinIO half runs on every push.
       - name: Run API suites (real PostgreSQL + MinIO)
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
-          TAU_S3_CONFORMANCE_ENDPOINT: ${{ secrets.TAU_S3_CONFORMANCE_ENDPOINT }}
-          TAU_S3_CONFORMANCE_BUCKET: ${{ secrets.TAU_S3_CONFORMANCE_BUCKET }}
-          TAU_S3_CONFORMANCE_ACCESS_KEY_ID: ${{ secrets.TAU_S3_CONFORMANCE_ACCESS_KEY_ID }}
-          TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: ${{ secrets.TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY }}
         run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
 
       - name: Qualify API development and production servers

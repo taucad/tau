@@ -278,7 +278,7 @@ const globCharacters = /[*?[\]]/u;
  *
  * Only reads change: writes keep the literal deny, so the carved path stays unwritable.
  *
- * @public
+ * @internal
  * @param denied - The launch's denied paths, every spelling.
  * @param allowed - The paths the launch may read, every spelling.
  * @returns The denied paths, spelled for Seatbelt's read rules.

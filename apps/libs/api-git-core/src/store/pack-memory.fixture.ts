@@ -25,10 +25,15 @@ export const largePackMebibytes = process.env['TAU_SCALE_TESTS'] === '1' ? 600 :
  *
  * Buffers live outside the V8 heap, so `--max-old-space-size` alone never sees
  * a buffered pack; the sum is what the VM holds. A streamed transfer retains a
- * hashing buffer and the read-ahead of one HTTP body, which plateaus near
- * 40 MiB on loopback MinIO however large the object (33 MiB at 128 MiB, 41 MiB
- * at 600 MiB). A buffered commit retained the whole pack, and a buffered
- * restore about three times it.
+ * hashing buffer and the read-ahead of one HTTP body, however large the
+ * object. A buffered commit retained the whole pack, and a buffered restore
+ * about three times it.
+ *
+ * The figures once recorded here (33 MiB at 128 MiB, 41 MiB at 600 MiB) were
+ * mostly freed chunks still awaiting V8's concurrent `ArrayBuffer` sweeper,
+ * which the sample counted, so they rose with throughput and CPU contention
+ * and passed the bound on a busy runner (Brain research/ci-flake-classes.md,
+ * class 2). {@link measureGrowth} now counts only what is retained.
  */
 export const streamedGrowthBoundMebibytes = 64;
 
@@ -38,9 +43,17 @@ export const mebibytes = (bytes: number): string => (bytes / 1024 / 1024).toFixe
  * The collector, so a sample measures what is retained rather than garbage
  * not yet collected. `--expose-gc` can be set at run time; the function then
  * exists in any new context.
+ *
+ * A full collection frees an unreachable `ArrayBuffer`'s backing store on a
+ * background sweeper by default, so `process.memoryUsage().arrayBuffers` read
+ * right after `gc()` still counts every chunk the sweeper has not reached: a
+ * stream of 64 KiB chunks with four alive reads about 40 MiB that way and
+ * 0.4 MiB once the sweep is finished. With concurrent sweeping off, the
+ * collection sweeps before it returns, and the sample is exactly what is held.
  */
 const collectGarbage = ((): (() => void) => {
   setFlagsFromString('--expose-gc');
+  setFlagsFromString('--no-concurrent-array-buffer-sweeping');
   return runInNewContext('gc') as () => void;
 })();
 

@@ -1,5 +1,5 @@
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, lazy, Suspense, use, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
@@ -17,7 +17,10 @@ import {
 } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteSlugs } from '#routes/w.$workspace.$project/project-route-state.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
-import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
+import type {
+  LiveProjectSessions as LiveProjectSessionsComponent,
+  ProjectSessionFlushRegistration,
+} from '#routes/w.$workspace.$project/project-live-sessions.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { useMemoryRelease } from '#hooks/use-memory-release.js';
@@ -28,16 +31,20 @@ import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
+import { loadProjectWorkspace, warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project
  * needs — three.js and the chat surface — is behind this boundary, which mounts only once a
  * project is live. Project links warm it on navigation intent.
  */
-const LiveProjectSessions = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/project-live-sessions.js');
-  return { default: module.LiveProjectSessions };
-});
+function LiveProjectSessions(props: React.ComponentProps<typeof LiveProjectSessionsComponent>): React.JSX.Element {
+  /* `use`, not `lazy`: a chunk that already arrived (warmed by the route below or by a project link)
+   * renders in this pass. `lazy` suspends on its first render however settled its import is, and the
+   * fallback it commits holds the reveal for React's 300 ms fallback throttle. */
+  const { LiveProjectSessions: Sessions } = use(loadProjectWorkspace());
+  return <Sessions {...props} />;
+}
 
 const ProjectCommandPaletteItems = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/project-command-items.js');
@@ -124,6 +131,13 @@ export function ProjectRouteGate({
     latestRequestedProjectIdRef.current = requestedProjectId;
     latestRequestedChatIdRef.current = requestedChatId;
   }, [requestedChatId, requestedProjectId]);
+  /* A direct open has no link intent to warm the workspace, so start its import beside the
+   * route-access check instead of after it. */
+  useEffect(() => {
+    if (requestedProjectId !== undefined || slugs !== undefined) {
+      warmProjectWorkspace();
+    }
+  }, [requestedProjectId, slugs]);
   const registerSessionFlush = useCallback((registration: ProjectSessionFlushRegistration | undefined): void => {
     activeSessionFlushRef.current = registration;
   }, []);

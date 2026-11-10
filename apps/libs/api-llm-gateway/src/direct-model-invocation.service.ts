@@ -128,6 +128,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
       const classification = classifyUpstreamRefusal({
         status: response.status,
         accountOwner: 'operator',
+        body,
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // The operator owns this key, so the provider's own reason stays in the message.

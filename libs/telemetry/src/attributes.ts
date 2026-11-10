@@ -27,6 +27,8 @@ export const AttributeKey = {
   AGENT_COMPACTION_LANE: 'compaction.lane',
   AGENT_COMPACTION_TIER: 'compaction.tier',
   AGENT_COMPACTION_OUTCOME: 'compaction.outcome',
+  /* Why a request did not reproduce the previous request's prompt prefix (provider reasoning replay contract). */
+  AGENT_PREFIX_BREAK_CAUSE: 'prefix_break.cause',
   /* Hosted Remote Storage: where git ran (`in_process` | `forwarded`) and how tau-storage was chosen (`off` | `rendezvous`). */
   GIT_EXECUTION: 'tau.git.execution',
   GIT_AFFINITY: 'tau.git.affinity',

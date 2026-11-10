@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { llmGatewayProviders } from '#llm-gateway-vocabulary.js';
 
 /**
  * Canonical entry name constants used in `performance.measure()` and ingest payloads.
@@ -169,6 +170,23 @@ export const agentCompactionTiers = ['tool_result_clearing', 'summarization'] as
 /** @public */
 export const agentCompactionOutcomes = ['cleared', 'generated', 'placeholder'] as const;
 
+/**
+ * Why a request did not reproduce the previous request's prompt prefix, so the provider's cache restarted there
+ * (provider reasoning replay contract, P1). `unsanctioned` is a change no cause explains: a defect.
+ * @public
+ */
+export const agentPrefixBreakCauses = [
+  'compaction',
+  'clearing',
+  'attachment-eviction',
+  'model',
+  'definitions',
+  'instructions',
+  'tools',
+  'settings',
+  'unsanctioned',
+] as const;
+
 /** A GeoSpec `test_model` run status. @public */
 export const geospecRunStatuses = ['passed', 'failed', 'inconclusive', 'unsupported', 'not-run'] as const;
 
@@ -310,6 +328,18 @@ const agentTurnEntrySchema = z.object({
         }),
       )
       .max(agentCompactionLanes.length * agentCompactionTiers.length * agentCompactionOutcomes.length)
+      .optional(),
+    /** Prompt-prefix breaks the turn's replies recorded, and the native reasoning blocks they left out. */
+    prefixBreaks: z
+      .array(
+        z.object({
+          cause: z.enum(agentPrefixBreakCauses),
+          provider: z.enum(llmGatewayProviders),
+          count: clampedInt(1000),
+          reasoningOmitted: clampedInt(100_000),
+        }),
+      )
+      .max(agentPrefixBreakCauses.length * llmGatewayProviders.length)
       .optional(),
     context: agentTurnContextSchema.optional(),
   }),

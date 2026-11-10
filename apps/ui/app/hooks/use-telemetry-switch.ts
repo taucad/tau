@@ -32,7 +32,8 @@ export const telemetryCopy = {
     'Never includes prompts, code, parameter values, file names or geometry.',
     'Signed in, data is rate-limited per account but not stored against it. Signed out, nothing identifies you.',
     'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use "tau telemetry off".',
-    'Error reports and product analytics are separate. On the web, analytics follow your cookie preferences; in the desktop app, the Analytics switch in Data controls.',
+    'Includes a short diagnostic report when the browser stops a page, such as which kernel was running and how much memory it used.',
+    'Other error reports and product analytics are separate. On the web, analytics follow your cookie preferences; in the desktop app, the Analytics switch in Data controls.',
   ],
   untilActivation: {
     /** True to the switch's current reach: three legacy producers still ignore it. */

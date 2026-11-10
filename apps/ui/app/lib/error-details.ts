@@ -25,6 +25,11 @@ export type ErrorDetails = Readonly<{
    * breadcrumbs of the page that died, with their original timestamps (SB3).
    */
   breadcrumbs?: readonly Breadcrumb[];
+  /**
+   * Send the event without `user`: a detected tab kill is usage and diagnostics data, and the telemetry switch
+   * promises that such data is not stored against an account (crash capture blueprint, overturning D1 for it alone).
+   */
+  anonymous?: boolean;
 }>;
 
 const recorded = new WeakMap<WeakKey, ErrorDetails>();
@@ -51,6 +56,7 @@ export const recordErrorDetails = <Failure>(error: Failure, details: ErrorDetail
     ...((details.breadcrumbs ?? previous?.breadcrumbs) === undefined
       ? {}
       : { breadcrumbs: details.breadcrumbs ?? previous?.breadcrumbs }),
+    ...(details.anonymous === true || previous?.anonymous === true ? { anonymous: true } : {}),
   });
   return error;
 };
@@ -59,7 +65,7 @@ export const recordErrorDetails = <Failure>(error: Failure, details: ErrorDetail
  * The details of a reported value: what reporters recorded on it, and the `api_request_id` along its `cause` chain.
  *
  * @param error - The reported value.
- * @returns Its tags, contexts, fingerprint, level and trail (each possibly absent or empty).
+ * @returns Its tags, contexts, fingerprint, level, trail and anonymity (each possibly absent or empty).
  */
 export const readErrorDetails = (error: unknown): ErrorDetails => {
   const own = isWeakKey(error) ? recorded.get(error) : undefined;
@@ -69,7 +75,19 @@ export const readErrorDetails = (error: unknown): ErrorDetails => {
     ...(own?.fingerprint === undefined ? {} : { fingerprint: own.fingerprint }),
     ...(own?.level === undefined ? {} : { level: own.level }),
     ...(own?.breadcrumbs === undefined ? {} : { breadcrumbs: own.breadcrumbs }),
+    ...(own?.anonymous === true ? { anonymous: true } : {}),
   };
+};
+
+/**
+ * The event without `user`.
+ *
+ * @param event - The event.
+ * @returns A copy with no `user` field.
+ */
+const withoutUser = <Reported extends Event>(event: Reported): Reported => {
+  const { user: _user, ...rest } = event;
+  return rest as Reported;
 };
 
 /**
@@ -83,7 +101,10 @@ export const readErrorDetails = (error: unknown): ErrorDetails => {
  * @returns The event with the details applied (the same event when there are none).
  */
 export const applyErrorDetails = <Reported extends Event>(event: Reported, error: unknown): Reported => {
-  const { tags = {}, contexts = {}, fingerprint, level, breadcrumbs } = readErrorDetails(error);
+  const { tags = {}, contexts = {}, fingerprint, level, breadcrumbs, anonymous } = readErrorDetails(error);
+  if (anonymous === true && event.user !== undefined) {
+    return applyErrorDetails(withoutUser(event), error);
+  }
   if (
     Object.keys(tags).length === 0 &&
     Object.keys(contexts).length === 0 &&
@@ -107,3 +128,15 @@ export const applyErrorDetails = <Reported extends Event>(event: Reported, error
     ...(breadcrumbs === undefined ? {} : { breadcrumbs: [...breadcrumbs] }),
   };
 };
+
+/**
+ * Remove `user` from an event whose error a reporter recorded as anonymous. The direct path applies the Tau context
+ * (which sets `user.id`) after the reporter's details, so it calls this last; the SDK path needs nothing more,
+ * because its event processor runs before `beforeSend`.
+ *
+ * @param event - The event about to be sent.
+ * @param error - The value it reports.
+ * @returns The event without `user` when the error is anonymous, else the same event.
+ */
+export const withoutUserWhenAnonymous = <Reported extends Event>(event: Reported, error: unknown): Reported =>
+  readErrorDetails(error).anonymous === true && event.user !== undefined ? withoutUser(event) : event;

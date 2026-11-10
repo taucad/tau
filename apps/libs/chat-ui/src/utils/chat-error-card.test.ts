@@ -42,6 +42,7 @@ describe('cardOf', () => {
    * resumable, and neither falls back to its status's card (a 503's outage card, a 403's generic block). */
   it.each([
     ['MODEL_ROUTE_PAUSED', errorCategory.overloaded, 'switchModel'],
+    ['REASONING_REPLAY_REJECTED', errorCategory.server, 'switchModel'],
     ['BILLING_ACCOUNT_RESTRICTED', errorCategory.generic, 'accountRestricted'],
   ] as const)('should route %s to its own card that never offers Resume', (code, statusCategory, category) => {
     expect(cardOf(code, statusCategory)).toEqual({ category, retry: 'never' });

@@ -702,10 +702,10 @@ for (const { from, to } of parallelRows) {
  *
  * Fable 5.2 answers 400 when a replayed thinking block follows content that changed since the block was minted, on
  * every account. Opus 5.5, Sonnet 5.5 and Haiku 5.5 do so because every live leg asks them to: the harness sends
- * the binding control as `refuse` where production sends `drop` (WP5). Each row edits the prefix the way Tau really does — clearing tool results, summarising, changing
- * mode, changing the tool list — and continues the chat. A row proves nothing unless reasoning existed to be refused,
- * so each asserts signed reasoning in the durable log behind the edit, and that the first reply after the edit
- * records the typed break with reasoning left out.
+ * the binding control as `refuse` where production sends `drop` (WP5). Each row edits the prefix the way Tau really
+ * does (clearing tool results, summarising, changing mode, changing the tool list) and continues the chat. A row
+ * proves nothing unless reasoning existed to be refused, so each asserts signed reasoning in the durable log behind
+ * the edit, and that the first reply after the edit records the typed break with reasoning left out.
  */
 
 const replayModelIds = [
@@ -1107,7 +1107,12 @@ for (const replayModelId of replayModelIds) {
       });
     },
   );
+}
 
+/* The rule is one comparison on every wire, so the two edits that need no bulk history also run on a model of each
+ * other wire that returns signed reasoning: OpenAI's Responses items and Vertex's thought signatures. Those providers
+ * refuse nothing; the rows hold them to the same typed break, with reasoning left out and then replayed. */
+for (const replayModelId of [...replayModelIds, 'openai-gpt-6.1-terra', 'google-gemini-3.8-flash']) {
   describe.skipIf(!hasLiveCredential(replayModelId))(
     replayTitle(replayModelId, 'mode change'),
     { repeats: liveRepeats },

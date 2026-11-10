@@ -731,15 +731,14 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
-    /* A score write names its score and outcome only, never the trace or the config id (LW7). */
+    /* A score write names its score, whether its config was set, and its outcome; never the trace or the config id (LW7). */
+    const score = { 'tau.agent_evidence.score': 'user-rating', 'tau.agent_evidence.score_configured': 'false' };
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'accepted' }).success).toBe(true);
+    /* A score without a config id is still written, so nothing is held. */
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'held' }).success).toBe(false);
     expect(
       TauMetrics.agentEvidenceScores.attributes.safeParse({
-        'tau.agent_evidence.score': 'user-rating',
-        outcome: 'held',
-      }).success,
-    ).toBe(true);
-    expect(
-      TauMetrics.agentEvidenceScores.attributes.safeParse({
+        ...score,
         'tau.agent_evidence.score': 'reply-quality',
         outcome: 'accepted',
       }).success,

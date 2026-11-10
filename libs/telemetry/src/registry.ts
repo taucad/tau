@@ -246,10 +246,10 @@ const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object'] as
 const agentEvidenceScoreNames = ['user-rating', 'run-termination', 'task-success'] as const;
 
 /**
- * `outcome` of one Langfuse score write, settled by its answer alone (nothing reads a score back): `held` waits for its
- * score config id, `not_sent` never reached Langfuse and is retried with its receipt.
+ * `outcome` of one Langfuse score write, settled by its answer alone (nothing reads a score back): `not_sent` never
+ * reached Langfuse and is retried with its receipt.
  */
-const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent', 'held'] as const;
+const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent'] as const;
 
 /** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
 const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
@@ -2050,9 +2050,11 @@ export const TauMetrics = {
     name: 'tau.agent_evidence.scores',
     unit: '{score}',
     description:
-      'Langfuse score writes for agent ratings and outcomes, by score and outcome; `held` waits for its score config id',
+      'Langfuse score writes for agent ratings and outcomes, by score, whether it named a score config, and outcome',
     attributes: z.object({
       'tau.agent_evidence.score': z.enum(agentEvidenceScoreNames),
+      /* `false`: the deployment names no config id for the score, so it was written without one. */
+      'tau.agent_evidence.score_configured': z.enum(['true', 'false']),
       outcome: z.enum(agentEvidenceScoreOutcomes),
     }),
   }),

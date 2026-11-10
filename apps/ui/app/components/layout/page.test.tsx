@@ -308,23 +308,31 @@ describe('Page application shell', () => {
 });
 
 describe('Page header contract', () => {
-  it('should leave an empty wide header out of the scrollport while keeping navigation', () => {
+  it("should serve an untitled route's phone bar, hidden from md up, with navigation kept", () => {
     const { container } = render(<Page />);
-    expect(container.querySelector('header')).not.toBeInTheDocument();
-    expect(container.querySelector('main')).toHaveClass('[--header-height:0px]');
+    // The bar is placed by CSS, so the server paints it on a phone and a wide page leaves it out.
+    expect(container.querySelector('header')).toHaveClass('md:hidden');
+    expect(container.querySelector('main')).toHaveClass(
+      '[--header-height:calc(var(--spacing)*12)]',
+      'md:[--header-height:0px]',
+    );
+    expect(container.querySelector('section')).toHaveClass('max-md:mt-(--header-height)');
     expect(container.querySelector('section')).not.toHaveClass('mt-(--header-height)');
-    expect(screen.getByRole('button', { name: 'Toggle Sidebar' })).toBeInTheDocument();
-  });
-
-  it('should keep a useful navigation row on mobile', () => {
-    state.isMobile = true;
-    const { container } = render(<Page />);
-    expect(container.querySelector('header')).toBeInTheDocument();
-    expect(container.querySelector('main')).toHaveClass('[--header-height:calc(var(--spacing)*12)]');
-    expect(container.querySelector('section')).toHaveClass('mt-(--header-height)');
     expect(
       within(container.querySelector('header')!).getByRole('button', { name: 'Toggle Sidebar' }),
     ).toBeInTheDocument();
+  });
+
+  it('should not move an untitled route when the viewport turns out to be a phone', () => {
+    // The server has no viewport and renders `isMobile` false; a phone then hydrates with it true.
+    const served = render(<Page />);
+    const layout = (container: HTMLElement): string[] =>
+      ['header', 'main', 'section'].map((selector) => container.querySelector(selector)?.className ?? 'absent');
+    const servedLayout = layout(served.container);
+    served.unmount();
+    state.isMobile = true;
+    const { container } = render(<Page />);
+    expect(layout(container)).toEqual(servedLayout);
   });
 
   it('removes route header DOM and offset while retaining application controls', () => {
@@ -410,7 +418,8 @@ describe('Desktop window drag band', () => {
     const { container } = render(<Page />);
 
     expect(container.querySelector('[data-slot=desktop-drag-band]')).not.toBeInTheDocument();
-    expect(container.querySelector('header')).not.toBeInTheDocument();
+    // Only the phone bar is left, and only below md.
+    expect(container.querySelector('header')).toHaveClass('md:hidden');
   });
 });
 

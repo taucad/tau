@@ -10,8 +10,12 @@
 #     that affects the UI since its last staging deploy. It publishes to the
 #     site's `staging` alias, which costs no Netlify credits, and
 #     `netlify-staging-router` serves taucad.dev from that alias.
-#   - Both builds embed the PicoGK browser host `picogk-browser-host.yml` prepares, which is
-#     what makes the browser PicoGK kernel available.
+#   - Both builds load the browser PicoGK host by digest from their environment's dependency
+#     mirror (`PICOGK_BROWSER_MIRROR_BASE` below: `dependencies.taucad.dev` for staging,
+#     `dependencies.tau.new` for production; the manifest identity is the committed pin
+#     `packages/plugins/picogk/browser-host.pin.json`). A deploy never builds, downloads or embeds
+#     the host: its producer publishes every blob when the host's inputs change, before the pin lands
+#     (charter picogk-interim-digest-consumer, D9), and the browser verifies each one before use.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
@@ -63,14 +67,8 @@ permissions:
   actions: read
 
 jobs:
-  # The browser PicoGK kernel ships only inside a build that embedded its prepared bundle, so the
-  # bundle is prepared first (cached by its inputs, so an unchanged one costs a lookup).
-  picogk:
-    uses: ./.github/workflows/picogk-browser-host.yml
-
   deploy:
     name: Deploy UI to ${{ inputs.environment }}
-    needs: picogk
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     environment: ${{ inputs.environment }}
@@ -104,8 +102,10 @@ jobs:
           case "$ENVIRONMENT" in
             # retain_from: the Netlify origin of the deploy now live, whose recent assets the new one keeps.
             # Not the public host: tau.new is still served by Fly, and taucad.dev goes through a router.
-            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev; retain_from=https://staging--taucad-staging.netlify.app ;;
-            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new; retain_from=https://taucad-prod-us.netlify.app ;;
+            # dependencies_base: the environment's digest mirror (`blobs/sha256/<hex>`), which serves the pinned
+            # PicoGK browser host to that environment's UI.
+            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev; retain_from=https://staging--taucad-staging.netlify.app; dependencies_base=https://dependencies.taucad.dev ;;
+            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new; retain_from=https://taucad-prod-us.netlify.app; dependencies_base=https://dependencies.tau.new ;;
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
           esac
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
@@ -115,6 +115,7 @@ jobs:
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "retain_from=$retain_from" >> "$GITHUB_OUTPUT"
+          echo "dependencies_base=$dependencies_base" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -123,14 +124,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-
-      # The UI embeds this bundle at the content-addressed path its manifest names, and advertises
-      # the browser PicoGK kernel only because it did (`PICOGK_BROWSER_ASSETS_ROOT` below).
-      - name: Download the prepared PicoGK browser host
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.picogk.outputs.artifact }}
-          path: out/picogk-browser-host
 
       # Production ships only a commit whose main CI run passed.
       - name: Require this commit's main CI run to have passed
@@ -215,8 +208,11 @@ jobs:
           TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
           # Runtime bundle files kept between deploys (the cache restored above).
           TAU_RETAIN_ASSETS_STORE: ${{ github.workspace }}/out/retained-runtime-store
-          # The prepared PicoGK browser host; `ui:build` declares it as an input.
-          PICOGK_BROWSER_ASSETS_ROOT: ${{ github.workspace }}/out/picogk-browser-host
+          # This environment's digest mirror, which serves the pinned PicoGK browser host
+          # (`dependencies.taucad.dev` or `dependencies.tau.new`; the loader verifies every byte).
+          # `ui:build` keys on it through `picogk-browser-assets-cache-key.ts`, and a base
+          # without a pin fails the build.
+          PICOGK_BROWSER_MIRROR_BASE: ${{ steps.site.outputs.dependencies_base }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

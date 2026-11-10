@@ -1,7 +1,8 @@
 import { authMutationKeys } from '@better-auth-ui/core';
-import { useAuth, useFetchOptions, useSendVerificationEmail, useSignInEmail } from '@better-auth-ui/react';
+import { useAuth, useFetchOptions, useSignInEmail } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -18,6 +19,20 @@ import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
 import { authErrorMessage, betterFetchErrorBodyCode } from '#utils/auth-error.utils.js';
+import { CheckEmail } from '#components/auth/check-email.js';
+
+/**
+ * What a social sign-in that failed after the provider handed back says, keyed by the `error` Better Auth puts on
+ * the `errorCallbackURL`. Anything unlisted gets the generic line.
+ */
+export const socialSignInErrorMessages: Readonly<Record<string, string>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Better Auth's error code
+  account_not_linked:
+    'This email already has a Tau account that is not verified yet. Sign in with your email and password and we will send you a new verification link.',
+};
+
+export const socialSignInErrorMessage = (code: string): string =>
+  socialSignInErrorMessages[code] ?? "We couldn't sign you in with that provider. Please try again.";
 
 export type SignInProps = {
   className?: string;
@@ -34,7 +49,6 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
   const {
     authClient,
     basePaths,
-    baseURL,
     emailAndPassword,
     localization,
     plugins,
@@ -50,27 +64,27 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
 
   const [email, setEmail] = useState(emailDraft);
   const [password, setPassword] = useState('');
+  // Set when a sign-in was refused for an unverified address. The API has already sent that address a fresh link
+  // (`sendOnSignIn`), so the form gives way to the "Check your email" view instead of offering a second send.
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | undefined>(undefined);
 
-  const { mutate: sendVerificationEmail } = useSendVerificationEmail(authClient, {
-    onSuccess: () => toast.success(localization.auth.verificationEmailSent),
-  });
+  // A social sign-in that failed comes back here with `?error=` (the provider buttons' `errorCallbackURL`).
+  const location = useLocation();
+  const socialError = new URLSearchParams(location.search).get('error');
+  useEffect(() => {
+    if (socialError) {
+      toast.error(socialSignInErrorMessage(socialError), {
+        id: 'social-sign-in-error',
+      });
+    }
+  }, [socialError]);
 
   const { mutate: signInEmail, isPending: signInEmailPending } = useSignInEmail(authClient, {
     onError: (error, { email }) => {
       setPassword('');
 
       if (betterFetchErrorBodyCode(error) === 'EMAIL_NOT_VERIFIED') {
-        toast.error(authErrorMessage(error), {
-          action: {
-            label: localization.auth.resend,
-            onClick: () => {
-              sendVerificationEmail({
-                email,
-                callbackURL: `${baseURL}${redirectTo}`,
-              });
-            },
-          },
-        });
+        setUnverifiedEmail(email);
       } else {
         toast.error(authErrorMessage(error));
       }
@@ -112,6 +126,19 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
   };
 
   const showSeparator = emailAndPassword.enabled && socialProviders && socialProviders.length > 0;
+
+  if (unverifiedEmail !== undefined) {
+    return (
+      <CheckEmail
+        className={className}
+        email={unverifiedEmail}
+        reason='unverified-sign-in'
+        onUseDifferentEmail={() => {
+          setUnverifiedEmail(undefined);
+        }}
+      />
+    );
+  }
 
   return (
     <Card className={cn('w-full max-w-sm', className)}>

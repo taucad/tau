@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { z } from 'zod';
@@ -16,15 +16,76 @@ const variant = z.object({ runtimeFiles: z.array(entry), references: z.array(ent
 const inventory = z.object({ single: variant, multi: variant.optional() });
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
-/** Serve the exact prepared bundle in development and preserve its directory layout in builds. */
+/*
+ * The committed pin of the published browser host (`packages/plugins/picogk/browser-host.pin.json`, interim
+ * charter D8), schema version 1 as `scripts/src/picogk-browser-host-pin.ts` writes and parses it. The UI uses only
+ * the manifest digest; the rest is checked so a malformed or foreign file fails the build. Unknown keys (the `//`
+ * provenance note) are ignored. Whether `inputsKey` matches the tree is the producer's check, not the build's.
+ */
+const hostPin = z.object({
+  schemaVersion: z.literal(1),
+  inputsKey: z.string().regex(/^picogk-browser-host-v\d+-[\da-f]{40}-[\w.+-]+-[\da-f]{64}-[\da-f]{64}$/u),
+  manifest: z.object({ sha256: z.string().regex(/^[\da-f]{64}$/u), byteLength: z.number().int().positive() }),
+  files: z.object({ count: z.number().int().positive(), byteLength: z.number().int().nonnegative() }),
+});
+
+/**
+ * Read the pinned browser host manifest identity, or nothing when no host has been pinned yet.
+ *
+ * @param file - The pin file.
+ * @returns The pinned manifest's sha256 and byte length.
+ */
+export const readPicogkBrowserHostPin = (
+  file: string,
+): { readonly sha256: string; readonly byteLength: number } | undefined =>
+  existsSync(file) ? hostPin.parse(JSON.parse(readFileSync(file, 'utf8'))).manifest : undefined;
+
+/**
+ * Locate the pinned manifest blob on a digest mirror.
+ *
+ * @param base - The mirror base (`PICOGK_BROWSER_MIRROR_BASE`), with or without a trailing `/`.
+ * @param pin - The pin file.
+ * @returns The manifest's `<base>/blobs/sha256/<sha256>` URL and its digest.
+ * @throws When the base is not a plain HTTP(S) URL or no host is pinned.
+ */
+const locatePinnedManifest = (base: string, pin: string): { url: string; sha256: string } => {
+  const root = new URL(base.endsWith('/') ? base : `${base}/`);
+  if (!['http:', 'https:'].includes(root.protocol) || root.username || root.password || root.search || root.hash) {
+    throw new Error(`Invalid PICOGK_BROWSER_MIRROR_BASE: ${base}`);
+  }
+  const pinned = readPicogkBrowserHostPin(pin);
+  if (!pinned) {
+    throw new Error(`PICOGK_BROWSER_MIRROR_BASE is set, but no browser host is pinned at ${pin}.`);
+  }
+  return { url: new URL(`blobs/sha256/${pinned.sha256}`, root).href, sha256: pinned.sha256 };
+};
+
+/**
+ * Where a build loads the PicoGK browser host from. Exactly one source may be named:
+ *
+ * - `mirror.base` (deploys): the pinned host on the digest mirror, `<base>/blobs/sha256/<manifest sha256>`,
+ *   every file its own blob. Nothing is copied into the build. A base without a pin fails the build.
+ * - `stage` (development and e2e): a prepared bundle served same-origin under `picogk-browser/<sha256>/`.
+ *
+ * Naming both fails the build; naming neither leaves the browser PicoGK kernel unadvertised.
+ *
+ * @param stage - The prepared bundle directory (`PICOGK_BROWSER_ASSETS_ROOT`).
+ * @param mirror - The mirror base (`PICOGK_BROWSER_MIRROR_BASE`) and the pin file it serves.
+ * @returns The manifest identity to define for the app, and the plugin that serves or emits a staged bundle.
+ */
 export const createPicogkBrowserAssets = (
   stage: string | undefined,
+  mirror?: { readonly base: string | undefined; readonly pin: string },
 ): {
   assets: { url: string; sha256: string } | undefined;
   plugin: Plugin;
 } => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   let sha256: string | undefined;
+  if (mirror?.base && stage) {
+    throw new Error('Set either PICOGK_BROWSER_MIRROR_BASE or PICOGK_BROWSER_ASSETS_ROOT, not both.');
+  }
+  const mirrored = mirror?.base ? locatePinnedManifest(mirror.base, mirror.pin) : undefined;
   if (stage) {
     const bytes = Uint8Array.from(readFileSync(path.join(stage, 'assets-manifest.json')));
     sha256 = digest(bytes);
@@ -54,7 +115,7 @@ export const createPicogkBrowserAssets = (
   const prefix = `picogk-browser/${sha256 ?? 'unprepared'}/`;
   let base = '/';
   return {
-    assets: sha256 ? { url: `/${prefix}assets-manifest.json`, sha256 } : undefined,
+    assets: mirrored ?? (sha256 ? { url: `/${prefix}assets-manifest.json`, sha256 } : undefined),
     plugin: {
       name: 'tau:picogk-browser-assets',
       applyToEnvironment: (environment) => environment.config.consumer === 'client',

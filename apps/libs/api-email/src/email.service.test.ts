@@ -72,6 +72,40 @@ describe('EmailService delivery gate', () => {
     );
   });
 
+  it('gives every send its own entity reference so Gmail does not thread them', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'email_123' }, error: null });
+    const service = createService('re_test_key');
+    const send = async (): Promise<void> =>
+      service.sendVerification({
+        email: 'user@example.com',
+        url: 'https://tau.new/auth/verify-email?token=secret&redirectTo=%2F',
+      });
+
+    await send();
+    await send();
+
+    const references = sendMock.mock.calls.map(
+      (call: unknown[]) => (call[0] as { headers: Record<string, string> }).headers['X-Entity-Ref-ID'],
+    );
+    expect(references).toHaveLength(2);
+    expect(references[0]).toMatch(/^[\da-f-]{36}$/u);
+    expect(references[0]).not.toBe(references[1]);
+  });
+
+  it('rejects an account-exists reset link off the frontend forgot-password page', async () => {
+    const service = createService('re_test_key');
+
+    await expect(
+      service.sendAccountExists({
+        email: 'user@example.com',
+        url: 'https://tau.new/auth/sign-in',
+        resetUrl: 'https://evil.example/auth/forgot-password',
+      }),
+    ).rejects.toThrow(/reset URL/u);
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it('rejects backend auth URLs before rendering or sending', async () => {
     const service = createService('re_test_key');
 

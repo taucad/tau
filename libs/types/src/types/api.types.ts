@@ -16,7 +16,7 @@ export type ErrorCategory = (typeof errorCategory)[keyof typeof errorCategory];
 export type ChatError = {
   /** Error category for routing to appropriate UI components */
   category: ErrorCategory;
-  /** Optional error code (e.g., LangChain error code, HTTP status text) */
+  /** Optional error code (e.g., provider error type, HTTP status text) */
   code?: string;
   /** HTTP status code if applicable */
   httpStatus?: number;

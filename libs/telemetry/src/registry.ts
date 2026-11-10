@@ -6,6 +6,7 @@ import {
   agentCompactionLanes,
   agentCompactionOutcomes,
   agentCompactionTiers,
+  agentPrefixBreakCauses,
   agentSafeguardPatterns,
   agentToolKinds,
   builtInSkillSlugs,
@@ -970,6 +971,34 @@ export const TauMetrics = {
       'compaction.lane': z.enum(agentCompactionLanes),
       'compaction.tier': z.enum(agentCompactionTiers),
       'compaction.outcome': z.enum(agentCompactionOutcomes),
+    }),
+  }),
+
+  /**
+   * Requests that did not reproduce the previous request's prompt prefix (provider reasoning replay contract, P1),
+   * folded from the break each reply's row records. Read it against `tau.agent.turns`: a counter has no series until
+   * it first fires, so a missing series is not a zero.
+   */
+  agentPrefixBreaks: defineCounter({
+    name: 'tau.agent.prefix_breaks',
+    unit: '{break}',
+    description:
+      'Requests that did not reproduce the previous request prefix, by cause and provider (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+    }),
+  }),
+
+  /** Native reasoning a prefix break made unreplayable (P2): left out of the request, never erased from the log. */
+  agentReasoningOmittedBlocks: defineCounter({
+    name: 'tau.agent.reasoning_omitted_blocks',
+    unit: '{block}',
+    description: 'Native reasoning blocks left out of a request after a prefix break, by cause (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
     }),
   }),
 

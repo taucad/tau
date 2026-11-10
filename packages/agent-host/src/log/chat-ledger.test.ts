@@ -666,3 +666,64 @@ describe('agent-loop decisions (R9)', () => {
     expect(compact.kind === 'folded' ? compact.ledger.runs['run-1'] : undefined).toEqual(whole.runs['run-1']);
   });
 });
+
+describe('prefix breaks (provider reasoning replay contract P1)', () => {
+  const stamp = { digest: 'd', system: 's', tools: 't', settings: 'high' };
+  const reply = (id: string, prefix: Record<string, unknown>, internal?: Record<string, unknown>) => ({
+    id,
+    role: 'assistant',
+    content: [{ type: 'text', text: 'Done.' }],
+    metadata: { provider: 'anthropic', prefix, ...(internal === undefined ? {} : { tauInternal: internal }) },
+  });
+  const rows = term([
+    life('admitted'),
+    committed,
+    life('running'),
+    /* A stream checkpoint carries no stamp; the final row that replaces it carries the reply's. */
+    {
+      type: 'message.appended',
+      message: reply('reply-1', {}, { kind: 'stream-checkpoint', streamState: 'checkpoint' }),
+    },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'reply-1',
+      replacement: reply('reply-1', { ...stamp, break: 'clearing', dropped: 9 }),
+    },
+    { type: 'message.appended', message: reply('reply-2', stamp) },
+    { type: 'message.appended', message: reply('reply-3', { ...stamp, break: 'settings' }) },
+    { type: 'message.appended', message: reply('reply-4', { ...stamp, break: 'not-a-cause' }) },
+    life('completed'),
+  ]);
+
+  it('should record each break a reply carries once, with its provider and the reasoning it left out', () => {
+    expect(foldChatLedger(emptyChatLedger, rows).runs['run-1']?.prefixBreaks).toEqual([
+      { cause: 'clearing', provider: 'anthropic', dropped: 9 },
+      { cause: 'settings', provider: 'anthropic', dropped: 0 },
+    ]);
+  });
+
+  it('should fold the same breaks from compact facts', () => {
+    const facts = rows.map((row) => {
+      const classified = classifyLogRow(row);
+      if (classified.class === 'quarantined') {
+        throw new Error('Expected kept fixture row');
+      }
+      return projectLogRow({ event: classified.event, opaque: classified.class === 'opaque' });
+    });
+    const compact = foldProjectionFacts({
+      ledger: emptyChatLedger,
+      answer: {
+        status: 'batch',
+        chatId: 'chat-1',
+        sourceGeneration: 'source-1',
+        cursor: 0,
+        nextCursor: facts.length,
+        endCursor: facts.length,
+        facts,
+      },
+    });
+    expect(compact.kind === 'folded' ? compact.ledger.runs['run-1'] : undefined).toEqual(
+      foldChatLedger(emptyChatLedger, rows).runs['run-1'],
+    );
+  });
+});

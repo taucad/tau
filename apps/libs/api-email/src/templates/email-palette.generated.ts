@@ -4,7 +4,7 @@
 
 export const light = {
   canvas: '#f3f3f3',
-  surface: '#ffffff',
+  surface: '#fefefe',
   detail: '#f3f3f3',
   foreground: '#0d0d0d',
   muted: '#5b5b5b',

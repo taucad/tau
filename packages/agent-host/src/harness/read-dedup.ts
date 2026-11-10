@@ -1,7 +1,7 @@
 /**
- * Read deduplication (LangChain plane regression review R5).
+ * Read deduplication (server agent plane regression review R5).
  *
- * The LangChain plane answered a `read_file` that returned exactly what an earlier, still-visible read in the same chat
+ * The server agent plane answered a `read_file` that returned exactly what an earlier, still-visible read in the same chat
  * returned with a short marker naming that earlier call, so re-reading an unchanged file did not put it in context
  * twice. The chat's committed history is the record: a prior read counts only while its body is still in history,
  * never once compaction cleared it.

@@ -5,7 +5,7 @@ import { createAgentSession } from '#harness/session.js';
 import { createToolResultBatchBudget, toolResultBatchBudget } from '#harness/tool-result-budget.js';
 
 /*
- * Regression review R4: the LangChain plane capped what one batch of tool results put into context at 200,000
+ * Regression review R4: the server agent plane capped what one batch of tool results put into context at 200,000
  * characters. The session hands each call its batch's budget, which a new model request resets.
  */
 
@@ -37,7 +37,7 @@ describe('createToolResultBatchBudget', () => {
     expect(batch.budget.admit(100)).toBe(true);
   });
 
-  it('should default to the LangChain plane budget', () => {
+  it('should default to the server agent plane budget', () => {
     expect(toolResultBatchBudget).toBe(200_000);
   });
 });

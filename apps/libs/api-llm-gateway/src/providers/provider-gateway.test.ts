@@ -3,6 +3,9 @@ import { generateKeyPairSync, verify } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   executeGatewayProviderRequest,
+  fundedGatewayProviderIds,
+  gatewayModelRoutes,
+  isGatewayProviderId,
   signVertexAccessToken,
   vertexUpstreamBody,
 } from '#providers/provider-gateway.js';
@@ -135,5 +138,80 @@ describe('Vertex self-signed access token', () => {
     await expect(failure).rejects.toThrow('Vertex credentials cannot sign');
     await expect(failure).rejects.not.toThrow('fixture-not-a-key');
     expect(fetchOnce).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider targets', () => {
+  const signal = (): AbortSignal => new AbortController().signal;
+  const sent = (fetchOnce: ReturnType<typeof vi.fn<typeof fetch>>): { url: string; init: RequestInit | undefined } => {
+    const [input, init] = fetchOnce.mock.calls[0] ?? [];
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input?.url ?? '');
+    return { url, init };
+  };
+
+  it.each([
+    ['openai', 'https://api.openai.com/v1/responses'],
+    ['xai', 'https://api.x.ai/v1/responses'],
+    ['together', 'https://api.together.ai/v1/chat/completions'],
+    ['morph', 'https://api.morphllm.com/v1/chat/completions'],
+    ['moonshot', 'https://api.moonshot.ai/v1/chat/completions'],
+    ['cerebras', 'https://api.cerebras.ai/v1/chat/completions'],
+  ] as const)('should send %s to its base URL with a bearer key', async (providerId, url) => {
+    const fetchOnce = vi.fn<typeof fetch>(async () => new Response('{}'));
+
+    await executeGatewayProviderRequest({
+      config: { get: () => 'provider-key' },
+      providerId,
+      body: { model: 'fixture' },
+      headers: {},
+      signal: signal(),
+      fetch: fetchOnce,
+    });
+
+    expect(sent(fetchOnce).url).toBe(url);
+    expect(sent(fetchOnce).init?.headers).toEqual({
+      'content-type': 'application/json',
+      authorization: 'Bearer provider-key',
+    });
+  });
+
+  it('should send Ollama to the local server without a credential when it is enabled', async () => {
+    const fetchOnce = vi.fn<typeof fetch>(async () => new Response('{}'));
+
+    await executeGatewayProviderRequest({
+      config: { get: (key) => key === 'OLLAMA_ENABLED' },
+      providerId: 'ollama',
+      body: { model: 'llama3.2:latest' },
+      headers: { 'anthropic-version': 'ignored' },
+      signal: signal(),
+      fetch: fetchOnce,
+    });
+
+    expect(sent(fetchOnce)).toMatchObject({
+      url: 'http://localhost:11434/v1/chat/completions',
+      init: { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json' } },
+    });
+  });
+
+  it('should refuse Ollama when it is not enabled', async () => {
+    const fetchOnce = vi.fn<typeof fetch>();
+
+    await expect(
+      executeGatewayProviderRequest({
+        config: { get: () => 'true' },
+        providerId: 'ollama',
+        body: {},
+        headers: {},
+        signal: signal(),
+        fetch: fetchOnce,
+      }),
+    ).rejects.toThrow('Configured provider ollama is unavailable');
+    expect(fetchOnce).not.toHaveBeenCalled();
+  });
+
+  it('should keep Ollama out of the gateway providers, the funded providers and the catalog routes', () => {
+    expect(isGatewayProviderId('ollama')).toBe(false);
+    expect(fundedGatewayProviderIds).not.toContain('ollama');
+    expect(gatewayModelRoutes().map((route) => route.providerId)).not.toContain('ollama');
   });
 });

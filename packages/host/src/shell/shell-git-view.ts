@@ -418,7 +418,8 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
   try {
     objects = await realpath(join(commonDirectory, 'objects'));
     const status = await lstat(objects);
-    if (!status.isDirectory()) {
+    /* The common directory is already real, so a store elsewhere means `objects` is a link: never follow one. */
+    if (!status.isDirectory() || objects !== join(commonDirectory, 'objects')) {
       return undefined;
     }
   } catch {

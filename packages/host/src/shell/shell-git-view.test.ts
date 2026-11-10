@@ -6,7 +6,7 @@
  * the shell qualification's job.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
@@ -193,6 +193,17 @@ describe('createShellGitView', () => {
     expect(await createShellGitView(linked, privateRoot)).toBeUndefined();
     await writeFile(own, '../..\n');
     expect(await createShellGitView(linked, privateRoot)).toBeDefined();
+  });
+
+  it('should give no view when the object store is a link to another store', async () => {
+    await seedRepository();
+    const linked = join(base, 'linked');
+    git(checkout, 'worktree', 'add', '--quiet', linked, 'feature');
+    const own = join(checkout, '.git', 'worktrees', 'linked');
+    await writeFile(join(own, 'commondir'), '.\n');
+    await symlink(join(checkout, '.git', 'objects'), join(own, 'objects'));
+
+    expect(await createShellGitView(linked, privateRoot)).toBeUndefined();
   });
 
   it('should copy the index so status compares against it: clean prints nothing, an edit shows as modified', async () => {

@@ -2735,6 +2735,43 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
+  it('owes a push the session change abandoned, records only (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'recordsChanged' });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'sessionChanged' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+
+    /* Never *Backed up* over the records that did not leave: the reopened pull pushes them. */
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('push')).toHaveLength(2);
+    });
+    expect(harness.actor.getSnapshot().matches('backedUp')).toBe(false);
+    harness.stop();
+  });
+
+  it('forgets a held session change when the remote goes before release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'remoteDisconnected' });
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+
+    expect(harness.actor.getSnapshot().context.pendingSession).toBe(false);
+    harness.stop();
+  });
+
   it('holds a session change through quiescing and reads the remote on release (audit R6)', async () => {
     const harness = start();
     await openCleanly(harness);

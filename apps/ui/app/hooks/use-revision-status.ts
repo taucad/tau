@@ -417,6 +417,9 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    sessionChanged: async () => {
+      await ask({ command: 'sessionChanged' });
+    },
     recordEditorConflict: async (conflict) =>
       (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
     /* The host answers the verb with the checkout the registry made, or its refusal (B7: an answer, never a bound). */
@@ -920,10 +923,7 @@ const revisionIdentityCommands = (
       (status.remote.phase === 'reconnectRequired' ||
         (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
     if (awaitingAnswer) {
-      if (refused) {
-        return;
-      }
-      awaitingAnswer = false;
+      return;
     }
     if (status.sync.state === 'backedUp') {
       recovered = false;
@@ -955,11 +955,23 @@ const revisionIdentityCommands = (
    * remote waiting on a credential takes the one just sent.
    */
   const announceSession = (): void => {
-    awaitingAnswer = true;
-    client().send({ command: 'sessionChanged' });
+    /* Taken by the root before the change, so its answer follows it too. */
     if (client().status()?.remote.phase === 'reconnectRequired') {
       client().send({ command: 'authorizeRemote' });
     }
+    awaitingAnswer = true;
+    const asked = generation;
+    // async-iife: bootstrap -- the root's answer arrives on the projection; this only ends the wait for it.
+    void (async (): Promise<void> => {
+      try {
+        await client().sessionChanged();
+      } catch {
+        /* The connection closed: `release` has already ended the wait. */
+      }
+      if (asked === generation) {
+        awaitingAnswer = false;
+      }
+    })();
   };
 
   const say = async (next: RevisionSessionUser | undefined): Promise<void> => {
@@ -1288,6 +1300,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+    },
+    sessionChanged: async () => {
+      await ask({ command: 'sessionChanged' });
     },
     /* On the selected checkout, which is the one the page's files are rooted at. */
     materialize: async (paths) => {

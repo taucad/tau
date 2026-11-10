@@ -926,6 +926,7 @@ describe('remoteMachine', () => {
       { type: 'disconnect' },
       { type: 'cancel' },
       { type: 'quotaRefused', paths: ['big.stl'], used: 3, quota: 2 },
+      { type: 'sessionChanged' },
     ];
     const options = {
       input: { projectId: 'p1' },
@@ -1086,6 +1087,28 @@ describe('remoteMachine', () => {
 
     expect(count).toBe(2);
     expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'connected', storage: undefined });
+    actor.stop();
+  });
+
+  it('reads a connect refused under the last session again from the remotes list (audit R6)', async () => {
+    const { actor } = start({
+      readRemote: reads(undefined),
+      writeRemote: createAsyncLogic({ run: async () => ({ remote: tauRemote }) }),
+      validate: createAsyncLogic({
+        run: async (): Promise<Readonly<{ storage?: RemoteStorage }>> => {
+          throw new Error('Sign in to Tau.');
+        },
+      }),
+    });
+    await settle();
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+    expect(selectRemoteFacet(actor.getSnapshot()).phase).toBe('failed');
+
+    actor.send({ type: 'sessionChanged' });
+    await settle();
+
+    expect(selectRemoteFacet(actor.getSnapshot()).phase).toBe('none');
     actor.stop();
   });
 

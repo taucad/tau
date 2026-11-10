@@ -61,6 +61,12 @@ export type RevisionClient = Readonly<{
    * Resolves `true` once a fresh credential was sent.
    */
   setCredential: (source: RevisionCredentialSource) => Promise<boolean>;
+  /**
+   * Tell the root the signed-in person changed (audit R6), so it reads the
+   * remote afresh under the new session. Resolves once the root has taken it:
+   * every projection received before then was the last session's.
+   */
+  sessionChanged: () => Promise<void>;
   /** Send a credential for one explicit push; the host discards it when the operation settles. */
   pushGithub: (credential: GitRemoteCredential) => Promise<void>;
   /**

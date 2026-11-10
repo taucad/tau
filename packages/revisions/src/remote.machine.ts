@@ -706,6 +706,8 @@ const remoteMachineDefinition = setup({
       on: {
         connect: ({ event }) => reconnect(event),
         disconnect: { target: 'disconnecting' },
+        /* A connect refused under the last session is read again from the remotes list, as a fresh root would (audit R6). */
+        sessionChanged: { target: 'reading' },
       },
     },
   },
@@ -722,6 +724,24 @@ const remoteMachineDefinition = setup({
 export const remoteIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
   ['probing', 'authorized'],
   ['probing', 'validated'],
+  /* Audit R6: a session change matters only where the last session's answer
+   * is held, `connected`'s figure and `failed`'s refusal. Elsewhere the
+   * sequence in flight, or the credential frame the page sent with the change,
+   * already decides what this session reads. */
+  ...(
+    [
+      'reading',
+      'none',
+      'choosing',
+      'probing',
+      'authorizing',
+      'validating',
+      'initialSync',
+      'abandoning',
+      'disconnecting',
+      'reconnectRequired',
+    ] as const
+  ).map((state) => [state, 'sessionChanged'] as const),
 ];
 
 type RemoteMachineDefinition = typeof remoteMachineDefinition;

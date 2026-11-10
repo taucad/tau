@@ -557,6 +557,17 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect([...leases].sort()).toEqual(['run-1.json', 'run-2.json']);
   });
 
+  it('should answer a session change once the root has taken it (audit R6)', async () => {
+    const fixture = harness(['alpha']);
+    const alpha = await fixture.open('alpha');
+
+    alpha.send({ command: 'sessionChanged', id: 5 });
+
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 5, result: { kind: 'sessionChanged' } });
+    });
+  });
+
   it('should give a branch its own checkout, route and files (AC22)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

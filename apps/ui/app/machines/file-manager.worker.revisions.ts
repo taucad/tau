@@ -2065,6 +2065,12 @@ export type WorkerRevisionResult =
    * permission for `pagehide` to run.
    */
   | Readonly<{ kind: 'saved' }>
+  /**
+   * The root has taken a `sessionChanged` (audit R6). Every frame posted before
+   * this one was projected before the change; the page reads a refusal after
+   * it as the new session's.
+   */
+  | Readonly<{ kind: 'sessionChanged' }>
   /** What recording an editor's overlapping edit did (D14). */
   | Readonly<{ kind: 'editorConflict'; outcome: EditorConflictOutcome }>
   /**
@@ -2231,6 +2237,10 @@ const answerOf = (
   request: WorkerRevisionRequest,
 ): Promise<WorkerRevisionResult> | undefined => {
   switch (request.command) {
+    case 'sessionChanged': {
+      tree.send(request);
+      return Promise.resolve({ kind: 'sessionChanged' } as const);
+    }
     case 'log': {
       const { branch, limit, from } = request;
       return tree

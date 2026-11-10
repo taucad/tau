@@ -1320,7 +1320,13 @@ const syncMachineDefinition = setup({
         }
         return {
           ...(value === 'queued' ? { target: '.queued', reenter: true } : {}),
-          context: { quiescing: false, transportStopped: false, pendingFetch: false, pendingFlush: false },
+          context: {
+            quiescing: false,
+            transportStopped: false,
+            pendingFetch: false,
+            pendingFlush: false,
+            pendingSession: false,
+          },
         };
       }
       return {
@@ -1363,14 +1369,27 @@ const syncMachineDefinition = setup({
      * re-read for the remote it already watches) is a fresh subscription that
      * `opening` watches again. Held while quiescing, read on release.
      */
-    sessionChanged: ({ context, guards }) => {
+    sessionChanged: ({ context, guards, value }) => {
       if (!guards.hasRemote(context)) {
         return {};
       }
       if (context.quiescing) {
         return { context: { pendingSession: true } };
       }
-      return { target: '.opening', reenter: true, context: { pendingSession: false } };
+      /* A push or queue write left in flight was cleared from `pending*` on
+       * entry and never settled: it is owed again, so the reopened pull pushes. */
+      const abandoned =
+        typeof value === 'string'
+          ? value === 'pushing' || value === 'recording'
+          : value['pushing'] !== undefined || value['recording'] !== undefined || value['conflicted'] !== undefined;
+      return {
+        target: '.opening',
+        reenter: true,
+        context: {
+          pendingSession: false,
+          ...(abandoned ? { pendingMint: true, recordQueueDirty: true, ...markUnsyncedRecords(context) } : {}),
+        },
+      };
     },
     leaseRetired: { context: { leaseSettled: true } },
     /* The root forwards every answer to a cut no turn asked for; only `minting`
@@ -1430,6 +1449,7 @@ const syncMachineDefinition = setup({
        * had never reached a remote, silently, while the row went blank. */
       context: {
         remote: undefined,
+        pendingSession: false,
         hasAppliedRemote: false,
         chats: 'unknown',
         recordProjection: undefined,

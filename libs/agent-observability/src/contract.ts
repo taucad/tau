@@ -14,6 +14,7 @@ const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const instant = z.number().int().nonnegative().max(8_640_000_000_000_000);
 const completeness = z.enum(['complete', 'redacted', 'omitted', 'truncated', 'missing', 'unsupported', 'pending']);
 const outcome = z.enum(['completed', 'cancelled', 'failed', 'abandoned', 'unknown']);
+const checkResult = z.enum(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']);
 const toolClass = z.enum(['read', 'write', 'execute', 'geometry', 'verification', 'export', 'other']);
 const coverage = z.strictObject({
   events: completeness,
@@ -150,7 +151,7 @@ const summary = z.discriminatedUnion('kind', [
     kind: z.literal('cad'),
     sourceRevision: digest,
     requirement: id,
-    result: z.enum(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']),
+    result: checkResult,
     exportRequested: z.boolean(),
     artifact: digest.nullable(),
   }),
@@ -166,6 +167,27 @@ const summary = z.discriminatedUnion('kind', [
        */
       failureClass: z.strictObject({ owner: id, retry: id }).optional(),
       code: id.optional(),
+      /*
+       * What the run did, as counts, digests and closed labels, so an evaluator of the root alone can judge it (LW6):
+       * the revisions it started from and ended at, the files it changed, its checks, how many turns came before it in
+       * the chat, its model and tool calls, and the host, kernel and model it ran on. Optional so an older host's
+       * outcome still admits.
+       */
+      turn: z
+        .strictObject({
+          startRevision: digest.nullable(),
+          finalRevision: digest.nullable(),
+          filesChanged: count,
+          checksPassed: count,
+          checksFailed: count,
+          priorTurns: count,
+          modelCalls: count,
+          toolCalls: count,
+          host: z.enum(['browser', 'desktop', 'cloud', 'cli']).nullable(),
+          kernel: id.nullable(),
+          model: id.nullable(),
+        })
+        .optional(),
     })
     .refine(
       (value) => value.success === 'unknown' || value.assessment !== null,
@@ -222,6 +244,9 @@ const retained = {
 } as const;
 const toolName = z.string().regex(/^[\w.:-]{1,128}$/u);
 const mime = z.string().regex(/^[\w.+-]{1,64}\/[\w.+-]{1,64}$/u);
+/* A project-relative path: no control characters, bounded. */
+// oxlint-disable-next-line no-control-regex -- the range is what the path refuses.
+const sourcePath = z.string().regex(/^[^\u0000-\u001F]{1,256}$/u);
 /**
  * One part of a recorded message. Text, readable thinking, a tool call's arguments and a tool result keep redacted,
  * bounded text; an image or a file is only its type and size (and a digest when it is at most 1 MiB). No signature or
@@ -240,6 +265,10 @@ const part = z.discriminatedUnion('kind', [
     ...retained,
   }),
   z.strictObject({ kind: z.literal('media'), mime, bytes: count, digest: digest.nullable() }),
+  /* A model file as the run left it, read at the run's final revision; past the design cap only its size and digest. */
+  z.strictObject({ kind: z.literal('source'), path: sourcePath, digest: digest.nullable(), ...retained }),
+  /* One line per CAD check the run settled. */
+  z.strictObject({ kind: z.literal('check'), result: checkResult, ...retained }),
 ]);
 const message = z.strictObject({
   role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),

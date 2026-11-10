@@ -97,6 +97,8 @@ export type SectionViewTestCameraState = Readonly<{
   }>;
   handoffFov?: number;
   verticalSpan: number;
+  /** The camera actor's view revision; it advances once for every view change the actor applies. */
+  revision: number;
   position: readonly [number, number, number];
   quaternion: readonly [number, number, number, number];
   target: readonly [number, number, number];
@@ -1068,6 +1070,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           bounds: cameraView.bounds,
           handoffFov: cameraContext.handoffVerticalFieldOfView,
           verticalSpan: cameraView.verticalSpan,
+          revision: cameraContext.revision,
           position: physicalCamera.position,
           quaternion: [camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w],
           target: physicalCamera.target,

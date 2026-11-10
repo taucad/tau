@@ -119,9 +119,13 @@ jobs:
           # factory); Nx marks each affected when any dependency of it changes. Billing
           # contracts: the project that owns them (`api-billing`) or one it depends on changed.
           # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
+          # API image: the project with the `docker:smoke` target (`api`) or one it depends on
+          # changed, so a change to another `scope:api` project (an end-to-end suite, `files`)
+          # does not rebuild the production image.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"]},
+             "api-image": {"targets": ["docker:smoke"]},
              "billing": {"targets": ["test:billing-foundation"]},
              "cli-e2e": {"targets": ["test:scenarios"]},
              "size": {"targets": ["size"]},
@@ -180,8 +184,8 @@ jobs:
           # that lands: a PR run of them proved nothing the queue does not prove again, and
           # PR runs held about six times the queue's runner minutes when the 60-job pool was
           # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
-          # test on the PRs that touch the API.
-          api_image=$api
+          # test on the PRs that affect the API image.
+          api_image=$(flag api-image)
           standalone=$(flag standalone)
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             run_api=false

@@ -49,6 +49,17 @@
       },
       "parallelism": true
     },
+    "docker:smoke": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build the production API image as Fly does. CI's API Docker smoke test builds this image and boots it against Postgres and Redis; its plan selects that job when Nx marks this project affected, so only a change to the API or a project it depends on rebuilds the image."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "docker build --file apps/api/Dockerfile --tag tau-api:smoke ."
+      }
+    },
     "launch": {
       "executor": "nx:run-commands",
       "options": {

@@ -22,7 +22,7 @@ import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
-import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { generatedSetupPaths } from '#workspace-config.js';
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -296,9 +296,6 @@ const rowOf = (
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
   });
 
-/* The files Tau owns as project setup: what it generates at the project root (A4). */
-const setupPaths: ReadonlySet<string> = new Set([generatedIgnorePath, generatedGitattributesPath]);
-
 /*
  * Setup verdicts already read, by revision id. A revision's changes against its
  * first parent are fixed by its id, so an entry is never stale.
@@ -321,7 +318,16 @@ const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntr
     ({ provenance: { trigger }, parents }) =>
       (trigger === 'idle' || trigger === 'hidden' || trigger === 'close') && parents.length === 1,
   );
-  const unjudged = candidates.filter((entry) => !setupVerdicts.has(entry.id));
+  /* This page's verdicts, held apart from the cache: a page longer than the
+   * cache's bound would otherwise evict a verdict it is about to read. */
+  const verdicts = new Map<string, boolean>();
+  const unjudged = candidates.filter((entry) => {
+    const known = setupVerdicts.get(entry.id);
+    if (known !== undefined) {
+      verdicts.set(entry.id, known);
+    }
+    return known === undefined;
+  });
   if (unjudged.length > 0) {
     const changed =
       port.firstParentChanges === undefined
@@ -336,13 +342,15 @@ const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntr
         : await port.firstParentChanges(unjudged.map((entry) => entry.id));
     for (const { id } of unjudged) {
       const paths = changed.get(id) ?? [];
-      setupVerdicts.set(id, paths.length > 0 && paths.every((path) => setupPaths.has(path)));
-      if (setupVerdicts.size > maximumOrdinals) {
-        setupVerdicts.delete(setupVerdicts.keys().next().value!);
-      }
+      const verdict = paths.length > 0 && paths.every((path) => generatedSetupPaths.has(path));
+      verdicts.set(id, verdict);
+      setupVerdicts.set(id, verdict);
+    }
+    while (setupVerdicts.size > maximumOrdinals) {
+      setupVerdicts.delete(setupVerdicts.keys().next().value!);
     }
   }
-  return new Set(candidates.filter((entry) => setupVerdicts.get(entry.id) === true).map((entry) => entry.id));
+  return new Set(candidates.filter((entry) => verdicts.get(entry.id) === true).map((entry) => entry.id));
 };
 
 /**

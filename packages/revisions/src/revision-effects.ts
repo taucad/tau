@@ -4202,15 +4202,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         /* A4: the attributes file this mint supplied gets its live copy now, as
          * the store recorded it, so the checkout reads clean against the new
-         * head. A file that appeared since the cut is someone's and is kept. */
+         * head. A file that appeared since the cut is someone's and is kept.
+         * The revision is already minted, so a failed copy only warns: the next
+         * capture reads the file as removed and records that, never loses it. */
         if (held.owesAttributes === true) {
-          const recordedFiles = await recordedTree(held.tree, input.parents[0]);
-          const attributes = recordedFiles.get(generatedGitattributesPath);
-          await useFileSystem(await placeOf(input.checkoutId), async (rooted) => {
-            if (attributes !== undefined && !(await rooted.exists(generatedGitattributesPath))) {
-              await rooted.writeFile(generatedGitattributesPath, attributes);
-            }
-          });
+          try {
+            const recordedFiles = await recordedTree(held.tree, input.parents[0]);
+            const attributes = recordedFiles.get(generatedGitattributesPath);
+            await useFileSystem(await placeOf(input.checkoutId), async (rooted) => {
+              if (attributes !== undefined && !(await rooted.exists(generatedGitattributesPath))) {
+                await rooted.writeFile(generatedGitattributesPath, attributes);
+              }
+            });
+          } catch (error) {
+            console.warn('[revisions] the recorded attributes file could not be written to the checkout', error);
+          }
         }
         /* The revision's tree is the one just cut, so the next walk inherits
          * its modes without reading it back from the store. */

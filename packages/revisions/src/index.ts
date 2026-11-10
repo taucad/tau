@@ -156,6 +156,7 @@ export {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  generatedSetupPaths,
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
 } from '#workspace-config.js';

@@ -5907,8 +5907,10 @@ for (const actorSet of actorSets) {
       );
     };
 
-    const olderProject = async () => {
-      const context = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, { actorSet: actorSet.name });
+    const olderProject = async (
+      wrap: (filesystem: RevisionFileSystem) => RevisionFileSystem = (filesystem) => filesystem,
+    ) => {
+      const context = await fixture({ 'main.scad': 'cube(1);\n' }, wrap, { actorSet: actorSet.name });
       const { port, filesystem, root } = context;
       await port.init({ author, createSetupFiles: false });
       await filesystem.writeFile(generatedIgnorePath, ignore);
@@ -5988,6 +5990,53 @@ for (const actorSet of actorSets) {
       expect(after.treeId).toBe(await treeIdOf(port, written.revisionId));
       const [row] = await readRevisionLog(port, { branch: 'main', limit: 1 });
       expect(row?.isSetup).toBeUndefined();
+    }, 30_000);
+
+    it('keeps the minted revision when the live copy of the attributes file cannot be written', async () => {
+      const refusing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+        new Proxy(filesystem, {
+          get: (target, property, receiver) => {
+            const value: unknown = Reflect.get(target, property, receiver);
+            if (typeof value !== 'function') {
+              return value;
+            }
+            const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+            return property === 'writeFile'
+              ? async (path: unknown, ...rest: unknown[]) => {
+                  if (path === generatedGitattributesPath) {
+                    throw new Error('The disk refused the write.');
+                  }
+                  return bound(path, ...rest);
+                }
+              : bound;
+          },
+        });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { actors, port, filesystem, head } = await olderProject(refusing);
+      await run(actors.checkout.captureTree, { checkoutId: 'live' });
+      await filesystem.writeFile('main.scad', 'cube(2);\n');
+
+      const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+        checkoutId: 'live',
+        trigger: 'save',
+      });
+      const written = await run<{ status: string; revisionId: string }>(actors.checkout.writeRevision, {
+        checkoutId: 'live',
+        cutId: cut.cutId,
+        treeId: cut.treeId,
+        parents: [head],
+        trigger: 'save',
+        leaseIds: [],
+      });
+
+      expect(written.status).toBe('written');
+      expect(await treeIdOf(port, written.revisionId)).toBe(cut.treeId);
+      expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
+      expect(warn).toHaveBeenCalledWith(
+        '[revisions] the recorded attributes file could not be written to the checkout',
+        expect.any(Error),
+      );
+      warn.mockRestore();
     }, 30_000);
 
     it("flags an automatic entry that changed only Tau's setup files, and no other (A4)", async () => {

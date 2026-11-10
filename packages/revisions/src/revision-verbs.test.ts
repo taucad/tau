@@ -20,9 +20,10 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import type { RevisionPort } from '#revision-port.js';
+import type { RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { generatedIgnorePath } from '#workspace-config.js';
 
 /* Every commit object the browser leg reads goes through `readObject`. */
 const objectReads = vi.hoisted(() => ({ count: 0 }));
@@ -320,5 +321,39 @@ describe('revision verbs', () => {
 
     expect(page.map((row) => row.revisionNumber)).toEqual([30, 29, 28, 27, 26]);
     expect(page).toEqual(whole.slice(0, 5));
+  });
+});
+
+/* A4: a page longer than the setup-verdict cache still flags every setup entry it holds. */
+describe('setup entries on a long page', () => {
+  it('flags every setup entry of a page longer than the verdict cache', async () => {
+    const length = 4100;
+    const idOf = (index: number): RevisionId => revisionId(index.toString(16).padStart(40, '0'));
+    const entries: RevisionLogEntry[] = Array.from({ length }, (_, offset) => {
+      const index = length - offset;
+      return {
+        id: idOf(index),
+        changeId: `change-${String(index)}`,
+        parents: index === 1 ? [] : [idOf(index - 1)],
+        treeId: 'a'.repeat(40),
+        summary: { generated: 'Saved changes (idle)' },
+        provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+        conflicted: false,
+      };
+    });
+    const head = idOf(length);
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) => new Map(ids.map((id) => [id, [generatedIgnorePath]] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const rows = await readRevisionLog(port as RevisionPort);
+
+    expect(rows).toHaveLength(length);
+    /* Every entry but the root, which has no first parent to change against. */
+    expect(rows.filter((row) => row.isSetup === true)).toHaveLength(length - 1);
   });
 });

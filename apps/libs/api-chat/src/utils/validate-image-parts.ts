@@ -50,7 +50,7 @@ export function validateModelImageInputSupport({
  * Validates that all image file parts across messages do not exceed
  * the 5 MB base64 size limit. Throws a descriptive error if any do.
  *
- * Should be called in prepareMessages before conversion to LangChain format.
+ * Should be called before the messages are converted for a model provider.
  *
  * @public
  */

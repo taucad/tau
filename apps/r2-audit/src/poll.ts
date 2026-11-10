@@ -8,6 +8,10 @@
  * delete on the dependency bucket also alarms: the lock refuses it per key inside a 200 response, so
  * unlike a refused single delete (409, not logged) it reaches the log.
  *
+ * The telemetry is account-wide, and environments can share an account. Events on a bucket in
+ * `AUDIT_FOREIGN_BUCKETS` belong to the other environment's Worker and are skipped before either check,
+ * unless the bucket is also one of this Worker's own (an expected-writer or the dependency bucket).
+ *
  * Request and response shapes follow Cloudflare's API reference for
  * `POST /accounts/{account_id}/workers/observability/telemetry/query` and the R2 Data Access Logs field
  * list. Where an event's fields sit is read defensively: nested under `source`, as dotted keys on
@@ -74,6 +78,7 @@ export type PollResult =
       lines: AuditRecordLine[];
       eventsSeen: number;
       eventsNew: number;
+      eventsForeign: number;
       truncated: boolean;
     }>
   | Readonly<{ ok: false; detail: string }>;
@@ -87,6 +92,8 @@ export type PollInput = Readonly<{
   kv: AuditKv;
   expected: ExpectedWriterMap;
   dependencyBucket: string | undefined;
+  /** The parsed `AUDIT_FOREIGN_BUCKETS`: another environment's buckets, skipped. Absent skips none. */
+  foreignBuckets?: ReadonlySet<string>;
   environment: string;
   fetch: typeof fetch;
 }>;
@@ -273,6 +280,23 @@ export const checkDataAccessEvent = (
 };
 
 /**
+ * Whether an event belongs to another environment's Worker.
+ *
+ * A bucket this Worker watches itself is never foreign, so a misconfigured list cannot silence it.
+ *
+ * @param event - The event.
+ * @param input - The foreign buckets, the expected writers and the dependency bucket.
+ * @returns True when the event's bucket is foreign.
+ */
+export const isForeignEvent = (
+  event: Pick<DataAccessEvent, 'bucket'>,
+  input: Pick<PollInput, 'foreignBuckets' | 'expected' | 'dependencyBucket'>,
+): boolean =>
+  input.foreignBuckets?.has(event.bucket) === true &&
+  !input.expected.buckets.has(event.bucket) &&
+  event.bucket !== input.dependencyBucket;
+
+/**
  * Keep the events no earlier pass has seen, and mark them seen.
  *
  * The mark is written before the event's lines are logged, so a pass that dies in between loses
@@ -300,7 +324,7 @@ export const unseenEvents = async (events: readonly DataAccessEvent[], kv: Audit
 };
 
 /**
- * Run one poll: query, de-duplicate, check.
+ * Run one poll: query, skip foreign buckets, de-duplicate, check.
  *
  * @param input - Everything the poll needs.
  * @returns The alarm lines and counts, or why the poll failed.
@@ -310,9 +334,10 @@ export const pollDataAccessLogs = async (input: PollInput): Promise<PollResult> 
   if (!fetched.ok) {
     return fetched;
   }
+  const own = fetched.events.filter((event) => !isForeignEvent(event, input));
   let fresh: DataAccessEvent[];
   try {
-    fresh = await unseenEvents(fetched.events, input.kv);
+    fresh = await unseenEvents(own, input.kv);
   } catch {
     return { ok: false, detail: 'kv' };
   }
@@ -321,6 +346,7 @@ export const pollDataAccessLogs = async (input: PollInput): Promise<PollResult> 
     lines: fresh.flatMap((event) => checkDataAccessEvent(event, input)),
     eventsSeen: fetched.events.length,
     eventsNew: fresh.length,
+    eventsForeign: fetched.events.length - own.length,
     truncated: fetched.truncated,
   };
 };

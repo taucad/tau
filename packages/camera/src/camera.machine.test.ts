@@ -28,6 +28,7 @@ describe('cameraMachine', () => {
 
     expect(selectCameraProjection(actor.getSnapshot())).toEqual({ kind: 'perspective', verticalFieldOfView: 60 });
     expect(Object.keys(machineModule).sort()).toEqual([
+      'cameraIgnoredEvents',
       'cameraMachine',
       'selectCameraDriverSnapshot',
       'selectCameraProjection',

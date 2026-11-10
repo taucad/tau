@@ -394,6 +394,19 @@ export class MetricsService {
     unit: TauMetrics.agentCompactions.unit,
   });
 
+  public readonly agentPrefixBreaks = this.clientMeter.createCounter(TauMetrics.agentPrefixBreaks.name, {
+    description: TauMetrics.agentPrefixBreaks.description,
+    unit: TauMetrics.agentPrefixBreaks.unit,
+  });
+
+  public readonly agentReasoningOmittedBlocks = this.clientMeter.createCounter(
+    TauMetrics.agentReasoningOmittedBlocks.name,
+    {
+      description: TauMetrics.agentReasoningOmittedBlocks.description,
+      unit: TauMetrics.agentReasoningOmittedBlocks.unit,
+    },
+  );
+
   // --- Client-reported: agent context ---
 
   public readonly agentCallsBeforeFirstWrite = this.clientMeter.createHistogram(

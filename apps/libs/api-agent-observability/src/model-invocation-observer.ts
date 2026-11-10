@@ -10,6 +10,7 @@ const supplierRefusals = new Set([
   'PROVIDER_UNAVAILABLE',
   'PROVIDER_ACCOUNT_EXHAUSTED',
   'UPSTREAM_REJECTED',
+  'REASONING_REPLAY_REJECTED',
 ]);
 
 /** The stable code of a gateway refusal, as its envelope carries it. */

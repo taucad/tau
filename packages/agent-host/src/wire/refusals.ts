@@ -233,6 +233,13 @@ export const refusals = {
    * balance in question. Neither another model nor signing in changes it; the card points to support.
    */
   BILLING_ACCOUNT_RESTRICTED: { owner: 'gateway', retry: 'never' },
+  /**
+   * The provider refused native reasoning replayed from an earlier turn (HTTP 502): Anthropic binds a thinking
+   * signature to everything sent before it. Resuming re-sends the same history and meets the same refusal, so the card
+   * offers another model instead. A request built under the prefix stamp never replays stale reasoning, so one of
+   * these is a defect to count, not a state to recover from.
+   */
+  REASONING_REPLAY_REJECTED: { owner: 'gateway', retry: 'never' },
 
   // ── transport: the host's gateway client ────────────────────────────────────────────────────
   MODEL_PROVIDER_UNSUPPORTED: { owner: 'transport', retry: 'never' },

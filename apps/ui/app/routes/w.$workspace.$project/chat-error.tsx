@@ -474,6 +474,21 @@ function codedErrorCard({
     );
   }
 
+  /* The provider refused reasoning replayed from earlier in the chat. The same history meets the same refusal on this
+   * model, so the card offers the switch, as for a paused route; the provider's sentence stays in Tau Debug. */
+  if (code === 'REASONING_REPLAY_REJECTED') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='This model cannot continue this chat'
+        reason='The model provider refused reasoning from earlier in this chat. Switch to another model to continue.'
+        resumable={false}
+        canSwitchModel
+        raw={codedRefusalRaw(error, rawDetail)}
+      />
+    );
+  }
+
   // Spending on the account is held (W11a): the account's, not the route's, so neither Resume nor another model helps.
   if (category === 'accountRestricted') {
     return <ChatErrorAccountRestricted className={className} raw={codedRefusalRaw(error, rawDetail)} />;

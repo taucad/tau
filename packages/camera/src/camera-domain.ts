@@ -93,14 +93,16 @@ export type CameraHandoffOptions = Readonly<{
 
 type MutableVector = [number, number, number];
 
-const assertFinite = (value: number, label: string): number => {
+/** Shared with the camera machine; not part of the package root. @internal */
+export const assertFinite = (value: number, label: string): number => {
   if (!Number.isFinite(value)) {
     throw new RangeError(`${label} must be finite.`);
   }
   return value;
 };
 
-const assertPositive = (value: number, label: string): number => {
+/** Shared with the camera machine; not part of the package root. @internal */
+export const assertPositive = (value: number, label: string): number => {
   assertFinite(value, label);
   if (value <= 0) {
     throw new RangeError(`${label} must be greater than zero.`);
@@ -116,7 +118,8 @@ const assertVerticalFieldOfView = (verticalFieldOfView: number): number => {
   return verticalFieldOfView;
 };
 
-const vector = (value: CameraVector, label: string): MutableVector => [
+/** Shared with the camera machine; not part of the package root. @internal */
+export const vector = (value: CameraVector, label: string): MutableVector => [
   assertFinite(value[0], `${label}[0]`),
   assertFinite(value[1], `${label}[1]`),
   assertFinite(value[2], `${label}[2]`),
@@ -139,7 +142,8 @@ const cross = (left: CameraVector, right: CameraVector): MutableVector => [
 
 const magnitude = (value: CameraVector): number => Math.hypot(value[0], value[1], value[2]);
 
-const normalize = (value: CameraVector, label: string): MutableVector => {
+/** Shared with the camera machine; not part of the package root. @internal */
+export const normalize = (value: CameraVector, label: string): MutableVector => {
   const length = magnitude(value);
   if (length === 0 || !Number.isFinite(length)) {
     throw new RangeError(`${label} must have non-zero length.`);
@@ -152,6 +156,53 @@ const cameraBasis = (view: Pick<CameraView, 'direction' | 'up'>) => {
   const right = normalize(cross(view.up, direction), 'direction and up cross product');
   const up = normalize(cross(direction, right), 'camera up');
   return { direction, right, up };
+};
+
+const cameraUpParallelEpsilon = 1e-8;
+
+/** Options for {@link resolveCameraUp}. @public */
+export type CameraUpOptions = Readonly<{
+  /** Target-to-camera direction; it need not be normalized. */
+  direction: CameraVector;
+  /** The up axis to keep when it is not parallel to the direction. */
+  preferredUp: CameraVector;
+  /** Tried when the preferred axis is parallel to the direction. */
+  fallbackUp?: CameraVector;
+  /** The host's default up axis, tried after the fallback. Defaults to `[0, 1, 0]`. */
+  defaultUp?: CameraVector;
+}>;
+
+/**
+ * Preserves the preferred up axis unless it is parallel to the view direction.
+ *
+ * Candidates are tried in order: `preferredUp`, `fallbackUp`, `defaultUp`, then the X axis. A candidate is taken when
+ * it has length and is not parallel to the direction. With no usable candidate, such as a zero direction, the result
+ * is `[0, 1, 0]`.
+ *
+ * @param options - Direction and candidate up axes.
+ * @returns A unit up vector that is not parallel to the direction.
+ * @public
+ */
+export const resolveCameraUp = ({
+  direction,
+  preferredUp,
+  fallbackUp,
+  defaultUp = [0, 1, 0],
+}: CameraUpOptions): CameraVector => {
+  const reciprocal = 1 / (Math.sqrt(dot(direction, direction)) || 1);
+  const unit: CameraVector = [direction[0] * reciprocal, direction[1] * reciprocal, direction[2] * reciprocal];
+  for (const candidate of [preferredUp, fallbackUp, defaultUp, [1, 0, 0]] as const) {
+    if (candidate === undefined) {
+      continue;
+    }
+    const lengthSquared = dot(candidate, candidate);
+    const crossed = cross(unit, candidate);
+    if (lengthSquared > 0 && dot(crossed, crossed) > cameraUpParallelEpsilon) {
+      const scale = 1 / Math.sqrt(lengthSquared);
+      return [candidate[0] * scale, candidate[1] * scale, candidate[2] * scale];
+    }
+  }
+  return [0, 1, 0];
 };
 
 const boundsCorners = (bounds: CameraBounds): CameraVector[] => {

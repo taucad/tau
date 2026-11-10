@@ -1,0 +1,52 @@
+{
+  "actions": {
+    "camera.frame#0": "Changed",
+    "camera.frameBounds#0": "Changed",
+    "camera.frameGeometry#0": "Changed",
+    "camera.input.dragging.adoptPersistedPose#0": "Observe",
+    "camera.input.dragging.interactionEnded#0": "InteractionEnded",
+    "camera.input.dragging.poseObserved#0": "EchoObserved",
+    "camera.input.dragging.poseObserved#1": "PoseObserved",
+    "camera.input.dragging.setView#0": "PoseObserved",
+    "camera.input.idle.adoptPersistedPose#0": "Observe",
+    "camera.input.idle.poseObserved#0": "EchoObserved",
+    "camera.input.idle.poseObserved#1": "PoseObserved",
+    "camera.input.idle.setView#0": "PoseObserved",
+    "camera.input.settling.adoptPersistedPose#0": "Observe",
+    "camera.input.settling.poseObserved#0": "EchoObserved",
+    "camera.input.settling.poseObserved#1": "PoseObserved",
+    "camera.input.settling.setView#0": "PoseObserved",
+    "camera.input.settling.xstate.after#0": "SettleElapsed",
+    "camera.setBounds#0": "Changed",
+    "camera.setUpDirection#0": "Changed",
+    "camera.setVerticalFieldOfView#0": "Changed",
+    "camera.setViewport#0": "Changed"
+  },
+  "alphabet": [
+    "adoptPersistedPose",
+    "frame",
+    "frameBounds",
+    "frameGeometry",
+    "interactionEnded",
+    "interactionStarted",
+    "poseObserved",
+    "setBounds",
+    "setClipPolicy",
+    "setRenderFrame",
+    "setUpDirection",
+    "setVerticalFieldOfView",
+    "setView",
+    "setViewport"
+  ],
+  "specs": {
+    "CameraAuthority.tla": "06d3ea7bd02b7c013459cb558d0b697b4970de8f48754cd4d5f9600270a1fa50"
+  },
+  "tables": {
+    "CameraAuthority.export.cfg": "c6c84e03505b8bda410364bafe73cff1d8a7ea900dd93386df605a83375596da",
+    "CameraAuthority.target.cfg": "84798d0871d83a924edf4fad071b78cf37c998eddc329cf69d1bcbee4f5aa19f",
+    "expected.json": "a40ebf1e3cdb1bda4d5d0c40be47a96ca9521781697773e8ef1922051cdc619e"
+  },
+  "versions": {
+    "camera": "1"
+  }
+}

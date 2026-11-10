@@ -5132,6 +5132,9 @@ importers:
 
   packages/camera:
     devDependencies:
+      '@taucad/formal':
+        specifier: workspace:*
+        version: link:../../tools/formal
       '@taucad/xstate-testing':
         specifier: workspace:*
         version: link:../../libs/xstate-testing

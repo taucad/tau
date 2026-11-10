@@ -2,7 +2,7 @@
 
 Renderer-neutral camera state, framing, and projection logic for CAD viewers.
 
-The package root contains data types and math. Importing `@taucad/camera` does not load XState. The optional `@taucad/camera/machine` subpath exports one machine, `cameraMachine`, for headless or renderer-driven use.
+The package root contains data types and math. Importing `@taucad/camera` does not load XState. The optional `@taucad/camera/machine` subpath exports one machine, `cameraMachine`, and its composition root, `createCameraActor`, for headless or renderer-driven use.
 
 ## Camera view or camera state
 
@@ -57,5 +57,52 @@ camera.stop();
 ```
 
 Projection changes are immediate. Hosts may animate their input values before sending them and subscribe a renderer adapter to the actor. Snapshots contain only serializable camera data.
+
+### Where a change came from
+
+Every change bumps `context.revision` once and records its source in `context.lastChange`:
+
+| Source               | Event                                               | Made by        |
+| -------------------- | --------------------------------------------------- | -------------- |
+| `input`, `gizmo`     | `poseObserved`                                      | a person       |
+| `fov`, `up`          | `setVerticalFieldOfView`, `setUpDirection`          | a person       |
+| `fit`, `focus`       | `frameGeometry` with `source: 'fit'`, `frameBounds` | a person       |
+| `framing`            | `frameGeometry` with `source: 'framing'`            | the viewer     |
+| `viewport`, `bounds` | `setViewport`, `setBounds`                          | the viewer     |
+| `persisted`          | `adoptPersistedPose`                                | a saved record |
+
+The actor emits `viewChanged` with the revision, the source and the visible span for each change. `setRenderFrame` and `setClipPolicy` change how a driver presents the pose, not the pose, so they synchronize the driver without a revision.
+
+### Gestures and saved poses
+
+The actor tracks the person's gesture in its `input` state. Send `interactionStarted` and `interactionEnded` around a drag and `poseObserved` for each pose the controls report:
+
+- A pose of a held gesture puts the camera in `input.dragging`. `interactionEnded` moves it to `input.settling`.
+- A pose with no held gesture, such as a wheel step or damping after a release, puts the camera in `input.settling` and restarts the settle window.
+- After `cameraPoseSettleMilliseconds` (250 ms) with no further pose, the camera returns to `input.idle`.
+
+`adoptPersistedPose` applies a saved record's pose, orientation, field of view or up direction only in `input.idle`, as one change, and emits `adoptionApplied`. While the person drags or the camera settles, the record is dropped and the actor emits `adoptionDropped`. It is never queued, so the person's pose wins.
+
+A controls update that a driver synchronization caused carries `echoRevision` on `poseObserved`. The camera ignores it.
+
+### Refused events
+
+A payload the camera cannot use, such as a non-finite field of view, a zero-sized viewport, inverted bounds, a zero or parallel direction or a margin above 0.5, is refused. The actor stays active on its last valid view and `snapshot.can(event)` answers `false`. To observe refusals, create the actor with `createCameraActor`, which reports each one to `onRejectedEvent` with the reason `refusedPayload`, next to XState's own dead letters:
+
+```ts
+import { cameraMachine, createCameraActor } from '@taucad/camera/machine';
+
+const camera = createCameraActor({
+  machine: cameraMachine,
+  input: { initialView },
+  onRejectedEvent: ({ event, reason }) => console.warn(`camera refused ${event.type}: ${reason}`),
+}).start();
+```
+
+`createCameraActor` also forwards `clock` and `inspect`, so a test can step the settle window on a simulated clock.
+
+### Up direction
+
+`resolveCameraUp({ direction, preferredUp, fallbackUp })` from the package root keeps the preferred up axis unless it is parallel to the view direction, then tries the fallback, the default up and the x axis in turn. `setUpDirection` uses it.
 
 Runtime support: Node.js 24 or newer and modern browsers. `xstate` 6 (`^6.0.0-alpha.59`) is an optional peer dependency, needed only for `@taucad/camera/machine`. This package is Apache-2.0 licensed; its implementation was authored for Tau and does not include copied Three.js source.

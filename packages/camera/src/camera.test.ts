@@ -1,3 +1,4 @@
+import * as fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import * as cameraModule from '#index.js';
 
@@ -13,6 +14,7 @@ import {
   perspectiveVerticalSpan,
   resolveCameraFrame,
   resolveCameraState,
+  resolveCameraUp,
 } from '#camera-domain.js';
 
 const bounds = {
@@ -90,6 +92,7 @@ describe('@taucad/camera', () => {
       'maximumProjectedPixelDelta',
       'perspectiveVerticalSpan',
       'resolveCameraState',
+      'resolveCameraUp',
     ]);
   });
 
@@ -344,5 +347,73 @@ describe('@taucad/camera', () => {
         8,
       );
     }
+  });
+});
+
+describe('resolveCameraUp', () => {
+  it('should keep the preferred up, normalized, when it is not parallel to the direction', () => {
+    expect(resolveCameraUp({ direction: [1, 1, 1], preferredUp: [0, 0, 2] })).toEqual([0, 0, 1]);
+  });
+
+  it.each([
+    ['along', [0, 0, 5]],
+    ['against', [0, 0, -5]],
+  ] as const)(
+    'should fall back to the fallback up when the preferred up runs %s the direction',
+    (_label, direction) => {
+      expect(resolveCameraUp({ direction, preferredUp: [0, 0, 1], fallbackUp: [0, 3, 0] })).toEqual([0, 1, 0]);
+    },
+  );
+
+  it('should fall back to the default up when the preferred up is parallel and no fallback is given', () => {
+    expect(resolveCameraUp({ direction: [0, 0, 1], preferredUp: [0, 0, 1] })).toEqual([0, 1, 0]);
+    const diagonal = resolveCameraUp({ direction: [0, 0, 1], preferredUp: [0, 0, 1], defaultUp: [1, 1, 0] });
+    expect(diagonal[0]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(diagonal[1]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(diagonal[2]).toBe(0);
+  });
+
+  it('should fall back to the x axis when the default up is parallel too', () => {
+    expect(resolveCameraUp({ direction: [0, 1, 0], preferredUp: [0, 2, 0], fallbackUp: [0, -1, 0] })).toEqual([
+      1, 0, 0,
+    ]);
+  });
+
+  it('should skip a zero-length candidate', () => {
+    expect(resolveCameraUp({ direction: [1, 0, 0], preferredUp: [0, 0, 0], fallbackUp: [0, 0, 4] })).toEqual([0, 0, 1]);
+  });
+
+  it('should return a unit candidate that is never parallel to the direction', () => {
+    const coordinate = fc.double({ min: -1000, max: 1000, noNaN: true });
+    const vector = fc.tuple(coordinate, coordinate, coordinate);
+    const unitOf = (value: readonly [number, number, number]): readonly [number, number, number] => {
+      const length = Math.sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+      return [value[0] / length, value[1] / length, value[2] / length];
+    };
+    fc.assert(
+      fc.property(
+        vector.filter((value) => Math.hypot(...value) > 1e-3),
+        vector,
+        fc.option(vector, { nil: undefined }),
+        (direction, preferredUp, fallbackUp) => {
+          const up = resolveCameraUp({ direction, preferredUp, fallbackUp });
+          const unit = unitOf(direction);
+          const crossed = [
+            unit[1] * up[2] - unit[2] * up[1],
+            unit[2] * up[0] - unit[0] * up[2],
+            unit[0] * up[1] - unit[1] * up[0],
+          ] as const;
+          const candidates = [preferredUp, fallbackUp, [0, 1, 0] as const, [1, 0, 0] as const]
+            .filter((candidate) => candidate !== undefined && Math.hypot(...candidate) > 0)
+            .map((candidate) => unitOf(candidate!));
+
+          expect(Math.hypot(...up)).toBeCloseTo(1, 12);
+          expect(Math.hypot(...crossed)).toBeGreaterThan(0);
+          expect(
+            candidates.some((candidate) => candidate.every((value, axis) => Math.abs(value - up[axis]!) < 1e-12)),
+          ).toBe(true);
+        },
+      ),
+    );
   });
 });

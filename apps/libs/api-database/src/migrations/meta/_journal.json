@@ -477,6 +477,13 @@
       "when": 1794312915029,
       "tag": "0068_agent_evidence_erasure_accepted",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794314005846,
+      "tag": "0069_agent_evidence_outbox_object",
+      "breakpoints": true
     }
   ]
 }

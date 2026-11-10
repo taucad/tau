@@ -5,7 +5,10 @@ import type { ModelProviderWire } from '@taucad/api-llm-gateway';
 /** The contract's provider summary fact. */
 export type ProviderFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'provider' };
 
-/** What the relayed bytes said about the attempt. No generated text is kept. */
+/**
+ * What the relayed bytes said about the attempt. No generated text is kept. `usage.input` is the uncached prompt tokens
+ * on every wire; cache reads and writes are their own counts.
+ */
 export type ProviderStreamSummary = Readonly<{
   stop: ProviderFact['stop'] | undefined;
   usage: ProviderFact['usage'];
@@ -30,6 +33,14 @@ const field = (value: unknown, ...path: readonly string[]): unknown => {
   }
   return current;
 };
+/**
+ * The prompt tokens that were not read from the cache. The OpenAI-style wires count cached tokens inside their prompt
+ * total, while Anthropic's `input_tokens` already excludes cache reads and writes; subtracting here gives `usage.input`
+ * one meaning on every wire (LF-33).
+ */
+type Tokens = ProviderFact['usage']['input'];
+const uncached = (prompt: Tokens, cached: Tokens): Tokens =>
+  prompt === null ? null : Math.max(0, prompt - (cached ?? 0));
 const identifier = (value: unknown): string | undefined =>
   typeof value === 'string' && /^[\w:.-]{1,128}$/u.test(value) ? value : undefined;
 
@@ -216,9 +227,8 @@ export class ProviderStreamFacts {
           : 'stop';
     }
     const usage = field(response, 'usage');
-    const input = count(field(usage, 'input_tokens'));
     const cached = count(field(usage, 'input_tokens_details', 'cached_tokens'));
-    this.usage.input = input;
+    this.usage.input = uncached(count(field(usage, 'input_tokens')), cached);
     this.usage.cacheRead = cached;
     this.usage.output = count(field(usage, 'output_tokens'));
     this.usage.reasoning = count(field(usage, 'output_tokens_details', 'reasoning_tokens'));
@@ -238,9 +248,10 @@ export class ProviderStreamFacts {
     }
     const usage = field(frame, 'usage');
     if (usage !== undefined && usage !== null) {
-      this.usage.input = count(field(usage, 'prompt_tokens'));
+      const cached = count(field(usage, 'prompt_tokens_details', 'cached_tokens'));
+      this.usage.input = uncached(count(field(usage, 'prompt_tokens')), cached);
       this.usage.output = count(field(usage, 'completion_tokens'));
-      this.usage.cacheRead = count(field(usage, 'prompt_tokens_details', 'cached_tokens'));
+      this.usage.cacheRead = cached;
       this.usage.reasoning = count(field(usage, 'completion_tokens_details', 'reasoning_tokens'));
     }
   }

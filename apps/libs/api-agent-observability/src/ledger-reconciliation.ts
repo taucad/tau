@@ -1,5 +1,5 @@
 import { contractId } from '@taucad/agent-observability/identity';
-import { observationGroup, observationMapperVersion } from '#langfuse-observation.js';
+import { observationGroup, settlementMappers } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
 import { creditsOfAtoms } from '#settlement-evidence.js';
 
@@ -75,26 +75,22 @@ export const reconcileLedger = async (
       }),
     ),
   );
-  /* One settlement is one fact: a replay or another projector version of it names the same source. */
+  /* One settlement is one ledger id: a replay, or the same settlement under v4.3 and v5, is counted once. */
   const observed = new Map<string, number>();
-  const sources = new Set<string>();
   for (const { metadata = {} } of rows) {
-    const source = text(metadata, 'source');
     const ledger = text(metadata, 'fact.ledger');
     const value = metadata['fact.credits'];
     /* Langfuse returns a number, or a numeric string for some stored values; anything else carries no charge. */
     const credits = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
     if (
-      text(metadata, 'mapper') === observationMapperVersion &&
+      settlementMappers.has(text(metadata, 'mapper') ?? '') &&
       text(metadata, 'authority') === 'api-reported' &&
-      text(metadata, 'family') === 'financial' &&
-      source !== undefined &&
-      !sources.has(source) &&
+      text(metadata, 'fact.kind') === 'financial' &&
       ledger !== undefined &&
+      !observed.has(ledger) &&
       typeof credits === 'number' &&
       Number.isFinite(credits)
     ) {
-      sources.add(source);
       observed.set(ledger, atomsOf(credits));
     }
   }

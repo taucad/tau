@@ -186,8 +186,12 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(await eraseProject(projectId)).toMatchObject({ fenced: 1, traces: 0 });
 
     await expect(
-      prepareSend(database, { receiptId, owner: 'worker-a' }, { traceId: 'b'.repeat(32), observedAt: new Date() }),
-    ).resolves.toBe(false);
+      prepareSend(
+        database,
+        { receiptId, owner: 'worker-a' },
+        { traceId: 'b'.repeat(32), objectId: 'b'.repeat(16), observedAt: new Date() },
+      ),
+    ).resolves.toBe('lost');
   });
 
   it('should keep an account erasure journal through the account cascade', async () => {
@@ -352,7 +356,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'purged' });
       expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'reaped' });
       /* Every state is sampled each pass, so a drained one reads zero rather than its last value. */
-      expect(metrics.agentEvidenceBacklogRows.record).toHaveBeenCalledTimes(2 * 6);
+      expect(metrics.agentEvidenceBacklogRows.record).toHaveBeenCalledTimes(2 * 7);
       expect(metrics.agentEvidenceBacklogHeldBytes.record).toHaveBeenCalledTimes(2);
       expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalled();
       expect(metrics.agentEvidencePasses.add).toHaveBeenCalledWith(1, { 'tau.worker': 'lifecycle', outcome: 'ok' });

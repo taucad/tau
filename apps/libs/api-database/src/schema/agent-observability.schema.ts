@@ -76,7 +76,7 @@ export const agentEvidenceOutbox = pgTable(
       .primaryKey()
       .references(() => agentEvidenceReceipt.id, { onDelete: 'cascade' }),
     state: text('state')
-      .$type<'pending' | 'sending' | 'confirmed' | 'uncertain' | 'rejected' | 'expired'>()
+      .$type<'pending' | 'sending' | 'confirmed' | 'uncertain' | 'rejected' | 'expired' | 'superseded'>()
       .default('pending')
       .notNull(),
     keyVersion: integer('key_version').notNull(),
@@ -86,8 +86,14 @@ export const agentEvidenceOutbox = pgTable(
     leaseOwner: text('lease_owner'),
     /** A lease's end while `sending` or reconciling; otherwise when the row is next due. */
     leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
-    /** Langfuse trace id of the observation once sent; with the receipt it names the span (T08). */
+    /** Langfuse trace id of the observation once sent (T08). */
     traceId: text('trace_id'),
+    /**
+     * The Langfuse observation id the receipt writes, set with the trace id before its send. It derives from the fact,
+     * not the receipt, and is unique, so a second receipt for one object settles `superseded` instead of writing it
+     * again (LD12); reconciliation reads it here because the payload is gone by then.
+     */
+    objectId: text('object_id'),
     /** The observation's start time, the lower bound of a reconciliation read. */
     observedAt: timestamp('observed_at', { withTimezone: true }),
     /** When the last send began; a reconciliation gap is measured from it. */
@@ -104,6 +110,7 @@ export const agentEvidenceOutbox = pgTable(
   (table) => [
     index('agent_evidence_outbox_dispatch_idx').on(table.state, table.leaseExpiresAt),
     index('agent_evidence_outbox_expiry_idx').on(table.expiresAt),
+    uniqueIndex('agent_evidence_outbox_object_idx').on(table.objectId),
   ],
 );
 

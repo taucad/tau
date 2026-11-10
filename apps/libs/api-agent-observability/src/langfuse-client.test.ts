@@ -1,16 +1,21 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { evidenceFixture } from '#testing/evidence.fixture.js';
+import { evidenceFixture, toolFact } from '#testing/evidence.fixture.js';
 import { classifySendError, classifySendResponse, LangfuseClient } from '#langfuse-client.js';
 import { langfuseObservation, pseudonymKey } from '#langfuse-observation.js';
 
 const target = { baseUrl: 'https://langfuse.test.invalid', publicKey: 'pk-test', secretKey: 'sk-test' };
-const span = async () =>
-  langfuseObservation(
-    await evidenceFixture(),
-    { environment: 'test', receipt: 'evr_1', protection: 'free' },
+const span = async () => {
+  const observation = langfuseObservation(
+    await evidenceFixture({ fact: toolFact() }),
+    { environment: 'test', protection: 'free' },
     pseudonymKey(Uint8Array.from(randomBytes(32))),
   );
+  if (observation === undefined) {
+    throw new Error('a tool fact maps to an object');
+  }
+  return observation;
+};
 
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -53,7 +58,7 @@ describe('LangfuseClient', () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(207, { name: 'otel-ingestion-job' }));
     const observation = await span();
 
-    await expect(new LangfuseClient(target, 1000, fetcher).send(observation.span)).resolves.toEqual({
+    await expect(new LangfuseClient(target, 1000, fetcher).send(observation.spans)).resolves.toEqual({
       kind: 'accepted',
     });
     const [url, init] = fetcher.mock.calls[0]!;
@@ -63,14 +68,16 @@ describe('LangfuseClient', () => {
       'x-langfuse-ingestion-version': '4',
     });
     expect(init?.redirect).toBe('error');
+    const body = JSON.parse(init?.body as string) as { resourceSpans: [{ scopeSpans: [{ spans: unknown[] }] }] };
+    expect(body.resourceSpans[0].scopeSpans[0].spans).toHaveLength(1);
   });
 
   it('should answer uncertain, never not-sent, when the request times out after connecting', async () => {
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new DOMException('late', 'TimeoutError'));
 
-    const { span: observation } = await span();
+    const { spans } = await span();
 
-    await expect(new LangfuseClient(target, 1000, fetcher).send(observation)).resolves.toEqual({
+    await expect(new LangfuseClient(target, 1000, fetcher).send(spans)).resolves.toEqual({
       kind: 'uncertain',
       reason: 'timeout',
     });
@@ -99,14 +106,23 @@ describe('LangfuseClient', () => {
     ).resolves.toBe('unavailable');
   });
 
-  it('should read only Tau observations and their metadata, and call a cut-short read partial', async () => {
+  it('should read only settlement observations and their metadata, and call a cut-short read partial', async () => {
     const window = { environment: 'synthetic', from: new Date(0), to: new Date(1000) };
-    const tau = { id: 's1', name: 'tau.tool', startTime: '1970-01-01T00:00:00.000Z', metadata: { family: 'tool' } };
+    const tau = {
+      id: 's1',
+      name: 'tau.financial',
+      startTime: '1970-01-01T00:00:00.000Z',
+      metadata: { 'fact.kind': 'financial' },
+    };
+    /* Every other name, Tau's or not, is left unread: the Langfuse dashboards score runs (LQ10). */
+    const others = ['tau.tool', 'tau.outcome', 'call-tool', 'run-cad-agent', 'checkout'].map((name) => ({
+      ...tau,
+      id: name,
+      name,
+    }));
     const paged = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        json(200, { data: [tau, { ...tau, id: 'other', name: 'checkout' }], meta: { cursor: 'next' } }),
-      )
+      .mockResolvedValueOnce(json(200, { data: [tau, ...others], meta: { cursor: 'next' } }))
       .mockResolvedValueOnce(json(200, { data: [{ ...tau, id: 's2' }], meta: {} }));
     const client = (fetcher: typeof fetch) => new LangfuseClient(target, 1000, fetcher);
 

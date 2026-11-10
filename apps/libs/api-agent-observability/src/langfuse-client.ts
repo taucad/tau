@@ -1,6 +1,6 @@
 import type { ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
-import { otlpBody } from '#langfuse-observation.js';
+import { otlpBody, settlementObservationName } from '#langfuse-observation.js';
 
 /** Where and as whom the API writes to one Langfuse project. Server-side only. */
 export type LangfuseTarget = Readonly<{ baseUrl: string; publicKey: string; secretKey: string }>;
@@ -122,15 +122,16 @@ const observationsUrl = (target: LangfuseTarget, query: Readonly<Record<string, 
  * Langfuse v4 ingestion and read-back for agent evidence. It never logs or
  * returns request or response bodies: the span carries customer content.
  */
-/* Only Tau's own observations, by the names the mapper gives them; anything else in the project is not read. */
+/*
+ * Only Tau's settlements, by the one name v4.3 and v5 share; every other observation is left unread, since the Langfuse
+ * dashboards score runs (LQ10) and no interval list is ever read back (LF-31).
+ */
 const observationRow = (item: unknown): LangfuseObservationRow[] => {
   const id = field(item, 'id');
-  const name = field(item, 'name');
   const startTime = field(item, 'startTime');
   const metadata = field(item, 'metadata');
   return typeof id === 'string' &&
-    typeof name === 'string' &&
-    name.startsWith('tau.') &&
+    field(item, 'name') === settlementObservationName &&
     typeof startTime === 'string' &&
     typeof metadata === 'object' &&
     metadata !== null
@@ -146,13 +147,13 @@ export class LangfuseClient {
   ) {}
 
   /**
-   * Send one complete observation.
+   * Send one receipt's complete observation, in one request.
    *
-   * @param span - The observation for one receipt.
+   * @param spans - The spans one receipt writes, its object first.
    * @param signal - Aborts the request on shutdown; an abort is uncertain.
    * @returns What the attempt established.
    */
-  public async send(span: OtlpSpan, signal?: AbortSignal): Promise<SendOutcome> {
+  public async send(spans: readonly OtlpSpan[], signal?: AbortSignal): Promise<SendOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
     try {
       const response = await this.fetcher(new URL('/api/public/otel/v1/traces', this.target.baseUrl), {
@@ -162,7 +163,7 @@ export class LangfuseClient {
           'content-type': 'application/json',
           'x-langfuse-ingestion-version': '4',
         },
-        body: otlpBody(span),
+        body: otlpBody(spans),
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });

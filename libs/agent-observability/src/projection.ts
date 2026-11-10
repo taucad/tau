@@ -1,5 +1,9 @@
 import { externalToolName, refusalOf, tauToolEvidence } from '@taucad/agent-host/wire';
 import type { Evidence } from '#contract.js';
+import { evidenceLimits } from '#contract.js';
+import { contentRedactor } from '#content-redaction.js';
+import { contentScales, rootContent, sectionCoverage, toolContent } from '#host-content.js';
+import type { CheckLine, ContentScale, DesignReader } from '#host-content.js';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#identity.js';
 
 /*
@@ -7,9 +11,17 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#ident
  *
  * Turns what a chat's committed rows say about a run into summary evidence the
  * API admits: one `tool` fact per settled tool call, one `cad` fact per settled
- * `test_model` check (T12) and one `outcome` fact per ended run. It reads facts only, never message content, and every value it
- * writes is derived from committed rows, so any device or replay that reads
- * the same rows writes byte-identical evidence and the API counts it once.
+ * `test_model` check (T12) and one `outcome` fact per ended run. Every value it
+ * writes is derived from committed rows (and, for a run's design, from its final
+ * revision), so any device or replay that reads the same rows writes
+ * byte-identical evidence and the API counts it once.
+ *
+ * Under the summary grant it writes facts only, never message content. Under
+ * the content grant (LW6) a tool fact and an outcome fact are written as
+ * content envelopes instead: the same fact and source, with a tool's arguments
+ * and result, or the run's message, reply, design and check lines, redacted and
+ * capped at the source. A fact from before the content grant, and content that
+ * cannot fit an envelope, is written as its summary.
  *
  * One fact is not from rows: a `response` fact for the moment this device's
  * UI first showed a run's model text (T10). It is an interaction of this
@@ -42,6 +54,9 @@ export type ProjectedRun = Readonly<{
       settledAt: number | undefined;
       /** The gateway attempt id of the generation that issued the call, as the host sent it in `x-tau-attempt-id`. */
       modelCall?: string | undefined;
+      /** The call's arguments and first committed result, when the host read content (LW6). */
+      arguments?: unknown;
+      result?: unknown;
       /** A settled `test_model` call's check: its decided status and the file keys of what it checked. */
       check?:
         | Readonly<{
@@ -70,6 +85,14 @@ export type ProjectedRun = Readonly<{
   sources?: readonly ProjectedSource[];
   /** When this device's UI first showed the run's model text, if it was watching while the run streamed. */
   presentedAt?: number;
+  /** The revision the run's turn wrote, how many files it changed, and how many Tau runs came before it. */
+  finalRevision?: string | undefined;
+  filesChanged?: number | undefined;
+  priorTurns?: number | undefined;
+  /** The model calls the run prepared. */
+  invocations?: ReadonlyArray<Readonly<{ purpose: string; modelId: string }>> | undefined;
+  /** This turn's message, the final reply and the changed paths, when the host read content (LW6). */
+  content?: Readonly<{ prompt: unknown; reply: unknown; changedPaths: readonly string[] }> | undefined;
   /** The account's rating of the run's reply on this device, the first one given (T12). */
   rating?: Readonly<{ value: 'positive' | 'negative'; at: number }>;
 }>;
@@ -98,6 +121,14 @@ export type ProjectionContext = Readonly<{
   toolClass?: (toolName: string) => ToolFact['toolClass'];
   /** The plane, and so the purpose, this projection writes for; each answers to its own grant. `summary` when absent. */
   plane?: 'summary' | 'feedback';
+  /**
+   * The content grant, when the server's answer allows `content` for this account and project too (LW6, rule 5):
+   * from `since`, a tool or outcome fact is written with its content. `design` reads the changed model files at the
+   * run's final revision; without it a root records no design.
+   */
+  content?: Readonly<{ since: number; design?: DesignReader | undefined }> | undefined;
+  /** What kind of host this is, written on each outcome. */
+  host?: 'browser' | 'desktop' | 'cloud' | 'cli' | undefined;
 }>;
 
 /**
@@ -190,7 +221,11 @@ type Candidate =
       occurredAt: number;
       events: Evidence['coverage']['events'];
       intervals: Evidence['clocks']['intervals'];
+      /** The fact's content at one scale, when the content grant covers it. */
+      content?: ((scale: ContentScale) => Promise<Readonly<{ input: MaybeSection; output: MaybeSection }>>) | undefined;
     }>;
+
+type MaybeSection = Extract<Evidence['payload'], { plane: 'content' }>['input'];
 
 const rowPosition = (source: ProjectedSource): string => `${source.leaderEpoch}:${source.sequence}`;
 
@@ -198,11 +233,25 @@ const rowPosition = (source: ProjectedSource): string => `${source.leaderEpoch}:
 const rowDigest = async (source: ProjectedSource): Promise<string> =>
   sha256Hex(canonicalEvidence(['host-row', source.chatId, source.leaderEpoch, source.sequence]));
 
+/** What one envelope carries: the summary or feedback fact, or the fact with its content and its coverage. */
+type Carried = Readonly<{
+  payload: Evidence['payload'];
+  redactor: string;
+  input: Evidence['coverage']['input'];
+  output: Evidence['coverage']['output'];
+}>;
+
 const envelope = async (
   context: ProjectionContext,
   run: ProjectedRun,
-  item: Exclude<Candidate, 'pending'>,
+  item: Exclude<Candidate, 'pending'> & Readonly<{ carried?: Carried | undefined }>,
 ): Promise<Evidence> => {
+  const carried = item.carried ?? {
+    payload: item.payload,
+    redactor: 'summary-only',
+    input: 'omitted',
+    output: 'omitted',
+  };
   const [chat, leaderEpoch, runId] = await Promise.all([
     contractId('chat', run.chatId),
     contractId('epoch', item.source.leaderEpoch),
@@ -240,7 +289,7 @@ const envelope = async (
         ? { kind: 'row', chat, leaderEpoch, sequence: item.source.sequence, digest: sourceDigest }
         : { kind: 'interaction', interaction: item.interaction, digest: sourceDigest },
     semantic: { kind: item.payload.fact.kind, id: item.semantic },
-    projection: { version: hostTurnMapper, redactor: 'summary-only', digest: '0'.repeat(64) },
+    projection: { version: hostTurnMapper, redactor: carried.redactor, digest: '0'.repeat(64) },
     delivery: {
       uploader: context.uploader,
       attempt: 'host-1',
@@ -276,15 +325,54 @@ const envelope = async (
     lineage,
     coverage: {
       events: item.events,
-      input: 'omitted',
-      output: 'omitted',
+      input: carried.input,
+      output: carried.output,
       usage: 'unsupported',
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: item.payload,
+    payload: carried.payload,
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
+};
+
+/**
+ * One fact's envelope: with its content when the content grant covers it and some scale of it fits the contract's
+ * envelope, else its summary. The content shares the summary's fact, and so its source (LW3).
+ */
+const projectedEnvelope = async (
+  context: ProjectionContext,
+  run: ProjectedRun,
+  item: Exclude<Candidate, 'pending'>,
+): Promise<Evidence> => {
+  const grant = context.content;
+  if (
+    item.content === undefined ||
+    grant === undefined ||
+    item.occurredAt < grant.since ||
+    item.payload.plane !== 'summary'
+  ) {
+    return envelope(context, run, item);
+  }
+  const { fact } = item.payload;
+  for (const scale of contentScales) {
+    // oxlint-disable-next-line no-await-in-loop -- at most three scales, each needed only when the last did not fit
+    const { input, output } = await item.content(scale);
+    // oxlint-disable-next-line no-await-in-loop -- the same
+    const evidence = await envelope(context, run, {
+      ...item,
+      carried: {
+        payload: { plane: 'content', fact, input, output, context: null, parameters: {} },
+        redactor: contentRedactor,
+        input: sectionCoverage(input, 'missing'),
+        output: sectionCoverage(output, 'missing'),
+      },
+    });
+    if (new TextEncoder().encode(canonicalEvidence(evidence)).byteLength <= evidenceLimits.bytes) {
+      return evidence;
+    }
+  }
+  return envelope(context, run, item);
 };
 
 const foreignTailsOf = async (
@@ -333,6 +421,60 @@ const foreignTailsOf = async (
     ),
   );
   return reported.toSorted((left, right) => left.epoch.localeCompare(right.epoch));
+};
+
+type TurnMeasures = NonNullable<OutcomeFact['turn']>;
+
+/**
+ * What a run did, as counts, digests and closed labels (LW6): the revision it wrote as a digest, never its id; its
+ * checks; and the model its last generation used, named as the API names a requested model. The revision it started
+ * from is not in its rows, so it is not claimed.
+ */
+const turnMeasures = async (run: ProjectedRun, context: ProjectionContext): Promise<TurnMeasures> => {
+  const generations = (run.invocations ?? []).filter((invocation) => invocation.purpose === 'generation');
+  const model = generations.at(-1)?.modelId;
+  const results = run.tools.flatMap((tool) =>
+    tool.check === undefined || tool.output === undefined ? [] : [tool.check.result],
+  );
+  return {
+    startRevision: null,
+    finalRevision:
+      run.finalRevision === undefined ? null : await sha256Hex(canonicalEvidence(['host-revision', run.finalRevision])),
+    filesChanged: run.filesChanged ?? 0,
+    checksPassed: results.filter((result) => result === 'passed').length,
+    checksFailed: results.filter((result) => result === 'failed').length,
+    priorTurns: run.priorTurns ?? 0,
+    modelCalls: generations.length,
+    toolCalls: run.tools.length,
+    host: context.host ?? null,
+    kernel: null,
+    model: model === undefined ? null : await contractId('model', model),
+  };
+};
+
+/** One line per settled check, in call order. */
+const checkLines = (run: ProjectedRun): CheckLine[] =>
+  run.tools.flatMap((tool) =>
+    tool.check === undefined || tool.output === undefined
+      ? []
+      : [{ tool: reportedToolName(tool.toolName), result: tool.check.result, requirements: tool.check.requirements }],
+  );
+
+/** The changed model files at the run's final revision; none without a reader, a revision or a change, or on a failed read. */
+const designOf = async (
+  run: ProjectedRun,
+  context: ProjectionContext,
+): Promise<ReadonlyArray<Readonly<{ path: string; text: string | undefined; bytes: number }>>> => {
+  const reader = context.content?.design;
+  const paths = run.content?.changedPaths ?? [];
+  if (reader === undefined || run.finalRevision === undefined || paths.length === 0) {
+    return [];
+  }
+  try {
+    return await reader({ revision: run.finalRevision, paths });
+  } catch {
+    return [];
+  }
 };
 
 /**
@@ -400,6 +542,22 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
         tool.settledAt === undefined
           ? []
           : [{ phase: 'tool', domain: 'host-recorded', start: tool.startedAt, end: tool.settledAt }],
+      ...('arguments' in tool
+        ? {
+            content: async (scale: ContentScale) =>
+              toolContent(
+                {
+                  call,
+                  name: reportedToolName(tool.toolName),
+                  failed: tool.outcome === 'failed',
+                  arguments: tool.arguments,
+                  result: tool.result,
+                  hasResult: tool.output !== undefined && 'result' in tool,
+                },
+                scale,
+              ),
+          }
+        : {}),
     };
   });
   /*
@@ -445,6 +603,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
     if (run.ending === undefined) {
       return 'pending';
     }
+    const { content } = run;
     return {
       source: run.ending.source,
       lineage: [run.ending.source],
@@ -457,8 +616,23 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           success: 'unknown',
           assessment: null,
           ...failureFields(run.ending.failure),
+          turn: await turnMeasures(run, context),
         },
       },
+      ...(content === undefined
+        ? {}
+        : {
+            content: async (scale: ContentScale) =>
+              rootContent(
+                {
+                  prompt: content.prompt,
+                  reply: content.reply,
+                  design: await designOf(run, context),
+                  checks: checkLines(run),
+                },
+                scale,
+              ),
+          }),
       occurredAt: run.ending.at,
       events: 'complete',
       /* A run that began before the grant reports only the time since it: earlier phases are clipped, not sent. */
@@ -550,7 +724,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
     } else if (candidate.occurredAt < context.grantedAt) {
       beforeGrant += 1;
     } else {
-      projected.push(envelope(context, run, candidate));
+      projected.push(projectedEnvelope(context, run, candidate));
     }
   }
   return {

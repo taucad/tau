@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { evidenceSchema } from '#contract.js';
-import { compareEvidence, contractId, evidenceKeys, verifyEvidenceDigest } from '#identity.js';
+import type { Evidence } from '#contract.js';
+import { compareEvidence, contractId, evidenceKeys, sha256Hex, verifyEvidenceDigest } from '#identity.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
 
@@ -336,6 +337,19 @@ describe('projectRun', () => {
       assessment: null,
       failureClass: { owner: 'host', retry: 'wait' },
       code: 'MODEL_ATTEMPT_PENDING',
+      turn: {
+        startRevision: null,
+        finalRevision: null,
+        filesChanged: 0,
+        checksPassed: 0,
+        checksFailed: 0,
+        priorTurns: 0,
+        modelCalls: 0,
+        toolCalls: 1,
+        host: null,
+        kernel: null,
+        model: null,
+      },
     });
     expect(await outcomeOf({ code: 'INSUFFICIENT_CREDIT', wrapped: undefined })).toMatchObject({
       failureClass: { owner: 'gateway', retry: 'resume' },
@@ -352,5 +366,231 @@ describe('projectRun', () => {
     const uncoded = await outcomeOf(undefined);
     expect(uncoded).not.toHaveProperty('failureClass');
     expect(uncoded).not.toHaveProperty('code');
+  });
+});
+
+describe('projectRun with the content grant (LW6)', () => {
+  const revision = 'rev-final';
+  const contentRun = (change: Partial<ProjectedRun> = {}): ProjectedRun =>
+    run({
+      tools: [
+        {
+          ...run().tools[0]!,
+          toolName: 'edit_file',
+          arguments: { targetFile: 'main.ts', content: 'cube(10)' },
+          result: 'Edited main.ts',
+        },
+        {
+          call: 'call-2',
+          toolName: 'test_model',
+          outcome: 'completed',
+          input: row(4),
+          output: row(5),
+          startedAt: at + 4000,
+          settledAt: at + 5000,
+          arguments: { targetFile: 'main.ts' },
+          result: { tests: [] },
+          check: { result: 'passed', revision: ['main.ts\u0000main.ts=sha256:x'], requirements: ['spec.ts#1'] },
+        },
+      ],
+      finalRevision: revision,
+      filesChanged: 1,
+      priorTurns: 2,
+      invocations: [
+        { purpose: 'generation', modelId: 'anthropic/model-a' },
+        { purpose: 'compaction', modelId: 'anthropic/model-a' },
+        { purpose: 'generation', modelId: 'anthropic/model-b' },
+      ],
+      content: {
+        prompt: [{ type: 'text', text: 'Make a 10 mm cube' }],
+        reply: [
+          { type: 'thinking', thinking: 'SYNTHETIC_THOUGHT' },
+          { type: 'text', text: 'Made the cube.' },
+        ],
+        changedPaths: ['main.ts'],
+      },
+      ...change,
+    });
+  const design = vi.fn(async () => [{ path: 'main.ts', text: 'export default cube(10);', bytes: 24 }]);
+  const granted = (change: Partial<ProjectionContext> = {}) =>
+    context({ content: { since: at, design }, host: 'browser', ...change });
+  const sections = (evidence: Evidence | undefined) => {
+    if (evidence?.payload.plane !== 'content') {
+      throw new Error(`expected content, got ${evidence?.payload.plane}`);
+    }
+    return evidence.payload;
+  };
+  const outcomeOf = (projection: Awaited<ReturnType<typeof projectRun>>) =>
+    projection.evidence.find((evidence) => evidence.semantic.kind === 'outcome');
+
+  it('writes the root’s message in, and reply, design read at the final revision and check lines out', async () => {
+    const projection = await projectRun(contentRun(), granted());
+    const outcome = outcomeOf(projection)!;
+    const payload = sections(outcome);
+
+    expect(evidenceSchema.safeParse(outcome).success).toBe(true);
+    expect(await verifyEvidenceDigest(outcome)).toBe(true);
+    expect(outcome.projection.redactor).toBe('content-v1');
+    expect(design).toHaveBeenCalledWith({ revision, paths: ['main.ts'] });
+    expect(payload.input?.messages).toEqual([
+      {
+        role: 'user',
+        parts: [{ kind: 'text', text: 'Make a 10 mm cube', originalBytes: 17, retainedBytes: 17, redaction: 'none' }],
+      },
+    ]);
+    expect(payload.output?.messages).toHaveLength(1);
+    expect(payload.output?.messages[0]?.parts).toMatchObject([
+      { kind: 'text', text: 'Made the cube.' },
+      { kind: 'source', path: 'main.ts', text: 'export default cube(10);', digest: null },
+      { kind: 'check', result: 'passed', text: 'test_model passed: spec.ts#1' },
+    ]);
+    expect(JSON.stringify(outcome)).not.toContain('SYNTHETIC_THOUGHT');
+    /* The same fact and source as the summary, so a call is one fact whichever plane carries it. */
+    const summary = outcomeOf(await projectRun(contentRun(), context({ host: 'browser' })))!;
+    expect(summary.payload).toMatchObject({ plane: 'summary', fact: payload.fact });
+    expect(summary.source).toEqual(outcome.source);
+    expect(compareEvidence(summary, outcome)).toBe('projection');
+  });
+
+  it('counts what the run did on its outcome, as digests and closed labels, under either plane', async () => {
+    const outcome = outcomeOf(await projectRun(contentRun(), context({ host: 'desktop' })))!;
+
+    expect(outcome.payload).toMatchObject({
+      plane: 'summary',
+      fact: {
+        turn: {
+          startRevision: null,
+          finalRevision: await sha256Hex(JSON.stringify(['host-revision', revision])),
+          filesChanged: 1,
+          checksPassed: 1,
+          checksFailed: 0,
+          priorTurns: 2,
+          modelCalls: 2,
+          toolCalls: 2,
+          host: 'desktop',
+          kernel: null,
+          model: await contractId('model', 'anthropic/model-b'),
+        },
+      },
+    });
+    expect(JSON.stringify(outcome)).not.toContain(revision);
+  });
+
+  it('writes a tool’s arguments in and its result out, and nothing of either without the grant', async () => {
+    const granted_ = await projectRun(contentRun(), granted());
+    const [edit] = granted_.evidence;
+    const payload = sections(edit);
+
+    expect(evidenceSchema.safeParse(edit).success).toBe(true);
+    expect(payload.input?.messages).toMatchObject([
+      {
+        role: 'assistant',
+        parts: [{ kind: 'tool-call', name: 'edit_file', text: '{"targetFile":"main.ts","content":"cube(10)"}' }],
+      },
+    ]);
+    expect(payload.output?.messages).toMatchObject([
+      { role: 'tool', parts: [{ kind: 'tool-result', error: false, digest: null, text: 'Edited main.ts' }] },
+    ]);
+    expect(edit?.coverage).toMatchObject({ input: 'complete', output: 'complete' });
+
+    const ungranted = await projectRun(contentRun(), context());
+    expect(ungranted.evidence.every((evidence) => evidence.payload.plane === 'summary')).toBe(true);
+    for (const text of ['cube(10)', 'Edited main.ts', 'Make a 10 mm cube', 'Made the cube.']) {
+      expect(JSON.stringify(ungranted)).not.toContain(text);
+    }
+  });
+
+  it('keeps only the size and digest of a tool result over 64 KiB, and an image result as its type and size', async () => {
+    const large = 'x'.repeat(70_000);
+    const image = 'A'.repeat(4000);
+    const projection = await projectRun(
+      contentRun({
+        tools: [
+          { ...contentRun().tools[0]!, result: large },
+          {
+            ...contentRun().tools[0]!,
+            call: 'call-3',
+            toolName: 'screenshot',
+            input: row(7),
+            output: row(8),
+            result: [
+              { type: 'text', text: 'Captured' },
+              { type: 'image', mimeType: 'image/png', data: image },
+            ],
+          },
+        ],
+      }),
+      granted(),
+    );
+    const [over, shot] = projection.evidence;
+
+    expect(sections(over).output?.messages[0]?.parts[0]).toEqual({
+      kind: 'tool-result',
+      call: await contractId('call', 'chat a/1:call-1'),
+      error: false,
+      digest: await sha256Hex(large),
+      text: '',
+      originalBytes: 70_000,
+      retainedBytes: 0,
+      redaction: 'truncated',
+    });
+    expect(over?.coverage.output).toBe('truncated');
+    expect(sections(shot).output?.messages[0]?.parts).toEqual([
+      expect.objectContaining({ kind: 'tool-result', text: 'Captured' }),
+      { kind: 'media', mime: 'image/png', bytes: 3000, digest: await sha256Hex(image) },
+    ]);
+    expect(JSON.stringify(shot)).not.toContain(image);
+  });
+
+  it('keeps a file past the design cap as its size and digest, and re-projects the same bytes', async () => {
+    const big = 'y'.repeat(140_000);
+    const reader = vi.fn(async () => [
+      { path: 'big.ts', text: big, bytes: 140_000 },
+      { path: 'part.bin', text: undefined, bytes: 12 },
+    ]);
+    const changed = contentRun({ content: { ...contentRun().content!, changedPaths: ['big.ts', 'part.bin'] } });
+    const first = outcomeOf(await projectRun(changed, granted({ content: { since: at, design: reader } })))!;
+    const again = outcomeOf(await projectRun(changed, granted({ content: { since: at, design: reader } })))!;
+
+    expect(sections(first).output?.messages[0]?.parts).toMatchObject([
+      { kind: 'text' },
+      {
+        kind: 'source',
+        path: 'big.ts',
+        text: '',
+        retainedBytes: 0,
+        originalBytes: 140_000,
+        digest: await sha256Hex(big),
+      },
+      { kind: 'source', path: 'part.bin', text: '', retainedBytes: 0, originalBytes: 12, digest: null },
+      { kind: 'check' },
+    ]);
+    expect(first.projection.digest).toBe(again.projection.digest);
+    expect(evidenceSchema.safeParse(first).success).toBe(true);
+  });
+
+  it('writes only summaries for facts from before the content grant, and keeps no earlier turn’s text', async () => {
+    const projection = await projectRun(contentRun(), granted({ content: { since: at + 5000, design } }));
+
+    expect(projection.evidence.map((evidence) => [evidence.semantic.kind, evidence.payload.plane])).toEqual([
+      ['tool', 'summary'],
+      ['tool', 'summary'],
+      ['cad', 'summary'],
+      ['outcome', 'content'],
+    ]);
+    const root = sections(outcomeOf(projection));
+    expect(root.input?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  it('falls back to the summary when the content cannot fit the envelope', async () => {
+    const huge = Array.from({ length: 40 }, (_, index) => `"${index}"`.repeat(20_000)).join('');
+    const projection = await projectRun(
+      contentRun({ tools: [{ ...contentRun().tools[0]!, arguments: { huge }, result: huge.slice(0, 60_000) }] }),
+      granted(),
+    );
+    for (const evidence of projection.evidence) {
+      expect(new TextEncoder().encode(JSON.stringify(evidence)).byteLength).toBeLessThanOrEqual(262_144);
+      expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+    }
   });
 });

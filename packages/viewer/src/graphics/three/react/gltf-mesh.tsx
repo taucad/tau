@@ -2166,7 +2166,7 @@ export function GltfMesh({
       // A press can reach camera controls before R3F: only movement gives the camera ownership.
       // Queries resume immediately on release, without waiting for a React render.
       if (
-        context.cameraInteractionHadMovement ||
+        context.cameraRef.getSnapshot().matches({ input: 'dragging' }) ||
         context.viewerHoverSuppressionReasons.includes('sectionViewTransform')
       ) {
         return false;

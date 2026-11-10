@@ -86,8 +86,10 @@ export function useCameraFraming<
           direction: new THREE.Vector3(...direction),
           preferredUp: new THREE.Vector3(...view.up),
         });
+        // The retired `setView` alias's mapping, unchanged until the framing actor (G5) sends `frameGeometry`.
         actor.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: view.target,
           direction,
           up: [up.x, up.y, up.z],
@@ -113,7 +115,7 @@ export function useCameraFraming<
     if (!framing.initialized) {
       frame({ enableConfiguredAngles: !framing.preserveOrientationOnFirstFrame });
       if (framing.pendingView) {
-        rig.actorRef.send({ type: 'setView', ...framing.pendingView });
+        rig.actorRef.send({ type: 'poseObserved', source: 'input', ...framing.pendingView });
       }
       // oxlint-disable-next-line react/immutability -- This is the session-owned first-frame result, consumed by record persistence.
       framing.firstFrameView = rig.actorRef.getSnapshot().context.view;

@@ -1,16 +1,20 @@
-import type { RefObject } from 'react';
-import type { ActorRefFrom } from 'xstate';
-import { Topic } from '@taucad/events';
-import { createCameraView } from '@taucad/camera';
+import type { Actor, ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { CameraState } from '@taucad/camera';
-import type { CameraDriverSnapshot } from '@taucad/camera/machine';
+import type { CameraDriverSnapshot, CameraMachine } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
-import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
-import type { CameraOwnedSettings, PersistedCameraView } from '#graphics/graphics-settings.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { ThreeCamera } from '@taucad/three/camera';
+import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
+import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#machines/graphics.machine.js';
+
+/*
+ * The view's camera is the graphics actor's `camera` child (charter D5, I11): its lifetime is structural, so there is
+ * no session registry. What was the registry's is now a type or a selector of the graphics snapshot.
+ */
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
+
+export type { ViewCameraFraming } from '#machines/graphics.machine.js';
 
 /**
  * Receives the camera and driver snapshot each time a view's camera rig updates.
@@ -26,43 +30,9 @@ export type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSn
 export type RenderFrameUpdateHandler = (renderFrame: RenderFrame) => void;
 
 /**
- * One-time framing record for an entry identity; mutated by the canvas framing hook.
- *
- * @public
- */
-export type ViewCameraFraming = {
-  /** Entry path whose geometry this record describes; a change re-latches the other two fields. */
-  identity: string | undefined;
-  /** Persisted pose to apply once the first geometry has been framed. */
-  pendingView: PersistedCameraView | undefined;
-  /** A record orientation already applied to the rig before first geometry; fit without configured angles. */
-  preserveOrientationOnFirstFrame: boolean;
-  /** The automatic first-frame result, so its fitted span/zoom are not mistaken for a person orbit. */
-  firstFrameView: PersistedCameraView | undefined;
-  /** Whether the first real geometry has already been framed for this identity. */
-  initialized: boolean;
-};
-
-/**
- * The live camera of one view: the rig, the slots each canvas rebinds, and the framing record.
- * Its lifetime is the graphics actor's, so a remounted provider finds the camera the person left.
- * @public
- */
-export type ViewCameraSession = Readonly<{
-  rig: ThreeCameraRig;
-  /** Rebound by each canvas mount. */
-  connectorRef: RefObject<CameraUpdateHandler | undefined>;
-  consumersRef: RefObject<Set<CameraUpdateHandler>>;
-  renderFrame: {
-    current: RenderFrame;
-    consumers: Set<RenderFrameUpdateHandler>;
-    listeners: Set<() => void>;
-  };
-  framing: ViewCameraFraming;
-}>;
-
-/**
- * Create-only seed. Applied when the session is built; later acquisitions ignore `camera`.
+ * The provider's seed. `identity` names the entry whose geometry the view frames: a new identity re-latches the
+ * framing record with `camera.cameraView` as its pending pose. The camera itself is seeded once, from the graphics
+ * actor's `camera` input.
  *
  * @public
  */
@@ -71,202 +41,70 @@ export type ViewCameraSeed = Readonly<{
   camera?: Partial<CameraOwnedSettings>;
 }>;
 
-const sessions = new WeakMap<GraphicsActorRef, ViewCameraSession>();
-const sessionTopic = new Topic<void>({ name: 'view-camera-sessions' });
-const publishedSessions = new WeakSet<ViewCameraSession>();
-let version = 0;
-
-const notify = (): void => {
-  version += 1;
-  sessionTopic.emit();
-};
-
 /**
- * Publishes a session to camera consumers outside the provider tree, once per session.
+ * Types a graphics actor's camera as the actor the native rig presents; XState types a spawned ref apart from a root
+ * actor, and the rig reads only what both have.
  *
- * A session is acquired during render so descendants can read the rig while rendering, and a store
- * notification from the render phase is a React update to a component that is not rendering. The
- * host calls this from its layout effect instead, which is the commit phase.
+ * @param cameraRef - The graphics actor's camera.
+ * @returns The same actor.
  * @public
  */
-export const notifyViewCameraSession = (session: ViewCameraSession): void => {
-  if (publishedSessions.has(session)) {
+export const asCameraActor = (cameraRef: GraphicsCameraRef): Actor<CameraMachine> =>
+  cameraRef as unknown as Actor<CameraMachine>;
+
+/**
+ * Selects a graphics actor's camera.
+ *
+ * @param snapshot - The graphics snapshot.
+ * @returns The camera actor.
+ * @public
+ */
+export const selectGraphicsCamera = (snapshot: SnapshotFrom<typeof graphicsMachine>): GraphicsCameraRef =>
+  snapshot.context.cameraRef;
+
+/**
+ * Selects a graphics actor's framing record (a bridge until the framing actor, G5b).
+ *
+ * @param snapshot - The graphics snapshot.
+ * @returns The framing record, mutated in place by the canvas framing hook.
+ * @public
+ */
+export const selectGraphicsCameraFraming = (snapshot: SnapshotFrom<typeof graphicsMachine>): ViewCameraFraming =>
+  snapshot.context.cameraFraming;
+
+/**
+ * Re-latches a view's framing record when the provider names a new entry. A view can render before its entry path is
+ * known (a panel seeded while the project loads), and that is not a file switch: a seed with no identity changes
+ * nothing, so the persisted pose is not re-armed over the live one.
+ *
+ * @param framing - The graphics actor's framing record.
+ * @param seed - The provider's seed.
+ * @public
+ */
+export const latchViewCameraFraming = (framing: ViewCameraFraming, seed: ViewCameraSeed): void => {
+  if (seed.identity === undefined || framing.identity === seed.identity) {
     return;
   }
-  publishedSessions.add(session);
-  notify();
-};
-
-const initialDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;
-/** Field of view in degrees for a rig whose host supplies no seed; matches `defaultGraphicsSettings.cameraFovAngle`. */
-const defaultVerticalFieldOfView = 60;
-
-const createInitialRenderFrame = (): RenderFrame => ({
-  anchorFrameId: 'tau:root',
-  originMeters: [0, 0, 0],
-  metersPerRenderUnit: 1,
-});
-
-const getPixelRatio = (): number => {
-  const pixelRatio = Reflect.get(globalThis, 'devicePixelRatio');
-  return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
-};
-
-const createRig = ({
-  graphicsRef,
-  seed,
-  connectorRef,
-  renderFrame,
-}: {
-  readonly graphicsRef: GraphicsActorRef;
-  readonly seed: ViewCameraSeed;
-  readonly connectorRef: RefObject<CameraUpdateHandler | undefined>;
-  readonly renderFrame: RenderFrame;
-}): ThreeCameraRig => {
-  const { upDirection } = graphicsRef.getSnapshot().context;
-  const up =
-    upDirection === 'x' ? ([1, 0, 0] as const) : upDirection === 'y' ? ([0, 1, 0] as const) : ([0, 0, 1] as const);
-
-  const initialView = seed.camera?.cameraView ?? {
-    target: [0, 0, 0],
-    direction: initialDirection,
-    up,
-    // Keep the seed bounds in front of the camera so the empty scene has stable depth precision.
-    verticalSpan: 4,
-    perspectiveZoom: 1,
-  };
-
-  return createThreeCameraRig({
-    pixelBudget: 0.25,
-    renderFrame,
-    initialView: createCameraView({
-      frameId: 'tau:root',
-      requestedVerticalFieldOfView: seed.camera?.cameraFovAngle ?? defaultVerticalFieldOfView,
-      ...initialView,
-      viewport: { width: 1, height: 1, pixelRatio: getPixelRatio() },
-      bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
-    }),
-    onUpdate(camera, snapshot) {
-      connectorRef.current?.(camera, snapshot);
-    },
-  });
+  framing.identity = seed.identity;
+  framing.pendingView = seed.camera?.cameraView;
+  framing.preserveOrientationOnFirstFrame = false;
+  framing.firstFrameView = undefined;
+  framing.initialized = false;
 };
 
 /**
- * Returns the live camera session for a graphics actor, building it on first demand.
+ * Reads the latest complete camera state of a graphics actor's camera, as its native cameras present it.
  *
- * The first call owns the seed: it builds and starts the rig. Later calls return the same session
- * and use the seed only to re-latch the framing record when the entry identity changes -- the live
- * field of view and pose belong to the camera actor from then on. The session is released when the
- * graphics actor completes, so a project that keeps its actors keeps its cameras.
- *
- * That release is explicit only for a graphics actor stopped as a spawned child, which is how a
- * project stops its views. `@xstate/react` mutes an actor's observers before stopping it, so a host
- * that owns its actor through `useActorRef` never emits `complete`; its session holds no timer,
- * subscription or GPU resource and is collected with the actor it is keyed by.
- *
- * The caller publishes the new session with {@link notifyViewCameraSession} from its commit phase.
- * @public
- */
-export const acquireViewCameraSession = (
-  graphicsRef: GraphicsActorRef,
-  seed: ViewCameraSeed = {},
-): ViewCameraSession => {
-  const existing = sessions.get(graphicsRef);
-  if (existing) {
-    /* A view can render before its entry path is known (a panel seeded while the project loads), and
-     * that is not a file switch: re-latching there would re-arm the persisted pose over the live one. */
-    if (seed.identity !== undefined && existing.framing.identity !== seed.identity) {
-      existing.framing.identity = seed.identity;
-      existing.framing.pendingView = seed.camera?.cameraView;
-      existing.framing.preserveOrientationOnFirstFrame = false;
-      existing.framing.firstFrameView = undefined;
-      existing.framing.initialized = false;
-    }
-    return existing;
-  }
-
-  const connectorRef: RefObject<CameraUpdateHandler | undefined> = { current: undefined };
-  const renderFrame = {
-    current: createInitialRenderFrame(),
-    consumers: new Set<RenderFrameUpdateHandler>(),
-    listeners: new Set<() => void>(),
-  };
-  const session: ViewCameraSession = {
-    rig: createRig({ graphicsRef, seed, connectorRef, renderFrame: renderFrame.current }),
-    connectorRef,
-    consumersRef: { current: new Set<CameraUpdateHandler>() },
-    renderFrame,
-    framing: {
-      identity: seed.identity,
-      pendingView: seed.camera?.cameraView,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: false,
-    },
-  };
-  sessions.set(graphicsRef, session);
-  session.rig.actorRef.start();
-
-  graphicsRef.subscribe({
-    complete: () => {
-      if (sessions.get(graphicsRef) !== session) {
-        return;
-      }
-      sessions.delete(graphicsRef);
-      session.rig.dispose();
-      notify();
-    },
-  });
-
-  return session;
-};
-
-/**
- * Returns the live camera session of a graphics actor, or undefined when no view has built one.
- *
- * For readers outside the provider tree: the write-side host persists a view whose pane may not be
- * mounted, and a view with no camera simply has no camera keys to write.
- * @public
- */
-export const getViewCameraSession = (graphicsRef: GraphicsActorRef | undefined): ViewCameraSession | undefined =>
-  graphicsRef ? sessions.get(graphicsRef) : undefined;
-
-/**
- * Reads the latest complete camera state without mirroring it into the graphics actor.
- *
+ * @param graphicsRef - The graphics actor, if any.
+ * @returns The camera state, or `undefined` with no graphics actor.
  * @public
  */
 export const getGraphicsCameraState = (graphicsRef: GraphicsActorRef | undefined): CameraState | undefined => {
   if (!graphicsRef) {
     return undefined;
   }
-  return sessions.get(graphicsRef)?.rig.readState();
+  const rig = createThreeCameraRig({ actorRef: asCameraActor(graphicsRef.getSnapshot().context.cameraRef) });
+  const state = rig.readState();
+  rig.dispose();
+  return state;
 };
-
-/**
- * Checks whether a graphics actor already has a live camera session.
- *
- * @param graphicsRef - The graphics actor, if any.
- * @returns Whether a camera rig exists for the actor.
- * @public
- */
-export const hasGraphicsCameraRig = (graphicsRef: GraphicsActorRef | undefined): boolean =>
-  Boolean(graphicsRef && sessions.has(graphicsRef));
-
-/**
- * Subscribes to changes in the set of live camera sessions, for use with `useSyncExternalStore`.
- *
- * @param listener - Called when a session is published or released.
- * @returns A function that removes the listener.
- * @public
- */
-export const subscribeGraphicsCameraRegistry = (listener: () => void): (() => void) => sessionTopic.subscribe(listener);
-
-/**
- * Returns a counter that increases each time the set of live camera sessions changes.
- *
- * @returns The current registry version.
- * @public
- */
-export const getGraphicsCameraRegistryVersion = (): number => version;

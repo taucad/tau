@@ -27,6 +27,7 @@ import { sceneTag, sceneTagData, hasSceneTagInHierarchy } from '#graphics/three/
 import type { SceneTagKey } from '#graphics/three/utils/scene-tags.js';
 import { getGltfOccurrenceLayers } from '#graphics/three/utils/gltf-surface-batches.js';
 import {
+  useCameraSelector,
   useGraphics,
   useGraphicsSelector,
   useKinematicsRef,
@@ -360,8 +361,8 @@ export function MeasureTool(): React.JSX.Element {
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   const wasMeasureActiveRef = useRef(isMeasureActive);
-  // A press alone raises `cameraInteracting`; only actual camera movement steals a measure gesture.
-  const cameraMoving = useGraphicsSelector((state) => state.context.cameraInteractionHadMovement);
+  // A press alone holds the camera's gesture; only a pose it moved to (`input.dragging`) steals a measure gesture.
+  const cameraMoving = useCameraSelector((state) => state.matches({ input: 'dragging' }));
 
   const [{ hoveredSnapPoints, activeSnapPoint, mousePosition }, dispatchHoverState] = useReducer(measureHoverReducer, {
     hoveredSnapPoints: [],
@@ -1720,7 +1721,8 @@ export function MeasureTool(): React.JSX.Element {
         origin.pointerId === event.pointerId &&
         Math.hypot(event.clientX - origin.clientX, event.clientY - origin.clientY) <= slop;
       // Read now, not from the render: the camera reports a drag before the tool re-renders with `cameraMoving`.
-      const { cameraInteractionHadMovement, suppressNextModelPointerClick } = graphicsActor.getSnapshot().context;
+      const { cameraRef: viewCamera, suppressNextModelPointerClick } = graphicsActor.getSnapshot().context;
+      const cameraInteractionHadMovement = viewCamera.getSnapshot().matches({ input: 'dragging' });
       // A primary click or tap that found no snap target while targets under it were still being prepared: it is not a
       // miss yet, nor a bare surface point where the prepared graph would snap it. A drag (an orbit) is neither.
       const isPressAwaitingTargets =

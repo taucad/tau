@@ -1,13 +1,18 @@
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import React, { useLayoutEffect, useMemo, useState } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import CameraControlsImpl from 'camera-controls';
 import { selectCameraProjection } from '@taucad/camera/machine';
-import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import { resolveCameraControlProps, TauCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
+import {
+  resolveCameraControlProps,
+  shouldUpdateTauCameraControlsFrame,
+} from '#graphics/three/controls/tau-camera-controls.jsx';
+import { useViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
 import { SectionPlanePickerContext } from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import { useCameraRig, useCameraSelector, useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.jsx';
+import { useCameraSelector, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
 
 const MeasureTool = React.lazy(async () => {
@@ -18,6 +23,24 @@ const SectionHandles = React.lazy(async () => {
   const module = await import('#graphics/three/react/section-handles.jsx');
   return { default: module.SectionHandles };
 });
+
+type CameraControlsFeel = ReturnType<typeof resolveCameraControlProps>;
+
+/**
+ * The view's `camera-controls` instance as an R3F primitive: it applies the control feel as props and steps the
+ * controls each frame. The controls adapter owns the instance, its DOM connection and its only listener (charter I9),
+ * and installs it as R3F's `controls`; this renders nothing until it does.
+ */
+function ViewerCameraControls({ feel }: { readonly feel: CameraControlsFeel }): React.JSX.Element | null {
+  const controls = useThree((state) => state.controls);
+  const interactionLock = useViewportGizmoInteractionLock();
+  useFrame((_state, delta) => {
+    if (controls instanceof CameraControlsImpl && shouldUpdateTauCameraControlsFrame({ controls, interactionLock })) {
+      controls.update(delta);
+    }
+  }, -1);
+  return controls instanceof CameraControlsImpl ? <primitive object={controls} {...feel} /> : null;
+}
 
 type ControlsProperties = {
   /**
@@ -56,8 +79,6 @@ export const Controls = React.memo(function ({
   gizmoContainer,
 }: ControlsProperties) {
   const backend = useThreeGraphicsBackend();
-  const cameraRig = useCameraRig();
-  const renderFrame = useRenderFrame();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const shouldMountMeasure = useGraphicsSelector(
     (state) => state.context.isMeasureActive || state.context.measurements.some((measurement) => measurement.isPinned),
@@ -78,16 +99,6 @@ export const Controls = React.memo(function ({
       picker.dispose();
     };
   }, [backend, enableGizmo, isSectionViewActive]);
-  /* `initialTarget` is read once, in the controls' own state initializer, which writes the live
-   * camera's orientation before `ActorBridge` is mounted. It is a render-unit API, so the actor's
-   * metre target is converted here rather than landing 1/metersPerRenderUnit away for two frames. */
-  const initialTarget = useMemo((): [number, number, number] => {
-    const point = toThreeRenderPoint({
-      renderFrame,
-      pointMeters: cameraRig.actorRef.getSnapshot().context.view.target,
-    });
-    return [point.x, point.y, point.z];
-  }, [cameraRig, renderFrame]);
   const controlProps = useMemo(
     () =>
       resolveCameraControlProps({
@@ -102,7 +113,7 @@ export const Controls = React.memo(function ({
 
   return (
     <>
-      <TauCameraControls makeDefault initialTarget={initialTarget} {...controlProps} />
+      <ViewerCameraControls feel={controlProps} />
       <React.Suspense fallback={null}>
         {shouldMountMeasure ? <MeasureTool /> : null}
         {isSectionViewActive ? <SectionHandles planePicker={planePicker} /> : null}

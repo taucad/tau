@@ -8,7 +8,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
-import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
+import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
 import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
 import type { TauR3fGlFactory } from '#graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#graphics/three/graphics-context-lost-fallback.jsx';
@@ -27,7 +27,7 @@ import {
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#graphics/three/webgpu-inspector-overlay.jsx';
 import { cn } from '@taucad/ui/utils/cn';
-import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
+import { useCameraConnectorRef, useCameraConsumersRef, useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
@@ -130,8 +130,9 @@ export function ThreeCanvasInstance({
   const phase = useSelector(canvasRef, (snapshot) => snapshot?.value);
   const failure = useSelector(canvasRef, (snapshot) => snapshot?.context.failure);
   const isContextLost = phase === 'lost';
-  const isCanvasReady = phase === 'ready' || phase === 'presented';
   const cameraRig = useCameraRig();
+  const cameraConnectorRef = useCameraConnectorRef();
+  const cameraConsumersRef = useCameraConsumersRef();
   /** The live R3F root, kept so a surface that re-attaches (a Suspense reveal) hosts its new canvas actor on it. */
   const rootRef = useRef<CanvasHostRoot | undefined>(undefined);
   /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
@@ -143,6 +144,23 @@ export function ThreeCanvasInstance({
       }
     },
     [canvasId, graphicsRef],
+  );
+  /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
+  const attachControls = useCallback(
+    (held: CanvasHostRoot): void => {
+      graphicsRef.send({
+        type: 'controlsAttached',
+        canvasId,
+        adapter: createControlsAdapter({
+          root: held.root,
+          rig: cameraRig,
+          connectorRef: cameraConnectorRef,
+          consumersRef: cameraConsumersRef,
+          getUpAxis: () => graphicsRef.getSnapshot().context.upDirection,
+        }),
+      });
+    },
+    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef],
   );
   const resize = useMemo(
     () => ({
@@ -224,9 +242,10 @@ export function ThreeCanvasInstance({
         sendToCanvas({ type: 'contextLost' });
       } else if (reattached && held && !held.isRetired()) {
         sendToCanvas(canvasHostCreated(held));
+        attachControls(held);
       }
     },
-    [admittedBytes, canvasId, graphicsRef, sendToCanvas, webglContext],
+    [admittedBytes, attachControls, canvasId, graphicsRef, sendToCanvas, webglContext],
   );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
@@ -270,8 +289,9 @@ export function ThreeCanvasInstance({
         textures: renderer.info.memory.textures,
       }));
       sendToCanvas(created);
+      attachControls(held);
     },
-    [glProperty, sendToCanvas],
+    [attachControls, glProperty, sendToCanvas],
   );
 
   if (failure) {
@@ -304,7 +324,6 @@ export function ThreeCanvasInstance({
             enableZoom={enableZoom}
             enablePan={enablePan}
             secondaryMouseButtonMode={secondaryMouseButtonMode}
-            upDirection={upDirection}
             stageOptions={stageOptions}
             zoomSpeed={zoomSpeed}
             gizmoContainer={gizmoContainer}
@@ -319,7 +338,6 @@ export function ThreeCanvasInstance({
             {enableGrid ? <Grid /> : null}
           </SceneOverlay>
         </OverlayDepthProvider>
-        {isCanvasReady ? <ActorBridge /> : null}
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />
         ) : null}

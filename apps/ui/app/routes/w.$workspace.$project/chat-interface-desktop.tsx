@@ -2,6 +2,7 @@ import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'r
 import { flushSync } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
+import type { AllotmentHandle } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
@@ -113,6 +114,30 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     }
   }, []);
 
+  /* Allotment sizes the panes it adds at their preferred widths before it applies `visible`, so a
+   * hidden workbench still takes its width on the first layout and squeezes the chat lane to its
+   * minimum (280 px rather than 320 px at a 1056 px workspace). Once that first layout lands, the chat
+   * lane gets its preferred width back from the viewer, still under the skeleton. */
+  const lanesRef = useRef<AllotmentHandle>(null);
+  useLayoutEffect(() => {
+    if (!areLanesLaidOut || !chatVisible) {
+      return;
+    }
+    const views = containerRef.current?.querySelector('.split-view-container')?.children;
+    if (views?.length !== 3) {
+      return;
+    }
+    const sizes = Array.from(views, (view) => view.getBoundingClientRect().width);
+    const [chat = 0, viewer = 0, workbench = 0] = sizes;
+    const missing = desktopLayout.chatWidth - chat;
+    const viewerMinimum = isTight ? panelMinSizeViewerTight : panelMinSizeViewer;
+    if (missing > 0 && viewer - missing >= viewerMinimum) {
+      lanesRef.current?.resize([desktopLayout.chatWidth, viewer - missing, workbench]);
+    }
+    // Only the first layout: later widths are the person's own, and persisted on drag end.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs once, when the lanes first lay out
+  }, [areLanesLaidOut]);
+
   const persistWidths = useCallback(
     (sizes: readonly number[]) => {
       const chatWidth = sizes[0];
@@ -155,6 +180,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
             {isClient && isEditorReady ? (
               <>
                 <Allotment
+                  ref={lanesRef}
                   paneLabels={['Chat', 'Viewer', 'Workbench']}
                   separator={false}
                   proportionalLayout={false}

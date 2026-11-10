@@ -424,7 +424,7 @@ export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTa
 };
 
 export const uiOpenTarget: BrowserCommand<
-  [options?: { deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean }]
+  [options?: { deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean; consentBanner?: boolean }]
 > = async (commandContext, options) => {
   if (commandContext.provider.name !== 'playwright') {
     throw new TypeError(`UI E2E requires the Playwright provider, received '${commandContext.provider.name}'.`);
@@ -438,8 +438,16 @@ export const uiOpenTarget: BrowserCommand<
   if (!browser) {
     throw new Error('Vitest Playwright browser is unavailable.');
   }
-  const context = await browser.newContext(options);
+  const { consentBanner = false, ...contextOptions } = options ?? {};
+  const context = await browser.newContext(contextOptions);
   context.setDefaultTimeout(10_000);
+  if (!consentBanner) {
+    /* The app's first-visit analytics banner stays out of every spec that did not ask for it: Do Not Track
+       suppresses it and changes nothing else in the app, so no spec decides analytics by accident. */
+    await context.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, 'doNotTrack', { configurable: true, get: () => '1' });
+    });
+  }
   const primary = await context.newPage();
   const session: Session = {
     agentHostApiRequests: [],

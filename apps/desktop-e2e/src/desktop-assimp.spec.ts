@@ -135,7 +135,10 @@ const exportToProject = async (
   const selectedSource = await sourceSelector.textContent();
   if (!selectedSource?.includes(sourceEntry)) {
     await sourceSelector.click();
-    await page.getByRole('option', { name: sourceEntry, exact: true }).click();
+    /* A model file's option leads with its format badge, an image named by the extension (#1005). */
+    const escaped = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`);
+    const badge = sourceEntry.slice(sourceEntry.lastIndexOf('.') + 1);
+    await page.getByRole('option', { name: new RegExp(`^${escaped(badge)}\\s*${escaped(sourceEntry)}$`, 'u') }).click();
     await expect.poll(async () => sourceSelector.textContent()).toContain(sourceEntry);
   }
 
@@ -539,7 +542,8 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         sourceEntry: modelEntry,
         extension: 'ply',
       });
-      expect(firstPlyPath).toBe(join(projectRoot, 'exports/result.ply'));
+      // Libassimp 0.4 names an output after its input's stem (`model.glb` gives `model.ply`), no longer `result.<ext>`.
+      expect(firstPlyPath).toBe(join(projectRoot, 'exports/model.ply'));
       const firstPly = readFileSync(firstPlyPath);
 
       // EOF now settles the cancelled resolver late. The next conversion proves
@@ -575,7 +579,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
 
       // A nested export renders through the same project runtime as its source.
       const beforePlyOpen = await renderCycleCount(page);
-      await openInViewer(page, 'exports/result.ply');
+      await openInViewer(page, 'exports/model.ply');
       await expectRenderCycleSince(page, beforePlyOpen);
       const hasDurablePlyView = (node: ViewerNode): boolean => {
         if (node.kind === 'split') {
@@ -590,7 +594,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
           return false;
         }
         const view = workbenchRecords.view.read(new Uint8Array(readFileSync(viewPath)));
-        return view.status === 'current' && view.record.entryPath === 'exports/result.ply';
+        return view.status === 'current' && view.record.entryPath === 'exports/model.ply';
       };
       await expect
         .poll(
@@ -606,10 +610,10 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         )
         .toBe(true);
       await page.reload();
-      await expectVisible(page.locator('.dv-tab[aria-label="exports/result.ply"]'), 60_000);
+      await expectVisible(page.locator('.dv-tab[aria-label="exports/model.ply"]'), 60_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first(), 120_000);
       const roundTripGlbPath = await exportToProject(page, projectRoot, {
-        sourceEntry: 'exports/result.ply',
+        sourceEntry: 'exports/model.ply',
         extension: 'glb',
       });
       expect(roundTripGlbPath).toBe(join(projectRoot, 'exports/model.glb'));

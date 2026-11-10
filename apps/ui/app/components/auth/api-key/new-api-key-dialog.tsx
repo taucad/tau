@@ -15,7 +15,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
 import { Label } from '@taucad/ui/components/label';
-import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+import { apiKeyPlugin } from '@taucad/ui-core/utils/api-key-plugin';
 
 export type NewApiKeyDialogProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog's controlled `open` prop API.

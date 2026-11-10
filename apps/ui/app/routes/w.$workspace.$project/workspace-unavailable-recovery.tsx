@@ -29,7 +29,10 @@ import { getWorkspace, listWorkspaces, requestHandlePermission } from '#filesyst
 import type { Workspace } from '#filesystem/handle-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { toast } from '@taucad/ui/components/sonner';
-import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
+import {
+  isWorkspaceIdentityConflictError,
+  workspaceIdentityConflictCopy,
+} from '@taucad/ui-core/filesystem/workspace-errors';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';

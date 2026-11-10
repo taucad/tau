@@ -3,7 +3,7 @@ title: 'UX Policy'
 description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, and keyboard conventions for all Tau UI surfaces.'
 status: active
 created: '2026-04-08'
-updated: '2026-09-16'
+updated: '2026-11-10'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/accessibility-policy.md
@@ -137,7 +137,24 @@ For lists of 2-3 static options, a plain `<Select>` is acceptable.
 | 3+ or dynamic | May grow         | `ComboBoxResponsive`                     |
 | Large (100+)  | Unbounded        | `ComboBoxResponsive` with virtualization |
 
-### 7. No Nested Dialogs
+### 7. Choose, Act or Disclose; Nest With the View Stack
+
+Pick the surface by what the list does, then nest the same way everywhere:
+
+| The list lets the person…                    | Surface                                 | Nesting                                                                                          |
+| -------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Choose a value (kernel, model, file, format) | `ComboBoxResponsive`                    | A group or row opens a sub-view in the same popover or drawer; search stays global across levels |
+| Perform an action (export, rename, settings) | Responsive `DropdownMenu`               | A submenu opens a sub-view in the same menu                                                      |
+| See facts or a few controls beside actions   | Disclosure row (`menu-disclosure-item`) | Expands in place; never replaces the list                                                        |
+| Act on a target by right-click               | `ContextMenu`                           | Flyout submenus are allowed (pointer convention)                                                 |
+
+Both sub-view surfaces compose the shared responsive view stack in `packages/ui`: a full-width Back row naming the parent, Escape and Backspace-on-empty step back, focus returns to the row that opened the view, and the same views render on pointer and touch. The Left arrow is never bound to Back, because slider rows use it.
+
+Never open a second popover from a menu or picker, stack a drawer from a menu, or use a hover flyout outside right-click menus. A `ComboBoxResponsive` opened from a pane control (no parent list) may still stack its drawer on a phone (`isNested`).
+
+**Why**: One nesting behaviour keeps focus in one scope, works identically on desktop and phone, and spares people from learning a different pattern in each menu.
+
+### 8. No Nested Dialogs
 
 Never nest a `Dialog` inside another `Dialog`. If a settings dialog needs a delete confirmation, either:
 
@@ -146,7 +163,7 @@ Never nest a `Dialog` inside another `Dialog`. If a settings dialog needs a dele
 
 **Why**: Nested dialogs create z-index issues, confuse focus trapping, and disorient users with stacked overlays.
 
-### 8. Use the InlineTextEditor Primitive
+### 9. Use the InlineTextEditor Primitive
 
 The `InlineTextEditor` component (`#components/inline-text-editor.js`) is the canonical implementation of inline editing. Use it for all label-to-input editing instead of building ad-hoc `isEditing` state.
 
@@ -160,6 +177,8 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - Using `setTimeout` to focus an input inside a Dialog (symptom of fighting the modal lifecycle)
 - Important actions discoverable only on hover, with no visible alternate route
 - Plain `<Select>` for unbounded or searchable lists
+- A second popover, a menu-stacked drawer, or a hover flyout to nest a list (outside right-click menus)
+- A searchable listbox standing in for an action menu, or a menu standing in for a value picker
 
 ## Summary Checklist
 
@@ -170,6 +189,7 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - [ ] No nested Dialogs
 - [ ] Dense list actions follow DESIGN's visible-action and disclosure contracts
 - [ ] Searchable/dynamic lists use ComboBoxResponsive
+- [ ] Choosing uses ComboBoxResponsive, acting uses DropdownMenu, and nesting in either uses the view-stack sub-view
 - [ ] New interaction patterns reviewed against this policy
 
 ## References

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import type { SearchParameterName } from '#constants/search-parameter.constants.js';
-import type { SearchParameterCodec } from '#utils/search-parameter.codecs.js';
+import type { SearchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import type { SearchParameterCodec } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 /**
  * URL-backed view state that renders a write at once. A data router commits a

@@ -71,8 +71,8 @@ import {
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
-import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';

@@ -1,8 +1,8 @@
 import type { ComponentProps } from 'react';
 import { InlineCode } from '@taucad/ui/components/inline-code';
-import { extractTextFromChildren } from '#utils/react.utils.js';
+import { extractTextFromChildren } from '@taucad/ui-core/utils/react.utils';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
-import { extractLanguageFromClassName } from '#lib/code-language-resolution.js';
+import { extractLanguageFromClassName } from '@taucad/ui-core/lib/code-language-resolution';
 
 /**
  * Custom code component for markdown rendering.

@@ -9,9 +9,9 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { WorkbenchPanesHostProvider, useWorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
 import type { WorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
 import type { ModelComponentActionTarget } from '@taucad/workbench-panes/component-menu/component-actions';
-import { defaultPanelState } from '#constants/editor.constants.js';
-import type { PanelState } from '#types/editor.types.js';
-import { mergePanelState } from '#utils/panel-state.utils.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
+import type { PanelState } from '@taucad/ui-core/types/editor.types';
+import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 
 /*
  * A part-menu reveal opens a pane that is a cold lazy chunk on a phone. The editor emits the reveal once, before that

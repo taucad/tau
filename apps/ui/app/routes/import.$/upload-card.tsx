@@ -4,7 +4,7 @@ import { Folder, Files, FolderOpen } from 'lucide-react';
 import { importFileAcceptString, supportedKernelExtensions } from '#routes/import.$/import.utils.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { isZipFile } from '#utils/file-reader.utils.js';
+import { isZipFile } from '@taucad/ui-core/utils/file-reader.utils';
 import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
 
 type UploadCardProperties = {

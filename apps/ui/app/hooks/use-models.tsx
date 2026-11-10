@@ -7,7 +7,7 @@ import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import { useFeature } from '#flags/use-feature.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 import { resolveNewChatExecution } from '@taucad/chat-ui/utils/new-chat-execution';
 import type { ModelCatalog } from '@taucad/chat-ui/utils/new-chat-execution';

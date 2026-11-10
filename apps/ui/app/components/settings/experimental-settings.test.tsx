@@ -1,5 +1,6 @@
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import { createActor, createAsyncLogic } from 'xstate';
+import type { CanvasHostCommand } from '@taucad/viewer/machines/canvas.machine';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -76,29 +77,35 @@ describe('ExperimentalSettings', () => {
     const view = render(<ExperimentalSettings />);
     try {
       expect(screen.getByText('No active 3D viewer.')).toBeInTheDocument();
-      act(() => {
-        actor.send({
-          type: 'rendererInitialized',
-          payload: { canvasId: 'a', backend: 'webgpu' },
+      const host = (canvasId: string, backend: 'webgl' | 'webgpu'): void => {
+        actor.send({ type: 'canvasAttached', canvasId, kind: 'canvas' });
+        actor.getSnapshot().context.canvas?.ref.send({
+          type: 'hostCreated',
+          backend,
+          surface: { width: 800, height: 600, pixelRatio: 1 },
+          domElement: document.createElement('canvas'),
+          host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),
         });
+      };
+      act(() => {
+        host('a', 'webgpu');
       });
       expect(screen.getByText('Using WebGPU.')).toBeInTheDocument();
+      // A replacement canvas (the WebGL fallback) takes the slot.
       act(() => {
-        actor.send({
-          type: 'rendererInitialized',
-          payload: { canvasId: 'b', backend: 'webgl' },
-        });
+        host('b', 'webgl');
       });
       expect(screen.getByText('Using WebGL2 fallback.')).toBeInTheDocument();
       mockState.flags = { ...featureFlagDefaults, webGpu: false };
       view.rerender(<ExperimentalSettings />);
       expect(screen.getByText('Using WebGL2.')).toBeInTheDocument();
+      // The replaced canvas leaving the document does not clear its replacement.
       act(() => {
-        actor.send({ type: 'rendererRemoved', canvasId: 'a' });
+        actor.send({ type: 'canvasDetached', canvasId: 'a' });
       });
       expect(screen.getByText('Using WebGL2.')).toBeInTheDocument();
       act(() => {
-        actor.send({ type: 'rendererRemoved', canvasId: 'b' });
+        actor.send({ type: 'canvasDetached', canvasId: 'b' });
       });
       expect(screen.getByText('No active 3D viewer.')).toBeInTheDocument();
     } finally {

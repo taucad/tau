@@ -56,7 +56,7 @@ export type TurnOutcome = 'finalized' | 'conflicted' | 'released' | 'failed';
  * Why a turn failed or was refused, as a page can act on it (P4).
  *
  * A refusal crosses every boundary as a code and the page owns the words
- * (`apps/ui/app/lib/revision-failure-copy.ts`), so the sentences here are
+ * (`apps/libs/ui-core/src/lib/revision-failure-copy.ts`), so the sentences here are
  * diagnostics for a console and a test, never copy. The port's own categories
  * are included because most of what fails a turn is the store refusing. The
  * turn's own: a contended head (`CAS_LOST`), a live tree somebody else holds

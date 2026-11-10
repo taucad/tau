@@ -25,7 +25,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { desktopDeepLink } from '#lib/desktop-deep-link.js';
+import { desktopDeepLink } from '@taucad/ui-core/lib/desktop-deep-link';
 import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 
 /**

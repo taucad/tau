@@ -98,6 +98,7 @@ const baseConfig: UserConfig = {
     'src/hooks/use-webgl-context-tracker.tsx',
     'src/lib/renderer-telemetry.ts',
     'src/lib/viewer-load-timing.ts',
+    'src/machines/canvas.machine.ts',
     'src/machines/graphics.machine.ts',
     'src/machines/kinematics.machine.ts',
     'src/machines/model-interaction.machine.ts',

@@ -8,6 +8,7 @@ import { useSelector } from '@xstate/react';
 import { cn } from '@taucad/ui/utils/cn';
 import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { RuntimeErrorOverlay } from '@taucad/viewer/model-viewer';
+import { selectCanvasAwaitingFrame } from '@taucad/viewer/machines/canvas.machine';
 import { HoveredModelComponentBadge, placeModelComponentNameBadge } from '#component-menu/component-name-badge.jsx';
 import type { ViewerPartMenu, ViewerPartMenuDecorator } from '#component-menu/use-viewer-part-menu.jsx';
 import type { GraphicsRef } from '#host/workbench-host.jsx';
@@ -187,10 +188,12 @@ export function ViewerStage({
   const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
   const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
-  // A mounted Three canvas reports its first frame on screen; until then the region is busy, so assistive technology
-  // and automation wait for a drawn stage. On a software adapter that first frame can take seconds of pipeline
-  // compiling. Content that draws no frames (an SVG, a placeholder) never declares a canvas, so it is never busy.
-  const isBusy = useSelector(graphicsRef, (state) => state.context.canvasPresentation?.presented === false);
+  // A mounted Three canvas (or the placeholder holding its place during the WebGPU probe) attaches a canvas actor that
+  // awaits its first frame on screen; until then the region is busy, so assistive technology and automation wait for a
+  // drawn stage. On a software adapter that first frame can take seconds of pipeline compiling. Content that draws no
+  // frames (an SVG) attaches no canvas, so it is never busy.
+  const canvasRef = useSelector(graphicsRef, (state) => state.context.canvas?.ref);
+  const isBusy = useSelector(canvasRef, selectCanvasAwaitingFrame);
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {

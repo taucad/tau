@@ -10,7 +10,7 @@ import { sanitizeVerifyEmailRedirectTo, VerifyEmail } from '#components/auth/ver
 import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
-import { setEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';

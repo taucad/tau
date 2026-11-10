@@ -9,7 +9,7 @@ import { useFeatureFlags } from '#flags/use-feature.js';
 import {
   parseGraphicsBackendQueryOverride,
   resolveViewerGraphicsBackendPreference,
-} from '#utils/graphics-backend-override.js';
+} from '@taucad/ui-core/utils/graphics-backend-override';
 
 const SectionViewTestBridge = React.lazy(async () => {
   const module = await import('#components/geometry/debug/section-view-test-bridge.js');

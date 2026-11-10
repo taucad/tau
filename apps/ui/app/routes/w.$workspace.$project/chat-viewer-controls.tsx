@@ -6,7 +6,7 @@ import { useProject } from '#hooks/use-project.js';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { selectCadOperationTimeout } from '#machines/cad.machine.js';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 
 type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */

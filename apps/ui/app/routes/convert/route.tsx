@@ -4,7 +4,7 @@ import type { Handle } from '#types/matches.types.js';
 import { formatConfigurations } from '@taucad/types/constants';
 import { asKnownArtifact } from '@taucad/runtime';
 import { Cpu, Download, Upload, RotateCcw } from 'lucide-react';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { Button } from '@taucad/ui/components/button';
@@ -28,7 +28,7 @@ import {
 import { Converter } from '#components/geometry/converter/converter.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';

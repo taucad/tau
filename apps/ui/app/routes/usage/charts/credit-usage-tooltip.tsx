@@ -1,6 +1,6 @@
 import { ChartTooltipContent } from '@taucad/ui/components/chart';
 import type { CustomTooltipProps } from '@taucad/ui/components/chart';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 
 /** Format server atom values without rounding the chart's geometry. */
 export function CreditUsageTooltip(props: CustomTooltipProps): React.JSX.Element | undefined {

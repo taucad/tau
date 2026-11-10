@@ -32,7 +32,7 @@
 
 import { assertEvent, createAsyncLogic, setup, types } from 'xstate';
 import type { EnqueueObject, SystemRegistry } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';

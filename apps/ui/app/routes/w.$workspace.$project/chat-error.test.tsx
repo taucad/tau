@@ -574,6 +574,37 @@ describe('ChatError', () => {
     expect(continueChat).not.toHaveBeenCalled();
   });
 
+  /* A refused reasoning replay is worded by the page: resuming re-sends the same history to the same refusal, so the
+   * card offers another model and the provider's sentence reaches Tau Debug only. */
+  it('should word a refused reasoning replay itself and offer a model switch without Resume', () => {
+    debug.enabled = true;
+    const providerSentence =
+      'Configured provider returned HTTP 400. messages.1.content.4: Invalid `signature` in `thinking` block.';
+    projected({
+      category: errorCategory.server,
+      title: 'Server Error',
+      message: providerSentence,
+      code: 'REASONING_REPLAY_REJECTED',
+      httpStatus: 502,
+    });
+
+    render(<ChatErrorBanner />);
+
+    const card = screen.getByRole('alert');
+    expect(card).toHaveTextContent('This model cannot continue this chat');
+    expect(
+      screen.getByText(
+        'The model provider refused reasoning from earlier in this chat. Switch to another model to continue.',
+      ),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(providerSentence);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Switch model',
+      'Try again',
+      'Debug details',
+    ]);
+  });
+
   /* W11a, IC5, OQ15: a restricted account is the account's, not the route's: support is the one recovery, the copy names
    * no case kind, and the gateway's sentence reaches Tau Debug only. */
   it('should point a restricted account to support without Resume or a model switch', async () => {

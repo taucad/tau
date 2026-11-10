@@ -55,6 +55,7 @@ const codeCards = {
   INVALID_REQUEST: { category: 'switchModel' },
   EXTERNAL_AGENT_MODEL_UNAVAILABLE: { category: 'switchModel' },
   MODEL_ROUTE_PAUSED: { category: 'switchModel' },
+  REASONING_REPLAY_REJECTED: { category: 'switchModel' },
   BILLING_ACCOUNT_RESTRICTED: { category: 'accountRestricted' },
   RESUME_UNAVAILABLE: { category: 'nothingToResume' },
   LEADERSHIP_LOST: { category: 'otherTab' },

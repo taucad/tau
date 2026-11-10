@@ -218,6 +218,7 @@ describe('BillableModelInvocationService', () => {
   it('maps every catalog route through the production adapter factory and actual resolver', () => {
     const routeCases = (
       [
+        ['anthropic-claude-fable-5.2', 'claude-fable-5-2', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5.1', 'claude-fable-5-1', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5', 'claude-fable-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],

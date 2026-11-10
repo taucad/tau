@@ -24,8 +24,8 @@
  *   runs the target build, so a deploy that cannot serve its own chunks never loops; and
  *   a tab makes at most `autoReloadBudget` automatic reloads per `autoReloadBudgetWindow`,
  *   never cleared on arrival, so a rolling deploy whose edges disagree cannot either.
- * - A different build otherwise: the sidebar update control (`BrowserUpdate`) or banner
- *   offers the reload (`superseded`). Writes go on: in a lone tab no other bundle shares
+ * - A different build otherwise: the sidebar update control (`BrowserUpdate`) offers the
+ *   reload (`superseded`). Writes go on: in a lone tab no other bundle shares
  *   storage, and another tab's bundle stops them through `build-skew`'s channel.
  *
  * The recovery asks no server itself: `build-skew` owns every `/health/build` answer and the
@@ -993,7 +993,7 @@ export const installStaleBuildRecovery = (): (() => void) => {
 };
 
 /**
- * Whether a reload prompt (the banner, the sidebar update control) shows: while the reload is
+ * Whether a reload prompt (the sidebar update control, the error page) shows: while the reload is
  * offered, and never while the page's own automatic reload is pending (a second reload would race
  * it); it shows again once that reload stalls.
  *

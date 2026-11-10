@@ -13,10 +13,9 @@ const load = async () => {
   const skew = await import('#filesystem/build-skew.js');
   loaded.push(skew);
   const { BrowserUpdate } = await import('#components/nav/browser-update.js');
-  const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
   // Same module instance as the control, so they share one sidebar context.
   const { SidebarProvider, useSidebar } = await import('@taucad/ui/components/sidebar');
-  return { ...skew, BrowserUpdate, BuildSkewBanner, SidebarProvider, useSidebar };
+  return { ...skew, BrowserUpdate, SidebarProvider, useSidebar };
 };
 
 const announce = async (buildId: number): Promise<void> => {
@@ -60,12 +59,11 @@ describe('browser update control', () => {
   it('reveals the sidebar prompt without taking editor focus and reloads only on request', async () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...globalThis.location, reload });
-    const { BrowserUpdate, BuildSkewBanner, SidebarProvider, buildId } = await load();
+    const { BrowserUpdate, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider defaultOpen={false}>
         <input aria-label='Model draft' />
         <BrowserUpdate />
-        <BuildSkewBanner />
       </SidebarProvider>,
     );
     screen.getByRole('textbox', { name: 'Model draft' }).focus();
@@ -77,42 +75,11 @@ describe('browser update control', () => {
       'Reload to continue with the latest version.',
     );
     expect(screen.getByRole('textbox', { name: 'Model draft' })).toHaveFocus();
-    // The sidebar owns the prompt, so the floating fallback stays away.
+    // The sidebar is the only update surface: nothing floats over the workspace.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Reload now' }));
     expect(reload).toHaveBeenCalledOnce();
-  });
-
-  it('falls back to the floating prompt while the sidebar is collapsed', async () => {
-    const { BrowserUpdate, BuildSkewBanner, SidebarProvider, buildId } = await load();
-    const { useSidebar } = await import('@taucad/ui/components/sidebar');
-    function Collapse(): React.JSX.Element {
-      const { setOpen } = useSidebar();
-      return (
-        <button
-          type='button'
-          onClick={() => {
-            setOpen(false);
-          }}
-        >
-          Collapse
-        </button>
-      );
-    }
-    render(
-      <SidebarProvider>
-        <Collapse />
-        <BrowserUpdate />
-        <BuildSkewBanner />
-      </SidebarProvider>,
-    );
-    await announce(buildId + 1);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
   });
 
   it('shows the newest build when a later one is announced', async () => {
@@ -237,14 +204,5 @@ describe('browser update control', () => {
     });
 
     expect(collapse).toHaveAttribute('data-open', 'false');
-  });
-
-  it('falls back to the floating prompt where no sidebar is mounted', async () => {
-    const { BuildSkewBanner, buildId } = await load();
-    render(<BuildSkewBanner />);
-
-    await announce(buildId + 1);
-
-    expect(screen.getByRole('alert')).toHaveTextContent('A newer version of Tau is available');
   });
 });

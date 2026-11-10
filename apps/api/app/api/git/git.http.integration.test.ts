@@ -37,7 +37,7 @@ import { ProjectAccessService } from '@taucad/api-projects/collaboration/project
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
-import { pktLine, repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import { authorshipRefusals, pktLine, repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -91,6 +91,12 @@ const state = {
   lfsBytes: 0,
   generation: 0,
   derivedGeneration: 0,
+  /**
+   * `project.origin` (B4). Stock git writes this suite's commits, as on a
+   * project linked to GitHub; the authorship rows set `local-mirror`, the
+   * origin every project Tau registers carries.
+   */
+  origin: 'github' as 'github' | 'local-mirror',
 };
 
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
@@ -245,7 +251,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         where: () =>
           Object.assign(Promise.resolve([] as unknown[]), {
             limit: async () =>
-              table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+              table === projectDeletion
+                ? []
+                : table === project
+                  ? [{ storageAccountId: null, origin: state.origin }]
+                  : rows(),
           }),
       }),
     });
@@ -906,6 +916,122 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(stranger.status).toBe(404);
     expect(stranger.body).not.toContain(callers.writer.id);
     expect(stranger.body).not.toContain('refs/heads');
+  }, 120_000);
+
+  /**
+   * B4 (A3, Q11; Revisions Policy rule 19): every commit new to the project's
+   * history names the pushing account, whatever its Tau record's version, on a
+   * project Tau registered. The records are the shape the client writes today.
+   * No refusal repeats an id, a name or an address the commit recorded.
+   */
+  it('refuses a revision that does not name its pusher, and one that carries an email, each with its own reason', async () => {
+    state.origin = 'local-mirror';
+    try {
+      const clone = path.join(workspace, 'authorship');
+      await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+      const cloned = await gitOk(['rev-parse', 'HEAD'], clone);
+      const base = cloned.stdout.trim();
+      let file = 0;
+      /** One revision on the base, recorded as `actor` and authored at `email`. */
+      const revise = async (email: string, record?: Readonly<Record<string, unknown>>): Promise<void> => {
+        await gitOk(['reset', '--quiet', '--hard', base], clone);
+        file += 1;
+        await writeFile(
+          path.join(clone, `authorship-${String(file)}.ts`),
+          `export const n = ${String(file)};\n`,
+          'utf8',
+        );
+        await gitOk(['add', '.'], clone);
+        const message =
+          record === undefined
+            ? ['-m', 'Edited outside Tau']
+            : [
+                '-m',
+                'Saved',
+                '-m',
+                `Tau-Metadata: ${JSON.stringify({
+                  version: 1,
+                  parents: [base],
+                  provenance: { source: 'user', createdAt: Date.now(), ...record },
+                  summary: { generated: 'Saved' },
+                })}`,
+              ];
+        const committed = await runGit(['commit', ...message], clone, {
+          GIT_AUTHOR_NAME: 'Someone',
+          GIT_AUTHOR_EMAIL: email,
+          GIT_COMMITTER_NAME: 'Tau',
+          GIT_COMMITTER_EMAIL: 'noreply@tau.new',
+        });
+        expect(committed.code, committed.stderr).toBe(0);
+      };
+      const push = async (branch: string) => runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], clone);
+      const noreply = (id: string): string => `${id}@users.noreply.tau.new`;
+
+      /* B pushing a revision signed as A. */
+      await revise(noreply(callers.owner.id), {
+        actorId: callers.owner.id,
+        actor: { kind: 'user', id: callers.owner.id, name: 'Member owner', email: `${callers.owner.id}@test.com` },
+      });
+      const forged = await push('authorship-forged');
+      expect(forged.code).not.toBe(0);
+      expect(forged.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+      expect(forged.stderr).not.toContain(callers.owner.id);
+      expect(forged.stderr).not.toContain('Member owner');
+      expect(await advertised()).not.toContain('authorship-forged');
+
+      /* An agent working for A, pushed by B. */
+      await revise(noreply(callers.owner.id), {
+        source: 'agent',
+        actorId: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.owner.id } },
+      });
+      const forgedAgent = await push('authorship-forged-agent');
+      expect(forgedAgent.code).not.toBe(0);
+      expect(forgedAgent.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+
+      /* A Tau-written revision carrying an environment email (Q11). */
+      await revise('writer@example.com', {
+        actorId: callers.writer.id,
+        actor: { kind: 'user', id: callers.writer.id, email: 'writer@example.com' },
+      });
+      const leaked = await push('authorship-email');
+      expect(leaked.code).not.toBe(0);
+      expect(leaked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
+      expect(leaked.stderr).not.toContain('writer@example.com');
+
+      /* A commit Tau did not record, on a project not linked to GitHub. */
+      await revise('someone@example.com');
+      const outside = await push('authorship-outside');
+      expect(outside.code).not.toBe(0);
+      expect(outside.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
+      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|outside)/u);
+
+      /* …and the same commit on a project linked to GitHub. */
+      state.origin = 'github';
+      const linked = await push('authorship-outside');
+      expect(linked.code, linked.stderr).toBe(0);
+      state.origin = 'local-mirror';
+
+      /* The pusher's own revision, and an agent's on the pusher's behalf. */
+      await revise(noreply(callers.writer.id), {
+        actorId: callers.writer.id,
+        actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
+      });
+      const own = await push('authorship-own');
+      expect(own.code, own.stderr).toBe(0);
+      await revise(noreply(callers.writer.id), {
+        source: 'agent',
+        actorId: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },
+      });
+      const onBehalf = await push('authorship-agent');
+      expect(onBehalf.code, onBehalf.stderr).toBe(0);
+      const advertisement = await advertised();
+      expect(advertisement).toContain('refs/heads/authorship-own');
+      expect(advertisement).toContain('refs/heads/authorship-agent');
+    } finally {
+      state.origin = 'github';
+    }
   }, 120_000);
 
   /** Ruling P55: an account with no relation to the project is told it does not exist. */

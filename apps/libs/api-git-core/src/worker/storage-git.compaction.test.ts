@@ -139,6 +139,8 @@ const newRepository = (
           project,
           callerId: owner,
           committedBy: owner,
+          /* Stock git writes these commits, as on a project linked to GitHub (B4). */
+          forge: 'github',
           remainingBytes: 64 * 1024 ** 2,
           storageLimitBytes: 64 * 1024 ** 2,
           recordedGeneration: 0,

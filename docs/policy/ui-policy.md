@@ -136,7 +136,7 @@ A piece of UI that appears on more than one surface has one implementation, and 
 
 ### Close Controls
 
-A dialog or sheet closes from one control: a ghost icon button (`variant='ghost'`, `size='icon-sm'`) in the top inline-end corner, with the `X` glyph, `text-muted-foreground`, and the screen-reader name "Close". It is the same control, with the same hover and focus treatment, as "Close settings". `DialogContent` and `SheetContent` render it; never restyle it, reposition it or add a second bare `X`. A screen that must stay open until the person acts hides it with `showCloseButton={false}` and offers a labelled button instead.
+A dialog or sheet closes from one control: a ghost icon button (`variant='ghost'`, `size='icon-sm'`) in the top inline-end corner, with the `X` glyph, `text-muted-foreground`, and the screen-reader name "Close". It is the same control, with the same hover and focus treatment, as "Close settings". `DialogContent` and `SheetContent` render it; never restyle it, reposition it or add a second bare `X`.
 
 **Why**: the old close mark was a bare, half-opaque glyph with no hover surface and a 16px target; it read as decoration and was hard to hit.
 

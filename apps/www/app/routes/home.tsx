@@ -80,7 +80,7 @@ export const content = (): React.JSX.Element => (
         {kicker('Pricing')}
         <h2 id='pricing-title'>Free to start.</h2>
         <p>
-          Use Tau for free and pay for hosted AI with credits. Pro is $20 a month and adds 2,000 credits a month and 10
+          Use Tau for free and pay for hosted AI with credits. Pro is $20 a month and adds 2,000 credits a month and 100
           GB of cloud backup.{' '}
           <SiteLink className='text-link' href='/pricing/'>
             Compare plans →

@@ -298,10 +298,10 @@ describe('funded journey', () => {
         await screenshot(page, 'fd-01-credits-card'),
       );
       expect(title).toBe('You’re out of credits');
-      // Main's preflight card has no run behind it: it says "Add credits, then send your message." and offers no
-      // Resume; a gateway 402 instead prefixes "Tau paused this turn:" and offers Resume.
-      expect(text).toMatch(/\b\d+ more credits? needed for Haiku 5\.5\./u);
-      expect(buttons).toEqual(expect.arrayContaining(['Billing', 'Switch model']));
+      // The preflight card has no run behind it: it offers Add credits and Switch model and no Resume, and says
+      // "Add credits, then send your message again."; a resumable gateway 402 offers Resume instead.
+      expect(text).toMatch(/This turn needs \d+ more credits? on Haiku 5\.5\./u);
+      expect(buttons).toEqual(expect.arrayContaining(['Add credits', 'Switch model']));
       expect(holds.holds).toHaveLength(0);
       return { outcome: 'pass', evidence };
     }),

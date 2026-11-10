@@ -106,7 +106,7 @@ export const storyChapters = [
     label: 'Anywhere',
     title: 'Open it on any computer.',
     body: 'Back the project up to Tau Cloud and open it wherever you sign in, with its files, its revision history and, unless you turn chat sync off, its chats.',
-    detail: 'Tau Cloud backup & sync · Pro and Enterprise',
+    detail: 'Tau Cloud backup & sync · Every plan',
   },
 ];
 

@@ -32,11 +32,13 @@ Accessible UI ensures all users, including those using assistive technology, can
 | Error                        | `role="alert"` `aria-label="<description>"`                     | `<div role="alert" aria-label="Preview error">`                     |
 | Informational image / canvas | `role="img"` `aria-label="<description>"`                       | `<div role="img" aria-label="3D model preview">`                    |
 
-A skeleton placeholder is one status region: the wrapper carries `role="status"`, `aria-busy="true"` and the name of the wait (an `aria-label`, or a visually hidden sentence when the region has other content), and every `Skeleton` bar inside it is `aria-hidden="true"`. Announce the wait once per region, not once per bar.
+A skeleton placeholder is one status region: the wrapper carries `role="status"`, `aria-busy="true"` and the name of the wait (an `aria-label`, or a visually hidden sentence referenced by `aria-labelledby` when the region has other content), and every `Skeleton` bar inside it is `aria-hidden="true"`. Announce the wait once per region, not once per bar.
 
 ```tsx
-<div role='status' aria-busy='true'>
-  <span className='sr-only'>Loading repositories…</span>
+<div role='status' aria-busy='true' aria-labelledby='repositories-loading'>
+  <span id='repositories-loading' className='sr-only'>
+    Loading repositories…
+  </span>
   <Skeleton aria-hidden='true' className='h-3.5 w-32' />
 </div>
 ```

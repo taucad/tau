@@ -24,6 +24,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
@@ -130,6 +131,8 @@ const fixture = async (
   });
   const base: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: portFiles });
   await base.init({ author });
+  /* A current project carries both setup files; opening writes no attributes file (A4). */
+  await rooted.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
   if (backend === 'node') {
     /* What init wrote is as settled as the fixture's own files, and the index is told by its compare. */
     for (const path of ['.gitattributes', '.gitignore']) {

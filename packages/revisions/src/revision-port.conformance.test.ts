@@ -2708,6 +2708,8 @@ describe.runIf(gitToolchainOnPath)('the live index follows HEAD (R14)', () => {
       const root = await project();
       const port = create(root);
       await port.init({ author });
+      /* Opening writes no attributes file (A4); this working copy carries one, as a save leaves it. */
+      await writeFile(join(root, generatedGitattributesPath), generatedGitattributesContent(undefined));
       const files = {
         '.gitignore': await readFile(join(root, generatedIgnorePath), 'utf8'),
         '.gitattributes': await readFile(join(root, '.gitattributes'), 'utf8'),

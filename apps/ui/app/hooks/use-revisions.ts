@@ -55,6 +55,8 @@ export type RevisionCard = {
   readonly restoredFrom?: string;
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
+  readonly isSetup?: true;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -207,6 +209,7 @@ const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): Rev
   trigger: row.trigger,
   ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
   ...(row.parent === undefined ? {} : { parent: row.parent }),
+  ...(row.isSetup === true ? { isSetup: true } : {}),
 });
 
 /**

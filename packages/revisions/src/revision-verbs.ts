@@ -22,6 +22,7 @@ import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -85,6 +86,13 @@ export type RevisionRow = Readonly<{
    * sides appear further down the order.
    */
   otherParents?: readonly string[];
+  /**
+   * An automatic entry (`idle`, `hidden` or `close`) that changed only Tau's
+   * own setup files, the root `.gitignore` and `.gitattributes` (A4). Decided
+   * at read by which files changed, never by a declared kind, so no one can
+   * fold a model edit out of sight under Tau's name. Absent on every other row.
+   */
+  isSetup?: true;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -288,6 +296,55 @@ const rowOf = (
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
   });
 
+/* The files Tau owns as project setup: what it generates at the project root (A4). */
+const setupPaths: ReadonlySet<string> = new Set([generatedIgnorePath, generatedGitattributesPath]);
+
+/*
+ * Setup verdicts already read, by revision id. A revision's changes against its
+ * first parent are fixed by its id, so an entry is never stale.
+ *
+ * ponytail: insertion-order eviction at 4 096 ids, as `ordinals`; a miss is read again.
+ */
+const setupVerdicts = new Map<string, boolean>();
+
+/**
+ * The entries that are Tau's own setup: automatic saves whose only changes
+ * against their first parent are Tau's setup files (A4). Decided by the files,
+ * never by a declared kind, so a model edit can never be folded under Tau's name.
+ *
+ * @param port - The store, asked once for every entry it has not judged yet.
+ * @param page - The entries read.
+ * @returns The ids of the setup entries among them.
+ */
+const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntry[]): Promise<ReadonlySet<string>> => {
+  const candidates = page.filter(
+    ({ provenance: { trigger }, parents }) =>
+      (trigger === 'idle' || trigger === 'hidden' || trigger === 'close') && parents.length === 1,
+  );
+  const unjudged = candidates.filter((entry) => !setupVerdicts.has(entry.id));
+  if (unjudged.length > 0) {
+    const changed =
+      port.firstParentChanges === undefined
+        ? new Map(
+            await Promise.all(
+              unjudged.map(async (entry) => {
+                const changes = await port.diff({ from: entry.parents[0], to: entry.id });
+                return [entry.id, changes.map((change) => change.path)] as const;
+              }),
+            ),
+          )
+        : await port.firstParentChanges(unjudged.map((entry) => entry.id));
+    for (const { id } of unjudged) {
+      const paths = changed.get(id) ?? [];
+      setupVerdicts.set(id, paths.length > 0 && paths.every((path) => setupPaths.has(path)));
+      if (setupVerdicts.size > maximumOrdinals) {
+        setupVerdicts.delete(setupVerdicts.keys().next().value!);
+      }
+    }
+  }
+  return new Set(candidates.filter((entry) => setupVerdicts.get(entry.id) === true).map((entry) => entry.id));
+};
+
 /**
  * Read one branch's history, newest first.
  *
@@ -327,10 +384,13 @@ export const readRevisionLog = async (
   /* The port's own order, not the chain's: a merge is followed by the side it
    * merged, and those revisions are in this branch's history without being on
    * its first-parent line, so they appear with no number of their own. */
-  const rows = [...entries.values()].map((entry) =>
-    rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted())),
-  );
-  return Object.freeze(limit === undefined ? rows : rows.slice(0, limit));
+  const page = limit === undefined ? [...entries.values()] : [...entries.values()].slice(0, limit);
+  const setup = await setupEntriesOf(port, page);
+  const rows = page.map((entry) => {
+    const row = rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted()));
+    return setup.has(entry.id) ? Object.freeze({ ...row, isSetup: true }) : row;
+  });
+  return Object.freeze(rows);
 };
 
 /**

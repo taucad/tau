@@ -15,6 +15,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 
 type Counted = Readonly<{
   filesystem: Awaited<ReturnType<typeof createMemoryProvider>>;
@@ -69,6 +70,8 @@ const fixture = async (
     },
   };
   await port.init({ author });
+  /* A current project carries both setup files; opening writes no attributes file (A4). */
+  await filesystem.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',

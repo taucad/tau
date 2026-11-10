@@ -2408,14 +2408,15 @@ const syncMachineDefinition = setup({
         offering: {
           always: ({ context }) => (context.automaticPush ? undefined : { target: 'offered' }),
           on: {
-            /* The conflict line's push is kept (audit R6): its answer is recorded, then the pull follows. */
+            /* The conflict line's push is kept (audit R6): its answer is recorded, then the pull follows.
+             * The stream is only stopped here: `opening` watches it afresh, so a refusal of it under
+             * the new session cannot pre-empt the push. */
             sessionChanged: ({ context, guards }, enq) => {
               if (!guards.hasRemote(context)) {
                 /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
                 return {};
               }
               enq.sendTo('remoteMoves', { type: 'unwatch' });
-              enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote ?? '' });
               return {
                 context: { pendingSession: true, heldSessionPull: context.heldSessionPull || context.quiescing },
               };

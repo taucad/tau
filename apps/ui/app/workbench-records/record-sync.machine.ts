@@ -151,6 +151,8 @@ export type RecordSyncContext<T, P> = Readonly<{
   slow: boolean;
   /** A write failed and its change is still owed. */
   writeFailed: boolean;
+  /** The deferred patch waits for the retry timer, so a command served meanwhile leaves the timer due. */
+  retryOwed: boolean;
   closeFenced: boolean;
   /** An effect or child failure no transition modelled; the store keeps answering (MC-R12). */
   fault: string | undefined;
@@ -453,18 +455,16 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       answer(enq, context.flushes, saved && deferred === undefined);
       return { target: 'fenced', context: reported(context, { ...patch, flushes: [] }, enq) };
     }
+    /* A command served while a deferred edit waited for its timer leaves that edit's retry due. */
+    const retryOwed = deferred !== undefined && (outcome === 'retry' || (cycle.kind !== 'edit' && context.retryOwed));
     const owed = deferred !== undefined || !latest || context.commands.length > 0 || context.readBack !== 'none';
     if (context.flushes.length > 0 && (!owed || (!saved && cycle.flushed && latest && context.commands.length === 0))) {
       answer(enq, context.flushes, !owed);
       patch.flushes = [];
     }
     return {
-      /* A command served while a failed edit waited for its timer leaves that edit's retry due. */
-      target:
-        deferred !== undefined && (outcome === 'retry' || (cycle.kind !== 'edit' && context.writeFailed))
-          ? 'retrying'
-          : 'idle',
-      context: reported(context, patch, enq),
+      target: retryOwed ? 'retrying' : 'idle',
+      context: reported(context, { ...patch, retryOwed }, enq),
     };
   };
 
@@ -572,6 +572,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       retryDelay: firstRetryDelay,
       slow: false,
       writeFailed: false,
+      retryOwed: false,
       closeFenced: false,
       fault: undefined,
       faults: 0,

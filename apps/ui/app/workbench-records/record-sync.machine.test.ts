@@ -1044,6 +1044,29 @@ describe('recordSync', () => {
       expect(store.writes[1]?.input.data).toBe('name=Front');
     });
 
+    it('should keep the retry of an edit whose first read failed due when an ensure is served during its backoff', async () => {
+      const store = harness();
+      const mine = store.commands.edit({ name: 'mine' });
+      await flush();
+      store.reads[0]?.settle({ status: 'failed', error: new Error('disk busy') });
+      await flush();
+
+      expect(await mine).toBe(false);
+
+      const ensured = store.commands.ensure({ name: 'seed' });
+      await flush();
+      await store.serve();
+
+      expect(await ensured).toBe(true);
+      expect(store.context().deferred).toEqual({ name: 'mine' });
+
+      store.clock.advance(60_000);
+      await flush();
+      await store.serve();
+
+      expect(store.writes.map((write) => write.input.data)).toEqual(['name=mine']);
+    });
+
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
       const store = harness();
       await store.observe();

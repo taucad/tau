@@ -12,7 +12,7 @@ related:
 
 # WebGPU Rendering Pipeline Policy
 
-Internal reference binding the Tau CAD viewer’s **WebGPU** post/lighting topology (R3F + Three.js **r184** TSL and owned frame targets). Divergences belong in ADRs (`docs/architecture/` or follow-up research), not silent refactors.
+Internal reference binding the Tau viewer’s **WebGPU** post/lighting topology (R3F + Three.js **r184** TSL and owned frame targets). Divergences belong in ADRs (`docs/architecture/` or follow-up research), not silent refactors.
 
 ## Rationale
 

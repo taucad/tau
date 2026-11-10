@@ -194,7 +194,7 @@ If updating an existing artifact, inspect the current file first and preserve us
     slug: 'create-model',
     name: 'Create Model',
     description:
-      'Selects a Tau CAD kernel and activates its authoring skill. Use when creating a model without a pinned kernel.',
+      'Selects a Tau kernel and activates its authoring skill. Use when creating a model without a pinned kernel.',
     version: '1.0.0',
     source: 'system',
     priority: 60,

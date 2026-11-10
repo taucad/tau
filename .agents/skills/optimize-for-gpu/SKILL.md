@@ -1,6 +1,6 @@
 ---
 name: optimize-for-gpu
-description: Designs and verifies WebGPU/WGSL compute acceleration for profiled Tau CAD, simulation, and analysis workloads. Use when investigating or implementing non-rendering GPU compute for a measured workload.
+description: Designs and verifies WebGPU/WGSL compute acceleration for profiled Tau CAD-kernel, simulation, and analysis workloads. Use when investigating or implementing non-rendering GPU compute for a measured workload.
 ---
 
 # Optimize for GPU

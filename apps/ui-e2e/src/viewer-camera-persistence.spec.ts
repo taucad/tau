@@ -8,7 +8,8 @@ import * as target from '#support/external-target.js';
  * about 500 ms later. Before #1602 the store published that write back as a foreign edit, and the
  * sync hook adopted it once the camera had been quiet for 250 ms, which is 250 ms after drag 2's
  * last move: the camera jumped back to where drag 1 ended. The echo only exists when drag 2 starts
- * before it lands, about 750 ms after drag 1's last move. The rows mirror the bisect harness,
+ * before it lands: at least 750 ms after drag 1's last camera change, which trails its last pointer
+ * move by the render lag. The rows mirror the bisect harness,
  * `viewer-orbit-snap-back-regression/repro.cjs` in Tau Brain.
  */
 
@@ -46,8 +47,15 @@ const dragDistancePixels = 120;
 /** 20 steps, as the harness, sent as 4 commands of 5 so the drag stays about as long as a person's. */
 const dragCommands = 4;
 const stepsPerCommand = 5;
-/** Drag 1's save echo lands about 750 ms (250 ms settle plus 500 ms write debounce) after its last move. */
-const echoAfterFirstDragMilliseconds = 750;
+/**
+ * The longest measured gap, drag 1's last pointer move to drag 2's first, at which the 200 and 400 ms
+ * rows still count as witnesses. The echo lands at least 750 ms after drag 1's last camera change,
+ * and with #1602 reverted the snap reproduced here at measured gaps up to 1.26 s; 1 s keeps the
+ * witness rows inside that window with margin over the 0.6 to 0.75 s they achieve.
+ */
+const witnessGapLimitMilliseconds = 1000;
+/** The rows whose achieved gap must stay inside the witness window. */
+const witnessRowLimitMilliseconds = 400;
 /** Lets the freshly opened fixture finish loading and framing before the first drag. */
 const quietBeforeRowMilliseconds = 2500;
 /** The snap landed about 250 ms after drag 2 settled; 1.5 s covers it with margin, as the harness did. */
@@ -212,13 +220,13 @@ test.describe('Viewer camera persistence', () => {
         endOfSecondDrag,
         settled,
       });
-      if (gapMilliseconds < echoAfterFirstDragMilliseconds - 300) {
+      if (gapMilliseconds <= witnessRowLimitMilliseconds) {
         /* These rows are the witness: drag 2 must be under way before drag 1's echo lands, or the
          * row could not go red with the regression present. */
         expect(
           timeline.gapMilliseconds,
           `drag 2 should start before drag 1's save echo lands, or this row proves nothing: ${evidence}`,
-        ).toBeLessThan(echoAfterFirstDragMilliseconds);
+        ).toBeLessThan(witnessGapLimitMilliseconds);
       }
       expect(firstArc, `the first drag should orbit the camera: ${evidence}`).toBeGreaterThan(tolerance);
       /* Both drags are the same azimuth-only gesture, so they must sweep the same arc. This is a

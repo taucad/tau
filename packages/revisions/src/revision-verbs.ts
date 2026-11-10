@@ -476,6 +476,27 @@ export const readRevisionLog = async (
     return Object.freeze([]);
   }
   const numbers = await numbersOn(port, head, entries);
+  /* The port's own order, not the chain's: a merge is followed by the side it
+   * merged, and those revisions are in this branch's history without being on
+   * its first-parent line, so they appear with no number of their own. */
+  const page = limit === undefined ? [...entries.values()] : [...entries.values()].slice(0, limit);
+  return Object.freeze(await rowsOf(port, page, numbers));
+};
+
+/**
+ * A page of log entries as rows: numbered versions, and the setup verdict (A4).
+ * Shared by {@link readRevisionLog} and the graph read, which numbers nothing.
+ *
+ * @param port - The store, for its tags and the setup verdicts.
+ * @param page - The entries, in the order to return them.
+ * @param numbers - `Rev N` by revision id; an entry it does not hold has none.
+ * @returns One row per entry, in `page`'s order.
+ */
+export const rowsOf = async (
+  port: RevisionPort,
+  page: readonly RevisionLogEntry[],
+  numbers: ReadonlyMap<string, number> = new Map(),
+): Promise<readonly RevisionRow[]> => {
   /* One `listTags` for the whole page, not one per row; each tag arrives numbered (B6). */
   const named = new Map<string, RevisionVersion[]>();
   for (const tag of numberVersions(await port.listTags())) {
@@ -484,17 +505,12 @@ export const readRevisionLog = async (
       Object.freeze({ name: tag.name, number: tag.number }),
     ]);
   }
-  /* The port's own order, not the chain's: a merge is followed by the side it
-   * merged, and those revisions are in this branch's history without being on
-   * its first-parent line, so they appear with no number of their own. */
-  const page = limit === undefined ? [...entries.values()] : [...entries.values()].slice(0, limit);
   const setup = await setupEntriesOf(port, page);
-  const rows = page.map((entry) => {
+  return page.map((entry) => {
     const row = rowOf(entry, numbers.get(entry.id), named.get(entry.id));
     /* The Start entry is V1 and reads as itself, never folded into the setup line. */
     return setup.has(entry.id) && row.start === undefined ? Object.freeze({ ...row, isSetup: true }) : row;
   });
-  return Object.freeze(rows);
 };
 
 /**

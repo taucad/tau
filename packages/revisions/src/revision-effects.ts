@@ -1867,6 +1867,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     equalEntry,
     entryOf,
     materializeTree: applyMaterializedTree,
+    repairTornCheckout,
   } = createApplyTreeEffects({
     useFileSystem,
     capture,
@@ -2175,6 +2176,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
       const placeholders = largeObjectPlaceholders(await capture(place));
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;
       }
@@ -4094,6 +4096,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     adoptLargeObjects,
     checkLargeObjects: async (checkoutId) => {
       const place = await readPlaceOf(checkoutId);
+      /* A checkout a failed write left torn is put back first, then its tree is given the fill's word (L5). */
+      await repairTornCheckout(place);
       answeredFills.delete(place.id);
       checkFill(place);
     },

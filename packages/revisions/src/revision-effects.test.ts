@@ -1516,7 +1516,7 @@ describe('restore, through the machine that owns it', () => {
     };
   };
 
-  it.fails('tells a tree write that rolled itself back as whole, not torn', async () => {
+  it('tells a tree write that rolled itself back as whole, not torn', async () => {
     const { tree, filesystem, outcomes, first, fail } = await failingWrites();
     /* The second changeset fails and the rollback lands: the checkout is whole again. */
     fail(1, 1);
@@ -1530,7 +1530,7 @@ describe('restore, through the machine that owns it', () => {
     tree.actor.stop();
   }, 30_000);
 
-  it.fails('puts a torn checkout back when the person tries again', async () => {
+  it('puts a torn checkout back when the person tries again', async () => {
     const { tree, filesystem, outcomes, first, fail } = await failingWrites();
     /* The second changeset and the rollback both fail: the checkout is torn. */
     fail(2, 1);

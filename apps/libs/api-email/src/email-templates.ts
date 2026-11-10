@@ -119,12 +119,12 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
             ],
           }),
           createElement(paragraph, null, "If this was you, there's nothing else to do."),
-          createElement(primaryAction, { href: template.url }, "I didn't do this"),
           createElement(
-            note,
+            paragraph,
             null,
-            "That button starts a new password reset for this address. If you can't sign in afterwards, reply to this email and we'll help.",
+            "If it wasn't, reset your password now. That signs out every other session. If you can't sign in, reply to this email and we'll help.",
           ),
+          createElement(primaryAction, { href: template.url }, 'Reset your password'),
         ],
       };
     }

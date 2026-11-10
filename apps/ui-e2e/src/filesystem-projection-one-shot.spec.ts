@@ -19,7 +19,7 @@ const currentSource = `import { makeBaseBox } from 'replicad';
 export default function main() { void makeBaseBox; throw new Error("one-shot-current-source"); }
 `;
 
-test('Fix with AI reads the current rooted source after an independent persistent replacement', async () => {
+test('Fix in chat reads the current rooted source after an independent persistent replacement', async () => {
   await target.installAgentHostGatewayFixture([
     { text: 'Current source received.', usage: { inputTokens: 10, outputTokens: 4 } },
   ]);
@@ -105,7 +105,7 @@ test('Fix with AI reads the current rooted source after an independent persisten
       sourceSha256,
       deadline,
       instructions:
-        'Principal owns Fix with AI, branch placement/Send and Update thumbnail gestures. Previous/current are explicit independent rooted mutations. Capture reads actual checkout/source/output. End finishes; no driver product gestures after READY.',
+        'Principal owns Fix in chat, branch placement/Send and Update thumbnail gestures. Previous/current are explicit independent rooted mutations. Capture reads actual checkout/source/output. End finishes; no driver product gestures after READY.',
     };
     await target.writeArtifact('one-shot-manual-ready.json', JSON.stringify(receipt, null, 2));
     console.info('ONE SHOT MANUAL READY', JSON.stringify(receipt));
@@ -190,7 +190,7 @@ test('Fix with AI reads the current rooted source after an independent persisten
     expect(acquiredValue3[`/${sourcePath}`]).toBe(currentSource);
     const acquiredValue4 = await target.readAgentHostGatewayRequests();
     expect(acquiredValue4).toHaveLength(0);
-    await target.click(selectors.getByRole('button', { name: 'Fix with AI', exact: true }).first());
+    await target.click(selectors.getByRole('button', { name: 'Fix in chat', exact: true }).first());
     await target.expectVisible(selectors.getByText('Current source received.', { exact: true }), 120_000);
     const requests = await target.readAgentHostGatewayRequests();
     expect(requests).toHaveLength(1);

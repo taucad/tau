@@ -20,8 +20,8 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
-import type { RevisionSessionUser } from '#lib/revision-actor.js';
+import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
+import type { RevisionWhoContext } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
@@ -40,7 +40,10 @@ export type RevisionCard = {
   /** Milliseconds since the Unix epoch. */
   readonly createdAt: number;
   readonly summary: string;
+  /** Who made it, as {@link revisionWho} answers: the who line, empty when the row shows none. */
   readonly actor: string;
+  /** The signed-in account made it, whether or not the row shows a who line (Q2). */
+  readonly isYours?: true;
   /** Object id of the tree it carries; absent on a remote settlement's card. */
   readonly treeId?: string;
   /** The turn this revision recorded, when a turn did. */
@@ -162,52 +165,24 @@ const titleOf = (row: RevisionRow): string => {
   return row.summary;
 };
 
-/**
- * Who made a revision, in a person's words (C45, D18/A26).
- *
- * `RevisionRow.actor` is `provenance.actorId`: a model id for an agent turn,
- * this app's own `anon:<hash>` pseudonym for an anonymous author, an account id
- * otherwise. The pseudonym scheme is ours (`lib/revision-actor.ts`), so naming
- * it is reading our own format. An account id belonging to somebody else cannot
- * be named here — `RevisionRow` carries no `provenance.actor` — so it is
- * described rather than printed raw.
- *
- * @param row - One graph row.
- * @param session - The signed-in person, as the hook subscribed to them.
- * @returns The attribution line.
- */
-export const actorOf = (
-  row: Readonly<{ actor: string; source: string }>,
-  session: RevisionSessionUser | undefined,
-): string => {
-  /* The actor id of an agent turn is a model id: a person reads who did it, not which model. */
-  if (row.source === 'agent') {
-    return 'Tau agent';
-  }
-  if (row.actor.startsWith('anon:')) {
-    return `Anonymous · ${row.actor.slice('anon:'.length)}`;
-  }
-  /* HQ4: your own revisions say You; everyone else's say who they are. */
-  if (session !== undefined && session.id === row.actor) {
-    return 'You';
-  }
-  return row.actor === '' ? 'Unknown' : 'Another account';
+const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
+  const { line, isYou } = revisionWho(row, who);
+  return {
+    revisionId: row.revisionId,
+    n: row.revisionNumber,
+    createdAt: row.createdAt,
+    summary: titleOf(row),
+    actor: line,
+    ...(isYou ? { isYours: true } : {}),
+    treeId: row.treeId,
+    turnId: row.turnId,
+    conflicted: row.conflicted,
+    tags: row.tags,
+    trigger: row.trigger,
+    ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
+    ...(row.parent === undefined ? {} : { parent: row.parent }),
+  };
 };
-
-const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): RevisionCard => ({
-  revisionId: row.revisionId,
-  n: row.revisionNumber,
-  createdAt: row.createdAt,
-  summary: titleOf(row),
-  actor: actorOf(row, session),
-  treeId: row.treeId,
-  turnId: row.turnId,
-  conflicted: row.conflicted,
-  tags: row.tags,
-  trigger: row.trigger,
-  ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
-  ...(row.parent === undefined ? {} : { parent: row.parent }),
-});
 
 /**
  * Attach one card to the turn it recorded, keeping the turn's own save.
@@ -387,7 +362,7 @@ export function useRevisions(): RevisionsView {
   const branch = line.kind === 'branch' ? line.name : undefined;
   const headRevisionId = status?.headRevisionId;
   /* Subscribed, not read once: a sign-in mid-session relabels every card. */
-  const session = useRevisionSessionUser();
+  const who = useRevisionWhoContext(projectId);
   const finalized = useHostFinalizedTurns(projectId);
   const queryClient = useQueryClient();
   const logKey = useMemo(() => ['revision-log', projectId, branch ?? ''] as const, [branch, projectId]);
@@ -533,7 +508,7 @@ export function useRevisions(): RevisionsView {
       }
       return { ...emptyView, line, isDirty: status?.dirty ?? false, isLoading: line.kind === 'branch' };
     }
-    const revisions = (rows ?? []).map((row) => cardOf(row, session));
+    const revisions = (rows ?? []).map((row) => cardOf(row, who));
     const byTurnId = new Map<string, RevisionCard>();
     const settledIdByTurn = new Map(
       finalized.flatMap(({ card }) => (card.turnId === undefined ? [] : [[card.turnId, card.revisionId] as const])),
@@ -586,8 +561,8 @@ export function useRevisions(): RevisionsView {
     otherHeads,
     others,
     rows,
-    session,
     status,
+    who,
   ]);
 }
 
@@ -603,9 +578,9 @@ export function useRevisions(): RevisionsView {
 export function useRevisionCards(ids: readonly string[]): ReadonlyMap<string, RevisionCard> {
   const { projectId } = useProject();
   const client = useRevisionClient();
-  const session = useRevisionSessionUser();
+  const who = useRevisionWhoContext(projectId);
   const rows = useRevisionRows(client, projectId, ids);
-  return useMemo(() => new Map([...rows].map(([id, row]) => [id, cardOf(row, session)] as const)), [rows, session]);
+  return useMemo(() => new Map([...rows].map(([id, row]) => [id, cardOf(row, who)] as const)), [rows, who]);
 }
 
 /**

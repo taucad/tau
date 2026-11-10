@@ -19,7 +19,8 @@ import { MessageIdentities, providerMessageToPi } from '#harness/session-record.
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { readPrefixStamp } from '#log/prefix-stamp.js';
 import type { PrefixStamp } from '#log/prefix-stamp.js';
-import { stampPrefix } from '#transport/prefix-stamp.js';
+import { prefixCodecEpoch, stampPrefix, withoutNativeReasoning } from '#transport/prefix-stamp.js';
+import type { StampedPrefix } from '#transport/prefix-stamp.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
 import { modelRequestObserver, observeModelStream } from '#transport/model-observation.js';
@@ -1011,22 +1012,20 @@ const reasoningSetting = (reasoning: ModelReasoningConfig | undefined): string =
   reasoning?.effort ?? (reasoning?.budgetTokens === undefined ? 'none' : `budget:${String(reasoning.budgetTokens)}`);
 
 /**
- * Stamp a generation request's prefix (P1). A compaction call is not a step of the chat's prefix and is not stamped.
+ * Stamp a request's prefix: which rows may replay native reasoning (P2), and the break it suffered (P1).
  *
  * @param input - The request, the pi model and context it is sent as, and the composing build's release label.
- * @returns The stamp, with the break the request suffered, or `undefined` for a compaction call.
+ * @returns The stamp and the stale rows.
  */
 const prefixStampFor = (input: {
   readonly request: ModelStreamRequest;
   readonly model: PiGatewayModel;
   readonly fitted: ReturnType<typeof budgetedContextFor>;
   readonly release: string | undefined;
-}): PrefixStamp | undefined => {
+}): StampedPrefix => {
   const { request, model, fitted } = input;
-  if (request.invocationPurpose !== 'generation') {
-    return undefined;
-  }
   return stampPrefix({
+    epoch: prefixCodecEpoch,
     model: { api: model.api, provider: model.provider, id: model.id },
     system: [request.systemPrompt, ...(request.systemPromptBlocks ?? []).map((block) => block.text)],
     tools: fitted.context.tools ?? [],
@@ -1264,8 +1263,21 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
     const fitted = budgetedContextFor(request, model);
-    const { context } = fitted;
-    const prefix = prefixStampFor({ request, model, fitted, release: options.release });
+    const { stamp, stale } = prefixStampFor({ request, model, fitted, release: options.release });
+    /* P2: a row whose prefix changed since it was minted replays no native reasoning. Every request obeys it; the
+     * durable row is untouched. A Gemini call of the current turn left without its signature gets the validator
+     * placeholder from `echoThoughtSignatures`, which reads this context. */
+    const context: Context =
+      stale.size === 0
+        ? fitted.context
+        : {
+            ...fitted.context,
+            messages: fitted.context.messages.map((message, index) =>
+              stale.has(index) ? withoutNativeReasoning(message) : message,
+            ),
+          };
+    /* P1: only a generation is a step of the chat's prefix. A compaction call is not stamped. */
+    const prefix = request.invocationPurpose === 'generation' ? stamp : undefined;
     const thoughtSignatures = new Map<string, string>();
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;

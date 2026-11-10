@@ -1,8 +1,8 @@
 /* oxlint-disable no-await-in-loop -- Every loop here drives one `git` child or one database statement after another on purpose. */
 import { randomFillSync } from 'node:crypto';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import {
@@ -128,15 +128,12 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
 
 const proLimitBytes = 10 * 1024 ** 3;
 
-/** The volume the tier's API writes bare repositories to (`global-setup.ts`). */
-const hostedRemoteRoot = resolve(import.meta.dirname, '../../../../out/test-results/api-e2e-git/git-root');
-
 let owner: TauCloudOwner;
 /* One shared second account. Better Auth allows three sign-ups per ten
    seconds, so every case that needs "somebody else" reads this one. */
 let stranger: TauCloudOwner;
 /* One shared free-tier account, for the same reason: Better Auth's sign-up
-   limit is three per ten seconds, and two cases need an owner with no plan. */
+   limit is three per ten seconds. */
 let free: TauCloudOwner;
 
 beforeAll(async () => {
@@ -299,58 +296,24 @@ describe('Tau Hosted Remote, real process', () => {
   });
 
   describe('plan entitlements, decided by real Postgres', () => {
-    it('should refuse a push from a free-tier owner and still serve the read advertisement', async () => {
+    /* D16: Free backs up within its 1 GB account allowance, so a free owner
+       connects through the product's own verb and is admitted to push. */
+    it('should connect a free-tier owner’s project and admit its push', async () => {
       const projectId = gitE2EProjectId();
-      await registerProject(free, projectId);
+
+      const connected = await connectProject(free.token, projectId, 'Free tier');
+      expect(connected.status, await connected.clone().text()).toBeLessThan(300);
+      expect(await projectExists(projectId)).toBe(true);
 
       const read = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-upload-pack`, {
         headers: { authorization: `Bearer ${free.token}` },
       });
       expect(read.status).toBe(200);
 
-      /* N6: a client with no `Origin` is not a browser, and git prints a 4xx
-         body only when it is `text/plain` — so this is the shape a `git push`
-         from a free account actually shows its user (review C7). */
       const write = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-receive-pack`, {
         headers: { authorization: `Bearer ${free.token}` },
       });
-      expect(write.status).toBe(403);
-      expect(write.headers.get('content-type')).toMatch(/text\/plain/u);
-      expect(await write.text()).toContain('paid plan');
-
-      // The browser client keeps the typed JSON envelope `REMOTE_NOT_ENTITLED` reads.
-      const inBrowser = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-receive-pack`, {
-        headers: { authorization: `Bearer ${free.token}`, origin: gitE2EFrontendUrl },
-      });
-      expect(inBrowser.status).toBe(403);
-      expect(await inBrowser.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
-    }, 300_000);
-
-    /**
-     * N5 (review C11): *Connect Tau Cloud* refuses before it writes anything.
-     *
-     * Registration spent the daily budget, inserted the row and ran
-     * `git init --bare` plus a hook install on the shared volume before
-     * anything looked at the plan — and then every push was refused with this
-     * same sentence. The operator's own free-tier account carries four such
-     * orphans. This is the tier that can see all three facts at once: the
-     * status, the row real Postgres holds, and the directory on the real
-     * `TAU_GIT_ROOT`.
-     */
-    it('should refuse a free-tier connect and leave no row and no repository behind', async () => {
-      const projectId = gitE2EProjectId();
-
-      const refused = await connectProject(free.token, projectId, 'Free tier');
-      expect(refused.status, await refused.clone().text()).toBe(403);
-      expect(await refused.json()).toEqual(
-        expect.objectContaining({
-          code: 'GIT_SYNC_NOT_ENTITLED',
-          error: 'Syncing files to Tau Cloud is a paid plan feature.',
-        }),
-      );
-
-      expect(await projectExists(projectId)).toBe(false);
-      await expect(stat(join(hostedRemoteRoot, `${projectId}.git`))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(write.status).toBe(200);
     }, 300_000);
 
     it('should answer another owner’s project with 404 rather than 403', async () => {

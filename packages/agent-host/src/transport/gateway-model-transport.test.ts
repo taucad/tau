@@ -15,6 +15,7 @@ import {
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
+import { stampedHistory } from '#transport/prefix-stamp.fixture.js';
 
 const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamRequest => ({
   attemptId: 'attempt-fixture-1',
@@ -52,6 +53,18 @@ const isPrefixStamp = (event: ModelStreamEvent): boolean =>
   event.type === 'message-metadata' && event.metadata['prefix'] !== undefined;
 
 /** The reply's events. The request's prefix stamp leads them and has its own cases, so it is left out here. */
+/**
+ * A request that continues a chat on the same model: its assistant rows carry the stamps their own requests left, so
+ * their native reasoning is replayed (P2).
+ *
+ * @param overrides - What the request changes about the fixture request.
+ * @returns The request, its history stamped.
+ */
+const continuing = async (overrides: Partial<ModelStreamRequest>): Promise<ModelStreamRequest> => {
+  const next = request(overrides);
+  return { ...next, messages: await stampedHistory(next) };
+};
+
 const collect = async (stream: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> => {
   const events: ModelStreamEvent[] = [];
   for await (const event of stream) {
@@ -646,7 +659,7 @@ describe('createGatewayModelTransport', () => {
 
     await collect(
       transport.stream(
-        request({
+        await continuing({
           messages: [
             { id: 'user-1', role: 'user', content: 'read both files' },
             {
@@ -1932,7 +1945,7 @@ describe('createGatewayModelTransport', () => {
 
     const events = await collect(
       transport.stream(
-        request({
+        await continuing({
           messages: [
             {
               id: 'assistant-1',
@@ -1984,7 +1997,7 @@ describe('createGatewayModelTransport', () => {
 
     await collect(
       transport.stream(
-        request({
+        await continuing({
           providerKind: 'anthropic',
           messages: [
             {

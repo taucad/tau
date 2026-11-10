@@ -33,6 +33,7 @@
     "csharp-language-assets.vite-plugin.test.ts",
     "openscad-language-assets.vite-plugin.test.ts",
     "asset-integrity.vite-plugin.test.ts",
+    "renderer-payload-plugins.test.ts",
     "desktop/**/*.ts",
     "serve/**/*.ts",
     "serve/**/*.tsx",

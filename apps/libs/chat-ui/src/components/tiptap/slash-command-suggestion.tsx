@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Extension, InputRule } from '@tiptap/core';
@@ -233,7 +234,9 @@ function SkillItemButton({
         <div className='space-y-2'>
           <div className='flex items-center gap-2'>
             <Blocks className='size-4 shrink-0 text-muted-foreground' />
-            <h4 className='text-sm font-semibold'>{item.title ?? titleFromCommandId(item.id)}</h4>
+            <Heading level={4} variant='label'>
+              {item.title ?? titleFromCommandId(item.id)}
+            </Heading>
           </div>
           <p className='text-sm text-muted-foreground'>{item.fullDescription}</p>
         </div>

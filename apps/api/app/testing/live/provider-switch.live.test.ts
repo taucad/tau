@@ -22,6 +22,7 @@ import {
   createLiveToolRegistry,
   hasLiveCredential,
   liveCadSystemPrompt,
+  liveChatSettings,
   liveCompletionCeiling,
   liveCredentialName,
   liveRepeats,
@@ -29,7 +30,7 @@ import {
   runWithRateLimitRetry,
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
-import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
+import type { LiveChatSettings, LiveGateway } from '#testing/live/live-gateway.harness.js';
 import {
   expectCompleted,
   expectPairedToolMessages,
@@ -237,6 +238,12 @@ type LegOptions = {
   readonly mode?: ChatMode | undefined;
   /** Offer the GeoSpec tools too, which changes the tool list and nothing else. */
   readonly testingTools?: boolean | undefined;
+  /**
+   * Compose the leg as a browser turn does (ruling U10): the system prompt and tool list of the defaults, with these
+   * settings said in the state note and masked by the tool choice. Absent, `mode` and `testingTools` edit the prompt
+   * and the tool list themselves, which is how a change of definitions looks to the host.
+   */
+  readonly settings?: LiveChatSettings | undefined;
 };
 
 /**
@@ -273,9 +280,19 @@ const runLeg = async (options: LegOptions): Promise<HostRunSnapshot> => {
     chatId: thread.chatId,
     runId,
     leaderEpoch: `${thread.chatId}-epoch-1`,
-    systemPrompt: liveCadSystemPrompt({ chatId: thread.chatId, modelId: options.modelId, mode: options.mode }),
     model: legModel(options.modelId, options),
-    toolRegistry: createLiveToolRegistry({ results: scriptedResults, testingEnabled: options.testingTools ?? false }),
+    ...(options.settings === undefined
+      ? {
+          systemPrompt: liveCadSystemPrompt({ chatId: thread.chatId, modelId: options.modelId, mode: options.mode }),
+          toolRegistry: createLiveToolRegistry({
+            results: scriptedResults,
+            testingEnabled: options.testingTools ?? false,
+          }),
+        }
+      : {
+          ...liveChatSettings({ chatId: thread.chatId, modelId: options.modelId, ...options.settings }),
+          toolRegistry: createLiveToolRegistry({ results: scriptedResults, testingEnabled: true }),
+        }),
     eventLog: await createNodeEventLog({ filePath: thread.filePath, access: 'write' }),
     ...(options.onCompaction === undefined ? {} : { onCompaction: options.onCompaction }),
     ...(options.stopAfterToolResult === true ? { onLiveEvent: stopAfterToolResult } : {}),
@@ -1142,3 +1159,64 @@ describe.skipIf(!hasLiveCredential(replayModelId))(
     });
   },
 );
+
+/** How much of one reply's input the provider read back from its prompt cache. */
+const cacheReadShare = (reply: ProviderMessage | undefined): number => {
+  const usage = reply?.metadata?.usage;
+  const input = usage === undefined ? 0 : usage.input + usage.cacheRead + usage.cacheWrite;
+  return usage === undefined || input === 0 ? 0 : usage.cacheRead / input;
+};
+
+/* What a person's own toggles cost after ruling U10: nothing. The settings ride in the state note and the tool
+ * choice, so every leg only appends, and the row holds that against the provider's own cache and binding, on a model
+ * of each wire that returns signed reasoning. */
+for (const settingsModelId of [replayModelId, 'openai-gpt-6.1-terra', 'google-gemini-3.8-flash']) {
+  describe.skipIf(!hasLiveCredential(settingsModelId))(
+    replayTitle(settingsModelId, 'settings change'),
+    { repeats: liveRepeats },
+    () => {
+      it('should keep the prefix, the cache and every reply’s reasoning across the chat’s settings', async () => {
+        const legs = await liveSwitch('replay-settings', async (thread) => {
+          const leg = async (index: number, prompt: string, settings: LiveChatSettings): Promise<HostRunSnapshot> =>
+            runLeg({ thread, modelId: settingsModelId, index, effort: 'high', prompt, settings });
+          return inOrder([
+            async () => leg(1, thinkThenRead(4001, ['alpha.ts']), {}),
+            async () => leg(2, thinkTurn(31_415), { mode: 'plan' }),
+            async () => leg(3, thinkTurn(27_183), { testingEnabled: false, toolChoice: 'none' }),
+            async () => leg(4, thinkTurn(16_180), {}),
+            /* Nothing changes here: the boundary the three before it are read against. */
+            async () => leg(5, thinkTurn(48_271), {}),
+          ]);
+        });
+        const [first, ...later] = legs;
+
+        expect(first, 'the first leg produced no snapshot').toBeDefined();
+        expect(
+          reasoningIn(repliesOf(first!, 1)),
+          'the first leg minted no signed reasoning, so the row proves nothing',
+        ).toBeGreaterThan(0);
+        expectAllCompleted(legs, 5);
+        for (const [position, changed] of later.entries()) {
+          const index = position + 2;
+          expect(breaksOf(changed, index), `leg ${String(index)} broke the prefix`).toEqual([]);
+          expectReplayed(changed, index, 'the reasoning minted before the settings changed');
+        }
+        /* Vertex caches implicitly and at its own discretion: a turn that changes nothing can read nothing back, so
+         * a share there says nothing about the prefix. Anthropic and OpenAI read what the prefix allows. */
+        if (settingsModelId.startsWith('google-')) {
+          return;
+        }
+        const control = cacheReadShare(repliesOf(later[3]!, 5)[0]);
+        expect(control, 'the control read nothing from the cache, so the row proves nothing').toBeGreaterThan(0.5);
+        for (const [position, changed] of later.entries()) {
+          const index = position + 2;
+          const share = cacheReadShare(repliesOf(changed, index)[0]);
+          expect(
+            share,
+            `leg ${String(index)} read ${share.toFixed(3)} from the cache, the control ${control.toFixed(3)}`,
+          ).toBeGreaterThan(control - 0.1);
+        }
+      });
+    },
+  );
+}

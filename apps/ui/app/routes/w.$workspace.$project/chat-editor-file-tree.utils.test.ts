@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { FileItem } from '#types/editor.types.js';
+import type { FileItem } from '@taucad/ui-core/types/editor.types';
 import {
   buildFileTreeIndex,
   getItemData,

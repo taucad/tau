@@ -1,7 +1,7 @@
 import { useFeature } from '#flags/use-feature.js';
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 /** Open Print for a source-job link, retaining its qualified machine and job selection. */

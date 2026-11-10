@@ -1,9 +1,9 @@
 import type { Event } from '@sentry/react';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { readDocumentSessionCounts } from '#lib/memory-kill-signal.js';
-import { readHighWaterWasmBytes, readLastMemorySample } from '#lib/memory-sampler.js';
+import { readHighWaterWasmBytes, readLastMemorySample } from '@taucad/ui-core/lib/memory-sampler';
 
 /*
  * The Tau context processor (browser observability SB1): the tags and contexts every UI event

@@ -5,7 +5,7 @@ import { isRecord } from '@taucad/utils/schema';
 import { toast } from '@taucad/ui/components/sonner';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
-import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { downloadExportArtifactSet } from '@taucad/ui-core/utils/export-artifact-set.utils';
 
 export type UseExportToDiskResult = {
   /**

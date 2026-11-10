@@ -1,7 +1,7 @@
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
-import type { EditorState, EditorStateInput } from '#types/editor.types.js';
+import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 export type CommitCancelledDraftRestoreInput = {

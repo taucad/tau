@@ -57,17 +57,17 @@ import {
   createWorkerRevisionRegistry,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
-import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
+import { dependencyMountRoot } from '@taucad/ui-core/lib/bundled-types-tree.constants';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
-import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
+import { summarizeLast, withPendingGauge, workerSpanTotals } from '@taucad/ui-core/lib/worker-timing-report';
 import { createProjectOpenTimer, markProjectOpen } from '@taucad/project-workspace/utils/project-open-timer';
 import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-open-timer';
 import { createRevisionCompute } from '#machines/revision-compute.js';
-import { linkedImportPort, stageLinkedImport } from '#machines/import-linked.js';
-import { importConnectMessageType, serveImportChannel } from '#machines/import-staging.js';
-import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
+import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
+import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
+import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
 
 /**
  * Handshake for the node filesystem backend (desktop only).

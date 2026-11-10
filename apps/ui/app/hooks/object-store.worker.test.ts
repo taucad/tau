@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Chat } from '@taucad/chat';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { pickDuplicatedFocusedChatId } from '#hooks/object-store.worker.js';
-import { mergePanelState } from '#utils/panel-state.utils.js';
+import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 
 function makeChat(overrides: Partial<Chat> & { id: string; updatedAt: number }): Chat {
   return {

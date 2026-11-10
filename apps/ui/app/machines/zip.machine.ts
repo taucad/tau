@@ -1,7 +1,7 @@
 import { setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import JSZip from 'jszip';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 /**
  * Zip Machine Context

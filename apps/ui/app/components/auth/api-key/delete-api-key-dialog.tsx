@@ -21,7 +21,7 @@ import { Field } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
-import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+import { apiKeyPlugin } from '@taucad/ui-core/utils/api-key-plugin';
 
 export type DeleteApiKeyDialogProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog's controlled `open` prop API.

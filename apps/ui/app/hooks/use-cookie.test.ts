@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { readServerPreferences, store, useCookie } from '#hooks/use-cookie.js';
 import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 
 const names = [
   'tau-test-write',

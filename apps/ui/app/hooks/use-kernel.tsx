@@ -1,7 +1,7 @@
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 
 const defaultKernel: KernelId = 'openscad';

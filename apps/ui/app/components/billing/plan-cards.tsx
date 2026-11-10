@@ -197,7 +197,7 @@ export function PlanCards({
             <Badge className='absolute -top-2.5 left-1/2 -translate-x-1/2 uppercase'>Popular</Badge>
           ) : undefined}
           <CardHeader>
-            <CardTitle className='text-lg'>{entry.name}</CardTitle>
+            <CardTitle variant='title'>{entry.name}</CardTitle>
             <p className='text-sm text-muted-foreground'>{entry.tagline}</p>
             <p className='pt-2'>
               <span className='text-3xl font-semibold'>{entry.priceLabel}</span>

@@ -4,7 +4,7 @@ import { createActor, waitFor } from 'xstate';
 import type { Remote } from 'comlink';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 vi.mock('#hooks/object-store.worker.js?worker', () => ({
   default: class MockWorker {

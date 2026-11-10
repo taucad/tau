@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState, useCallback, useRef } from 'react';
 import { Trash2, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -164,7 +165,9 @@ export function ProjectSettingsDialog({ controlled }: ProjectSettingsDialogProps
             {/* Danger Zone */}
             <div className='flex flex-col gap-4 rounded-md border border-destructive/50 p-4'>
               <div>
-                <h4 className='text-sm font-semibold text-destructive'>Danger Zone</h4>
+                <Heading level={4} variant='label' className='text-destructive'>
+                  Danger Zone
+                </Heading>
                 <p className='text-xs text-muted-foreground'>Move this project to Trash so it can be restored later.</p>
               </div>
               <Button variant='destructive' className='w-fit' disabled={!project} onClick={handleDeleteClick}>

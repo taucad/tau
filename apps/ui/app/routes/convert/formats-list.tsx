@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import type { FileExtension } from '@taucad/types';
 import { SearchInput } from '@taucad/ui/components/search-input';
@@ -18,7 +19,9 @@ export function FormatsList({ formats, isLoading }: FormatsListProps): React.JSX
   return (
     <section className='space-y-4'>
       <div className='flex items-baseline justify-between gap-2'>
-        <h2 className='text-sm font-medium'>Input formats</h2>
+        <Heading level={2} variant='label'>
+          Input formats
+        </Heading>
         {isLoading ? undefined : <span className='text-xs text-muted-foreground tabular-nums'>{formats.length}</span>}
       </div>
       <SearchInput

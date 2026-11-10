@@ -50,7 +50,7 @@ export const pendingKillLimit = 3;
 
 /**
  * Kills in a row that make a kill loop: the point at which Safari starts telling the user "A problem
- * repeatedly occurred", the report rises to `error` (A11) and the crash prompt holds off (SB12).
+ * repeatedly occurred" and the report rises to `error` (A11).
  */
 export const killLoopThreshold = 2;
 

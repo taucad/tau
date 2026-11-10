@@ -9,8 +9,14 @@ import {
   stripeWebhookRoute,
 } from '@taucad/api-billing';
 import { HostsModule, HostsService } from '@taucad/api-hosts';
-import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '@taucad/api-auth';
-import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
+import {
+  accountDeletionGateToken,
+  accountDeletionHooksToken,
+  authRateLimitStoreToken,
+  authRouteExtensionsToken,
+} from '@taucad/api-auth';
+import type { AccountDeletionHook, AuthRateLimitStore, AuthRouteExtension } from '@taucad/api-auth';
+import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 
 /**
  * Binds the auth module's extension ports (`auth-extensions.ts`) to the
@@ -22,6 +28,8 @@ import type { AccountDeletionHook, AuthRouteExtension } from '@taucad/api-auth';
  *   its agent evidence is erased after it (T13), in that order.
  * - Auth routes: in Tau Cloud the byte-exact Stripe webhook registers ahead of
  *   the Better Auth wildcard, when billing provides payments.
+ * - Rate limits: Better Auth counts in Redis, so every Machine shares one count
+ *   per client and path instead of each keeping its own.
  */
 @Module({})
 export class AuthExtensionsModule {
@@ -43,6 +51,17 @@ export class AuthExtensionsModule {
             ]
           : []),
         {
+          provide: authRateLimitStoreToken,
+          inject: [RedisService],
+          useFactory: (redis: RedisService): AuthRateLimitStore => {
+            const budgets = new PublicationRateLimiterService(redis);
+            return {
+              consume: async ({ key, limit, windowSeconds }) =>
+                budgets.consumeWindowBudget({ key, limit, windowSeconds }),
+            };
+          },
+        },
+        {
           provide: accountDeletionHooksToken,
           inject: [HostsService, DatabaseService],
           useFactory: (hosts: HostsService, databaseService: DatabaseService): AccountDeletionHook[] => [
@@ -61,6 +80,7 @@ export class AuthExtensionsModule {
       ],
       exports: [
         accountDeletionHooksToken,
+        authRateLimitStoreToken,
         ...(options.tauCloudEnabled ? [accountDeletionGateToken, authRouteExtensionsToken] : []),
       ],
     };

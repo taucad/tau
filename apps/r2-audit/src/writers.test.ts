@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- `token_ids` is the AUDIT_EXPECTED_WRITERS JSON key tau-cloud writes. */
 
 import { describe, expect, it } from 'vitest';
-import { parseExpectedWriters } from '#environment.js';
+import { parseExpectedWriters, parseForeignBuckets } from '#environment.js';
 import { unexpectedWriter } from '#writers.js';
 
 const expected = parseExpectedWriters(
@@ -38,6 +38,26 @@ describe('parseExpectedWriters', () => {
 
   it('should accept an empty map', () => {
     expect(parseExpectedWriters('{}')).toMatchObject({ valid: true });
+  });
+});
+
+describe('parseForeignBuckets', () => {
+  it('should read a JSON array of bucket names', () => {
+    const parsed = parseForeignBuckets('["tau-prod-content-private","tau-prod-dependencies"]');
+    expect(parsed.valid).toBe(true);
+    expect([...parsed.buckets]).toEqual(['tau-prod-content-private', 'tau-prod-dependencies']);
+  });
+
+  it('should read a missing or empty binding as no buckets, validly', () => {
+    for (const raw of [undefined, '', '  ', '[]']) {
+      expect(parseForeignBuckets(raw)).toEqual({ valid: true, buckets: new Set() });
+    }
+  });
+
+  it('should read a malformed or mistyped binding as no buckets, invalidly', () => {
+    for (const raw of ['not json', '{}', '"tau-prod-content-private"', '[1]', '["a",null]']) {
+      expect(parseForeignBuckets(raw)).toEqual({ valid: false, buckets: new Set() });
+    }
   });
 });
 

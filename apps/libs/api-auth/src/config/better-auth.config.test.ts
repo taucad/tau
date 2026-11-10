@@ -5,19 +5,27 @@ import { APIError } from 'better-auth/api';
 import { getCookies } from 'better-auth/cookies';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { github as githubProvider } from 'better-auth/social-providers';
-import { getBetterAuthConfig } from '#config/better-auth.config.js';
+import { getBetterAuthConfig, redactEmailAddresses } from '#config/better-auth.config.js';
 import type { Environment } from '@taucad/api-core';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '@taucad/api-database';
 import type { EmailService } from '@taucad/api-email';
-import type { AccountDeletionHook } from '#auth-extensions.js';
+import type { AccountDeletionHook, AuthRateLimitStore } from '#auth-extensions.js';
+import { tokenLifetimeSeconds } from '@taucad/api-email';
 
 /** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
-type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };
+type RecordedWrite = {
+  readonly table: unknown;
+  readonly values: Record<string, unknown>;
+};
 
 const createConfig = (
   authUrl = 'http://localhost:4000',
-  allowlist: { readonly domains?: readonly string[]; readonly users?: Record<string, string> } = {},
+  allowlist: {
+    readonly domains?: readonly string[];
+    readonly users?: Record<string, string>;
+  } = {},
+  rateLimitStore?: AuthRateLimitStore,
 ) => {
   const writes: RecordedWrite[] = [];
   const order: string[] = [];
@@ -25,7 +33,12 @@ const createConfig = (
     sendMagicLink: vi.fn<EmailService['sendMagicLink']>().mockResolvedValue(undefined),
     sendResetPassword: vi.fn<EmailService['sendResetPassword']>().mockResolvedValue(undefined),
     sendVerification: vi.fn<EmailService['sendVerification']>().mockResolvedValue(undefined),
-  } satisfies Pick<EmailService, 'sendMagicLink' | 'sendResetPassword' | 'sendVerification'>;
+    sendAccountExists: vi.fn<EmailService['sendAccountExists']>().mockResolvedValue(undefined),
+    sendPasswordChanged: vi.fn<EmailService['sendPasswordChanged']>().mockResolvedValue(undefined),
+  } satisfies Pick<
+    EmailService,
+    'sendMagicLink' | 'sendResetPassword' | 'sendVerification' | 'sendAccountExists' | 'sendPasswordChanged'
+  >;
   const databaseService = {
     database: {
       query: {
@@ -98,6 +111,7 @@ const createConfig = (
     databaseService,
     configService: configService as unknown as ConfigService<Environment, true>,
     emailService: emailService as unknown as EmailService,
+    rateLimitStore,
   });
 
   return { config, emailService, closure, cloudHosts, writes, order };
@@ -796,5 +810,182 @@ describe('getBetterAuthConfig email-domain allowlist', () => {
         null,
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('getBetterAuthConfig sign-up readiness', () => {
+  const password = 'correct horse battery staple';
+  let clients = 0;
+
+  const createAuth = (rateLimitStore?: AuthRateLimitStore) => {
+    const store: Record<string, Array<Record<string, unknown>>> = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      apikey: [],
+      subscription: [],
+    };
+    const { config, emailService } = createConfig('http://localhost:4000', {}, rateLimitStore);
+    return {
+      config,
+      store,
+      emailService,
+      auth: betterAuth({ ...config, database: memoryAdapter(store) }),
+    };
+  };
+
+  type Handler = { handler: (input: Request) => Promise<Response> };
+
+  const send = async (
+    auth: Handler,
+    { path, body, headers = {} }: { path: string; body: Record<string, unknown>; headers?: Record<string, string> },
+  ) => {
+    // Better Auth's in-memory limiter is process-wide; each call gets its own documentation address.
+    clients += 1;
+    return auth.handler(
+      new Request(`http://localhost:4000/v1/auth/${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'fly-client-ip': `192.0.2.${clients}`,
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+  };
+
+  const post = async (auth: Handler, path: string, body: Record<string, unknown>) => send(auth, { path, body });
+
+  it('keeps the verification lifetime the email copy states', () => {
+    const { config } = createConfig();
+
+    expect(config.emailVerification?.expiresIn).toBe(tokenLifetimeSeconds.verifyEmail);
+  });
+
+  it("reads the client address from Fly's own header before X-Forwarded-For", () => {
+    const { config } = createConfig();
+
+    expect(config.advanced?.ipAddress?.ipAddressHeaders).toEqual(['fly-client-ip', 'x-forwarded-for']);
+  });
+
+  it('sends a fresh verification link when an unverified address signs up again', async () => {
+    const { auth, emailService } = createAuth();
+    const email = 'again@example.test';
+
+    await post(auth, 'sign-up/email', {
+      email,
+      name: 'Again',
+      password,
+      callbackURL: '/s/tau~pub_1',
+    });
+    const second = await post(auth, 'sign-up/email', {
+      email,
+      name: 'Again',
+      password: `${password}!`,
+    });
+
+    // The answer is the same generic one either way, so the address's existence is not revealed.
+    expect(await second.json()).toMatchObject({ token: null });
+    expect(emailService.sendVerification).toHaveBeenCalledTimes(2);
+    const url = new URL(emailService.sendVerification.mock.calls[1]?.[0].url ?? '');
+    expect(url.origin + url.pathname).toBe('http://localhost:3000/auth/verify-email');
+    expect(url.searchParams.get('token')).toEqual(expect.any(String));
+    expect(url.searchParams.get('redirectTo')).toBe('/');
+
+    // A repeat sign-up that names where to go keeps it in the new link.
+    await post(auth, 'sign-up/email', {
+      email,
+      name: 'Again',
+      password: `${password}!`,
+      callbackURL: '/s/tau~pub_2',
+    });
+    expect(emailService.sendVerification).toHaveBeenCalledTimes(3);
+    const withCallback = new URL(emailService.sendVerification.mock.calls[2]?.[0].url ?? '');
+    expect(withCallback.searchParams.get('redirectTo')).toBe('/s/tau~pub_2');
+    expect(emailService.sendAccountExists).not.toHaveBeenCalled();
+  });
+
+  it('tells a verified owner that someone tried to sign up with their address', async () => {
+    const { auth, store, emailService } = createAuth();
+    const email = 'owner@example.test';
+
+    await post(auth, 'sign-up/email', { email, name: 'Owner', password });
+    for (const user of store['user'] ?? []) {
+      user['emailVerified'] = true;
+    }
+    await post(auth, 'sign-up/email', { email, name: 'Owner', password });
+
+    expect(emailService.sendVerification).toHaveBeenCalledTimes(1);
+    expect(emailService.sendAccountExists).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email,
+        url: 'http://localhost:3000/auth/sign-in',
+        resetUrl: 'http://localhost:3000/auth/forgot-password',
+      }),
+    );
+  });
+
+  it('sends the password-changed notice for a change made from settings', async () => {
+    const { auth, store, emailService } = createAuth();
+    const email = 'settings@example.test';
+
+    await post(auth, 'sign-up/email', { email, name: 'Settings', password });
+    for (const user of store['user'] ?? []) {
+      user['emailVerified'] = true;
+    }
+    const signIn = await post(auth, 'sign-in/email', { email, password });
+    const bearer = {
+      authorization: `Bearer ${signIn.headers.get('set-auth-token') ?? ''}`,
+    };
+
+    const wrong = await send(auth, {
+      path: 'change-password',
+      body: { currentPassword: 'nope-nope-nope', newPassword: 'n' },
+      headers: bearer,
+    });
+    expect(wrong.ok).toBe(false);
+    expect(emailService.sendPasswordChanged).not.toHaveBeenCalled();
+
+    const changed = await send(auth, {
+      path: 'change-password',
+      body: { currentPassword: password, newPassword: `${password} again` },
+      headers: bearer,
+    });
+    expect(changed.status).toBe(200);
+    expect(emailService.sendPasswordChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email,
+        url: 'http://localhost:3000/auth/forgot-password',
+      }),
+    );
+  });
+
+  it('counts rate limits in the shared store and lets requests through when it fails', async () => {
+    const consume = vi
+      .fn<AuthRateLimitStore['consume']>()
+      .mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 7 })
+      .mockRejectedValueOnce(new Error('redis down'));
+    const { auth } = createAuth({ consume });
+
+    const limited = await post(auth, 'sign-in/email', {
+      email: 'nobody@example.test',
+      password,
+    });
+    const failedOpen = await post(auth, 'sign-in/email', {
+      email: 'nobody@example.test',
+      password,
+    });
+
+    expect(limited.status).toBe(429);
+    expect(failedOpen.status).not.toBe(429);
+    expect(consume.mock.calls[0]?.[0].key).toMatch(/^auth:rl:/u);
+  });
+
+  it('keeps only the domain of an address Better Auth writes into a log message', () => {
+    expect(redactEmailAddresses('Sign-up attempt for existing email: someone+x@tau.new')).toBe(
+      'Sign-up attempt for existing email: recipient@tau.new',
+    );
   });
 });

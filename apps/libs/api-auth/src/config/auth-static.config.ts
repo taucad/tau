@@ -79,6 +79,12 @@ export const staticAuthConfig = {
     },
   },
   advanced: {
+    // Fly sends `X-Forwarded-For: <client>, <Fly edge>` on every request, and Better Auth trusts only a single-value
+    // header, so without this every caller fell into one shared rate-limit bucket. Fly sets `Fly-Client-IP` to the
+    // connecting address itself; a lone `X-Forwarded-For` still serves a self-hosted proxy.
+    ipAddress: {
+      ipAddressHeaders: ['fly-client-ip', 'x-forwarded-for'],
+    },
     cookiePrefix: 'tau',
     // Only use secure cookies in production. Note: this requires SSL.
     useSecureCookies: import.meta.env.PROD,

@@ -1,14 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type React from 'react';
 import { Clock, Play, RefreshCcw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions } from '#hooks/use-chat.js';
 import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';
-import {
-  nextRateLimitRetry,
-  rateLimitRetryDelayMilliseconds,
-  recordRateLimitAutoResume,
-} from '#utils/run-auto-resume.js';
 
 /** How often the countdown redraws; the label shows whole seconds. Milliseconds. */
 const countdownTickMilliseconds = 250;
@@ -16,35 +11,25 @@ const countdownTickMilliseconds = 250;
 const secondsLabel = (seconds: number): string => `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
 
 /**
- * Counts down beside Resume and resumes once when the wait ends.
+ * Counts down beside Resume to the moment the chat resumes on its own.
  *
- * Keyed by the failed attempt, so a new failure starts a new clock; the clock
- * is the card's own, as the agent-stop card's reset timer is.
+ * The label only: the wait and the resume are the chat's session machine's (audit R5), so unmounting this label, or
+ * remounting it, neither stops nor restarts the resume. Its tick redraws the seconds and nothing else.
  *
- * @param properties - The wait in milliseconds and the resume to call once it ends.
+ * @param properties - When the chat resumes, in epoch milliseconds.
  * @returns The countdown label.
  */
-export function ResumeCountdown({
-  resumeAfterMilliseconds,
-  onResume,
-}: {
-  readonly resumeAfterMilliseconds: number;
-  readonly onResume: () => void;
-}): React.JSX.Element {
-  const [startedAt] = useState(() => Date.now());
-  const [readAt, setReadAt] = useState(startedAt);
-  const resumeAt = startedAt + resumeAfterMilliseconds;
+export function ResumeCountdown({ resumeAt }: { readonly resumeAt: number }): React.JSX.Element {
+  const [readAt, setReadAt] = useState(() => Date.now());
 
   useEffect(() => {
     const tick = globalThis.setInterval(() => {
       setReadAt(Date.now());
     }, countdownTickMilliseconds);
-    const timer = globalThis.setTimeout(onResume, Math.max(resumeAt - Date.now(), 0));
     return () => {
       globalThis.clearInterval(tick);
-      globalThis.clearTimeout(timer);
     };
-  }, [resumeAt, onResume]);
+  }, []);
 
   return (
     <span role='timer' className='text-xs text-muted-foreground tabular-nums'>
@@ -62,10 +47,10 @@ export function ResumeCountdown({
  * a `FUNDED_OPERATION_LIMIT` ends its run for good, and saying the turn is
  * saved would be a promise the next click breaks.
  *
- * A provider's `RATE_LIMITED` refusal is transient, so with `autoResume` the
- * card resumes the run on its own after the wait Codex would take, counting
- * down beside Resume, until the run's automatic retries are spent
- * (`#utils/run-auto-resume`).
+ * A provider's `RATE_LIMITED` refusal is transient, so the chat resumes the
+ * run on its own after the wait Codex would take, until the run's automatic
+ * retries are spent (`#utils/run-auto-resume`). The chat's session machine
+ * waits it out; with `countdown` this card counts down beside Resume.
  */
 export const ChatErrorRateLimit = memo(function ({
   className,
@@ -73,7 +58,7 @@ export const ChatErrorRateLimit = memo(function ({
   title,
   description,
   retryAfterSeconds,
-  autoResume,
+  countdown,
 }: {
   readonly className?: string;
   /** Whether the host will continue this run rather than replay it. */
@@ -82,8 +67,8 @@ export const ChatErrorRateLimit = memo(function ({
   readonly description?: string;
   /** Seconds the gateway asked the client to wait, from its Retry-After header. */
   readonly retryAfterSeconds?: number;
-  /** The failed run attempt to resume automatically; only a resumable `RATE_LIMITED` failure passes one. */
-  readonly autoResume?: Readonly<{ runId: string; attempt: number }>;
+  /** The automatic resume the chat is waiting out; only a resumable `RATE_LIMITED` failure has one. */
+  readonly countdown?: Readonly<{ resumeAt: number }>;
 }): React.JSX.Element {
   const { continueChat, regenerate } = useChatActions();
   const heading = title ?? (resumable ? 'Rate limit reached' : 'Rate limit exceeded');
@@ -93,37 +78,7 @@ export const ChatErrorRateLimit = memo(function ({
       ? 'The model provider asked Tau to wait.'
       : 'Too many requests. Please wait a moment before trying again.');
 
-  // A click resumes now, so the countdown must not resume a second time.
-  const [resumedByHand, setResumedByHand] = useState(false);
-  const runId = autoResume?.runId;
-  const attempt = autoResume?.attempt;
-  const retry = useMemo(
-    () =>
-      resumable && !resumedByHand && runId !== undefined && attempt !== undefined
-        ? nextRateLimitRetry(runId, attempt)
-        : undefined,
-    [resumable, resumedByHand, runId, attempt],
-  );
-  const resumeAfterMilliseconds = useMemo(
-    () =>
-      retry === undefined
-        ? undefined
-        : rateLimitRetryDelayMilliseconds({
-            retry,
-            ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-          }),
-    [retry, retryAfterSeconds],
-  );
-  // The countdown re-arms when `continueChat` changes, so the budget is checked again here:
-  // a failed attempt already resumed is never resumed twice.
-  const resumeAutomatically = useCallback(() => {
-    if (runId === undefined || attempt === undefined || nextRateLimitRetry(runId, attempt) === undefined) {
-      return;
-    }
-    recordRateLimitAutoResume(runId, attempt);
-    continueChat();
-  }, [runId, attempt, continueChat]);
-  const counting = resumeAfterMilliseconds !== undefined;
+  const counting = countdown !== undefined;
 
   return (
     <ChatErrorCard
@@ -144,22 +99,16 @@ export const ChatErrorRateLimit = memo(function ({
       }
       actions={
         <>
-          {counting ? (
-            <ResumeCountdown
-              key={`${runId}:${attempt}`}
-              resumeAfterMilliseconds={resumeAfterMilliseconds}
-              onResume={resumeAutomatically}
-            />
-          ) : undefined}
+          {countdown === undefined ? undefined : <ResumeCountdown resumeAt={countdown.resumeAt} />}
           <Button
             variant='outline'
             size='xs'
             onClick={() => {
               // A resumable wait interrupted a turn the host still holds whole, so
               // this re-issues the one refused call; anything else dispatches the
-              // turn afresh, which is what the label says.
+              // turn afresh, which is what the label says. Either gesture ends the
+              // chat's own wait, so it never resumes a second time.
               if (resumable) {
-                setResumedByHand(true);
                 continueChat();
               } else {
                 regenerate();

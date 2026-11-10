@@ -278,3 +278,8 @@ R2 buckets › Other buckets: growth per day
 R2 buckets › Other buckets: write operations last hour
 R2 buckets › Other buckets: origin egress last hour
 R2 buckets › Other buckets: request errors last hour
+
+# Crash capture (blueprint PR-6). A tab kill is counted only when the next load reports it with telemetry
+# consent, so these stay empty on a local stack and on any deployment until a browser ends a page.
+Runtime operations › Tab Kills by Kernel and Phase (1h)
+Runtime operations › Tab Kills by Kernel, Phase, Class and Device (24h)

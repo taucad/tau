@@ -48,7 +48,6 @@ vi.mock('#hooks/use-revisions.js', () => ({
   useRevisionsOnLine: vi.fn(),
   useWithRestoreTargets: vi.fn(),
   revisionPageSize: 50,
-  actorOf: vi.fn(),
   useRevisions: vi.fn(),
   useRevisionCards: vi.fn(),
   useTurnRevision: vi.fn(),

@@ -18,7 +18,11 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
  * @public
  */
 export type ViewerTelemetryEvent = Readonly<{
-  event: 'context-lost' | 'context-restored' | 'first-frame' | 'long-frame-burst' | 'download';
+  /**
+   * `upload-start` marks the moment the viewer starts preparing received geometry for the GPU. It is a local
+   * phase marker for a host's crash record, not a counted event.
+   */
+  event: 'context-lost' | 'context-restored' | 'first-frame' | 'long-frame-burst' | 'download' | 'upload-start';
   backend: ResolvedGraphicsBackend;
   /** Milliseconds: receipt to first frame, or the burst's total frame time. */
   duration?: number;
@@ -31,6 +35,8 @@ export type ViewerTelemetryEvent = Readonly<{
 /* A host handler that throws never reaches the frame path. */
 const topic = new Topic<ViewerTelemetryEvent>({ name: 'viewer-telemetry', onError: () => undefined });
 let lastBackend: ResolvedGraphicsBackend | undefined;
+/** The live renderer's `info.memory`, read on demand; absent until a canvas creates a renderer. */
+let readMemory: (() => Readonly<{ geometries: number; textures: number }>) | undefined;
 let contextLostPending = false;
 
 /**
@@ -70,9 +76,14 @@ const emit = (build: () => ViewerTelemetryEvent | undefined): void => {
  * A canvas initialised its renderer. After a context loss on this page, this is the restore.
  *
  * @param backend - The backend the renderer resolved.
+ * @param memory - Reads the renderer's `info.memory` counts; kept for {@link readViewerRendererMemory}.
  */
-export const viewerRendererCreated = (backend: ResolvedGraphicsBackend): void => {
+export const viewerRendererCreated = (
+  backend: ResolvedGraphicsBackend,
+  memory?: () => Readonly<{ geometries: number; textures: number }>,
+): void => {
   lastBackend = backend;
+  readMemory = memory;
   if (contextLostPending) {
     contextLostPending = false;
     emit(() => ({ event: 'context-restored', backend }));
@@ -143,6 +154,27 @@ export const viewerGeometryDownloaded = (format: string): void => {
   emit(() => (lastBackend === undefined ? undefined : { event: 'download', backend: lastBackend, format }));
 };
 
+/**
+ * The viewer started preparing a received geometry for the GPU: the step a phone may not survive. Emitted before the
+ * work, so a host can record it first.
+ */
+export const viewerUploadStarted = (): void => {
+  emit(() => (lastBackend === undefined ? undefined : { event: 'upload-start', backend: lastBackend }));
+};
+
+/**
+ * The live renderer's geometry and texture counts, read now. Counts only; nothing about the scene.
+ *
+ * @returns The counts, or `undefined` before a renderer exists or when the read fails.
+ */
+export const readViewerRendererMemory = (): Readonly<{ geometries: number; textures: number }> | undefined => {
+  try {
+    return readMemory?.();
+  } catch {
+    return undefined;
+  }
+};
+
 /** Test seam: forget the remembered backend, any pending context loss and any unsent long frames. */
 export const resetViewerEvents = (): void => {
   if (longFrameTimer !== undefined) {
@@ -151,5 +183,6 @@ export const resetViewerEvents = (): void => {
   }
   pendingLongFrames = undefined;
   lastBackend = undefined;
+  readMemory = undefined;
   contextLostPending = false;
 };

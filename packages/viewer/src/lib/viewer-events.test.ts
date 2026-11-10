@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { markGeometryReceipt, observeLongAnimationFrames, onViewerEvent } from '#lib/renderer-telemetry.js';
+import {
+  markGeometryReceipt,
+  observeLongAnimationFrames,
+  onViewerEvent,
+  readRendererMemory,
+} from '#lib/renderer-telemetry.js';
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import {
   longFrameWindow,
@@ -8,6 +13,7 @@ import {
   viewerFirstFrame,
   viewerLongFrameBurst,
   viewerRendererCreated,
+  viewerUploadStarted,
 } from '#lib/viewer-events.js';
 
 const unsubscribes: Array<() => void> = [];
@@ -134,5 +140,24 @@ describe('viewer events (FR-17)', () => {
       viewerContextLost('webgl');
     }).not.toThrow();
     expect(seen).toHaveLength(1);
+  });
+
+  it('should mark the start of a GPU upload on the current backend, and nothing before a renderer exists', () => {
+    const seen = listen();
+    viewerUploadStarted();
+    viewerRendererCreated('webgl');
+    viewerUploadStarted();
+
+    expect(seen).toEqual([{ event: 'upload-start', backend: 'webgl' }]);
+  });
+
+  it('should read the live renderer counts on demand, and contain a failing read', () => {
+    expect(readRendererMemory()).toBeUndefined();
+    viewerRendererCreated('webgl', () => ({ geometries: 4, textures: 2 }));
+    expect(readRendererMemory()).toEqual({ geometries: 4, textures: 2 });
+    viewerRendererCreated('webgl', () => {
+      throw new Error('lost');
+    });
+    expect(readRendererMemory()).toBeUndefined();
   });
 });

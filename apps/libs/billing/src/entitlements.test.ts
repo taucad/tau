@@ -2,25 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { entitlementsFromTier, formatStorageLimit, storageLimitBytesByTier } from '#entitlements.js';
 
 describe('entitlementsFromTier', () => {
-  /* D23: free sync is a launch gate, closed unless a deployment opens it. */
-  it('should keep free-tier sync closed unless the deployment opens free sync', () => {
-    expect(entitlementsFromTier('free')).toMatchObject({ canSyncFiles: false });
-    expect(entitlementsFromTier('free', { freeTierSync: false })).toMatchObject({ canSyncFiles: false });
-  });
-
-  /* D16: open, a free account backs up and publishes. GitHub is on every plan, so it has no flag. */
-  it('should let a free account sync once free sync is open', () => {
-    expect(entitlementsFromTier('free', { freeTierSync: true })).toMatchObject({
+  /* D16: a free account backs up and publishes within its 1 GB allowance. GitHub is on every plan, so it has no flag. */
+  it('should let a free account sync within its allowance', () => {
+    expect(entitlementsFromTier('free')).toMatchObject({
       tier: 'free',
       canSyncFiles: true,
       canUseProKernels: false,
       canCreatePrivateShares: false,
     });
-  });
-
-  it('should leave the paid tiers alone whatever the free-sync gate says', () => {
-    expect(entitlementsFromTier('pro', { freeTierSync: false }).canSyncFiles).toBe(true);
-    expect(entitlementsFromTier('enterprise', { freeTierSync: false }).canSyncFiles).toBe(true);
+    expect(storageLimitBytesByTier.free).toBe(1024 ** 3);
   });
 
   it('returns free-tier entitlements with pro features disabled', () => {
@@ -31,7 +21,7 @@ describe('entitlementsFromTier', () => {
       status: 'none',
       canUseProKernels: false,
       canCreatePrivateShares: false,
-      canSyncFiles: false,
+      canSyncFiles: true,
       canConnectEnterpriseGit: false,
       apiCadGatewayMonthlyLimit: 1000,
       conversionApiMonthlyLimit: 0,

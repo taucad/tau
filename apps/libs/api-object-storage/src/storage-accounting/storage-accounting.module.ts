@@ -26,13 +26,10 @@ import { StorageAccountingScheduler, redisSnapshotStore } from '#storage-account
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const tasks = accountingTasks({
           database: database.database,
-          /* Plans resolve in SQL as `BillingService` projects them, never through Stripe (D23's gate included). */
+          /* Plans resolve in SQL as `BillingService` projects them, never through Stripe. */
           plans: {
             tauCloudEnabled: config.get('TAU_CLOUD_ENABLED', { infer: true }),
             environment: environment.success ? environment.data : undefined,
-            freeTierSync:
-              config.get('TAU_FREE_TIER_SYNC_ENABLED', { infer: true }) &&
-              config.get('NODE_ENV', { infer: true }) !== 'production',
           },
           r2: r2SourceOf({
             accountId: config.get('TAU_CLOUDFLARE_ACCOUNT_ID', { infer: true }),

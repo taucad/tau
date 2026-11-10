@@ -55,16 +55,6 @@ export const environmentSchemaBase = z.object({
       ),
   ).describe('Desktop, CLI and daemon releases admitted as runtime telemetry labels, newest first.'),
   /*
-   * Charter D23: sync opens to the free tier only after the deployment gate
-   * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
-   * whatever the code's free tier says. `BillingService` ignores it under
-   * `NODE_ENV=production` until the go-live commit deletes that clause; the
-   * value then arrives through the Terraform secrets map, never a `fly.*.toml`.
-   */
-  TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
-    'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
-  ),
-  /*
    * Blueprint T01/T04: the agent-observability purpose notice the account is
    * shown and decides against. Unset — the default everywhere until the
    * production notice is approved — keeps every new purpose unavailable, so no

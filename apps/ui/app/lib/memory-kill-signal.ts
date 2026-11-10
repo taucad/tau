@@ -25,6 +25,7 @@ import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { readLastMemorySample, readHighWaterWasmBytes, takeMemorySample } from '#lib/memory-sampler.js';
 import { readSessionStorage } from '#lib/session-storage.js';
+import { isModelKey } from '#lib/kill-memory.js';
 import type { MemorySample } from '#lib/memory-sampler.js';
 
 /** The marker shape this build writes and reads. An older shape is left alone rather than guessed at. */
@@ -119,6 +120,8 @@ export type KillWork = Readonly<{
   lastInteraction?: (typeof killInteractions)[number];
   interactionAt?: number;
   parameterChanges?: number;
+  /** The opaque kill-memory key of the model on screen (`#lib/kill-memory`); kept on the device, never reported. */
+  model?: string;
 }>;
 
 const kernelPattern = /^[a-z][\da-z-]{0,31}$/u;
@@ -151,7 +154,10 @@ const numericWorkFields = [
  */
 export const admitKillWork = (patch: Readonly<Record<string, unknown>>): KillWork => {
   const admitted: Record<string, unknown> = {};
-  const { kernel, builtin, shareProvider, phase, backend, contextLost, lastInteraction } = patch;
+  const { kernel, builtin, shareProvider, phase, backend, contextLost, lastInteraction, model } = patch;
+  if (isModelKey(model)) {
+    admitted['model'] = model;
+  }
   if (typeof kernel === 'string' && kernelPattern.test(kernel)) {
     admitted['kernel'] = kernel;
   }

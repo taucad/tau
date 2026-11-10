@@ -5,6 +5,7 @@ import { createMemoryKillSignal } from '#lib/memory-kill-signal.js';
 import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '#lib/memory-sampler.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { KillReportConsent } from '#components/memory-kill-reporter.js';
+import { createKillMemory } from '#lib/kill-memory.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 
 vi.mock('#lib/tab-kill-reporting.js', () => ({
@@ -207,6 +208,55 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
         expect(reportDetectedKill).toHaveBeenCalledTimes(1);
       });
       expect(container).toBeEmptyDOMElement();
+    });
+  });
+
+  describe('kill memory (paused model)', () => {
+    const killedWhile = (phase: string): ReturnType<typeof createMemoryKillSignal> => {
+      const storage = globalThis.sessionStorage;
+      const previous = createMemoryKillSignal({ storage, navigationType: 'navigate', deviceClass: 'standard' });
+      previous.takeDetectedKills();
+      previous.work({ model: 'abcd1234', phase });
+      return createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'standard' });
+    };
+
+    it('remembers a model that stopped the page while rendering, even with telemetry off', () => {
+      const values = new Map<string, string>();
+      const memory = createKillMemory({
+        storage: () =>
+          ({
+            getItem: (key: string) => values.get(key) ?? null,
+            setItem: (key: string, value: string) => values.set(key, value),
+            removeItem: (key: string) => values.delete(key),
+          }) as unknown as Storage,
+      });
+      render(
+        <MemoryKillReporter
+          signal={killedWhile('gpu-upload')}
+          liveProjectCount={0}
+          chatCount={0}
+          consent={consentSource('denied')}
+          memory={memory}
+        />,
+      );
+
+      expect(memory.entries()).toEqual([expect.objectContaining({ model: 'abcd1234', kills: 1 })]);
+    });
+
+    it('does not pause a model for a kill while idle', () => {
+      const memory = createKillMemory({ storage: () => undefined });
+      const record = vi.spyOn(memory, 'record');
+      render(
+        <MemoryKillReporter
+          signal={killedWhile('idle')}
+          liveProjectCount={0}
+          chatCount={0}
+          consent={consentSource('granted')}
+          memory={memory}
+        />,
+      );
+
+      expect(record).not.toHaveBeenCalled();
     });
   });
 });

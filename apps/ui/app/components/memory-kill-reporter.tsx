@@ -16,9 +16,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
-import { getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
+import { busyKillPhases, getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
 import { installKillWorkReaders } from '#lib/kill-work-context.js';
+import { killMemory } from '#lib/kill-memory.js';
+import type { KillMemory } from '#lib/kill-memory.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
@@ -52,11 +54,13 @@ export function MemoryKillReporter({
   liveProjectCount,
   chatCount,
   consent = pageConsent,
+  memory = killMemory,
 }: {
   readonly signal: MemoryKillSignal | undefined;
   readonly liveProjectCount: number;
   readonly chatCount: number;
   readonly consent?: KillReportConsent;
+  readonly memory?: KillMemory;
 }): undefined {
   const waiting = useRef<DetectedMemoryKill[] | undefined>(undefined);
 
@@ -64,7 +68,22 @@ export function MemoryKillReporter({
     if (signal === undefined) {
       return undefined;
     }
-    waiting.current ??= [...signal.takeDetectedKills()];
+    if (waiting.current === undefined) {
+      waiting.current = [...signal.takeDetectedKills()];
+      // Kill memory, in every consent state: a model that stopped the page while opening or rendering is paused
+      // the next time it opens on this device. Local functional state; nothing is sent.
+      for (const kill of waiting.current) {
+        const { model, phase } = kill.work;
+        if (
+          kill.classification === 'foreground' &&
+          model !== undefined &&
+          phase !== undefined &&
+          busyKillPhases.has(phase)
+        ) {
+          memory.record(model, kill.buildId, kill.diedAt);
+        }
+      }
+    }
     let isSending = false;
     const process = async (): Promise<void> => {
       const decided = consent.read();
@@ -99,7 +118,7 @@ export function MemoryKillReporter({
     // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
     void process();
     return unsubscribe;
-  }, [consent, signal]);
+  }, [consent, memory, signal]);
 
   // SB2's kernel heap and renderer readers, which nothing registered before (crash capture, Finding 2).
   useEffect(() => installKillWorkReaders(), []);

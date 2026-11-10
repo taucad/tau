@@ -13,6 +13,10 @@ import { sealEvidence } from '#evidence-seal.js';
 import { scoreAttempts } from '#langfuse-client.js';
 import { receiptSpanId } from '#langfuse-observation.js';
 import { evidenceFixture, outcomeFact, privateMarker, providerFact, toolFact } from '#testing/evidence.fixture.js';
+import { providerAttemptEvidence } from '#model-invocation-evidence.js';
+import type { ObservedAttempt } from '#model-invocation-evidence.js';
+import { settlementEvidence } from '#settlement-evidence.js';
+import type { Evidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
 import type { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurposeState } from '#telemetry-purposes/telemetry-purpose.schema.js';
@@ -108,6 +112,95 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       throw new Error(outcome.kind);
     }
     return { userId, projectId, receiptId: outcome.receipt.receipt };
+  };
+
+  /** Admit one piece of API-reported evidence, sealed as ingress seals it. */
+  const admit = async (evidence: Evidence) => {
+    const { principal, project } = evidence.scope;
+    const bytes = new TextEncoder().encode(canonicalEvidence(evidence));
+    const outcome = await admitEvidence({
+      database,
+      evidence,
+      allowed: { replay: true, admit: true },
+      protection: 'free',
+      seal: (receipt) => ({
+        payload: sealEvidence(
+          Uint8Array.from(bytes),
+          { environment, principal, project, receipt, plane: evidence.payload.plane },
+          { version: 1, key },
+        ),
+        keyVersion: 1,
+      }),
+      budgets: { total: 1_000_000_000, principal: 1_000_000_000 },
+      now: new Date(),
+    });
+    if (outcome.kind !== 'receipt') {
+      throw new Error(outcome.kind);
+    }
+    return outcome.receipt.receipt;
+  };
+
+  /** A funded call of a host run, as the relay observed it, and the ledger's settlement of the same operation (LW4). */
+  const funded = (owner: Readonly<{ userId: string; projectId: string }>, call = '0') => {
+    const attemptKey = `run-1:1:${call}`;
+    const operation = `op-${call}`;
+    return {
+      generation: async (change: Partial<ObservedAttempt> = {}) =>
+        admit(
+          await providerAttemptEvidence(
+            {
+              principal: owner.userId,
+              project: owner.projectId,
+              attemptKey,
+              chat: 'chat-1',
+              surface: 'gateway',
+              wire: 'anthropic',
+              requestedModel: undefined,
+              provider: undefined,
+              operation,
+              startedAt: Date.now() - 2000,
+              duration: 1000,
+              stream: {
+                stop: 'stop',
+                usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+                resolvedModel: 'claude-test',
+                response: 'response-1',
+                firstChunk: 400,
+                firstText: 650,
+              },
+              ended: 'completed',
+              ...change,
+            },
+            { policyEpoch: 'epoch-a', protection: 'free' },
+          ),
+        ),
+      settlement: async () =>
+        admit(
+          await settlementEvidence(
+            {
+              operation: {
+                id: operation,
+                accountId: 'account-1',
+                environment,
+                attemptKey,
+                projectHint: owner.projectId,
+                chatHint: 'chat-1',
+                admittedAt: new Date(Date.now() - 2000),
+                activationId: 'activation-1',
+              },
+              receipt: {
+                terminalRevision: 1n,
+                chargedAtoms: 1_500_000n,
+                supplierCostPicoUsd: 750_000_000_000n,
+                resolvedAt: new Date(),
+              },
+              normalization: undefined,
+            },
+            owner.userId,
+            { policyEpoch: 'epoch-a', protection: 'free', project: owner.projectId },
+          ),
+        ),
+    };
   };
 
   const row = async (receiptId: string) => {
@@ -569,6 +662,186 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     const retried = await row(receiptId);
     expect(retried).toMatchObject({ state: 'pending', reason: 'econnrefused' });
     expect(retried.payload).not.toBeNull();
+  });
+
+  /** The metadata of each span the vendor stub was sent, in order. */
+  const spanMetadata = (bodies: readonly string[]) =>
+    bodies.map((body) => {
+      const parsed = JSON.parse(body) as {
+        resourceSpans: Array<{
+          scopeSpans: Array<{
+            spans: Array<{
+              name: string;
+              attributes: Array<{ key: string; value: Record<string, unknown> }>;
+            }>;
+          }>;
+        }>;
+      };
+      const [span] = parsed.resourceSpans[0]!.scopeSpans[0]!.spans;
+      const prefix = 'langfuse.observation.metadata.';
+      return {
+        name: span!.name,
+        metadata: Object.fromEntries(
+          span!.attributes
+            .filter((item) => item.key.startsWith(prefix))
+            .map((item) => [item.key.slice(prefix.length), Object.values(item.value)[0]]),
+        ),
+      };
+    });
+  /* Delivery passes one tick apart, so a held receipt comes due on the next. */
+  const ticks = async (delivery: EvidenceDeliveryService, from: Date, count: number) => {
+    for (let tick = 0; tick < count; tick++) {
+      // oxlint-disable-next-line no-await-in-loop -- passes run one after another, as the timer runs them
+      await delivery.drain(new Date(from.getTime() + tick * (deliveryTiming.intervalMilliseconds + 1)));
+    }
+  };
+
+  it("should hold a funded generation until its settlement is admitted, and send the settlement's values in its one send", async () => {
+    const owner = await account();
+    const call = funded(owner);
+    const generation = await call.generation();
+    const sent = capturePosts();
+    const delivery = service();
+    const now = new Date();
+
+    await delivery.drain(now);
+    expect(sent).toHaveLength(0);
+    expect(await row(generation)).toMatchObject({ state: 'pending', reason: 'held', traceId: null });
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'held' });
+
+    const settlement = await call.settlement();
+    await ticks(delivery, new Date(now.getTime() + deliveryTiming.intervalMilliseconds + 1), 3);
+
+    const [carried] = spanMetadata(sent);
+    expect(sent).toHaveLength(1);
+    expect(carried).toMatchObject({ name: 'call-model', metadata: { credits: 1.5 } });
+    expect(carried!.metadata['supplier_cost_usd']).toBe(0.75);
+    expect(carried!.metadata['ledger']).toMatch(/^[a-f\d]{32}$/u);
+    expect(carried!.metadata['tariff']).toMatch(/^[a-f\d]{32}$/u);
+    expect(sent[0]).not.toContain('cost_details');
+    expect(await row(generation)).toMatchObject({ payload: null });
+    expect(await row(settlement)).toMatchObject({
+      state: 'superseded',
+      reason: 'merged',
+      payload: null,
+      objectId: null,
+    });
+    expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledWith(1, { reason: 'merged' });
+    expect(metrics.agentEvidenceSettlements.add).toHaveBeenCalledWith(1, { outcome: 'merged' });
+  });
+
+  it('should merge a settlement admitted before its generation, and never send the settlement on its own', async () => {
+    const owner = await account();
+    const call = funded(owner);
+    const settlement = await call.settlement();
+    const sent = capturePosts();
+    const delivery = service();
+    const now = new Date();
+
+    await delivery.drain(now);
+    expect(sent).toHaveLength(0);
+    expect(await row(settlement)).toMatchObject({ state: 'pending', reason: 'held' });
+
+    const generation = await call.generation();
+    await ticks(delivery, new Date(now.getTime() + deliveryTiming.intervalMilliseconds + 1), 2);
+
+    const [carried] = spanMetadata(sent);
+    expect(sent).toHaveLength(1);
+    expect(carried!.metadata).toMatchObject({ credits: 1.5 });
+    expect(await row(generation)).toMatchObject({ payload: null });
+    expect(await row(settlement)).toMatchObject({ state: 'superseded', reason: 'merged' });
+  });
+
+  it('should send a funded generation without the values once its hold runs out, and count it unsettled', async () => {
+    const owner = await account();
+    const generation = await funded(owner).generation();
+    const sent = capturePosts();
+    const delivery = service();
+    const now = new Date();
+
+    await delivery.drain(now);
+    await delivery.drain(new Date(now.getTime() + deliveryTiming.settlementHoldMilliseconds + 1));
+
+    const [unsettled] = spanMetadata(sent);
+    expect(sent).toHaveLength(1);
+    expect(unsettled!.metadata).not.toHaveProperty('credits');
+    expect(unsettled!.metadata).not.toHaveProperty('ledger');
+    expect(await row(generation)).toMatchObject({ payload: null });
+    expect(metrics.agentEvidenceSettlements.add).toHaveBeenCalledWith(1, { outcome: 'unsettled' });
+  });
+
+  it('should settle a settlement admitted after its generation went late, and send nothing for it', async () => {
+    const owner = await account();
+    const call = funded(owner);
+    await call.generation();
+    const sent = capturePosts();
+    const delivery = service();
+    const now = new Date();
+    await delivery.drain(now);
+    const gone = new Date(now.getTime() + deliveryTiming.settlementHoldMilliseconds + 1);
+    await delivery.drain(gone);
+    expect(sent).toHaveLength(1);
+
+    const settlement = await call.settlement();
+    await delivery.drain(new Date(gone.getTime() + 1));
+
+    expect(sent).toHaveLength(1);
+    expect(await row(settlement)).toMatchObject({ state: 'superseded', reason: 'late', payload: null });
+    expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledWith(1, { reason: 'late' });
+    expect(metrics.agentEvidenceSettlements.add).toHaveBeenCalledWith(1, { outcome: 'late' });
+  });
+
+  it('should settle a settlement whose generation never came late once its own bound runs out', async () => {
+    const owner = await account();
+    const settlement = await funded(owner).settlement();
+    const sent = capturePosts();
+    const delivery = service();
+    const now = new Date();
+
+    await delivery.drain(now);
+    expect(await row(settlement)).toMatchObject({ state: 'pending', reason: 'held' });
+    await delivery.drain(new Date(now.getTime() + deliveryTiming.settlementOrphanMilliseconds + 1));
+
+    expect(sent).toHaveLength(0);
+    expect(await row(settlement)).toMatchObject({ state: 'superseded', reason: 'late', payload: null });
+  });
+
+  it('should give a taken settlement back when its generation never reached Langfuse, and merge it on the retry', async () => {
+    const owner = await account();
+    const call = funded(owner);
+    const settlement = await call.settlement();
+    const generation = await call.generation();
+    const now = new Date();
+    vendor(() => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+    });
+    await ticks(service(), now, 3);
+    expect(await row(generation)).toMatchObject({ state: 'pending', reason: 'econnrefused' });
+    expect(await row(settlement)).toMatchObject({ state: 'pending', reason: 'held', leaseOwner: null });
+
+    const sent = capturePosts();
+    await ticks(service(), new Date(now.getTime() + deliveryTiming.maxBackoffMilliseconds + 1), 2);
+
+    const [carried] = spanMetadata(sent);
+    expect(sent).toHaveLength(1);
+    expect(carried!.metadata).toMatchObject({ credits: 1.5 });
+    expect(await row(settlement)).toMatchObject({ state: 'superseded', reason: 'merged' });
+  });
+
+  it('should not hold a failed attempt or a call with no operation', async () => {
+    const owner = await account();
+    const failed = await funded(owner, '0').generation({ ended: 'failed' });
+    const unfunded = await funded(owner, '1').generation({ operation: undefined });
+    const sent = capturePosts();
+
+    await service().drain(new Date());
+
+    expect(sent).toHaveLength(2);
+    for (const receipt of [failed, unfunded]) {
+      // oxlint-disable-next-line no-await-in-loop -- two rows read one after another
+      expect(await row(receipt)).toMatchObject({ payload: null });
+    }
+    expect(metrics.agentEvidenceDeliveries.add).not.toHaveBeenCalledWith(1, { outcome: 'held' });
   });
 
   it('should fence a settlement to the lease holder and reconcile a send whose worker died', async () => {

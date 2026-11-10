@@ -19,7 +19,15 @@ import type {
 } from '@taucad/api-observability/metrics';
 import { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#evidence-seal.js';
-import { leasePending, leaseUncertain, prepareSend, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
+import {
+  generationState,
+  leasePending,
+  leaseUncertain,
+  prepareSend,
+  settleDelivery,
+  sweepBacklog,
+  takeSettlement,
+} from '#evidence-delivery.js';
 import type { DeliverySettlement, LeasedDelivery } from '#evidence-delivery.js';
 import { LangfuseClient } from '#langfuse-client.js';
 import type { ScoreOutcome } from '#langfuse-client.js';
@@ -30,7 +38,8 @@ import {
   pseudonymKey,
   receiptSpanId,
 } from '#langfuse-observation.js';
-import type { LangfuseScore } from '#langfuse-observation.js';
+import type { LangfuseScore, SettlementFact } from '#langfuse-observation.js';
+import { generationSettlementKey, settledGenerationKey, settles } from '#settlement-evidence.js';
 
 /** Delivery pacing. Fixed and low: vendor availability never gates the API. */
 export const deliveryTiming = Object.freeze({
@@ -43,6 +52,10 @@ export const deliveryTiming = Object.freeze({
   gapAfterMilliseconds: 15 * 60_000,
   recheckMilliseconds: 60_000,
   maxBackoffMilliseconds: 15 * 60_000,
+  /** How long a funded generation waits after admission for its call's settlement before it goes without (rule 8). */
+  settlementHoldMilliseconds: 60_000,
+  /** How long a settlement waits after admission for a generation that was never admitted, before it settles late. */
+  settlementOrphanMilliseconds: 15 * 60_000,
 });
 
 /** Backoff for a send that provably never reached ingestion. */
@@ -68,6 +81,9 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
     case 'retry': {
       return settlement.reason === 'key-unavailable' ? 'key_unavailable' : 'retry';
     }
+    case 'hold': {
+      return 'held';
+    }
     default: {
       return settlement.kind;
     }
@@ -91,9 +107,13 @@ const reasonOf = (outcomes: readonly ScoreOutcome[], kind: 'not-sent' | 'rejecte
   return undefined;
 };
 
-const supersededReason: Readonly<Record<'object' | 'no-object', AgentEvidenceSupersededReason>> = {
+const supersededReason: Readonly<
+  Record<Extract<DeliverySettlement, { kind: 'superseded' }>['reason'], AgentEvidenceSupersededReason>
+> = {
   object: 'object',
   'no-object': 'no_object',
+  merged: 'merged',
+  late: 'late',
 };
 
 /** What a failure log may carry: the error's class and driver code, never its message, which can embed row values. */
@@ -104,6 +124,18 @@ const errorFacts = (error: unknown): Readonly<{ name: string; code?: string }> =
     ...(typeof code === 'string' ? { code } : {}),
   };
 };
+
+/**
+ * Whether a generation waits for its call's settlement (rule 8): a provider fact that names its funded operation and
+ * did not fail. A call with no operation has no settlement, and a failed attempt is never held.
+ */
+const awaitsSettlement = (evidence: Evidence): boolean => {
+  const { fact } = evidence.payload;
+  return fact.kind === 'provider' && fact.billing !== null && fact.stop !== 'error';
+};
+
+/** A generation's settlement, taken for its send: the leased row, and the values the generation carries. */
+type HeldSettlement = Readonly<{ row: LeasedDelivery; fact: SettlementFact }>;
 
 const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) => Promise<void>): Promise<void> => {
   let next = 0;
@@ -425,9 +457,56 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (typeof exportable === 'string') {
       return this.settle(row, { kind: 'expired', reason: exportable });
     }
+    if (exportable.evidence.payload.fact.kind === 'financial') {
+      /* A settlement is never sent on its own: its generation carries it, or it is late (rule 8). */
+      return this.awaitGeneration(row, exportable.evidence, now);
+    }
+    const settlement = awaitsSettlement(exportable.evidence)
+      ? await this.settlementOf(row, exportable.evidence, now)
+      : undefined;
+    if (settlement === 'hold') {
+      return this.settle(row, {
+        kind: 'hold',
+        reason: 'settlement',
+        notBefore: new Date(now.getTime() + deliveryTiming.intervalMilliseconds),
+      });
+    }
+    try {
+      return await this.send({ client, pseudonym, progress }, { row, exportable, settlement }, now);
+    } finally {
+      await this.releaseSettlement(typeof settlement === 'object' ? settlement.row : undefined, now);
+    }
+  }
+
+  /**
+   * Send one receipt's object and its scores, and settle the row by Langfuse's answer. A generation carries its
+   * settlement's values, and the settlement settles `merged` once that send is made (rule 8).
+   */
+  private async send(
+    {
+      client,
+      pseudonym,
+      progress,
+    }: Readonly<{ client: LangfuseClient; pseudonym: Uint8Array<ArrayBuffer>; progress: { identified: boolean } }>,
+    {
+      row,
+      exportable,
+      settlement,
+    }: Readonly<{
+      row: LeasedDelivery;
+      exportable: Readonly<{ evidence: Evidence; identity?: PersonalIdentity }>;
+      settlement: HeldSettlement | 'unsettled' | undefined;
+    }>,
+    now: Date,
+  ): Promise<string> {
     const observation = langfuseObservation(
       exportable.evidence,
-      { environment: this.environment, protection: row.protection, identity: exportable.identity },
+      {
+        environment: this.environment,
+        protection: row.protection,
+        identity: exportable.identity,
+        settlement: typeof settlement === 'object' ? settlement.fact : undefined,
+      },
       pseudonym,
     );
     const scores = langfuseScores(exportable.evidence, { environment: this.environment });
@@ -464,6 +543,9 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (outcome.kind !== 'not-sent') {
       await this.writeScores(client, scores);
     }
+    if (outcome.kind === 'accepted' || outcome.kind === 'uncertain') {
+      await this.mergeSettlement(settlement);
+    }
     switch (outcome.kind) {
       case 'accepted': {
         return this.settle(row, { kind: 'sent', reason: 'acknowledged' });
@@ -482,6 +564,96 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
         return this.settle(row, { kind: 'rejected', reason: outcome.reason });
       }
     }
+  }
+
+  /**
+   * Take the settlement a funded generation waits for (rule 8). `hold` while the settlement is not yet admitted and
+   * the generation's hold has not run out, or while another worker holds the settlement; `unsettled` once the hold ran
+   * out with no settlement, so the generation goes without the values.
+   */
+  private async settlementOf(
+    row: LeasedDelivery,
+    generation: Evidence,
+    now: Date,
+  ): Promise<HeldSettlement | 'hold' | 'unsettled'> {
+    const taken = await takeSettlement(
+      this.databaseService.database,
+      { principalId: row.principalId, projectId: row.projectId, semanticKey: generationSettlementKey(generation) },
+      { owner: this.owner, leaseMilliseconds: deliveryTiming.leaseMilliseconds, now },
+    );
+    if (taken.kind === 'taken') {
+      const settlement = this.open(taken.row);
+      if (
+        typeof settlement === 'object' &&
+        settlement.payload.fact.kind === 'financial' &&
+        settles(settlement, generation)
+      ) {
+        return { row: taken.row, fact: settlement.payload.fact };
+      }
+      /* Not this call's settlement after all (or unreadable): it settles on its own lease. */
+      await this.releaseSettlement(taken.row, now);
+    }
+    if (taken.kind === 'busy') {
+      return 'hold';
+    }
+    return now.getTime() - row.createdAt.getTime() < deliveryTiming.settlementHoldMilliseconds ? 'hold' : 'unsettled';
+  }
+
+  /** Settle a generation's taken settlement `merged`, or count the generation sent without one. */
+  private async mergeSettlement(settlement: HeldSettlement | 'unsettled' | undefined): Promise<void> {
+    if (settlement === 'unsettled') {
+      this.metrics.agentEvidenceSettlements.add(1, { outcome: 'unsettled' });
+      return;
+    }
+    if (settlement === undefined) {
+      return;
+    }
+    if ((await this.settle(settlement.row, { kind: 'superseded', reason: 'merged' })) !== 'lease-lost') {
+      this.metrics.agentEvidenceSettlements.add(1, { outcome: 'merged' });
+    }
+  }
+
+  /**
+   * Return a taken settlement its generation's send did not settle (nothing was sent, or Langfuse refused it), so it
+   * waits again. Its generation can take it again before it is due; on its own it is next looked at after a recheck. A
+   * settlement already settled `merged` is fenced and left as it is.
+   */
+  private async releaseSettlement(row: LeasedDelivery | undefined, now: Date): Promise<void> {
+    if (row === undefined) {
+      return;
+    }
+    await settleDelivery(
+      this.databaseService.database,
+      { receiptId: row.receiptId, owner: this.owner },
+      { kind: 'hold', reason: 'generation', notBefore: new Date(now.getTime() + deliveryTiming.recheckMilliseconds) },
+    );
+  }
+
+  /**
+   * A settlement leased on its own (rule 8): it waits while its generation is still to be sent, which then takes it,
+   * and settles `late`, sending nothing, once its generation went without it, or when none was admitted in its bound.
+   * Reconciliation then reads it as missing, never as drift.
+   */
+  private async awaitGeneration(row: LeasedDelivery, settlement: Evidence, now: Date): Promise<string> {
+    const generation = await generationState(this.databaseService.database, {
+      principalId: row.principalId,
+      projectId: row.projectId,
+      semanticKey: settledGenerationKey(settlement),
+    });
+    const orphaned =
+      generation === 'none' && now.getTime() - row.createdAt.getTime() >= deliveryTiming.settlementOrphanMilliseconds;
+    if (generation === 'gone' || orphaned) {
+      const settled = await this.settle(row, { kind: 'superseded', reason: 'late' });
+      if (settled !== 'lease-lost') {
+        this.metrics.agentEvidenceSettlements.add(1, { outcome: 'late' });
+      }
+      return settled;
+    }
+    return this.settle(row, {
+      kind: 'hold',
+      reason: 'generation',
+      notBefore: new Date(now.getTime() + deliveryTiming.recheckMilliseconds),
+    });
   }
 
   /**

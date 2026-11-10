@@ -515,6 +515,48 @@ describe('trackAgentTurn', () => {
     const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
     expect(detail).not.toHaveProperty('safeguards');
     expect(detail).not.toHaveProperty('compactions');
+    expect(detail).not.toHaveProperty('prefixBreaks');
+  });
+
+  it('counts the attempt’s prefix breaks by cause and provider, with the reasoning they left out', () => {
+    const reply = (id: string, provider: string, prefix: Record<string, unknown>) =>
+      logRow(0, {
+        type: 'message.appended',
+        message: {
+          id,
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done.' }],
+          metadata: { provider, prefix: { digest: 'd', system: 's', tools: 't', settings: 'high', ...prefix } },
+        },
+      });
+    const attemptOne = [
+      lifecycleRow(0, 'admitted', 'run_breaks'),
+      lifecycleRow(0, 'running', 'run_breaks'),
+      reply('reply-0', 'anthropic', { break: 'model' }),
+      logRow(0, {
+        type: 'run.lifecycle',
+        state: 'failed',
+        attempt: 1,
+        detail: { message: 'stalled', code: 'MODEL_STREAM_STALLED', resumable: true },
+      }),
+    ];
+    const { publish, report } = harness('run_breaks', { prior: attemptOne });
+    publish([logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 1300);
+    publish(
+      [
+        reply('reply-1', 'anthropic', { break: 'clearing', dropped: 9 }),
+        reply('reply-2', 'anthropic', {}),
+        reply('reply-3', 'anthropic', { break: 'clearing', dropped: 2 }),
+        reply('reply-4', 'a-provider-of-tomorrow', { break: 'settings' }),
+        logRow(0, { type: 'run.lifecycle', state: 'completed', attempt: 2 }),
+      ],
+      1800,
+    );
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail.prefixBreaks).toEqual([
+      { cause: 'clearing', provider: 'anthropic', count: 2, reasoningOmitted: 11 },
+      { cause: 'settings', provider: 'other', count: 1, reasoningOmitted: 0 },
+    ]);
   });
 
   it('counts a cancelled run as cancelled', () => {

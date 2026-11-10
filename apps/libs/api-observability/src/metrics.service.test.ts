@@ -70,6 +70,11 @@ describe('MetricsService', () => {
       expect(() => service.agentCompactions.add(1)).not.toThrow();
     });
 
+    it('should create the client-reported prefix-break and omitted-reasoning counters', () => {
+      expect(() => service.agentPrefixBreaks.add(1)).not.toThrow();
+      expect(() => service.agentReasoningOmittedBlocks.add(1)).not.toThrow();
+    });
+
     it('should create content-free funded-operation metrics', () => {
       expect(() =>
         service.billingFundedOperationRecoveries.add(1, {

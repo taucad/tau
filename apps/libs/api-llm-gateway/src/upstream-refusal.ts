@@ -138,17 +138,56 @@ const upstreamStatus = {
 } as const;
 
 /**
+ * Whether a provider's own type, code or sentence matches one of `patterns`. Reads a body's `error` member, or the
+ * object itself when it is that member already (an in-band error frame).
+ *
+ * @param body - The parsed provider body or its error object.
+ * @param patterns - What the refusal says, in each provider's words.
+ * @returns `true` when the provider said one of them.
+ */
+const refusalSays = (body: unknown, patterns: readonly RegExp[]): boolean => {
+  if (body === null || typeof body !== 'object') {
+    return false;
+  }
+  const { error } = body as { error?: unknown };
+  const source = (error !== null && typeof error === 'object' ? error : body) as Record<string, unknown>;
+  return [source['type'], source['code'], source['message']].some(
+    (value) => typeof value === 'string' && patterns.some((pattern) => pattern.test(value)),
+  );
+};
+
+/**
+ * How a provider says it will not accept reasoning replayed from an earlier turn. Anthropic binds each thinking
+ * signature to everything sent before the block and answers 400 when that prefix differs.
+ *
+ * ponytail: the one sentence observed (Anthropic, Fable 5.2). Add a provider's sentence here when it starts refusing
+ * instead of dropping.
+ */
+const reasoningReplayRefusalPatterns: readonly RegExp[] = [/invalid\W+signature\W+in\W+thinking\W+block/i];
+
+/**
+ * Whether a refused upstream call was refused for native reasoning it replayed. The same history meets the same
+ * refusal, so the gateway answers it with a code no client resumes.
+ *
+ * @param body - The parsed provider body or its error object.
+ * @returns `true` for a reasoning-replay refusal.
+ */
+export const isReasoningReplayRefusal = (body: unknown): boolean => refusalSays(body, reasoningReplayRefusalPatterns);
+
+/**
  * The one status mapping both relay legs use, so the self-host and funded paths
  * cannot drift. A recognised provider-account refusal is classified before this.
  *
- * @param input - The upstream status, its retry estimate when it sent one, and who
- * owns the provider account the request spent against.
+ * @param input - The upstream status, its retry estimate when it sent one, who
+ * owns the provider account the request spent against, and the parsed body
+ * when it was read.
  * @returns The gateway status, refusal code and retry details to answer with.
  */
 export const classifyUpstreamRefusal = (input: {
   readonly status: number;
   readonly retryAfterSeconds?: number;
   readonly accountOwner: ProviderAccountOwner;
+  readonly body?: unknown;
 }): UpstreamClassification => {
   if (input.status === upstreamStatus.tooManyRequests) {
     return {
@@ -166,6 +205,9 @@ export const classifyUpstreamRefusal = (input: {
   const credentialRefusal = input.status === upstreamStatus.unauthorized || input.status === upstreamStatus.forbidden;
   if (input.status < upstreamStatus.badRequest || (credentialRefusal && input.accountOwner === 'tau')) {
     return { status: HttpStatus.SERVICE_UNAVAILABLE, type: 'PROVIDER_UNAVAILABLE' };
+  }
+  if (input.status === upstreamStatus.badRequest && isReasoningReplayRefusal(input.body)) {
+    return { status: HttpStatus.BAD_GATEWAY, type: 'REASONING_REPLAY_REJECTED' };
   }
   return { status: HttpStatus.BAD_GATEWAY, type: 'UPSTREAM_REJECTED' };
 };
@@ -210,20 +252,11 @@ export const contextWindowRefusalMessage = 'The request exceeds the context wind
  * @param body - The parsed provider body or its error object.
  * @returns `true` for a context-window refusal.
  */
-export const isContextWindowRefusal = (body: unknown): boolean => {
-  if (body === null || typeof body !== 'object') {
-    return false;
-  }
-  const { error } = body as { error?: unknown };
-  const source = (error !== null && typeof error === 'object' ? error : body) as Record<string, unknown>;
-  return [source['type'], source['code'], source['message']].some(
-    (value) => typeof value === 'string' && contextWindowRefusalPatterns.some((pattern) => pattern.test(value)),
-  );
-};
+export const isContextWindowRefusal = (body: unknown): boolean => refusalSays(body, contextWindowRefusalPatterns);
 
 /**
  * What a Cloud customer is told about a refused upstream call. Tau owns the key
- * on that path, so the supplier's own sentence never leaves the API; these four
+ * on that path, so the supplier's own sentence never leaves the API; these five
  * sentences are all a customer reads. Shared so the pre-stream leg and the
  * mid-stream frame filter cannot drift apart.
  *
@@ -242,6 +275,9 @@ export const cloudUpstreamRefusalMessage = (input: {
   }
   if (input.type === 'UPSTREAM_REJECTED') {
     return `The model provider rejected the request (HTTP ${String(input.status)}).`;
+  }
+  if (input.type === 'REASONING_REPLAY_REJECTED') {
+    return 'The model provider rejected reasoning replayed from earlier in this chat.';
   }
   return input.type === 'RATE_LIMITED'
     ? 'The model provider is rate limiting this request.'

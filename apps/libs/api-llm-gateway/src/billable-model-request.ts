@@ -144,13 +144,29 @@ const toolResultSchema = z
 const googleToolCallExtraContentSchema = z
   .object({ google: z.object({ thought_signature: boundedString }).strict() })
   .strict();
+/**
+ * How Anthropic treats a replayed thinking block whose prefix changed since it was minted: refuse the request, or
+ * leave the block out and report it. Either value turns the check on whatever the account's age; it changes which
+ * blocks the model reads, not what a token costs. It needs the `thinking-binding-controls-2026-08-01` beta.
+ */
+const anthropicBlockBindingSchema = z
+  .object({ prefix_mismatch_behavior: z.enum(['error', 'drop_block']) })
+  .strict()
+  .optional();
 const anthropicThinkingConfigSchema = z.union([
-  z.object({ type: z.literal('adaptive'), display: z.enum(['summarized', 'omitted']).optional() }).strict(),
+  z
+    .object({
+      type: z.literal('adaptive'),
+      display: z.enum(['summarized', 'omitted']).optional(),
+      block_binding: anthropicBlockBindingSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.literal('enabled'),
       budget_tokens: z.number().int().positive(),
       display: z.enum(['summarized', 'omitted']).optional(),
+      block_binding: anthropicBlockBindingSchema,
     })
     .strict(),
 ]);

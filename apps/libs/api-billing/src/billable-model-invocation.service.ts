@@ -523,6 +523,7 @@ export class BillableModelInvocationService {
       const classification = classifyUpstreamRefusal({
         status: response.status,
         accountOwner: 'tau',
+        body,
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // Tau owns the key here, so the supplier's own sentence never leaves the API.

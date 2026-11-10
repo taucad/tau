@@ -190,9 +190,77 @@ describe('scheduled', () => {
       truncated: false,
       alarms: 2,
     });
+    expect(lines.at(-1)).not.toHaveProperty('eventsForeign');
+    expect(lines.at(-1)).not.toHaveProperty('foreignBucketsValid');
     const text = JSON.stringify(lines);
     expect(text).not.toContain(queryToken);
     expect(text).not.toContain('token-upload');
+  });
+
+  it("should skip the other environment's buckets and count them in the heartbeat", async () => {
+    const event = (id: string, bucket: string): Record<string, unknown> => ({
+      $metadata: { id },
+      timestamp: 0,
+      source: { action: 'PutObject', bucket, interface: 'S3', actor: { accessKeyId: 'token-prod' } },
+    });
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        success: true,
+        result: { events: { events: [event('e1', 'tau-prod-content-private'), event('e2', 'tau-rogue-bucket')] } },
+      }),
+    );
+    const { worker, lines } = harness(fetcher);
+    await worker.scheduled(
+      { scheduledTime: 600_000 },
+      environmentWith(createFakeKv(), {
+        AUDIT_QUERY_TOKEN: queryToken,
+        AUDIT_FOREIGN_BUCKETS: '["tau-prod-content-private"]',
+      }),
+    );
+    expect(lines).toEqual([
+      expect.objectContaining({
+        event: 'r2_audit.unexpected_writer',
+        bucket: 'tau-rogue-bucket',
+        reason: 'unknown-bucket',
+      }),
+      expect.objectContaining({
+        event: 'r2_audit.heartbeat',
+        foreignBucketsValid: true,
+        poll: 'ok',
+        eventsSeen: 2,
+        eventsNew: 1,
+        eventsForeign: 1,
+        alarms: 1,
+      }),
+    ]);
+  });
+
+  it('should report a malformed foreign bucket list and skip nothing', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        success: true,
+        result: {
+          events: {
+            events: [
+              {
+                $metadata: { id: 'e1' },
+                source: { action: 'PutObject', bucket: 'tau-prod-content-private', interface: 'S3' },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const { worker, lines } = harness(fetcher);
+    await worker.scheduled(
+      { scheduledTime: 600_000 },
+      environmentWith(createFakeKv(), {
+        AUDIT_QUERY_TOKEN: queryToken,
+        AUDIT_FOREIGN_BUCKETS: 'tau-prod-content-private',
+      }),
+    );
+    expect(lines.map((line) => line.event)).toEqual(['r2_audit.unexpected_writer', 'r2_audit.heartbeat']);
+    expect(lines.at(-1)).toMatchObject({ foreignBucketsValid: false, eventsForeign: 0 });
   });
 
   it('should report a failed poll in the heartbeat', async () => {

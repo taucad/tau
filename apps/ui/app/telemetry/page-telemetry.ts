@@ -18,6 +18,7 @@
  * @module
  */
 
+import { Topic } from '@taucad/events';
 import {
   createIngestReporter,
   isCloudHost,
@@ -90,6 +91,11 @@ export type PageTelemetryDependencies = Readonly<{
 export type PageTelemetry = Readonly<{
   /** The resolved consent under the one rule. */
   consent: () => ReportingConsent;
+  /**
+   * Listen for each change of the resolved consent (a signed-in preference loading, the switch, GPC, the cookie
+   * banner, an unresolved page draining as signed-out). The detected tab kill waits on it while it is `unknown`.
+   */
+  onConsentChange: (listener: (consent: ReportingConsent) => void) => () => void;
   /** The page's entry context, without a caller. */
   context: () => PageTelemetryContext;
   /** The reporter, composed once the host predicate holds. */
@@ -171,6 +177,8 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
   const held: RuntimeIngestEntry[] = [];
   let heldDropped = 0;
   let lastConsent: ReportingConsent | undefined;
+  /* A listener's failure never reaches the consent inputs. */
+  const consentChanges = new Topic<ReportingConsent>({ name: 'telemetry-consent', onError: () => undefined });
   let lastServer: boolean | undefined;
   let lastUpdatePending = false;
   type Observed = { client: ObservedRuntimeClient; caller: PageCaller; detach: (() => void) | undefined };
@@ -395,11 +403,23 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
     }
   };
 
+  /** Tell listeners and desktop main when the resolved consent changed. */
+  const announceConsent = (): void => {
+    const next = consent();
+    if (next === lastConsent) {
+      return;
+    }
+    lastConsent = next;
+    deps.notifyDesktopMain(next);
+    consentChanges.emit(next);
+  };
+
   /** The identity settled (or was assumed signed-out): drain the hold through the same path. */
   const settle = (): void => {
     if (effectiveIdentity().kind === 'unresolved') {
       return;
     }
+    announceConsent();
     clearDrainTimer();
     const target = ensureReporter();
     if (target === undefined) {
@@ -439,11 +459,7 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
     lastServer = server;
     settle();
     ensureReporter();
-    const next = consent();
-    if (next !== lastConsent) {
-      lastConsent = next;
-      deps.notifyDesktopMain(next);
-    }
+    announceConsent();
   };
 
   /**
@@ -540,6 +556,7 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
 
   return {
     consent,
+    onConsentChange: (listener) => consentChanges.subscribe(listener),
     context,
     ensureReporter,
     record,

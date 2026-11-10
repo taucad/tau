@@ -873,6 +873,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readContent,
     materialize,
     resolvePlaceholder,
+    checkLargeObjects,
     pullsChats,
   } = createProjectRevisionsActor({
     port: options.port,
@@ -1641,7 +1642,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'retryLargeObjects': {
-          largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
+          const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
+          const running = largeObjects.get(checkoutId ?? '');
+          if (running === undefined) {
+            /* No fill to retry: the wait is for the fill's word, so the checkout is checked again. */
+            // async-iife: bootstrap -- a command answers nothing; a failed check is logged and the next capture checks again.
+            void (async (): Promise<void> => {
+              try {
+                await checkLargeObjects(checkoutId);
+              } catch (error) {
+                console.warn('[revisions] large objects could not be checked again', error);
+              }
+            })();
+          } else {
+            running.retry();
+          }
           return;
         }
         case 'prioritizeLargeObjects': {

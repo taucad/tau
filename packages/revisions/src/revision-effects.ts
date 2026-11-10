@@ -475,6 +475,12 @@ export type RevisionActors = Readonly<{
    */
   adoptLargeObjects: (checkoutId: string | undefined) => Promise<LargeObjectAdoption>;
   /**
+   * Check the checkout's large objects again now, even if its current write
+   * generation was answered: the visible way out of a wait the person can see
+   * (Try again). A running fill is replaced by the new check's.
+   */
+  checkLargeObjects: (checkoutId: string | undefined) => Promise<void>;
+  /**
    * The entry closure of the checkout's head (`tau.json` and the files it
    * names), read by the oids its tree names without reading any other blob
    * (D10). `undefined` before the checkout has a head, or on a port that
@@ -4076,6 +4082,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     materialize,
     resolvePlaceholder,
     adoptLargeObjects,
+    checkLargeObjects: async (checkoutId) => {
+      const place = await readPlaceOf(checkoutId);
+      answeredFills.delete(place.id);
+      checkFill(place);
+    },
     readEntryClosure: entryClosureOf,
     chatDevice: async () => {
       const context = await chatContext();
@@ -6239,6 +6250,8 @@ export type ProjectRevisions = Readonly<{
   resolvePlaceholder: RevisionActors['resolvePlaceholder'];
   /** See {@link RevisionActors.adoptLargeObjects}. */
   adoptLargeObjects: RevisionActors['adoptLargeObjects'];
+  /** See {@link RevisionActors.checkLargeObjects}. */
+  checkLargeObjects: RevisionActors['checkLargeObjects'];
   /** See {@link RevisionActors.readEntryClosure}. */
   readEntryClosure: RevisionActors['readEntryClosure'];
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
@@ -6378,6 +6391,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     materialize: actors.materialize,
     resolvePlaceholder: actors.resolvePlaceholder,
     adoptLargeObjects: actors.adoptLargeObjects,
+    checkLargeObjects: actors.checkLargeObjects,
     readEntryClosure: actors.readEntryClosure,
     chatDevice: actors.chatDevice,
     pullsChats: actors.pullsChats,

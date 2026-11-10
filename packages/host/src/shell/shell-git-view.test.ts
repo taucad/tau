@@ -290,6 +290,11 @@ describe('createShellGitView', () => {
         async () => rm(join(store, 'shallow')),
       ],
       [
+        'shallow with an empty line between ids, which git refuses as a bad shallow line',
+        async () => writeFile(join(store, 'shallow'), `${first}\n\n${first}\n`),
+        async () => writeFile(join(store, 'shallow'), `${first}\n`),
+      ],
+      [
         'a loose branch that holds no ref value',
         async () => writeFile(join(store, 'refs', 'heads', 'loose'), 'garbage\n'),
         async () => writeFile(join(store, 'refs', 'heads', 'loose'), `${first}\n`),

@@ -5,7 +5,7 @@ import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { ProjectedRun, ProjectionContext } from '@taucad/agent-observability/projection';
 import { projectRun } from '@taucad/agent-observability/projection';
-import { evidenceFixture, privateMarker } from '#testing/evidence.fixture.js';
+import { evidenceFixture, privateMarker, toolFact } from '#testing/evidence.fixture.js';
 import {
   exportableEvidence,
   langfuseObservation,
@@ -319,7 +319,9 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     const [failed] = await projected(hostRun({ tools: [tool('failed')], ending: undefined }));
     const span = only(completed!);
 
-    expect(span.name).toBe('call-tool');
+    /* A tool outside the first-party vocabulary is named only as external-tool (LQ5). */
+    expect(span.name).toBe('external-tool');
+    expect(JSON.stringify(completed)).not.toContain('SYNTHETIC_TOOL');
     expect(attribute(span, 'langfuse.observation.type')).toBe('tool');
     expect(span.parentSpanId).toBe(runRootSpanId('staging', 'user-a', 'run-1'));
     expect(milliseconds(span.endTimeUnixNano) - milliseconds(span.startTimeUnixNano)).toBe(2000);
@@ -329,6 +331,37 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     expect(metadata(span, 'tool_call')).toMatch(/^[a-f\d]{32}$/u);
     expect(attribute(only(failed!), 'langfuse.observation.level')).toBe('ERROR');
     expect(only(failed!).spanId).toBe(span.spanId);
+  });
+
+  it('should name a first-party tool and its class, and any other name, or none, as external-tool (LW5)', async () => {
+    const [evidence] = await projected(
+      hostRun({
+        tools: [
+          {
+            call: 'call-1',
+            toolName: 'edit_file',
+            outcome: 'completed',
+            input: row(3),
+            output: row(4),
+            startedAt: at + 1000,
+            settledAt: at + 3000,
+          },
+        ],
+        ending: undefined,
+      }),
+    );
+    const span = only(evidence!);
+    expect(span.name).toBe('edit_file');
+    expect(metadata(span, 'tool_class')).toBe('write');
+
+    const renamed = async (name: string | undefined): Promise<string> => {
+      const fact = { ...toolFact(), ...(name === undefined ? {} : { name }) };
+      return only(await evidenceFixture({ semantic: 'call-1', fact })).name;
+    };
+    /* A host that sent a name outside the vocabulary, or an older host that sent none, still names no private tool. */
+    expect(await renamed('synthetic_private_tool')).toBe('external-tool');
+    expect(await renamed(undefined)).toBe('external-tool');
+    expect(await renamed('test_model')).toBe('test_model');
   });
 
   it('should map a check, a presentation and an instruction to no object', async () => {

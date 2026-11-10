@@ -568,3 +568,36 @@ it("should parse a provider fact's declared call kind, absent from an older API,
   }
   expect(parse(provider('chat')).ok).toBe(false);
 });
+
+it("should parse a tool fact's name, absent from an older host, and refuse a name of any other shape", () => {
+  /* Untyped, so a name of the wrong shape reaches the parser as a JavaScript caller would send it. */
+  const tool = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'row', chat: 'chat-1', leaderEpoch: 'device-a', sequence: 7, digest },
+    semantic: { kind: 'tool', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'tool',
+        call: 'call-1',
+        dispatch: 'dispatch-1',
+        toolClass: 'write',
+        toolVersion: null,
+        schemaVersion: null,
+        modelCall: null,
+        outcome: 'completed',
+        revisionBefore: null,
+        revisionAfter: null,
+        ...extra,
+      },
+    },
+  });
+  expect(parse(tool()).ok).toBe(true);
+  expect(parse(tool({ name: 'edit_file' })).ok).toBe(true);
+  expect(parse(tool({ name: 'external-tool' })).ok).toBe(true);
+  for (const name of ['', 'mcp server/tool', 'a'.repeat(65), 'Edit File']) {
+    expect(parse(tool({ name }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+  }
+  /* A field this contract does not know is refused whole, with the fixed code: how an older API answers a newer host. */
+  expect(parse(tool({ toolName: 'edit_file' }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+});

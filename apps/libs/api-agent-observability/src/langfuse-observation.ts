@@ -2,6 +2,7 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
+import { reportedToolName } from '@taucad/agent-observability/projection';
 import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import { redactPersonal } from '@taucad/agent-observability/content-redaction';
 import type { PersonalIdentity } from '@taucad/agent-observability/content-redaction';
@@ -516,9 +517,6 @@ const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentP
 
 type ToolFact = SummaryFact & { kind: 'tool' };
 
-/** LW5 names first-party tools; until then a tool is one operation name with its class as metadata. */
-const toolName = 'call-tool';
-
 const toolSpan = (mapping: Mapping, fact: ToolFact): OtlpSpan => {
   const { evidence, group } = mapping;
   const start = startOf(evidence);
@@ -529,7 +527,8 @@ const toolSpan = (mapping: Mapping, fact: ToolFact): OtlpSpan => {
     traceId: mapping.traceId,
     spanId: objectId(mapping),
     parentSpanId: mapping.rootId,
-    name: toolName,
+    /* The host reports a first-party name or `external-tool`; a name outside the vocabulary is never sent (LQ5). */
+    name: reportedToolName(fact.name),
     kind: 1,
     startTimeUnixNano: nanoseconds(start),
     endTimeUnixNano: nanoseconds(start + spanMilliseconds(evidence)),

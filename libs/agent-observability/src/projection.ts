@@ -1,4 +1,4 @@
-import { refusalOf } from '@taucad/agent-host/wire';
+import { externalToolName, refusalOf, tauToolEvidence } from '@taucad/agent-host/wire';
 import type { Evidence } from '#contract.js';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#identity.js';
 
@@ -91,7 +91,10 @@ export type ProjectionContext = Readonly<{
   grantedAt: number;
   /** This host's build id, when it has one. */
   hostBuild: string | undefined;
-  /** Maps a tool name to its class; the name itself never leaves the device. */
+  /**
+   * Maps a tool name to its class; the first-party vocabulary's class when absent. Only a first-party tool's name leaves
+   * the device: any other is reported as `external-tool` (LQ5).
+   */
   toolClass?: (toolName: string) => ToolFact['toolClass'];
   /** The plane, and so the purpose, this projection writes for; each answers to its own grant. `summary` when absent. */
   plane?: 'summary' | 'feedback';
@@ -129,8 +132,20 @@ export type RunProjection = Readonly<{
   pending: number;
 }>;
 
+/**
+ * The name a tool is reported as (LQ5): a first-party tool's own name, and `external-tool` for any other, whose name
+ * can be private. The API maps a reported name through the same function, so a name outside the vocabulary never
+ * reaches the vendor.
+ *
+ * @param toolName - The tool's name, as its call recorded it; absent from an older host's fact.
+ * @returns The first-party name, or `external-tool`.
+ * @public
+ */
+export const reportedToolName = (toolName: string | undefined): string =>
+  toolName !== undefined && tauToolEvidence.has(toolName) ? toolName : externalToolName;
+
 /** Bumped whenever the facts written for the same rows change. @public */
-export const hostTurnMapper = 'host-turn-v4';
+export const hostTurnMapper = 'host-turn-v5';
 
 const retentionMilliseconds = 180 * 86_400_000;
 
@@ -347,7 +362,8 @@ const foreignTailsOf = async (
  * @public
  */
 export const projectRun = async (run: ProjectedRun, context: ProjectionContext): Promise<RunProjection> => {
-  const classOf = context.toolClass ?? ((): ToolFact['toolClass'] => 'other');
+  const classOf =
+    context.toolClass ?? ((toolName: string): ToolFact['toolClass'] => tauToolEvidence.get(toolName) ?? 'other');
   const toolCandidates = run.tools.map(async (tool): Promise<Candidate> => {
     if (tool.output === undefined && run.ending === undefined) {
       return 'pending';
@@ -368,6 +384,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           kind: 'tool',
           call,
           dispatch,
+          name: reportedToolName(tool.toolName),
           toolClass: classOf(tool.toolName),
           toolVersion: null,
           schemaVersion: null,

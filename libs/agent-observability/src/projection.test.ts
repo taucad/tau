@@ -60,7 +60,7 @@ describe('projectRun', () => {
     expect(JSON.stringify(projection)).not.toContain('SYNTHETIC_TOOL_NAME');
     expect(projection.evidence[0]?.payload).toMatchObject({
       plane: 'summary',
-      fact: { kind: 'tool', outcome: 'completed', toolClass: 'other' },
+      fact: { kind: 'tool', name: 'external-tool', outcome: 'completed', toolClass: 'other' },
     });
     expect(projection.evidence[1]?.clocks.intervals).toEqual([
       { phase: 'admission', domain: 'host-recorded', start: at, end: at + 1000 },
@@ -77,6 +77,25 @@ describe('projectRun', () => {
     ]);
     const unseen = await projectRun(run(), context());
     expect(unseen.evidence[0]?.payload).toMatchObject({ fact: { modelCall: null } });
+  });
+
+  it('names a first-party tool and its class, and any other tool only as external-tool (LQ5)', async () => {
+    const named = async (toolName: string) => {
+      const projection = await projectRun(run({ tools: [{ ...run().tools[0]!, toolName }] }), context());
+      expect(evidenceSchema.safeParse(projection.evidence[0]).success).toBe(true);
+      return projection;
+    };
+
+    const edit = await named('edit_file');
+    expect(edit.evidence[0]?.payload).toMatchObject({
+      fact: { kind: 'tool', name: 'edit_file', toolClass: 'write' },
+    });
+    const test = await named('test_model');
+    expect(test.evidence[0]?.payload).toMatchObject({ fact: { name: 'test_model', toolClass: 'verification' } });
+    const external = await named('mcp__SYNTHETIC_SERVER__lookup');
+    expect(external.evidence[0]?.payload).toMatchObject({ fact: { name: 'external-tool', toolClass: 'other' } });
+    expect(JSON.stringify(external)).not.toContain('SYNTHETIC_SERVER');
+    expect(external.evidence[0]?.versions.mapper).toBe('host-turn-v5');
   });
 
   describe('test_model checks', () => {
@@ -306,7 +325,7 @@ describe('projectRun', () => {
       );
       const evidence = projection.evidence.find((item) => item.semantic.kind === 'outcome')!;
       expect(evidenceSchema.safeParse(evidence).success).toBe(true);
-      expect(evidence.versions.mapper).toBe('host-turn-v4');
+      expect(evidence.versions.mapper).toBe('host-turn-v5');
       return evidence.payload.plane === 'summary' ? evidence.payload.fact : undefined;
     };
 

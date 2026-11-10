@@ -122,6 +122,14 @@ const summary = z.discriminatedUnion('kind', [
     kind: z.literal('tool'),
     call: id,
     dispatch: id,
+    /*
+     * A first-party tool's name, or `external-tool` for any other (LQ5): only Tau's own tool names leave the device.
+     * Optional so an older host's fact still admits; the API maps a name outside its vocabulary as `external-tool`.
+     */
+    name: z
+      .string()
+      .regex(/^[a-z][a-z\d_-]{0,63}$/u)
+      .optional(),
     toolClass,
     toolVersion: digest.nullable(),
     schemaVersion: digest.nullable(),

@@ -33,13 +33,14 @@ describe('@taucad/api package metadata', () => {
   it('keeps the runtime, substrate and CLI runtime available to tests only', async () => {
     const packageJson = await readPackageJson();
 
-    // `app/testing/**` boots headless GeoSpec against an in-memory filesystem,
-    // and `main.ts` is bundled from source, so these must resolve at build and
+    // `main.ts` is bundled from source, so these must resolve at build and
     // test time without shipping. The CLI's runtime pins the publication
-    // kernel table (`publication-runtime.parity.test.ts`). `geospec` is
-    // published from taucad/geospec and comes from its catalog pin.
+    // kernel table (`publication-runtime.parity.test.ts`). The headless
+    // GeoSpec harness lives with the `test_model` projection in
+    // `@taucad/agent-tools`, so the API declares no GeoSpec package.
     expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
-    expect(packageJson.devDependencies?.['geospec']).toBe('catalog:');
+    expect(packageJson.devDependencies?.['geospec']).toBeUndefined();
+    expect(packageJson.devDependencies?.['geospec-engine']).toBeUndefined();
     expect(packageJson.devDependencies?.['@taucad/cli']).toBe('workspace:*');
   });
 

@@ -1,23 +1,24 @@
 /**
- * Node GeoSpec harness for the API's own integration tests.
+ * Node GeoSpec harness for the `test_model` projection's integration tests.
  *
  * Discovers nothing and owns no policy: it runs the GeoSpec entries it is
- * handed, one file at a time in sorted order, and maps the runner result into
- * the compact `test_model` wire shape through the shared agent-tools projection;
- * the live product path uses that same projection. This exists
- * so the API can exercise the `test_model` tool headlessly.
+ * handed, one file at a time in sorted order, over the real `geospec-engine`
+ * Node add-on, and maps the runner result into the compact `test_model` wire
+ * shape through {@link runnerResultToTestModelOutput}, the projection the live
+ * product path uses. Test-only: no export of this package reaches it.
  *
  * @module
  */
 
 import { Engine } from 'geospec-engine/node';
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
-import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { GeoSpecModelFormat, LoadModelSourceOptions } from 'geospec/model';
 import type { RunGeoSpecModuleOptions } from 'geospec/runner';
 import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
+
+import { runnerResultToTestModelOutput } from '#geospec/result.js';
 
 /**
  * Renderer contract used by Tau-aware GeoSpec tests.

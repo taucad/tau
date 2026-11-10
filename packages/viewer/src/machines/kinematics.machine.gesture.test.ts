@@ -23,6 +23,7 @@ import {
   kinematicsIgnoredEvents,
   kinematicsMachine,
   selectKinematicsDragging,
+  selectKinematicsPressHeld,
 } from '#machines/kinematics.machine.js';
 import type {
   KinematicsDragAdapterCommand,
@@ -250,6 +251,23 @@ describe('kinematics gesture', () => {
 
       actor.send({ ...move(100), clientY: 104 } as KinematicsMachineEvent);
       expect(selectKinematicsDragging(actor.getSnapshot())).toBe(true);
+    });
+
+    it('should hold a press disarmed before the threshold until release, still guarding the click', () => {
+      const { actor, settled } = startArmed();
+      const { logic, record } = scriptAdapter();
+      actor.send(press(logic));
+      actor.send({ type: 'setDragEnabled', unitId, enabled: false });
+
+      actor.send(move(150));
+
+      expect(actor.getSnapshot().value).toBe('cancelled');
+      expect(selectKinematicsPressHeld(actor.getSnapshot())).toBe(true);
+      expect(record.commands).toEqual(['dragStarted']);
+      actor.send({ type: 'releasePointer', pointerId: 7 });
+      expect(selectKinematicsPressHeld(actor.getSnapshot())).toBe(false);
+      expect(record.stops).toBe(1);
+      expect(settled).toEqual([]);
     });
 
     it('should ignore another pointer', () => {

@@ -17,6 +17,11 @@
  *   first, so the pose ends where the pointer did.
  * - **cancelled**: Escape restored the pre-drag pose; the press holds the camera until its release.
  *
+ * The adapter is built per press by the viewer's pointer-down handler and arrives in `pressPart`, as the canvas actor's
+ * host arrives in `hostCreated`: the graphics actor spawns this actor in its context factory, so no composition root
+ * provides a `dragAdapter` slot by name yet; the default slot throws. `gesture` and `dragAdapter` are optional root
+ * keys rather than per-state context (MC-R26), as in the viewer's other machines.
+ *
  * A drag that ends (kept on release, or restored on cancel) emits `poseSettled` once, so a listener can re-measure the
  * unit's bounds after the pose stops moving. Every fact here is ephemeral and memory-only: it is derived from the
  * presented mechanism and the pointer, and never persisted or seeded.
@@ -672,7 +677,7 @@ export const kinematicsMachine = setup({
     events: eventSchemas<KinematicsMachineEvent>(),
     emitted: eventSchemas<KinematicsEmitted>(),
     input: types<KinematicsMachineInput>(),
-    tags: types<'dragging'>(),
+    tags: types<'dragging' | 'pressHeld'>(),
   },
 }).createMachine({
   id: 'kinematics',
@@ -700,6 +705,7 @@ export const kinematicsMachine = setup({
       },
     },
     pressed: {
+      tags: ['pressHeld'],
       on: {
         movePointer: ({ context, event }, enq) => {
           const { gesture } = context;
@@ -716,12 +722,13 @@ export const kinematicsMachine = setup({
             return {};
           }
           const started = startDrag(context, gesture);
+          // The press became a gesture either way: capture, cursor, hover and the click guard after release.
+          if (context.dragAdapter) {
+            enq.sendTo(context.dragAdapter, { type: 'dragStarted' });
+          }
           if (started === undefined) {
             // The unit was disarmed or lost the link since the press: hold the press, as a cancelled drag does.
             return { target: 'cancelled' };
-          }
-          if (context.dragAdapter) {
-            enq.sendTo(context.dragAdapter, { type: 'dragStarted' });
           }
           return {
             target: event.target === undefined ? 'dragging' : 'dragging.coalescing',
@@ -738,7 +745,7 @@ export const kinematicsMachine = setup({
       },
     },
     dragging: {
-      tags: ['dragging'],
+      tags: ['dragging', 'pressHeld'],
       initial: 'steady',
       states: {
         steady: {
@@ -813,6 +820,7 @@ export const kinematicsMachine = setup({
       },
     },
     cancelled: {
+      tags: ['pressHeld'],
       on: {
         movePointer: ({ context, event }, enq) =>
           // Moves after a cancel change nothing; only one without the primary button ends the press.
@@ -1066,3 +1074,13 @@ export const kinematicsEventTypes = [
  */
 export const selectKinematicsDragging = (snapshot: Readonly<{ hasTag: (tag: 'dragging') => boolean }>): boolean =>
   snapshot.hasTag('dragging');
+
+/**
+ * Whether a press holds the viewer (pressed, dragging or cancelled), so the kinematics actor claims no other press.
+ *
+ * @param snapshot - The kinematics actor's snapshot.
+ * @returns `true` from a claimed press until its release.
+ * @public
+ */
+export const selectKinematicsPressHeld = (snapshot: Readonly<{ hasTag: (tag: 'pressHeld') => boolean }>): boolean =>
+  snapshot.hasTag('pressHeld');

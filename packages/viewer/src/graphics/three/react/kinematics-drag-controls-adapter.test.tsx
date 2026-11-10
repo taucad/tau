@@ -15,6 +15,7 @@ import { mock } from 'vitest-mock-extended';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { Mechanism } from '@taucad/kinematics';
 import { StepClock } from '@taucad/xstate-testing/clock';
+import { guardActors } from '@taucad/xstate-testing/inspect';
 import {
   createKinematicsDragAdapter,
   useKinematicsDragControls,
@@ -22,7 +23,12 @@ import {
 import type { KinematicsDragAdapterOptions } from '#graphics/three/react/kinematics-drag-controls-adapter.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { KeyboardProvider, useKeybinding } from '@taucad/ui/components/keyboard';
-import { getKinematicsUnitState, kinematicsDragMoveWindow, kinematicsMachine } from '#machines/kinematics.machine.js';
+import {
+  getKinematicsUnitState,
+  kinematicsDragMoveWindow,
+  kinematicsIgnoredEvents,
+  kinematicsMachine,
+} from '#machines/kinematics.machine.js';
 import type { KinematicsEmitted } from '#machines/kinematics.machine.js';
 
 type ViewerState = Readonly<{
@@ -99,7 +105,8 @@ const mechanism: Mechanism = {
 /** An armed kinematics actor on its own clock, recording `poseSettled`. */
 const startKinematics = () => {
   clock = new StepClock();
-  const actor = createActor(kinematicsMachine, { input: {}, clock }).start();
+  const guard = guardActors({ ignore: { kinematics: kinematicsIgnoredEvents } });
+  const actor = createActor(kinematicsMachine, { input: {}, clock, inspect: guard.inspect }).start();
   const settled: KinematicsEmitted[] = [];
   actor.on('poseSettled', (event) => {
     settled.push(event);

@@ -33,7 +33,11 @@ import {
 import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { useGraphics, useKinematicsRef, useRenderFrame } from '#hooks/use-graphics.jsx';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
-import { getKinematicsUnitState, selectKinematicsDragging } from '#machines/kinematics.machine.js';
+import {
+  getKinematicsUnitState,
+  selectKinematicsDragging,
+  selectKinematicsPressHeld,
+} from '#machines/kinematics.machine.js';
 import type {
   KinematicsDragAdapterCommand,
   KinematicsDragAdapterLogic,
@@ -245,7 +249,7 @@ export function useKinematicsDragControls({
       const { mechanism, dragEnabled } = getKinematicsUnitState(kinematics.context, unitId);
       const graphicsContext = graphicsActor.getSnapshot().context;
       if (
-        !kinematics.matches('idle') ||
+        selectKinematicsPressHeld(kinematics) ||
         !dragEnabled ||
         !mechanism ||
         graphicsContext.modelPointerClickSuppressionReasons.length > 0

@@ -2265,3 +2265,90 @@ describe('the revision long poll follows focus (RV-W5b F12)', () => {
     expect(pulls).toEqual(['prj_a', 'prj_c']);
   });
 });
+
+/*
+ * A new project, or a newly selected checkout, settles at `filled` when it holds
+ * no large object: no facet, and no further capture, edit or reload needed.
+ * Red today (Brain research/new-project-viewer-stuck-downloading-blueprint.md,
+ * L1 and L2): readiness stays `materialized`, and the viewer shows "Downloading
+ * model files" for a download that does not exist.
+ */
+describe('readiness settles without a large-object download', () => {
+  const seed = async (fixture: Harness) => {
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', '{"name":"x","assets":{"main":{"entryPath":"main.ts"}}}');
+    await project.writeFile('main.ts', 'a');
+    return project;
+  };
+
+  /* A checkout the fill has answered for, on a head: the root restarted over an existing revision. */
+  const openOnHead = async (fixture: Harness, project: Awaited<ReturnType<typeof seed>>) => {
+    const first = await fixture.open('alpha');
+    const before = await fixture.root('alpha');
+    const placement = await before.placementSession();
+    await place(placement, turnKey(1));
+    await project.writeFile('main.ts', 'b');
+    await finish(placement, turnKey(1));
+    await turnFinalized(first, 'turn-1');
+    await settle(20);
+    first.send({ command: 'close' });
+    await settle(20);
+    const alpha = await fixture.open('alpha');
+    await settle(30);
+    return { alpha, root: await fixture.root('alpha') };
+  };
+
+  it.fails('reaches filled after the first revision of a new project is saved (S1)', async () => {
+    const fixture = harness(['alpha']);
+    await seed(fixture);
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    await settle(20);
+    fixture.announce('alpha', ['main.ts']);
+    await settle(20);
+    await root.saveRevision('save');
+    await settle(40);
+    expect(root.status().headRevisionId).toBeDefined();
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it.fails('reaches filled when the first turn of a new project mints its base revision (S2)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await settle(20);
+    await place(session, turnKey(1));
+    await settle(20);
+    expect(root.status().headRevisionId).toBeDefined();
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+    await project.writeFile('main.ts', 'b');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    await settle(40);
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it.fails('reaches filled on a linked checkout selected after it is created (S5)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const { alpha, root } = await openOnHead(fixture, project);
+    expect(root.status().readiness).toBe('filled');
+    const linked = await branchOff(alpha, root, 'side');
+    alpha.send({ command: 'switch', branch: 'side' });
+    await settle(30);
+    expect(root.status().checkoutId).toBe(linked.checkoutId);
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it('reaches filled when the root starts on an existing revision (S3, control)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const { root } = await openOnHead(fixture, project);
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+});

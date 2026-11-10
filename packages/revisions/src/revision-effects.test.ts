@@ -1603,6 +1603,59 @@ describe('restore, through the machine that owns it', () => {
   }, 30_000);
 
   /* D10: an owed check samples the checkout's tree writes before it awaits, as `fillSoon` does: a write begun in the gap owns the word. */
+  /*
+   * Red rows (Brain research/new-project-viewer-stuck-downloading-blueprint.md):
+   * a checkout's readiness waits on the fill's word, and these two paths never give it.
+   */
+  it.fails('tells the fill result for a new linked checkout (E1, L2)', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const added = await run<{ checkout: { id: string } }>(actors.checkouts.addCheckout, {
+      projectId: 'project-1',
+      branch: 'turn',
+      from: first.commitId,
+    });
+    await vi.waitFor(() => {
+      expect(reports).toContainEqual(expect.objectContaining({ checkoutId: added.checkout.id, facet: undefined }));
+    });
+  }, 30_000);
+
+  it.fails('tells the fill result once a project with no revision gets its first one (E2, L1)', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    /* The first capture, before any revision: the check finds no head. */
+    await run(actors.checkout.captureTree, { checkoutId: 'live' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    await run(actors.checkout.captureTree, { checkoutId: 'live' });
+    await vi.waitFor(() => {
+      expect(reports).toContainEqual(expect.objectContaining({ checkoutId: 'live', facet: undefined }));
+    });
+  }, 30_000);
+
   it('starts no owed fill for a linked checkout once a newer tree write has begun', async () => {
     let failWrite = false;
     let failReads = 0;

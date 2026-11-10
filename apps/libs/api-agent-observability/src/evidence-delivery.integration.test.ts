@@ -465,6 +465,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(await row(receiptId)).toMatchObject({ state: 'confirmed', payload: null, objectId: null });
     expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
       'tau.agent_evidence.score': 'user-rating',
+      'tau.agent_evidence.score_configured': 'true',
       outcome: 'accepted',
     });
   });
@@ -501,23 +502,29 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(new Set(terminations.map((score) => score['id'])).size).toBe(2);
   });
 
-  it('should hold a receipt whose score config id is not set, sending nothing, and count it', async () => {
+  it('should deliver the root and its scores without configId when no score config id is set', async () => {
     const { receiptId } = await admitted('outcome');
     const requests = captureScores();
-    const now = new Date();
 
-    await service(['summary'], 1, { configs: { 'run-termination': 'cfg-termination' } }).drain(now);
+    await service(['summary'], 1, { configs: {} }).drain(new Date());
 
-    const held = await row(receiptId);
-    expect(held).toMatchObject({ state: 'pending', reason: 'score-config', traceId: null });
-    expect(held.payload).not.toBeNull();
-    expect(held.leaseExpiresAt!.getTime()).toBeGreaterThanOrEqual(
-      now.getTime() + deliveryTiming.maxBackoffMilliseconds,
-    );
-    expect(requests.filter((request) => request.route !== 'read')).toEqual([]);
+    const delivered = await row(receiptId);
+    expect(delivered.state).not.toBe('pending');
+    expect(delivered.payload).toBeNull();
+    expect(requests.some((request) => request.route === 'span')).toBe(true);
+    const scores = scoresOf(requests, delivered.traceId!);
+    expect(scores.map((score) => [score['name'], score['value'], score['dataType']])).toEqual([
+      ['run-termination', 'completed', 'CATEGORICAL'],
+      ['task-success', 1, 'BOOLEAN'],
+    ]);
+    for (const score of scores) {
+      expect(score).not.toHaveProperty('configId');
+      expect(score['observationId']).toBe(delivered.objectId);
+    }
     expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
       'tau.agent_evidence.score': 'task-success',
-      outcome: 'held',
+      'tau.agent_evidence.score_configured': 'false',
+      outcome: 'accepted',
     });
   });
 
@@ -534,6 +541,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(scoresOf(requests)).toHaveLength(1);
     expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
       'tau.agent_evidence.score': 'user-rating',
+      'tau.agent_evidence.score_configured': 'true',
       outcome: 'rejected',
     });
   });

@@ -199,20 +199,31 @@ describe('LangfuseClient', () => {
       ]);
     });
 
-    it('should hold a score whose config id is not set, and make no request at all', async () => {
-      const fetcher = vi.fn<typeof fetch>();
+    it('should write a score whose config id is not set without configId, under the same id', async () => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(202, {}));
 
-      await expect(new LangfuseClient(target, 1000, fetcher).score(score)).resolves.toEqual({
-        kind: 'held',
-        reason: 'config-unset',
-      });
+      await expect(new LangfuseClient(target, 1000, fetcher).score(score)).resolves.toEqual({ kind: 'accepted' });
       await expect(
         new LangfuseClient({ ...target, scoreConfigs: { 'user-rating': 'cfg-rating' } }, 1000, fetcher).score(score),
-      ).resolves.toMatchObject({ kind: 'held' });
-      expect(fetcher).not.toHaveBeenCalled();
+      ).resolves.toEqual({ kind: 'accepted' });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      for (const [, init] of fetcher.mock.calls) {
+        expect(JSON.parse(init?.body as string)).toEqual([
+          {
+            id: score.id,
+            traceId: score.traceId,
+            observationId: score.observationId,
+            name: 'run-termination',
+            value: 'completed',
+            dataType: 'CATEGORICAL',
+            timestamp: score.timestamp,
+            environment: 'staging',
+          },
+        ]);
+      }
     });
 
-    it('should say which scores have a config id, so a receipt can be held before any of its scores is sent', () => {
+    it('should say which scores have a config id, for the counter', () => {
       const client = new LangfuseClient(configured, 1000, vi.fn<typeof fetch>());
 
       expect(client.scoreConfigured('run-termination')).toBe(true);

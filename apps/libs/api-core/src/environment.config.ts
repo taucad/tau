@@ -90,8 +90,8 @@ export const environmentSchemaBase = z.object({
   ).describe('Comma-separated staff account ids whose content is captured when the capture mode is allowlist.'),
   /*
    * Langfuse remediation LW7: the score config each Langfuse score names, per project, as `name=id` pairs. The
-   * operator creates the configs and enters their ids (LW9); a score whose id is not set is held, never sent without
-   * one. Tau never reads score configs from Langfuse (charter D6, ruling 9). Not a secret.
+   * operator creates the configs and enters their ids (LW9); a score whose id is not set is written without one,
+   * so roots and scores never wait for the configs. Tau never reads score configs from Langfuse (charter D6, ruling 9). Not a secret.
    */
   TAU_OBSERVABILITY_SCORE_CONFIG_IDS: unsetWhenEmpty(
     z

@@ -79,7 +79,6 @@ const scoreOutcome: Readonly<Record<ScoreOutcome['kind'], AgentEvidenceScoreOutc
   rejected: 'rejected',
   uncertain: 'uncertain',
   'not-sent': 'not_sent',
-  held: 'held',
 };
 
 /** The reason of a receipt's first score write that ended `kind`, if one did. */
@@ -432,18 +431,6 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       pseudonym,
     );
     const scores = langfuseScores(exportable.evidence, { environment: this.environment });
-    const unconfigured = scores.filter((score) => !client.scoreConfigured(score.name));
-    if (unconfigured.length > 0) {
-      /* Held whole, before anything is sent, until the operator names the score configs (LW9). */
-      for (const score of unconfigured) {
-        this.countScore(score, { kind: 'held', reason: 'config-unset' });
-      }
-      return this.settle(row, {
-        kind: 'retry',
-        reason: 'score-config',
-        notBefore: new Date(now.getTime() + deliveryTiming.maxBackoffMilliseconds),
-      });
-    }
     if (observation === undefined) {
       return scores.length === 0
         ? this.settle(row, { kind: 'superseded', reason: 'no-object' })
@@ -510,7 +497,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     for (const score of scores) {
       // oxlint-disable-next-line no-await-in-loop -- one score per request, in order, stopping at the first unsent
       const outcome = await client.score(score, this.shutdown.signal);
-      this.countScore(score, outcome);
+      this.countScore(score, outcome, client.scoreConfigured(score.name));
       outcomes.push(outcome);
       if (outcome.kind === 'not-sent') {
         break;
@@ -520,12 +507,14 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Count one score write by its outcome. An `accepted` score is the one Langfuse holds, counted here once per write
-   * that is never repeated, which is where the `score` kind of a units counter belongs (LW24).
+   * Count one score write by its outcome, and whether it named a score config. An `accepted` score is the one Langfuse
+   * holds, counted here once per write that is never repeated, which is where the `score` kind of a units counter
+   * belongs (LW24).
    */
-  private countScore(score: LangfuseScore, outcome: ScoreOutcome): void {
+  private countScore(score: LangfuseScore, outcome: ScoreOutcome, configured: boolean): void {
     this.metrics.agentEvidenceScores.add(1, {
       'tau.agent_evidence.score': score.name,
+      'tau.agent_evidence.score_configured': configured ? 'true' : 'false',
       outcome: scoreOutcome[outcome.kind],
     });
   }

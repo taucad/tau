@@ -29,10 +29,10 @@ export type SendOutcome =
 
 /**
  * What one score write established (LW7). Nothing reads a score back (ruling 9), so its answer settles it: `accepted`
- * and `rejected` are final, `not-sent` provably never reached Langfuse, `uncertain` may have been stored after its
- * bounded repeats, and `held` was not sent because its score config id is not set.
+ * and `rejected` are final, `not-sent` provably never reached Langfuse, and `uncertain` may have been stored after its
+ * bounded repeats.
  */
-export type ScoreOutcome = SendOutcome | Readonly<{ kind: 'held'; reason: 'config-unset' }>;
+export type ScoreOutcome = SendOutcome;
 
 /**
  * How many times one score write sends its identical body while the answer is uncertain. A repeat is safe: Langfuse
@@ -207,7 +207,7 @@ export class LangfuseClient {
   }
 
   /**
-   * Whether this project names a score config for a score, so its writes can be sent.
+   * Whether this project names a score config for a score; a score without one is written without `configId`.
    *
    * @param name - The score's name.
    * @returns True when the setting names its config id.
@@ -217,9 +217,10 @@ export class LangfuseClient {
   }
 
   /**
-   * Write one score with `POST /api/public/scores`, as an array of one that names the project's score config. A score
-   * whose config id is not set is held and never sent without it. An uncertain answer repeats the identical body, at
-   * most {@link scoreAttempts} sends in all; nothing is ever read back.
+   * Write one score with `POST /api/public/scores`, as an array of one that names the project's score config when the
+   * setting names one. Without a config id the same score is written by its name, data type and value alone, so roots
+   * and scores keep flowing before the configs exist. An uncertain answer repeats the identical body, at most
+   * {@link scoreAttempts} sends in all; nothing is ever read back.
    *
    * @param score - The score, with its fixed id and timestamp.
    * @param signal - Aborts the request on shutdown; an abort is uncertain.
@@ -227,12 +228,19 @@ export class LangfuseClient {
    */
   public async score(score: LangfuseScore, signal?: AbortSignal): Promise<ScoreOutcome> {
     const configId = this.target.scoreConfigs?.[score.name];
-    if (configId === undefined) {
-      return { kind: 'held', reason: 'config-unset' };
-    }
     const { id, traceId, observationId, name, value, dataType, timestamp, environment } = score;
     const body = JSON.stringify([
-      { id, traceId, observationId, name, value, dataType, configId, timestamp, environment },
+      {
+        id,
+        traceId,
+        observationId,
+        name,
+        value,
+        dataType,
+        ...(configId === undefined ? {} : { configId }),
+        timestamp,
+        environment,
+      },
     ]);
     let outcome: SendOutcome = { kind: 'uncertain', reason: 'unsent' };
     for (let attempt = 0; attempt < scoreAttempts && outcome.kind === 'uncertain'; attempt++) {

@@ -199,7 +199,7 @@ describe('StorageAccountingScheduler (W14 OB3)', () => {
 
 describe('accountingTasks', () => {
   const database = mock<DatabaseType>();
-  const plans: OwnerPlanSettings = { tauCloudEnabled: false, environment: undefined, freeTierSync: false };
+  const plans: OwnerPlanSettings = { tauCloudEnabled: false, environment: undefined };
 
   it('should leave the R2 task inert without a Cloudflare token or account', () => {
     for (const settings of [

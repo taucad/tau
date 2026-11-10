@@ -319,7 +319,7 @@ export const createProviderAccountFrameFilter = (input: {
     if (error === undefined || status === undefined) {
       return undefined;
     }
-    const { type } = classifyUpstreamRefusal({ status, accountOwner: input.accountOwner });
+    const { type } = classifyUpstreamRefusal({ status, accountOwner: input.accountOwner, body: error });
     const { status: providerCode, message } = error;
     /* A frame cannot set a header once the stream has started, so the estimate rides
      * the frame's details, the field the client derives from `Retry-After` pre-stream. */

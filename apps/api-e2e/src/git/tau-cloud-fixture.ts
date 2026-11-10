@@ -14,9 +14,9 @@ import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
  * A node-side sibling of `apps/desktop-e2e/src/support/tau-account.ts` rather
  * than an import of it: the repo's own comment rejects cross-e2e-project source
  * imports, and this file needs two things that one does not have — a **paid**
- * plan (the free tier cannot sync at all: `canSyncFiles` is false and
- * `storageLimitBytesByTier.free` is zero) and a **registered project**, which
- * no production code path creates. Both are stated at their call sites.
+ * plan (for the 10 GB Pro allowance, where the free tier has 1 GB) and a
+ * **registered project**, which no production code path creates. Both are
+ * stated at their call sites.
  */
 
 const execFileAsync = promisify(execFile);

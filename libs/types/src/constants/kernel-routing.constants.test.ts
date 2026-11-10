@@ -12,7 +12,7 @@ import {
   kernelRoutingRules,
   kernelRoutingZones,
   kernelsReachedByNameOnly,
-  voxelKernelIds,
+  implicitKernelIds,
 } from '#constants/kernel-routing.constants.js';
 import type { KernelRouting } from '#constants/kernel-routing.constants.js';
 
@@ -42,7 +42,7 @@ describe('kernel routing facets', () => {
   });
 
   it('should group PicoGK and PicoVoxel as the voxel family (D5 rule 7)', () => {
-    expect([...voxelKernelIds].sort()).toEqual(['picogk', 'picovoxel']);
+    expect([...implicitKernelIds].sort()).toEqual(['picogk', 'picovoxel']);
   });
 });
 
@@ -98,7 +98,7 @@ describe('kernel routing rules and zones', () => {
 
   it('should keep computational engineering voxel-only (E15)', () => {
     const u8 = kernelRoutingZones.find(({ id }) => id === 'U8');
-    expect([...(u8?.acceptable ?? [])].sort()).toEqual([...voxelKernelIds].sort());
+    expect([...(u8?.acceptable ?? [])].sort()).toEqual([...implicitKernelIds].sort());
   });
 });
 

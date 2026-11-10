@@ -67,11 +67,11 @@ export const kernelChoiceCondition =
 const groupLabels: Readonly<Record<KernelRepresentation, string>> = {
   brep: 'BRep',
   mesh: 'Mesh',
-  voxel: 'Voxel',
+  implicit: 'Implicit',
   electronics: 'Electronics',
 };
 
-const groupOrder: readonly KernelRepresentation[] = ['brep', 'mesh', 'voxel', 'electronics'];
+const groupOrder: readonly KernelRepresentation[] = ['brep', 'mesh', 'implicit', 'electronics'];
 
 const bindingSentence =
   'The entry file binds the kernel: its extension, and for `.ts`, `.js` and `.py` the library the entry imports.';
@@ -236,7 +236,7 @@ export const renderKernelRoutingDigest = (profile: KernelRoutingProfile): string
   ].join('\n');
 
 /**
- * Group kernels by representation for the selector, BRep, Mesh, Voxel, Electronics, keeping input order within a
+ * Group kernels by representation for the selector, BRep, Mesh, Implicit, Electronics, keeping input order within a
  * group and dropping empty groups. Which rows sit under More is layout and belongs to the selector.
  *
  * @param kernels - The kernels to show.

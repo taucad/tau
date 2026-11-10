@@ -104,9 +104,9 @@ export const kernelRoutingCopy = {
 export const exactGeometryKernelIds: readonly KernelId[] = /* @__PURE__ */ (() =>
   kernelConfigurations.filter(({ exactGeometry }) => exactGeometry).map(({ id }) => id))();
 
-/** The voxel and implicit kernels, in catalog order. @public */
-export const voxelKernelIds: readonly KernelId[] = /* @__PURE__ */ (() =>
-  kernelConfigurations.filter(({ representation }) => representation === 'voxel').map(({ id }) => id))();
+/** The implicit kernels (signed distance fields, voxelised for evaluation), in catalog order. @public */
+export const implicitKernelIds: readonly KernelId[] = /* @__PURE__ */ (() =>
+  kernelConfigurations.filter(({ representation }) => representation === 'implicit').map(({ id }) => id))();
 
 /** @public */
 export type KernelRoutingRuleId =
@@ -196,7 +196,7 @@ export type KernelRoutingZone = {
 };
 
 const exact = exactGeometryKernelIds;
-const voxel = voxelKernelIds;
+const implicit = implicitKernelIds;
 
 /** The seven narrow rules, in the order they apply (D5 tier 1). @public */
 export const kernelRoutingRules = [
@@ -239,7 +239,7 @@ export const kernelRoutingRules = [
     name: 'Required input',
     outcomes: [
       { when: 'An existing mesh to repair, combine or remix', kernels: ['manifold', 'openscad'] },
-      { when: 'An existing mesh to offset, hollow or lattice', kernels: voxel },
+      { when: 'An existing mesh to offset, hollow or lattice', kernels: implicit },
     ],
   },
   {
@@ -255,7 +255,7 @@ export const kernelRoutingRules = [
     outcomes: [
       {
         when: 'Computational engineering: lattices and graded infill, TPMS and gyroid cores, heat exchangers and cold plates, conformal and regenerative cooling channels, porous implants, topology-optimised and lightweighted structures, additive manifolds with blended internal passages',
-        kernels: voxel,
+        kernels: implicit,
       },
     ],
     doesNotFireOn: '"Lightweight" or "organic" alone, a plate of plain holes, a honeycomb drawn as a pattern',

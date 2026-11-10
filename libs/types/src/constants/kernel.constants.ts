@@ -29,11 +29,11 @@ export type KernelEcosystem = 'npm' | 'pypi' | 'nuget' | 'kcl' | 'none';
 /**
  * The geometry family a kernel's models are made of; it names the kernel's group in the selector and in the routing
  * rubric. `brep` is exact boundary representation, `mesh` constructive or mesh-first solids exported as triangles,
- * `voxel` voxel and implicit fields, `electronics` circuit boards.
+ * `implicit` signed distance and other implicit fields, voxelised to evaluate, `electronics` circuit boards.
  *
  * @public
  */
-export type KernelRepresentation = 'brep' | 'mesh' | 'voxel' | 'electronics';
+export type KernelRepresentation = 'brep' | 'mesh' | 'implicit' | 'electronics';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -103,7 +103,7 @@ public static class Params
     tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
     features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
     requiresRuntimeKernelId: 'picogk',
-    representation: 'voxel',
+    representation: 'implicit',
     exactGeometry: false,
   },
   {
@@ -137,7 +137,7 @@ export default function main(pico: Pico, params = defaultParams): Voxels[] {
       'Fast preview with exact export',
       'Interactive parameters',
     ],
-    representation: 'voxel',
+    representation: 'implicit',
     exactGeometry: false,
   },
   {

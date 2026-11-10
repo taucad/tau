@@ -7,7 +7,7 @@ import type { ModelInputModality, ModelSupport } from '#types/model.types.js';
 import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
 
 /**
- * CAD agent tools that are exposed to model providers through LangChain.
+ * CAD agent tools that are exposed to model providers as function declarations.
  *
  * Internal browser RPC schemas are intentionally
  * excluded: they are not serialized into provider function declarations.
@@ -156,7 +156,7 @@ export type ProviderFacingToolSchemaEntry = {
  * Resolve the provider-visible CAD tool input schemas for a request.
  *
  * This mirrors the `ChatService` tool assembly order while keeping the shared
- * chat package focused on names and schemas, not LangChain tool instances.
+ * chat package focused on names and schemas, not runtime tool instances.
  *
  * @public
  */

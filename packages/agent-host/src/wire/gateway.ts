@@ -4,7 +4,8 @@ import type { RefusalCode } from '#wire/refusals.js';
 
 /**
  * The codes Tau's LLM gateway (apps/api) refuses with: its 13 API codes, W11's `ATTEMPT_VOIDED` and
- * `BILLING_ACCOUNT_CLOSED`, and the route and account denials `MODEL_ROUTE_PAUSED` and `BILLING_ACCOUNT_RESTRICTED`.
+ * `BILLING_ACCOUNT_CLOSED`, the route and account denials `MODEL_ROUTE_PAUSED` and `BILLING_ACCOUNT_RESTRICTED`, and
+ * `REASONING_REPLAY_REJECTED`.
  * apps/api types its errors from this as a type (`LlmGatewayErrorType = GatewayErrorCode`), and each code's recovery
  * is its {@link refusals} entry.
  *
@@ -45,6 +46,11 @@ export const gatewayErrorCodes = [
    * restricted (HTTP 403). No model choice or sign-in changes it; the card points to support.
    */
   'BILLING_ACCOUNT_RESTRICTED',
+  /**
+   * The provider refused native reasoning replayed from an earlier turn (HTTP 502; Anthropic's thinking-signature
+   * binding). The same history meets the same refusal, so nothing resumes it; another model reads the reasoning as text.
+   */
+  'REASONING_REPLAY_REJECTED',
 ] as const satisfies readonly RefusalCode[];
 
 /** One {@link gatewayErrorCodes} value. @public */

@@ -86,10 +86,10 @@ const commits: CommitTouches[] = git(
   });
 
 const nxJson = JSON.parse(readFileSync(join(workspaceRoot, 'nx.json'), 'utf8')) as {
-  namedInputs?: { sharedGlobals?: string[] };
+  namedInputs?: { sharedGlobals?: Array<string | Record<string, string>> };
 };
 const shared = (nxJson.namedInputs?.sharedGlobals ?? [])
-  .filter((input) => input.startsWith('{workspaceRoot}/'))
+  .filter((input): input is string => typeof input === 'string' && input.startsWith('{workspaceRoot}/'))
   .map((input) => input.slice('{workspaceRoot}/'.length));
 
 const { rates, globalCommits, lockfileCommits } = simulateRates(graph, commits, {

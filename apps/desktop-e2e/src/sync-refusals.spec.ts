@@ -8,7 +8,7 @@ import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled } from '#support/config.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   forgetBackupByDefault,
@@ -203,64 +203,7 @@ afterEach(async ({ task }) => {
   }
 }, 120_000);
 
-describe.skipIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner', () => {
-  /* Row 2 (C5, C11, N5): the plan gate is the client's, and nothing may be
-   * registered before the plan admits it — so the table is asserted, not only
-   * the pane. */
-  it('should offer Available on Pro instead of connecting, and leave no project row behind', async () => {
-    const { client, owner } = required(free);
-    const registrations: string[] = [];
-    client.page.on('request', (request) => {
-      if (request.method() === 'PUT' && request.url().includes('/v1/projects/')) {
-        registrations.push(request.url());
-      }
-    });
-    const ownedRows = `SELECT count(*) FROM project WHERE owner_id = '${owner.userId}';`;
-    const before = await countRows(ownedRows);
-
-    const projectId = await createProject(client, 'W8 Free Tier');
-    await openSync(client);
-    const region = client.page.getByRole('region', { name: 'Sync' }).first();
-    await expect.poll(async () => region.getByRole('radio', { name: 'Tau Cloud' }).isDisabled()).toBe(true);
-    await expect.poll(async () => region.getByRole('button', { name: /Available on Pro/u }).count()).toBeGreaterThan(0);
-    /* A Git remote, GitHub included, is on every plan. */
-    await expect.poll(async () => region.getByRole('radio', { name: 'Git remote' }).isEnabled()).toBe(true);
-    /* The gesture a person would try anyway: a disabled radio must not connect. */
-    await region.getByRole('radio', { name: 'Tau Cloud' }).click({ force: true });
-    await expect.poll(async () => region.getByRole('button', { name: 'Connect backup' }).isDisabled()).toBe(true);
-
-    expect(registrations, 'N5: a free owner must never issue PUT /v1/projects').toEqual([]);
-    expect(await countRows(ownedRows)).toBe(before);
-    expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(0);
-  }, 900_000);
-
-  /* W11 row 5 (D19 under D23): backup by default follows the entitlement, so a
-   * Free account with the gate closed is offered no line, keeps its first
-   * revision on this device, and registers nothing. */
-  it('should keep a new project on this device, with no backup line and no registration', async () => {
-    const { client } = required(free);
-    const registrations: string[] = [];
-    client.page.on('request', (request) => {
-      if (['POST', 'PUT'].includes(request.method()) && request.url().includes('/v1/projects/')) {
-        registrations.push(request.url());
-      }
-    });
-    const projectId = await createProject(client, 'W11 Free Local');
-    await openRevisions(client);
-    await client.page.keyboard.press(`${modifier}+KeyS`);
-    await expect
-      .poll(async () => revisionStatus(client.page).textContent(), { timeout: 120_000 })
-      .toBe('Saved on this device');
-    /* The intent is forgotten once the plan answers, so nothing is left to connect later. */
-    await expect
-      .poll(async () => client.page.evaluate((id) => localStorage.getItem(`tau:tau-cloud-intent:${id}`), projectId))
-      .toBeNull();
-    expect(registrations, 'D19/D23: a free owner must never register a project').toEqual([]);
-    expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(0);
-  }, 900_000);
-});
-
-describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner whose pushes are refused', () => {
+describe('a Pro owner whose pushes are refused', () => {
   /* Row 3 (C1, C4; rule 19): each class renders the server's own sentence
    * with its one action. The browser receives the JSON envelope (N6: Playwright
    * sends `Origin`), whose sentence is in `error`. Every sentence below differs
@@ -431,7 +374,7 @@ describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner whose pushes are ref
 /* D14 (charter W6): a decision travels only on `refs/heads/conflicts/`. The
  * hook refuses a conflicted revision anywhere else with a sentence a person can
  * act on, and the name `conflicts` is kept for those lines. */
-describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner and a decision that travels (D14)', () => {
+describe('a Pro owner and a decision that travels (D14)', () => {
   it('should refuse a conflicted revision pushed to main, in words, and admit it on a conflict line', async () => {
     const { client, bearer } = required(pro);
     const projectId = await connectAndBackUp(client, 'W6 Conflicted Push');
@@ -499,16 +442,14 @@ describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner and a decision that 
 });
 
 /*
- * W8's rows with charter D23's free-tier sync gate open (D16, D17, D18). They
- * run only in the target's second pass, whose API boots with
- * `TAU_FREE_TIER_SYNC_ENABLED=true`; every describe above runs only in the
- * first, so `a free-tier owner` still sees the gate closed.
+ * W8's free-tier rows (D16, D17, D18, D19): Free backs up to Tau Cloud within
+ * its 1 GB account allowance.
  *
  * Not here: W8's self-host row (`… of 10 GB`, no plan action). It needs a
  * self-host UI build and an API with `TAU_CLOUD_ENABLED=false`, and this tier's
  * build and API are the cloud variant by design (see `test:e2e:two-client`).
  */
-describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-sync gate open (W8)', () => {
+describe('a free-tier owner (W8)', () => {
   const ownerSentence = 'This push needs more room than your 1 GB storage plan has left, so it was not backed up.';
   const figure = /\bof 1 GB\b/u;
   const allowanceName = 'W8 Free Allowance';
@@ -574,6 +515,23 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
       ]);
     }
   }, 120_000);
+
+  /* W11 row 5 (D19): backup by default follows the entitlement, and Free has
+   * it, so a free owner's first revision registers the project and backs it up
+   * with no Connect step. */
+  it('should back up a new project from its first revision with no Connect step', async () => {
+    const { client } = required(free);
+    const projectId = await createProject(client, 'W11 Free Default Backup');
+    await openRevisions(client);
+    await client.page.keyboard.press(`${modifier}+KeyS`);
+    await expect
+      .poll(async () => revisionStatus(client.page).textContent(), {
+        message: 'D19: a free owner’s first revision is backed up by default',
+        timeout: 180_000,
+      })
+      .toBe('Saved · Backed up');
+    expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(1);
+  }, 900_000);
 
   /* Row 1 (D16, D18). D19 now connects a new project by itself once the plan
    * allows it, so the project is kept local first (its intent forgotten),

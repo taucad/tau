@@ -168,6 +168,38 @@ describe('classifyUpstreamRefusal', () => {
     });
   });
 
+  /* Anthropic's sentence as Fable 5.2 answered it after a tool result was cleared under a signed thinking block. */
+  const bindingRefusal = {
+    type: 'error',
+    error: {
+      type: 'invalid_request_error',
+      message:
+        'messages.1.content.4: Invalid `signature` in `thinking` block. The block is bound to a different conversation.',
+    },
+  };
+
+  it.each([['operator'], ['tau']] as const)(
+    'should code a refused reasoning replay on the %s account as its own refusal',
+    (accountOwner) => {
+      expect(classifyUpstreamRefusal({ status: 400, accountOwner, body: bindingRefusal })).toEqual({
+        status: 502,
+        type: 'REASONING_REPLAY_REJECTED',
+      });
+      /* An in-band frame hands over the error object itself. */
+      expect(classifyUpstreamRefusal({ status: 400, accountOwner, body: bindingRefusal.error }).type).toBe(
+        'REASONING_REPLAY_REJECTED',
+      );
+    },
+  );
+
+  it('should keep every other 400, and the sentence under another status, as they were', () => {
+    const other = { error: { type: 'invalid_request_error', message: 'messages.1.content.4: Invalid `signature`.' } };
+    expect(classifyUpstreamRefusal({ status: 400, accountOwner: 'tau', body: other }).type).toBe('UPSTREAM_REJECTED');
+    expect(classifyUpstreamRefusal({ status: 503, accountOwner: 'tau', body: bindingRefusal }).type).toBe(
+      'PROVIDER_UNAVAILABLE',
+    );
+  });
+
   it.each([[401], [403]])('should keep upstream %i as each account owner already answered it', (status) => {
     expect(classifyUpstreamRefusal({ status, accountOwner: 'operator' }).type).toBe('UPSTREAM_REJECTED');
     expect(classifyUpstreamRefusal({ status, accountOwner: 'tau' }).type).toBe('PROVIDER_UNAVAILABLE');
@@ -186,6 +218,7 @@ describe('cloudUpstreamRefusalMessage', () => {
     ['UPSTREAM_REJECTED', 400, 'The model provider rejected the request (HTTP 400).'],
     ['RATE_LIMITED', 429, 'The model provider is rate limiting this request.'],
     ['PROVIDER_UNAVAILABLE', 503, 'The model provider is unavailable.'],
+    ['REASONING_REPLAY_REJECTED', 400, 'The model provider rejected reasoning replayed from earlier in this chat.'],
   ] as const)('should answer a %s with the sentence a Cloud customer reads', (type, status, expected) => {
     expect(cloudUpstreamRefusalMessage({ type, status })).toBe(expected);
   });

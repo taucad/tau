@@ -1,7 +1,7 @@
 /**
  * Tool-result offloading (regression review R4).
  *
- * The LangChain plane wrote any tool result too large for context to the chat's filesystem and gave the model a
+ * The server agent plane wrote any tool result too large for context to the chat's filesystem and gave the model a
  * preview and the path, so the full result stayed retrievable. The Pi host lost that: a large result went into context
  * whole until compaction erased it. This restores it for every host that builds its registry here:
  *
@@ -11,7 +11,7 @@
  *   `offloadedTo: { path, characters }`. Totals and status fields stay, so the UI renders the preview as it would the
  *   result, and the model can `read_file` or `grep` the file.
  * - A session's {@link HostToolResultBudget} caps what one batch of parallel calls puts into context at once (200,000
- *   characters on the LangChain plane). A result the batch cannot fit is retained the same way, even under its own
+ *   characters on the server agent plane). A result the batch cannot fit is retained the same way, even under its own
  *   limit.
  *
  * Long text is written as lines rather than as one escaped JSON string, so `read_file` pages it by line.

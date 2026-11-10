@@ -79,27 +79,29 @@ describe('closeGracefullyOnSignal', () => {
     ]);
   }, 60_000);
 
-  it('should log and ignore a second signal during the drain and exit only after the request', async () => {
+  it('should cut what is still running when the stop signal repeats, then settle and exit before Fly kills the Machine', async () => {
     const started = await start();
     child = started.child;
-    // Outlasts the second signal by seconds, however loaded the machine, and ends before the fixture's 5 s cut.
-    const response = fetch(`${started.url}/slow?ms=4000`);
+    // Outlives the fixture's 5 s cut: only the repeated signal can end it early.
+    const response = fetch(`${started.url}/slow?ms=20000`);
     await vi.waitFor(() => {
       expect(child!.lines).toContain('request entered');
     });
 
     child.process.kill('SIGTERM');
     await setTimeout(1000);
+    const repeatedAt = Date.now();
     child.process.kill('SIGTERM');
 
-    const answered = await response;
-    await expect(answered.json()).resolves.toEqual({ ok: true });
+    await expect(response).rejects.toThrow('fetch failed');
     await expect(child.exited).resolves.toEqual({ code: undefined, signal: 'SIGTERM' });
+    // Fly sends the repeat when kill_timeout runs out and kills the VM 5 s later.
+    expect(Date.now() - repeatedAt).toBeLessThan(4000);
+    expect(child.lines).not.toContain('request finished');
     expect(child.lines.slice(child.lines.indexOf('log: Shutdown started'))).toEqual([
       'log: Shutdown started',
-      'warn: Shutdown signal repeated during the drain; ignored',
-      'request finished',
-      'log: Shutdown drained; closing modules',
+      'warn: Shutdown signal repeated during the drain; cutting now',
+      'warn: Shutdown drained with cuts; closing modules',
       'database closed',
       'log: Shutdown complete',
     ]);

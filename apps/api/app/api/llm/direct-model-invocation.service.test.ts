@@ -1,12 +1,18 @@
-/* eslint-disable @typescript-eslint/naming-convention -- LangChain usage metadata and provider wire fields use snake_case. */
+/* eslint-disable @typescript-eslint/naming-convention -- provider wire fields use snake_case. */
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { AIMessageChunk } from '@langchain/core/messages';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatService } from '@taucad/api-chat/chat.service';
-import { DirectModelInvocationService, LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
+import {
+  DirectModelInvocationService,
+  LlmGatewayError,
+  modelList,
+  providerDiagnostic,
+  textMarker,
+} from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelService } from '@taucad/api-llm-gateway';
+import type { Model } from '@taucad/chat/model-catalog';
 import type { Environment } from '@taucad/api-core';
 
 const providerMessage =
@@ -60,21 +66,88 @@ const errorDetails = (error: unknown): { type?: string; message?: string; detail
     ? (error.getResponse() as { error: { type?: string; message?: string; details?: unknown } }).error
     : {};
 
-/** A provider stream that fails on its first pull, the way an exhausted account does. */
-const refusingStream = (failure: Error): AsyncIterable<AIMessageChunk> => ({
-  [Symbol.asyncIterator]: () => ({
-    next: async (): Promise<IteratorResult<AIMessageChunk>> => {
-      await Promise.resolve();
-      throw failure;
-    },
-  }),
-});
+const catalogRow = (providerId: keyof typeof modelList, slug: string): Model =>
+  (modelList[providerId] as Record<string, Model>)[slug]!;
 
-const helperModels = (stream: () => unknown): ModelService =>
+/** A self-host model list that offers exactly these rows, as `ModelService.getModels` would. */
+const helperModels = (...rows: Model[]): ModelService =>
   ({
-    getModels: vi.fn(async () => [{ id: 'openai-gpt-5.6-luna', recommended: true, provider: { id: 'openai' } }]),
-    buildModel: vi.fn(() => ({ model: { stream: vi.fn(async () => stream()) } })),
+    getModels: vi.fn(async () => rows),
+    getOtelProviderName: vi.fn(() => undefined),
   }) as unknown as ModelService;
+
+/** A provider SSE body: one `data:` frame per event, named when the event carries a type. */
+const providerSse = (frames: readonly unknown[]): Response =>
+  new Response(
+    frames
+      .map((frame) => {
+        const type =
+          typeof frame === 'object' && frame !== null && 'type' in frame ? `event: ${String(frame.type)}\n` : '';
+        return `${type}data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`;
+      })
+      .join(''),
+    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+  );
+
+/** Recorded-shape provider streams that answer "Named part", per wire, with the usage each reports. */
+const providerStreams = {
+  'openai-responses': (): Response =>
+    providerSse([
+      { type: 'response.created', response: { id: 'resp_1' } },
+      { type: 'response.reasoning_summary_text.delta', delta: 'Thinking.' },
+      { type: 'response.output_text.delta', delta: 'Named ' },
+      { type: 'response.output_text.delta', delta: 'part' },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp_1',
+          usage: {
+            input_tokens: 30,
+            output_tokens: 12,
+            input_tokens_details: { cached_tokens: 20 },
+            output_tokens_details: { reasoning_tokens: 8 },
+          },
+        },
+      },
+    ]),
+  anthropic: (): Response =>
+    providerSse([
+      {
+        type: 'message_start',
+        message: { usage: { input_tokens: 4, cache_read_input_tokens: 20, cache_creation_input_tokens: 6 } },
+      },
+      { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Thinking.' } },
+      { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Named part' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 12 } },
+      { type: 'message_stop' },
+    ]),
+  'openai-completions': (): Response =>
+    providerSse([
+      { choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'Thinking.' } }] },
+      { choices: [{ index: 0, delta: { content: 'Named part' }, finish_reason: 'stop' }] },
+      {
+        choices: [],
+        usage: {
+          prompt_tokens: 30,
+          completion_tokens: 12,
+          prompt_tokens_details: { cached_tokens: 20 },
+          completion_tokens_details: { reasoning_tokens: 8 },
+        },
+      },
+      '[DONE]',
+    ]),
+} as const;
+
+/** The `response.completed` usage a helper stream ends with. */
+const completedUsage = (text: string): unknown => {
+  const completed = text
+    .split('\n\n')
+    .map((frame) => frame.replace(/^data: /u, ''))
+    .filter((data) => data.startsWith('{'))
+    .map((data) => JSON.parse(data) as { type: string; response?: { usage?: unknown } })
+    .find((event) => event.type === 'response.completed');
+  return completed?.response?.usage;
+};
 
 describe('DirectModelInvocationService', () => {
   afterEach(() => {
@@ -82,20 +155,10 @@ describe('DirectModelInvocationService', () => {
   });
 
   it('runs API helper prompts through an advertised non-OpenAI self-host model', async () => {
-    async function* chunks(): AsyncGenerator<AIMessageChunk> {
-      yield new AIMessageChunk({ content: 'Named part' });
-      yield new AIMessageChunk({
-        content: '',
-        usage_metadata: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
-      });
-    }
-    const buildModel = vi.fn(() => ({ model: { stream: vi.fn(async () => chunks()) } }));
-    const models = {
-      getModels: vi.fn(async () => [{ id: 'anthropic-claude-fable-5', recommended: true }]),
-      buildModel,
-    } as unknown as ModelService;
-    const config = { get: vi.fn() } as unknown as ConfigService<Environment, true>;
-    const chat = new ChatService(new DirectModelInvocationService(config, models));
+    const fetchOnce = vi.spyOn(globalThis, 'fetch').mockResolvedValue(providerStreams.anthropic());
+    const chat = new ChatService(
+      new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('anthropic', 'claude-fable-5'))),
+    );
 
     const result = await chat.getBuildNameGenerator(
       [{ role: 'user', content: 'Name this part' }],
@@ -126,9 +189,94 @@ describe('DirectModelInvocationService', () => {
     }
 
     expect(text).toBe('Named part');
-    expect(buildModel).toHaveBeenCalledWith('anthropic-claude-fable-5', { maximumOutputTokens: 64 });
+    const [url, init] = fetchOnce.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    const sent = JSON.parse(init?.body as string) as Record<string, unknown>;
+    expect(sent).toMatchObject({ model: 'claude-fable-5', stream: true, max_tokens: 64 });
+    // The row's adaptive thinking at `high` would spend the 64-token ceiling before the name.
+    expect(sent).not.toHaveProperty('thinking');
+    expect(sent).not.toHaveProperty('output_config');
+    expect(init?.headers).toMatchObject({ 'x-api-key': 'provider-key', 'anthropic-version': '2023-06-01' });
     await result.completion;
   });
+
+  it.each([
+    {
+      wire: 'openai-responses',
+      row: catalogRow('openai', 'gpt-5.6-luna'),
+      url: 'https://api.openai.com/v1/responses',
+      usage: { input_tokens: 30, output_tokens: 12, cached: 20, reasoning: 8 },
+    },
+    {
+      wire: 'anthropic',
+      row: catalogRow('anthropic', 'claude-haiku-5.5'),
+      url: 'https://api.anthropic.com/v1/messages',
+      // Anthropic's input excludes cache reads and writes; the Responses total includes both.
+      usage: { input_tokens: 30, output_tokens: 12, cached: 20, reasoning: 0 },
+    },
+    {
+      wire: 'openai-completions',
+      row: catalogRow('together', 'kimi-k3.1-pro'),
+      url: 'https://api.together.ai/v1/chat/completions',
+      usage: { input_tokens: 30, output_tokens: 12, cached: 20, reasoning: 8 },
+    },
+  ] as const)(
+    'should relay a $wire helper stream as Responses text with the provider usage',
+    async ({ wire, row, url, usage }) => {
+      const fetchOnce = vi.spyOn(globalThis, 'fetch').mockResolvedValue(providerStreams[wire]());
+      const service = new DirectModelInvocationService(keyedConfig, helperModels(row));
+
+      const result = await service.invoke(helperIntent());
+      if (result.state !== 'streaming') {
+        throw new Error('Expected stream');
+      }
+      const text = await result.response.text();
+      await result.completion;
+
+      expect(fetchOnce.mock.calls[0]?.[0]).toBe(url);
+      expect(text).toContain('"type":"response.output_text.delta"');
+      expect(text).not.toContain('Thinking.');
+      expect(text.endsWith('data: [DONE]\n\n')).toBe(true);
+      expect(completedUsage(text)).toEqual({
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        input_tokens_details: { cached_tokens: usage.cached },
+        output_tokens_details: { reasoning_tokens: usage.reasoning },
+        total_tokens: usage.input_tokens + usage.output_tokens,
+      });
+    },
+  );
+
+  it('should send a discovered Ollama helper model to the local server without a credential', async () => {
+    const fetchOnce = vi.spyOn(globalThis, 'fetch').mockResolvedValue(providerStreams['openai-completions']());
+    const ollama = {
+      id: 'llama3.2:latest',
+      model: 'llama3.2:latest',
+      recommended: true,
+      provider: { id: 'ollama', name: 'Ollama' },
+      configuration: { streaming: true, temperature: 0 },
+    } as unknown as Model;
+    const config = {
+      get: vi.fn((key: string) => key === 'OLLAMA_ENABLED'),
+    } as unknown as ConfigService<Environment, true>;
+    const service = new DirectModelInvocationService(config, helperModels(ollama));
+
+    const result = await service.invoke(helperIntent());
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+    await result.response.text();
+
+    const [url, init] = fetchOnce.mock.calls[0] ?? [];
+    expect(url).toBe('http://localhost:11434/v1/chat/completions');
+    expect(init?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(JSON.parse(init?.body as string)).toMatchObject({
+      model: 'llama3.2:latest',
+      temperature: 0,
+      max_tokens: 64,
+    });
+  });
+
   it('should answer a recognized pre-stream provider refusal as a typed 503 naming the operator account', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(exhaustedBody), { status: 429, headers: { 'content-type': 'application/json' } }),
@@ -203,6 +351,26 @@ describe('DirectModelInvocationService', () => {
     await expect(service.invoke(gatewayIntent())).rejects.toThrow(
       'Configured provider returned HTTP 400. max_output_tokens is too large.',
     );
+  });
+
+  it('should code a refused reasoning replay as its own refusal and keep the provider reason for the operator', async () => {
+    const sentence =
+      'messages.1.content.4: Invalid `signature` in `thinking` block. The block is bound to a different conversation.';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: sentence } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    const refused = await service.invoke(gatewayIntent()).catch((error: unknown) => error);
+
+    expect((refused as LlmGatewayError).getStatus()).toBe(502);
+    expect(errorDetails(refused)).toMatchObject({
+      type: 'REASONING_REPLAY_REJECTED',
+      message: `Configured provider returned HTTP 400. ${sentence}`,
+    });
   });
 
   it('should redact a credential the provider quotes back before it reaches the client', async () => {
@@ -414,17 +582,10 @@ describe('DirectModelInvocationService', () => {
   });
 
   it('should refuse a helper turn before streaming when the provider account is exhausted', async () => {
-    const service = new DirectModelInvocationService(
-      keyedConfig,
-      helperModels(() =>
-        refusingStream(
-          Object.assign(new Error('429 You have no credits remaining.'), {
-            status: 429,
-            error: exhaustedBody.error,
-          }),
-        ),
-      ),
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(exhaustedBody), { status: 429, headers: { 'content-type': 'application/json' } }),
     );
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
 
     try {
       await service.invoke(helperIntent());
@@ -438,11 +599,35 @@ describe('DirectModelInvocationService', () => {
     }
   });
 
-  it('should report an unrecognized helper first-chunk failure as a provider outage', async () => {
-    const service = new DirectModelInvocationService(
-      keyedConfig,
-      helperModels(() => refusingStream(new Error('socket hang up'))),
+  it('should refuse a helper turn before streaming when the account refusal arrives as the first stream frame', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(providerSse([{ type: 'error', ...exhaustedBody }]));
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
+
+    const refused = await service.invoke(helperIntent()).then(
+      () => expect.fail('The helper should refuse before it answers 200'),
+      (error: unknown) => error,
     );
+
+    expect((refused as LlmGatewayError).getStatus()).toBe(503);
+    expect(errorDetails(refused)).toMatchObject({
+      type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      details: { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'operator' },
+    });
+  });
+
+  it.each([
+    ['an unrecognized provider refusal', async () => new Response('{"error":{"message":"boom"}}', { status: 500 })],
+    [
+      'a transport failure',
+      async () => {
+        throw new TypeError('fetch failed');
+      },
+    ],
+  ])('should report %s on a helper as a provider outage', async (_label, answer) => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(answer);
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
 
     try {
       await service.invoke(helperIntent());
@@ -457,18 +642,12 @@ describe('DirectModelInvocationService', () => {
   it('should let a helper abort through untouched instead of calling it a provider outage', async () => {
     const controller = new AbortController();
     const abort = new Error('aborted');
-    const service = new DirectModelInvocationService(
-      keyedConfig,
-      helperModels(() => ({
-        [Symbol.asyncIterator]: () => ({
-          next: async (): Promise<IteratorResult<AIMessageChunk>> => {
-            controller.abort();
-            await Promise.resolve();
-            throw abort;
-          },
-        }),
-      })),
-    );
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      controller.abort();
+      await Promise.resolve();
+      throw abort;
+    });
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
 
     await expect(service.invoke({ ...helperIntent(), signal: controller.signal })).rejects.toBe(abort);
   });

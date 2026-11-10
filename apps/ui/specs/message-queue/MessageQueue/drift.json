@@ -2,6 +2,8 @@
   "actions": {},
   "alphabet": [
     "adoptRun",
+    "autoResumeOffered",
+    "autoResumeWithdrawn",
     "close",
     "dirtyChanged",
     "interruptRecorded",
@@ -9,6 +11,8 @@
     "refresh",
     "requestTurn",
     "retry",
+    "runElsewhereAwaitsPull",
+    "runElsewherePullSettled",
     "runLifecycle",
     "syncState",
     "toolParts",
@@ -26,11 +30,11 @@
     "apps/ui/app/components/chat/chat-textarea.tsx": "542f569420a5c4bb8bae5b83b57404d629f022cf2d710fe9d54c2d2cda0496c4",
     "apps/ui/app/hooks/use-chat.tsx": "d74d59846a7dfef364c1723c5186554c0b222ac2dd8c8da4793774da0abf9b0d",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "eeab9732ac5b93bcce4b28e8da9005fcc9c18b380c6fa17fd7e22c31844d24a2",
-    "apps/ui/app/machines/chat-session.machine.ts": "7e83a394af459b109a16b92350f9667df7dc76fe6938958fb2908fc9071d01f1",
-    "apps/ui/app/services/chat-session-store.ts": "3306e3408d331f59312d6936f7786ab9b619e660afd90ef3492d9e72c22fe109"
+    "apps/ui/app/machines/chat-session.machine.ts": "a0be2e6d680c5dbac61a2ac0feaf0c1889860014eab410237fcc3596f13c8b25",
+    "apps/ui/app/services/chat-session-store.ts": "4a2a7fafeae5fc8108f09a304c13bebeabb64424beec768c77bf1979018966c6"
   },
   "specs": {
-    "MessageQueue.tla": "308edd787276e9647139f20f626db1cc33dc2553100506db4d721cbea7c9a921",
+    "MessageQueue.tla": "8e6f7d8b72859c2a182ca81a36cffda6d574bdbee0eee3ca5e2837f428b1d0cd",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {
@@ -50,6 +54,6 @@
   },
   "versions": {
     "chat-message-queue": "1",
-    "chat-session": "3"
+    "chat-session": "4"
   }
 }

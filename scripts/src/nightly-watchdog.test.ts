@@ -1,8 +1,15 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { alertPayload, judge, maxAge, scheduledWorkflows } from '#nightly-watchdog.js';
-import type { ScheduledRun, ScheduledWorkflow } from '#nightly-watchdog.js';
+import {
+  alertPayload,
+  candidateRunNumber,
+  judge,
+  judgeCandidates,
+  maxAge,
+  scheduledWorkflows,
+} from '#nightly-watchdog.js';
+import type { CandidateRun, RunJob, ScheduledRun, ScheduledWorkflow } from '#nightly-watchdog.js';
 
 const now = new Date('2026-11-08T18:30:00Z');
 const daily: ScheduledWorkflow = { file: 'e2e-nightly.yml', name: 'E2E nightly', crons: ['23 13 * * *'] };
@@ -58,5 +65,87 @@ describe('nightly watchdog', () => {
     const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
     const files = found.map((workflow) => workflow.file);
     expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'formal-nightly.yml', 'nightly-watchdog.yml']));
+  });
+
+  describe('candidate shell gate (WD-1a)', () => {
+    const candidate = (number: number, createdAt: string): CandidateRun => ({
+      id: number * 10,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+      run_number: number,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+      created_at: createdAt,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+      html_url: `https://github.com/taucad/tau/actions/runs/${number * 10}`,
+    });
+    const job = (name: string, conclusion: string | undefined, status = 'completed'): RunJob => ({
+      name,
+      status,
+      conclusion,
+    });
+    const green = [
+      job('Shell gate / Shell conformance on LNX-U', 'success'),
+      job('Shell gate / Shell conformance on MAC-A', 'success'),
+    ];
+
+    it('should read the build number from a candidate tag', () => {
+      expect(candidateRunNumber('desktop-staging@0.4.1-staging.953')).toBe(953);
+      expect(candidateRunNumber('desktop@0.4.1')).toBeUndefined();
+    });
+
+    it('should pass a recent candidate whose gate jobs are green', () => {
+      const verdicts = judgeCandidates({
+        tags: ['desktop-staging@0.4.1-staging.953'],
+        runs: [candidate(953, '2026-11-08T03:17:00Z')],
+        jobsOf: () => green,
+        now,
+      });
+      expect(verdicts.map((verdict) => verdict.state)).toEqual(['ok']);
+    });
+
+    it('should fail a recent candidate whose gate is red, cancelled or absent', () => {
+      const runs = [
+        candidate(951, '2026-11-08T01:00:00Z'),
+        candidate(952, '2026-11-08T02:00:00Z'),
+        candidate(953, '2026-11-08T03:00:00Z'),
+      ];
+      const jobs: Record<number, readonly RunJob[]> = {
+        9510: [job('Shell gate / Shell conformance on LNX-U', 'failure')],
+        9520: [job('Shell gate / Shell conformance on MAC-X', 'cancelled')],
+        9530: [job('Tag the staging desktop candidate', 'success')],
+      };
+      const verdicts = judgeCandidates({
+        tags: [
+          'desktop-staging@0.4.1-staging.951',
+          'desktop-staging@0.4.1-staging.952',
+          'desktop-staging@0.4.1-staging.953',
+        ],
+        runs,
+        jobsOf: (run) => jobs[run.id] ?? [],
+        now,
+      });
+      expect(verdicts.map((verdict) => verdict.state)).toEqual(['failed', 'failed', 'failed']);
+      expect(verdicts[2]?.detail).toContain('no gate jobs');
+    });
+
+    it('should flag a synthetic candidate tag that no release run cut', () => {
+      const verdicts = judgeCandidates({
+        tags: ['desktop-staging@0.4.1-staging.999'],
+        runs: [candidate(953, '2026-11-08T03:17:00Z')],
+        jobsOf: () => green,
+        now,
+      });
+      expect(verdicts.map((verdict) => verdict.state)).toEqual(['missing']);
+      expect(verdicts[0]?.detail).toContain('no release run cut it');
+    });
+
+    it('should ignore candidates older than 36 hours and tags of runs outside the listed page', () => {
+      const verdicts = judgeCandidates({
+        tags: ['desktop-staging@0.4.1-staging.900', 'desktop-staging@0.4.1-staging.950'],
+        runs: [candidate(950, '2026-11-06T03:17:00Z'), candidate(953, '2026-11-08T03:17:00Z')],
+        jobsOf: () => [],
+        now,
+      });
+      expect(verdicts).toEqual([]);
+    });
   });
 });

@@ -135,6 +135,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@electron/asar": "4.3.0",
     "@fumadocs/tailwind": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

@@ -42,15 +42,18 @@ export const rateLimitBackoffMilliseconds = (retry: number, random: () => number
 /**
  * How long to wait before one automatic resume: the server's advice first, then backoff.
  *
- * @param input - The gateway's `Retry-After` estimate and the 1-based retry number.
+ * @param input - The gateway's `Retry-After` estimate, the 1-based retry number and the backoff's jitter source.
  * @returns The wait in milliseconds.
  * @public
  */
 export const rateLimitRetryDelayMilliseconds = (input: {
   readonly retryAfterSeconds?: number;
   readonly retry: number;
+  readonly random?: () => number;
 }): number =>
-  input.retryAfterSeconds === undefined ? rateLimitBackoffMilliseconds(input.retry) : input.retryAfterSeconds * 1000;
+  input.retryAfterSeconds === undefined
+    ? rateLimitBackoffMilliseconds(input.retry, input.random)
+    : input.retryAfterSeconds * 1000;
 
 /* Attempts of each run already resumed automatically by this page. Keyed by attempt so
  * a card that remounts for the same failure cannot resume it twice. */
@@ -89,9 +92,9 @@ export const recordRateLimitAutoResume = (runId: string, attempt: number): void 
 // ── Provider unavailable ──────────────────────────────────────────────────────────────────────────
 
 /**
- * The provider refusal code that resumes once on its own (LangChain plane regression review R6).
+ * The provider refusal code that resumes once on its own (server agent plane regression review R6).
  *
- * The LangChain plane's provider client retried a transient failure twice before the person saw it. The Pi gateway
+ * The server agent plane's provider client retried a transient failure twice before the person saw it. The Pi gateway
  * transport retries none, because each retry is a billed attempt, so a brief provider 5xx paused the turn for a click.
  * One automatic resume restores the common case without hiding a real outage.
  *

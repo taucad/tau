@@ -75,6 +75,11 @@ describe('entry.server handleRequest', () => {
       expect(response.headers.has('Content-Security-Policy')).toBe(false);
       // SB6: violations and crash reports go to the same-origin receiver, on documents and static files alike.
       expect(staticPolicy).toMatch(/ report-to default;$/u);
+      // Each site fetches the PicoGK browser host by digest from its own dependency mirror
+      // (picogk-interim-digest-consumer W3); the shared policy admits both.
+      expect(/ connect-src ([^;]+);/u.exec(staticPolicy!)?.[1]?.split(' ')).toEqual(
+        expect.arrayContaining(['https://dependencies.tau.new', 'https://dependencies.taucad.dev']),
+      );
       expect(response.headers.get('Reporting-Endpoints')).toBe('default="/api/reports"');
       expect(/^Reporting-Endpoints = '(.+)'$/mu.exec(netlifyConfig)?.[1]).toBe('default="/api/reports"');
       expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');

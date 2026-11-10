@@ -623,7 +623,7 @@ export type TauCloudEligibility = Readonly<{
   auth: 'authed' | 'anonymous' | 'indeterminate';
   /** Whether the plan is known yet; nothing is decided before it is. */
   isResolved: boolean;
-  /** W8's entitlement: closed for Free while the D23 gate is. */
+  /** W8's entitlement: closed only for a plan that cannot sync (an Enterprise override). */
   canSyncFiles: boolean;
 }>;
 

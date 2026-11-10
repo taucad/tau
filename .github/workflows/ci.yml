@@ -330,6 +330,12 @@ jobs:
       # this happened a few minutes in; at two it still happened once both overlapped.
       # `test` needs the same cap: overlapping WASM suites lost the VM the same way
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
+      #
+      # The build lane also runs `ui:check-desktop-payload`, the desktop renderer ownership
+      # gate, whenever `ui` is affected: a renderer-only change no longer selects `desktop`,
+      # so the desktop `package-*` targets that also depend on it never run for it (Brain
+      # research/desktop-split-blueprint.md, D-DS2). Its `ui:build:desktop` and
+      # `desktop:build` dependencies stay serial here under the same `--parallel=1`.
       - name: Run the lane's tasks
         if: steps.queue.outputs.run-id == ''
         env:
@@ -339,7 +345,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload --parallel=1 ;;
             pkgcheck)
               # publint, attw, madge and the surface checks are light, so they run three at
               # a time once their builds exist. The builds stay serial and land in the local

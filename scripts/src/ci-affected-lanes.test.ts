@@ -175,6 +175,25 @@ describe('ci.yml affected-only lanes', () => {
     expect(gate?.steps?.[0]?.env?.['REUSED']).toBe(expression('needs.plan.outputs.reused'));
   });
 
+  it('should run the desktop renderer payload check in the build lane whenever ui is affected', () => {
+    // A renderer-only change selects `ui` but not `desktop` (DS-1 cut that edge), so the desktop `package-*`
+    // targets that depend on the check never run for it. The build lane's `nx affected` runs it instead.
+    const steps = ci.jobs['affected-lane']?.steps ?? [];
+    const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
+    const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
+    expect(build).toBe('pnpm nx affected -t build size check-desktop-payload --parallel=1');
+    expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
+    // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
+    // the renderer and desktop main/preload builds it reads.
+    const ui = JSON.parse(read('apps/ui/project.json')) as {
+      targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
+    };
+    expect(ui.targets['check-desktop-payload']?.dependsOn).toEqual([
+      'build:desktop',
+      { projects: ['desktop'], target: 'build' },
+    ]);
+  });
+
   it('should skip a service lane on a push only where the reused queue run passed it', () => {
     expect(planStep?.env?.['QUEUE_LANES']).toBe(expression("steps.queue.outputs.lanes || '{}'"));
     expect(planScript).toContain(`if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi`);

@@ -151,7 +151,7 @@ export const viewStackBackRowClass = cn(menuItemVariants({ highlight: 'focus' })
 export function ViewStackBackContent({ title }: { readonly title: React.ReactNode }): React.JSX.Element {
   return (
     <>
-      <ChevronLeft aria-hidden='true' className='size-4 shrink-0' />
+      <ChevronLeft aria-hidden='true' className='size-3.5 shrink-0' />
       <span className='truncate'>{title}</span>
     </>
   );

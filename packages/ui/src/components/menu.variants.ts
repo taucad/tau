@@ -309,7 +309,23 @@ export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-for
  * export const className = menuViewBackClass;
  * ```
  */
-export const menuViewBackClass = 'w-full gap-2 text-muted-foreground';
+export const menuViewBackClass = 'w-full gap-2 text-xs text-muted-foreground data-disabled:text-muted-foreground';
+
+/**
+ * A combobox row that opens a sub-view of further choices ("More kernels"): quieter than the choices around it, small
+ * and muted, so the list reads as its choices first. The `data-disabled:` twin outranks the command item's reset,
+ * which cmdk triggers by setting `data-disabled="false"` on every item.
+ *
+ * @public
+ *
+ * @example <caption>Style a combobox sub-view trigger</caption>
+ * ```typescript
+ * import { comboboxViewTriggerClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = comboboxViewTriggerClass;
+ * ```
+ */
+export const comboboxViewTriggerClass = 'text-xs text-muted-foreground data-disabled:text-muted-foreground';
 
 /**
  * The trailing ChevronRight of a row that opens a sub-view. A disclosure row's chevron points down instead.

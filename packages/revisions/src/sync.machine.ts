@@ -168,7 +168,10 @@ type SyncMachineContextFields = Readonly<{
   /**
    * A session change not yet pulled when the host began quiescing, or one that
    * arrived during it (audit R6). Kept apart from `pendingSession`, which a push
-   * started during the hold clears: the release pulls for this one.
+   * started during the hold clears: the release pulls for this one, unless the
+   * machine is in `failed` (which reopens only while `pendingSession` is set, so
+   * a refusal of a push started after the change stays terminal) or in
+   * `conflicted.offering` (which pulls once its push is answered).
    */
   heldSessionPull: boolean;
   /** Holds new background work while the host waits for close. */
@@ -952,12 +955,16 @@ const answerPushes = (
   }
 };
 
-/* A close cannot promise a new push. Answer the request without retaining a
- * wake-up that could restart transport as the successful close releases its hold. */
-/** A session change the conflict line's push waited for (audit R6): the pull follows its answer. */
+/**
+ * A session change the conflict line's push waited for (audit R6): the pull follows its answer.
+ *
+ * @returns `opening` when a change is still unread and the host is not quiescing.
+ */
 const sessionPullOf = (context: SyncMachineContext): '#sync.opening' | undefined =>
   context.pendingSession && !context.quiescing ? '#sync.opening' : undefined;
 
+/* A close cannot promise a new push. Answer the request without retaining a
+ * wake-up that could restart transport as the successful close releases its hold. */
 const holdPushRequest = (context: SyncMachineContext, event: Readonly<{ pushId?: string }>, enq: SyncEnqueue) => {
   answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
   return {};
@@ -1322,8 +1329,9 @@ const syncMachineDefinition = setup({
     quiesce: ({ context, event, value, guards }, enq) => {
       if (event.phase === 'release') {
         const hasRemote = guards.hasRemote(context);
-        /* `failed.settled` opens again on its own once quiescing ends. */
-        /* `conflicted.offering` pulls once its push settles, so the line's answer is not dropped. */
+        /* `failed.settled` opens again on its own once quiescing ends while `pendingSession` is set;
+         * a refusal of a push started after the change stays terminal. `conflicted.offering` pulls
+         * once its push settles, so the line's answer is not dropped. */
         const busy = typeof value !== 'string' && (value['failed'] !== undefined || value['conflicted'] === 'offering');
         if (context.heldSessionPull && hasRemote && !busy) {
           /* A session change held through the close is pulled now (audit R6). */

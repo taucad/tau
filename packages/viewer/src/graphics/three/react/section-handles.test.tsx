@@ -4,7 +4,7 @@ import type { Mock } from 'vitest';
 import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import type { SpatialBounds } from '@taucad/spatial';
+import type { RenderFrame, SpatialBounds } from '@taucad/spatial';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { SectionHandles } from '#graphics/three/react/section-handles.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -16,11 +16,15 @@ type CompileAsync = (scene: THREE.Object3D, camera: THREE.Camera) => Promise<THR
 
 const mocks = vi.hoisted(() => {
   const bounds: SpatialBounds = { min: [-0.05, -0.05, -0.05], max: [0.05, 0.05, 0.05] };
+  const renderFrame: RenderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
   return {
     actor: undefined as unknown,
     state: undefined as unknown,
     frame: undefined as FrameCallback | undefined,
     bounds,
+    renderFrame,
+    /** The view's render-frame consumer, as `useRenderFrameRetarget` registers it. */
+    retarget: undefined as ((renderFrame: RenderFrame) => void) | undefined,
     cameraRig: undefined as unknown,
   };
 });
@@ -34,7 +38,10 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
     useCameraRig: () => mocks.cameraRig,
     useCameraSelector: (selector: (snapshot: unknown) => unknown) =>
       selector({ context: { view: { bounds: mocks.bounds } } }),
-    useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 }),
+    useRenderFrame: () => mocks.renderFrame,
+    useRenderFrameRetarget: (handler: (renderFrame: RenderFrame) => void) => {
+      mocks.retarget = handler;
+    },
   };
 });
 
@@ -83,6 +90,11 @@ type Harness = Readonly<{
   /** Every pointer and click event that reached a listener on the surface added before the handles mounted. */
   toolEvents: string[];
   runFrame: () => void;
+  /**
+   * Rebases the view's render frame onto `originMeters`, moving the camera with it so the same pixel casts the same
+   * physical ray, as the view does when its target moves far from the frame's origin.
+   */
+  rebase: (originMeters: readonly [number, number, number]) => void;
   /** Dispatched on the surface under an event source, else on the canvas, or on `target`. */
   pointer: (type: string, at: Point & Readonly<{ buttons?: number; target?: HTMLElement }>) => void;
   send: (event: Parameters<GraphicsActor['send']>[0]) => void;
@@ -134,8 +146,16 @@ const mountHandles = ({
   camera.updateMatrixWorld();
   const perspectiveCamera = new THREE.PerspectiveCamera();
   const orthographicCamera = new THREE.OrthographicCamera();
+  mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
+  mocks.retarget = undefined;
   mocks.cameraRig = {
-    actorRef: { getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5] } } }) },
+    actorRef: {
+      getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5], bounds: mocks.bounds } } }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    },
+    get renderFrame() {
+      return mocks.renderFrame;
+    },
     perspectiveCamera,
     orthographicCamera,
   };
@@ -152,7 +172,7 @@ const mountHandles = ({
   };
   mocks.state = state;
 
-  render(<SectionHandles planePicker={planePicker} />);
+  const rendered = render(<SectionHandles planePicker={planePicker} />);
   act(() => {
     mocks.frame?.({ camera, size: state.size });
   });
@@ -184,6 +204,20 @@ const mountHandles = ({
         for (const callback of callbacks) {
           callback(0);
         }
+      });
+    },
+    rebase: (originMeters) => {
+      const previous = mocks.renderFrame;
+      const next: RenderFrame = { ...previous, originMeters: [...originMeters] };
+      const shift = new THREE.Vector3(...originMeters)
+        .sub(new THREE.Vector3(...previous.originMeters))
+        .divideScalar(previous.metersPerRenderUnit);
+      camera.position.sub(shift);
+      camera.updateMatrixWorld();
+      act(() => {
+        mocks.renderFrame = next;
+        mocks.retarget?.(next);
+        rendered.rerender(<SectionHandles planePicker={planePicker} />);
       });
     },
     pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1, target }) => {
@@ -291,6 +325,39 @@ describe('SectionHandles', () => {
     expect(harness.cuts()[0]).toBe(moved);
     expect(harness.toolEvents).toEqual(['pointermove', 'pointerdown', 'pointerup', 'pointerdown', 'click']);
     expect(lateEvents).toEqual(harness.toolEvents);
+  });
+
+  it('should keep dragging through a render-frame rebase mid-drag, landing where the pointer is', () => {
+    // The same drag without a rebase, for where it lands.
+    harness = mountHandles();
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.runFrame();
+    harness.pointer('pointermove', { x: 400, y: 200 });
+    harness.pointer('pointerup', { x: 400, y: 200 });
+    const [reference] = harness.cuts();
+    const expected = reference?.kind === 'plane' ? reference.offset : Number.NaN;
+    cleanup();
+    harness.actor.stop();
+    harness.canvas.parentElement?.remove();
+    vi.restoreAllMocks();
+
+    harness = mountHandles();
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.runFrame();
+    // The view's target moved far from the frame's origin, so the view rebased its render frame under the drag.
+    harness.rebase([0, 0.02, 0.01]);
+    expect(harness.controls.enabled).toBe(false);
+    expect(isHoverSuppressed(harness)).toBe(true);
+    harness.pointer('pointermove', { x: 400, y: 200 });
+    harness.pointer('pointerup', { x: 400, y: 200 });
+
+    const [cut] = harness.cuts();
+    expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+    expect(expected).toBeGreaterThan(0.05);
+    expect(harness.controls.enabled).toBe(true);
+    expect(isHoverSuppressed(harness)).toBe(false);
   });
 
   it('should keep a dragged plane within the bounds centre ± 2 × radius along its axis', () => {

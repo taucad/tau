@@ -24,6 +24,20 @@ const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] }
  */
 const lowToHighReasoning = { levels: ['low', 'medium', 'high'] } satisfies ModelReasoningSupport;
 const lowToExtraHighReasoning = { levels: ['low', 'medium', 'high', 'xhigh'] } satisfies ModelReasoningSupport;
+/*
+ * Two facts about how a provider treats a model's reasoning, each probed per model through the gateway, never
+ * inferred from the provider. A client sends either form only for a row that declares it, so a client newer than the
+ * API it talks to sends neither.
+ *
+ * `effortInTranscript`: the provider reads the level from the transcript (Anthropic's empty `system` message with
+ * `output_config`, OpenAI's `configuration_update` item), so a level change appends to the prompt cache instead of
+ * rewriting it. Refused by the provider on Fable 5, Opus 4.8, Sonnet 5, Sonnet 4.6 and GPT 5.5, and on xAI.
+ *
+ * `replayBinding`: the provider takes `thinking.block_binding`, which says what happens to a replayed thinking block
+ * whose prefix changed. Every Anthropic row that thinks accepts it.
+ */
+const anthropicReplayBinding = { replayBinding: true } satisfies Partial<ModelReasoningSupport>;
+const effortInTranscript = { effortInTranscript: true } satisfies Partial<ModelReasoningSupport>;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -67,7 +81,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5-2',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding, ...effortInTranscript },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -113,7 +127,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5-1',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding, ...effortInTranscript },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -160,7 +174,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -207,7 +221,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-5-5',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding, ...effortInTranscript },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -253,7 +267,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-5',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding, ...effortInTranscript },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -299,7 +313,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-4-8',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...anthropicReplayBinding },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -344,7 +358,11 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-5-5',
       support: {
-        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        reasoning: {
+          levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+          ...anthropicReplayBinding,
+          ...effortInTranscript,
+        },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -389,7 +407,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-5',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...anthropicReplayBinding },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -434,7 +452,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-4-6',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...anthropicReplayBinding },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -478,7 +496,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-haiku-5-5',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...anthropicReplayBinding, ...effortInTranscript },
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -524,7 +542,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6.1-terra',
       support: {
-        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'], ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -563,7 +581,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-astra',
       support: {
-        reasoning: lowToExtraHighReasoning,
+        reasoning: { ...lowToExtraHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -603,7 +621,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-sol',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -642,7 +660,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-luna',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -683,7 +701,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-sol',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -723,7 +741,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-terra',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {
@@ -763,7 +781,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-luna',
       support: {
-        reasoning: lowToHighReasoning,
+        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
         modalities: pdfInputModalities,
       },
       details: {

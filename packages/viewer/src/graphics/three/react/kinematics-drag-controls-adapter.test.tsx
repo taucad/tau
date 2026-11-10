@@ -1,6 +1,11 @@
+/**
+ * The drag adapter and press handler: the DOM side of the kinematics actor's gesture. Rows drive real DOM events into
+ * an adapter the real actor started, with time on a `StepClock`.
+ */
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import { StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createActor } from 'xstate';
 import type { Actor, SnapshotFrom } from 'xstate';
@@ -9,14 +14,16 @@ import type { Camera } from 'three';
 import { mock } from 'vitest-mock-extended';
 import type { ThreeEvent } from '@react-three/fiber';
 import type { Mechanism } from '@taucad/kinematics';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import {
-  beginKinematicsDragGesture,
+  createKinematicsDragAdapter,
   useKinematicsDragControls,
-} from '#graphics/three/react/kinematics-drag-controls.js';
-import type { KinematicsDragGestureOptions } from '#graphics/three/react/kinematics-drag-controls.js';
+} from '#graphics/three/react/kinematics-drag-controls-adapter.js';
+import type { KinematicsDragAdapterOptions } from '#graphics/three/react/kinematics-drag-controls-adapter.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { KeyboardProvider, useKeybinding } from '@taucad/ui/components/keyboard';
-import { getKinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
+import { getKinematicsUnitState, kinematicsDragMoveWindow, kinematicsMachine } from '#machines/kinematics.machine.js';
+import type { KinematicsEmitted } from '#machines/kinematics.machine.js';
 
 type ViewerState = Readonly<{
   camera: Camera;
@@ -29,6 +36,7 @@ const hooks = vi.hoisted(() => ({
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
   graphics: {
     suppressionReasons: [] as string[],
+    status: 'active' as 'active' | 'stopped',
     send: vi.fn(),
   },
   viewer: undefined as ViewerState | undefined,
@@ -39,7 +47,10 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
   const { useSelector } = await import('@xstate/react');
   return {
     useGraphics: () => ({
-      getSnapshot: () => ({ context: { modelPointerClickSuppressionReasons: hooks.graphics.suppressionReasons } }),
+      getSnapshot: () => ({
+        status: hooks.graphics.status,
+        context: { modelPointerClickSuppressionReasons: hooks.graphics.suppressionReasons },
+      }),
       send: hooks.graphics.send,
     }),
     useKinematicsRef: () => hooks.kinematics,
@@ -68,12 +79,34 @@ const pointer = (
 const escapeKeydown = (): KeyboardEvent =>
   new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
 
-let frames: FrameRequestCallback[];
+let clock: StepClock;
 
+/** Let one coalescing window pass on the actor's clock. */
 const flushFrame = (): void => {
-  for (const frame of frames.splice(0)) {
-    frame(0);
-  }
+  clock.advance(kinematicsDragMoveWindow);
+};
+
+const unitId = 'file:main.ts';
+// The arm hinges about Z at the origin; the base is grounded.
+const mechanism: Mechanism = {
+  schemaVersion: 1,
+  units: { length: 'm', angle: 'rad' },
+  root: 'base',
+  links: { base: { components: ['component:base'] }, arm: { components: ['component:arm'] } },
+  joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+};
+
+/** An armed kinematics actor on its own clock, recording `poseSettled`. */
+const startKinematics = () => {
+  clock = new StepClock();
+  const actor = createActor(kinematicsMachine, { input: {}, clock }).start();
+  const settled: KinematicsEmitted[] = [];
+  actor.on('poseSettled', (event) => {
+    settled.push(event);
+  });
+  actor.send({ type: 'loadMechanism', unitId, mechanism });
+  actor.send({ type: 'setDragEnabled', unitId, enabled: true });
+  return { actor, settled };
 };
 
 const createViewerElement = (): HTMLDivElement => {
@@ -95,32 +128,38 @@ const createCamera = (): PerspectiveCamera => {
   return camera;
 };
 
-beforeEach(() => {
-  frames = [];
-  vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
-  vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
-    frames.splice(id - 1, 1);
-  });
-});
-
 afterEach(() => {
   cleanup();
   document.body.replaceChildren();
   vi.restoreAllMocks();
 });
 
-describe('beginKinematicsDragGesture', () => {
+describe('createKinematicsDragAdapter', () => {
   let element: HTMLDivElement;
   let controls: { enabled: boolean };
-  let sendKinematics: Mock<KinematicsDragGestureOptions['sendKinematics']>;
-  let sendGraphics: Mock<KinematicsDragGestureOptions['sendGraphics']>;
-  let onFinish: Mock<KinematicsDragGestureOptions['onFinish']>;
-  let options: KinematicsDragGestureOptions;
+  let graphicsSend: Mock<(event: { type: string }) => void>;
+  let graphicsStatus: 'active' | 'stopped';
+  let options: KinematicsDragAdapterOptions;
+  let kinematics: Actor<typeof kinematicsMachine>;
+  let settled: KinematicsEmitted[];
 
-  const kinematicsEvents = (): string[] => sendKinematics.mock.calls.map(([event]) => event.type);
-  const graphicsEvents = (): string[] => sendGraphics.mock.calls.map(([event]) => event.type);
-  const moveTargets = (): number[][] =>
-    sendKinematics.mock.calls.flatMap(([event]) => (event.type === 'dragMove' ? [[...event.target]] : []));
+  const unit = () => getKinematicsUnitState(kinematics.getSnapshot().context, unitId);
+  const graphicsEvents = (): string[] => graphicsSend.mock.calls.map(([event]) => event.type);
+  const drag = () => unit().drag;
+
+  /** The press as the handler sends it: the arm grabbed at the world origin, which is −1 in X in the GLB frame. */
+  const pressArm = (): void => {
+    kinematics.send({
+      type: 'pressPart',
+      unitId,
+      componentId: 'component:arm',
+      pointerId: 7,
+      clientX: 100,
+      clientY: 100,
+      point: [-1, 0, 0],
+      adapter: createKinematicsDragAdapter(options),
+    });
+  };
 
   beforeEach(() => {
     element = createViewerElement();
@@ -130,81 +169,82 @@ describe('beginKinematicsDragGesture', () => {
     root.updateMatrixWorld();
 
     controls = { enabled: true };
-    sendKinematics = vi.fn();
-    sendGraphics = vi.fn();
-    onFinish = vi.fn();
+    graphicsSend = vi.fn();
+    graphicsStatus = 'active';
+    ({ actor: kinematics, settled } = startKinematics());
     options = {
-      unitId: 'file:main.ts',
-      componentId: 'component:planet-1',
+      unitId,
+      componentId: 'component:arm',
       pointerId: 7,
-      start: { clientX: 100, clientY: 100 },
       grabPoint: new Vector3(0, 0, 0),
       element,
       canvas: element,
       camera: createCamera(),
       root,
       controls,
-      sendKinematics,
-      sendGraphics,
-      onFinish,
+      graphics: {
+        send: graphicsSend,
+        getSnapshot: () => ({ status: graphicsStatus }),
+      } as unknown as KinematicsDragAdapterOptions['graphics'],
     };
+  });
+
+  afterEach(() => {
+    kinematics.stop();
   });
 
   describe('threshold', () => {
     it('should suspend the camera while pressed and leave a press under 4 px to the click', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
       expect(controls.enabled).toBe(false);
 
       element.dispatchEvent(pointer('pointermove', [102, 102]));
       element.dispatchEvent(pointer('pointerup', [102, 102]));
 
-      expect(kinematicsEvents()).toEqual([]);
+      expect(drag()).toBeUndefined();
       expect(graphicsEvents()).toEqual([]);
       expect(element.setPointerCapture).not.toHaveBeenCalled();
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(kinematics.getSnapshot().value).toBe('idle');
     });
 
     it('should ignore other pointers', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
 
       element.dispatchEvent(pointer('pointermove', [150, 100], { pointerId: 8 }));
       element.dispatchEvent(pointer('pointerup', [150, 100], { pointerId: 8 }));
 
-      expect(kinematicsEvents()).toEqual([]);
+      expect(drag()).toBeUndefined();
       expect(controls.enabled).toBe(false);
+      expect(kinematics.getSnapshot().value).toBe('pressed');
     });
   });
 
   describe('drag', () => {
-    it('should start after 4 px with capture, map the pointer onto the drag plane and coalesce moves per frame', () => {
-      beginKinematicsDragGesture(options);
+    it('should start after 4 px with capture, map the pointer onto the drag plane and coalesce moves per window', () => {
+      pressArm();
 
       element.dispatchEvent(pointer('pointermove', [104, 100]));
       element.dispatchEvent(pointer('pointermove', [130, 100]));
       element.dispatchEvent(pointer('pointermove', [150, 100]));
 
       expect(element.setPointerCapture).toHaveBeenCalledWith(7);
-      expect(sendKinematics).toHaveBeenCalledWith({
-        type: 'dragStart',
-        unitId: 'file:main.ts',
-        componentId: 'component:planet-1',
-        point: [-1, 0, 0],
-      });
+      expect(drag()).toMatchObject({ componentId: 'component:arm', link: 'arm', target: [-1, 0, 0] });
       expect(graphicsEvents()).toEqual(['beginViewerModelHoverSuppression', 'setHoveredModelComponent']);
       expect(element.style.cursor).toBe('grabbing');
 
       flushFrame();
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragMove']);
-      const [target] = moveTargets();
-      expect(target?.[0]).toBeCloseTo(4);
-      expect(target?.[1]).toBeCloseTo(0);
-      expect(target?.[2]).toBeCloseTo(0);
+      // 50 px right of centre is NDC 0.5, 5 units at the grab depth, 4 in the GLB frame.
+      const [x, y, z] = drag()!.target;
+      expect(x).toBeCloseTo(4);
+      expect(y).toBeCloseTo(0);
+      expect(z).toBeCloseTo(0);
 
       element.dispatchEvent(pointer('pointerup', [150, 100]));
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragMove', 'dragEnd']);
+      expect(drag()).toBeUndefined();
+      expect(settled).toHaveLength(1);
       expect(graphicsEvents()).toEqual([
         'beginViewerModelHoverSuppression',
         'setHoveredModelComponent',
@@ -216,69 +256,75 @@ describe('beginKinematicsDragGesture', () => {
       expect(element.style.cursor).toBe('');
     });
 
-    it('should send the move still waiting for its frame before ending the drag on release', () => {
-      beginKinematicsDragGesture(options);
+    it('should solve the move still waiting for its window before ending the drag on release', () => {
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
       flushFrame();
+      const before = unit().coordinates['hinge'];
 
       element.dispatchEvent(pointer('pointermove', [190, 100]));
       element.dispatchEvent(pointer('pointerup', [190, 100]));
       flushFrame();
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragMove', 'dragMove', 'dragEnd']);
-      // 90 px right of centre is NDC 0.9, 9 units at the grab depth, 8 in the GLB frame.
-      expect(moveTargets()[1]?.[0]).toBeCloseTo(8);
+      expect(drag()).toBeUndefined();
+      expect(unit().coordinates['hinge']).not.toBe(before);
+      expect(settled).toHaveLength(1);
     });
   });
 
   describe('cancellation', () => {
-    it('should cancel on request, ignore moves until release and then restore the camera', () => {
-      const gesture = beginKinematicsDragGesture(options);
+    it('should cancel on Escape, ignore moves until release and then restore the camera', () => {
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
-      expect(gesture.isDragging()).toBe(true);
+      flushFrame();
 
-      gesture.cancel();
+      kinematics.send({ type: 'cancelGesture' });
       element.dispatchEvent(pointer('pointermove', [180, 100]));
       flushFrame();
 
-      expect(gesture.isDragging()).toBe(false);
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragCancel']);
+      expect(drag()).toBeUndefined();
+      expect(unit().coordinates).toEqual({ hinge: 0 });
       expect(controls.enabled).toBe(false);
 
       element.dispatchEvent(pointer('pointerup', [180, 100]));
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragCancel']);
+      expect(unit().coordinates).toEqual({ hinge: 0 });
       expect(controls.enabled).toBe(true);
       expect(graphicsEvents()).toContain('markModelPointerGestureMoved');
+      expect(settled).toHaveLength(1);
     });
 
     it.each(['pointercancel', 'lostpointercapture'])('should cancel and restore on %s', (type) => {
-      beginKinematicsDragGesture(options);
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
+      flushFrame();
 
       element.dispatchEvent(pointer(type, [150, 100]));
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragCancel']);
+      expect(unit()).toMatchObject({ drag: undefined, coordinates: { hinge: 0 } });
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(kinematics.getSnapshot().value).toBe('idle');
     });
 
-    it('should cancel an active drag when disposed and stop listening', () => {
-      const gesture = beginKinematicsDragGesture(options);
+    it('should cancel an active drag and stop listening when the actor stops', () => {
+      const removed = vi.spyOn(document, 'removeEventListener');
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
 
-      gesture.dispose();
-      element.dispatchEvent(pointer('pointermove', [180, 100]));
-      element.dispatchEvent(pointer('pointerup', [180, 100]));
-      flushFrame();
+      graphicsStatus = 'stopped';
+      kinematics.stop();
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragCancel']);
+      expect(removed.mock.calls.map(([type]) => type)).toEqual(
+        expect.arrayContaining(['pointermove', 'pointerup', 'pointercancel', 'visibilitychange']),
+      );
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(element.style.cursor).toBe('');
+      // A view that is going away is not sent the hover release.
+      expect(graphicsEvents()).toEqual(['beginViewerModelHoverSuppression', 'setHoveredModelComponent']);
     });
 
     it('should cancel the drag and restore the camera when the window loses focus', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
       flushFrame();
 
@@ -287,17 +333,17 @@ describe('beginKinematicsDragGesture', () => {
       element.dispatchEvent(pointer('pointermove', [170, 120]));
       flushFrame();
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragMove', 'dragCancel']);
+      expect(unit()).toMatchObject({ drag: undefined, coordinates: { hinge: 0 } });
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(settled).toHaveLength(1);
     });
 
     it('should cancel the drag when the tab is hidden and ignore a visibility change that keeps it shown', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
 
       document.dispatchEvent(new Event('visibilitychange'));
-      expect(kinematicsEvents()).toEqual(['dragStart']);
+      expect(drag()).toBeDefined();
 
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
       try {
@@ -306,49 +352,41 @@ describe('beginKinematicsDragGesture', () => {
         Reflect.deleteProperty(document, 'visibilityState');
       }
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragCancel']);
+      expect(drag()).toBeUndefined();
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
     });
 
     it('should end the drag where the pointer was when a move arrives without the primary button', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
       element.dispatchEvent(pointer('pointermove', [150, 100]));
 
       // The release happened outside the page; the next move reports no button held.
       element.dispatchEvent(pointer('pointermove', [170, 120], { buttons: 0 }));
+      const kept = unit().coordinates['hinge'];
       element.dispatchEvent(pointer('pointermove', [190, 140]));
       flushFrame();
 
-      expect(kinematicsEvents()).toEqual(['dragStart', 'dragMove', 'dragEnd']);
-      expect(moveTargets()[0]?.[0]).toBeCloseTo(4);
+      expect(drag()).toBeUndefined();
+      expect(Math.abs(kept ?? 0)).toBeGreaterThan(0.1);
+      expect(unit().coordinates['hinge']).toBe(kept);
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(settled).toHaveLength(1);
     });
 
     it('should end a pending press on window blur without starting a drag', () => {
-      beginKinematicsDragGesture(options);
+      pressArm();
 
       globalThis.dispatchEvent(new Event('blur'));
       element.dispatchEvent(pointer('pointermove', [150, 100]));
 
-      expect(kinematicsEvents()).toEqual([]);
+      expect(drag()).toBeUndefined();
       expect(controls.enabled).toBe(true);
-      expect(onFinish).toHaveBeenCalledOnce();
+      expect(kinematics.getSnapshot().value).toBe('idle');
     });
   });
 });
 
 describe('useKinematicsDragControls', () => {
-  const unitId = 'file:main.ts';
-  const mechanism: Mechanism = {
-    schemaVersion: 1,
-    units: { length: 'm', angle: 'rad' },
-    root: 'base',
-    links: { base: { components: ['component:base'] }, arm: { components: ['component:arm'] } },
-    joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
-  };
-
   let element: HTMLDivElement;
   let controls: { enabled: boolean };
   let scene: Group;
@@ -370,7 +408,7 @@ describe('useKinematicsDragControls', () => {
       ray: new Ray(new Vector3(x, 0, 10), new Vector3(0, 0, -1)),
     });
 
-  const renderControls = (wrapper = KeyboardProvider) =>
+  const renderControls = (wrapper: (props: { readonly children: ReactNode }) => React.JSX.Element = KeyboardProvider) =>
     renderHook(() => useKinematicsDragControls({ unitId, scene, getPickableMeshes }), { wrapper });
 
   /** Presses the arm and drags it far enough, and for long enough, to change its pose. */
@@ -397,8 +435,8 @@ describe('useKinematicsDragControls', () => {
     meshes = [base, arm];
     getPickableMeshes = vi.fn(() => meshes);
 
-    kinematics = createActor(kinematicsMachine, { input: {} }).start();
-    kinematics.send({ type: 'loadMechanism', unitId, mechanism });
+    ({ actor: kinematics } = startKinematics());
+    kinematics.send({ type: 'setDragEnabled', unitId, enabled: false });
     hooks.kinematics = kinematics;
     hooks.graphics.suppressionReasons = [];
     hooks.graphics.send.mockClear();
@@ -515,16 +553,44 @@ describe('useKinematicsDragControls', () => {
       expect(controls.enabled).toBe(true);
     });
 
-    it('should cancel a drag in flight and restore the camera on unmount', () => {
+    it('should end a press in flight and restore the camera when the viewer clears the unit', () => {
       const { result, unmount } = renderControls();
       setArmed(true);
       dragArm(result.current);
       expect(unit().coordinates['hinge']).not.toBe(0);
 
+      // The kinematics viewer clears the unit as it unmounts it.
       unmount();
+      act(() => {
+        kinematics.send({ type: 'clearMechanism', unitId });
+      });
 
       expect(unit().drag).toBeUndefined();
-      expect(unit().coordinates).toEqual({ hinge: 0 });
+      expect(kinematics.getSnapshot().value).toBe('idle');
+      expect(controls.enabled).toBe(true);
+    });
+
+    it('should register one set of pointer listeners per press under a StrictMode remount', () => {
+      const added = vi.spyOn(document, 'addEventListener');
+      function StrictKeyboard({ children }: { readonly children: ReactNode }): React.JSX.Element {
+        return (
+          <StrictMode>
+            <KeyboardProvider>{children}</KeyboardProvider>
+          </StrictMode>
+        );
+      }
+      const { result } = renderControls(StrictKeyboard);
+      setArmed(true);
+      const pointerListeners = () => added.mock.calls.filter(([type]) => type === 'pointermove').length;
+      const before = pointerListeners();
+
+      dragArm(result.current);
+      act(() => {
+        result.current(press(4));
+      });
+
+      expect(pointerListeners() - before).toBe(1);
+      element.dispatchEvent(pointer('pointerup', [100, 60]));
       expect(controls.enabled).toBe(true);
     });
   });

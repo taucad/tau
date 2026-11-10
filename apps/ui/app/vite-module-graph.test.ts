@@ -174,7 +174,7 @@ describe('desktop module graph', () => {
     expect(serverFiles.some((file) => file.startsWith('tau-module-graph-'))).toBe(false);
   });
   it('should exclude the AR USDZ Assimp worker from the desktop renderer graph', async () => {
-    // `desktop:check-renderer-payload` only runs under the `package-*` targets, so this guard keeps the AR
+    // `ui:check-desktop-payload` only runs under the desktop `package-*` targets, so this guard keeps the AR
     // USDZ Assimp worker and its WebAssembly out of the renderer in core CI instead of at packaging time.
     // The payload pattern below is safe only because the entry is the single AR module: the renderer ships
     // other runtime workers and Assimp legitimately, so widening the entry would make it fire on those.

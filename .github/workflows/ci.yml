@@ -343,6 +343,47 @@ jobs:
         if: matrix.lane == 'build' && github.event_name == 'pull_request'
         run: pnpm nx release plan:check
 
+      # Pinned third-party downloads come from the Actions cache, so only a pin change asks their
+      # origin (Brain research/ci-flake-classes.md class 1, R3: during a GitHub Releases outage the
+      # wasi-sdk of `prepare` and the CPython of `seed` failed 34 lane jobs in two days). The lane's
+      # task graph, for the same targets as the step below, decides which entries it needs, so a
+      # lane that runs neither task restores nothing (the kernel seeds are about 350 MB, the
+      # wasi-sdk archive 125 MB); the test shards read the whole affected `test` graph, as the
+      # deal happens in the step below. Keys digest the pins themselves
+      # (scripts/src/ci-pinned-downloads.ts). The consumers re-verify every byte against its pin,
+      # and on a miss they download as before; `ci-pinned-downloads.yml` saves the entries from
+      # `main`, whose cache scope pull requests and the merge queue restore from.
+      - name: Find the lane's pinned downloads
+        id: pins
+        if: steps.queue.outputs.run-id == ''
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          graph="$RUNNER_TEMP/lane-graph.json"
+          case "$LANE" in
+            lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
+            typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size --graph="$graph" > /dev/null ;;
+            pkgcheck) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
       # Nx Affected runs only tasks affected by the changes in this PR/commit.
       # Browser-backed targets are not in this list — they run nightly in
       # e2e-nightly.yml, the only workflow that installs Chromium.

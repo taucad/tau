@@ -1,0 +1,117 @@
+{
+  "configs": {
+    "CameraAuthority.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Charter I2, I3, I6, I7, I8 and D15 with the drop rule, the input gate, the provenance write rule and sound attribution"
+    },
+    "CameraAuthority.target-wide.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "The target at eight camera changes and three foreign writes"
+    },
+    "CameraAuthority.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The target at two camera changes and one foreign write, so the graph stays under 1 MB (graphs.CameraAuthority)"
+    },
+    "CameraAuthority.today.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoSnapBack"
+      },
+      "kind": "defect",
+      "ref": "The orbit snap-back: after the first frame, the view's own save of a drag pose is published as foreign and, the quiet window having passed, replaces the newer pose of the same drag",
+      "fixedBy": "taucad/tau#1602 for the view store; G1 (digest attribution, I5) and G6b (binding and camera gate) for every interleaving"
+    },
+    "CameraAuthority.today-foreign-mid-drag.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LocalInputWins"
+      },
+      "kind": "defect",
+      "ref": "As built, a foreign pose that arrives during a drag is applied over the person's pose once the quiet window has passed",
+      "fixedBy": "G3 (the camera drops adoptPersistedPose outside input.idle, D15) and G6b"
+    },
+    "CameraAuthority.today-held-drag.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AdoptOnlyWhenIdle"
+      },
+      "kind": "defect",
+      "ref": "As built, the quiet window counts from the last camera emission, so a drag held still for poseSettle lets a foreign pose apply mid-gesture",
+      "fixedBy": "G3 (input states and the settle timer) and G6b"
+    },
+    "CameraAuthority.today-refit-saved.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OnlyPersonPosesWritten"
+      },
+      "kind": "defect",
+      "ref": "As built, an automatic refit after the first frame is saved, because poses are filtered by value and not by source",
+      "fixedBy": "G6b (D20: the binding writes person sources only)"
+    },
+    "CameraAuthority.queue-until-idle.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LocalInputWins"
+      },
+      "kind": "witness",
+      "ref": "Adoption = queue with the input gate: D15's rejected alternative, applying a foreign pose after the drag ends"
+    },
+    "CameraAuthority.misattributed.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoSnapBack"
+      },
+      "kind": "witness",
+      "ref": "AttributionSound removed: the target binding and camera still snap back without the planned RecordSync OwnWriteAttributed (I5)"
+    },
+    "CameraAuthority.no-origin-guard.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnNeverAdopted"
+      },
+      "kind": "witness",
+      "ref": "OriginGuard removed: the binding adopts records labelled own"
+    },
+    "CameraAuthority.no-echo-stamp.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEchoLoop"
+      },
+      "kind": "witness",
+      "ref": "EchoStamp removed: the driver's controls update is taken for input"
+    },
+    "CameraAuthority.no-resave-on-drop.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PersonPoseSaved"
+      },
+      "kind": "witness",
+      "ref": "ResaveOnDrop removed: a person's pose that landed before a foreign write is not saved again when the camera drops the foreign pose, so the file keeps the dropped pose (D15)"
+    },
+    "CameraAuthority.emission-gate.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "IdleForeignApplies"
+      },
+      "kind": "witness",
+      "ref": "QuietGate = emission with the drop rule: a foreign pose that arrives in idle inside the quiet window is dropped, not applied (D15)"
+    },
+    "CameraAuthority.queue-until-idle-NothingQueued.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NothingQueued"
+      },
+      "kind": "witness",
+      "ref": "Adoption = queue with the input gate: a foreign pose that arrives during a drag waits for the gate (I2, D15)"
+    }
+  },
+  "graphs": {
+    "CameraAuthority": {
+      "config": "CameraAuthority.export.cfg",
+      "phase": "cam.input"
+    }
+  }
+}

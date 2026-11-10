@@ -704,34 +704,38 @@ type LayerMaterials = {
   silkscreen: Record<Side, Material>;
 };
 
+/**
+ * A matte solder mask. A flat, glossy board mirrors a whole panel of the viewer's camera-locked room
+ * environment and blows out to white; orbiting cannot move that highlight. The specular factor puts F0
+ * near 0.02, below a real polymer's 0.04: a deliberate legibility choice, not a measured property.
+ */
+const maskRoughness = 0.6;
+const maskSpecular = 0.5;
+
 const createMaterials = (
   document: Document,
   regions: BoardRegions,
   options: BoardPresentationOptions,
 ): LayerMaterials => {
-  const clearcoatExtension = allExtensions.find(
-    (extension) => extension.EXTENSION_NAME === 'KHR_materials_clearcoat',
-  ) as (new (document: Document) => Extension) | undefined;
-  const clearcoat = clearcoatExtension ? document.createExtension(clearcoatExtension) : undefined;
+  const specularExtension = allExtensions.find((extension) => extension.EXTENSION_NAME === 'KHR_materials_specular') as
+    | (new (document: Document) => Extension)
+    | undefined;
+  const specular = specularExtension ? document.createExtension(specularExtension) : undefined;
   // oxlint-disable-next-line eslint/max-params -- a material's PBR factors, read as one row per layer below.
-  const make = (name: string, rgb: Rgb, roughness: number, metallic = 0, coat = false): Material => {
+  const make = (name: string, rgb: Rgb, roughness: number, metallic = 0, specularFactor?: number): Material => {
     const material = document
       .createMaterial(name)
       .setBaseColorFactor(linear(rgb))
       .setRoughnessFactor(roughness)
       .setMetallicFactor(metallic);
-    if (coat && clearcoat) {
+    if (specularFactor !== undefined && specular) {
       const property = (
-        clearcoat as unknown as {
-          createClearcoat: () => {
-            setClearcoatFactor: (v: number) => unknown;
-            setClearcoatRoughnessFactor: (v: number) => unknown;
-          };
+        specular as unknown as {
+          createSpecular: () => { setSpecularFactor: (v: number) => unknown };
         }
-      ).createClearcoat();
-      property.setClearcoatFactor(1);
-      property.setClearcoatRoughnessFactor(0.12);
-      material.setExtension('KHR_materials_clearcoat', property as unknown as Parameters<Material['setExtension']>[1]);
+      ).createSpecular();
+      property.setSpecularFactor(specularFactor);
+      material.setExtension('KHR_materials_specular', property as unknown as Parameters<Material['setExtension']>[1]);
     }
     return material;
   };
@@ -741,12 +745,12 @@ const createMaterials = (
     copper: make('pcb-copper', [0.85, 0.47, 0.32], 0.35, 1),
     finish: make('pcb-finish', finish.color, finish.roughness, 1),
     mask: {
-      top: make('pcb-mask-top', regions.maskColor, 0.42, 0, true),
-      bottom: make('pcb-mask-bottom', regions.bottomMaskColor, 0.42, 0, true),
+      top: make('pcb-mask-top', regions.maskColor, maskRoughness, 0, maskSpecular),
+      bottom: make('pcb-mask-bottom', regions.bottomMaskColor, maskRoughness, 0, maskSpecular),
     },
     maskOverCopper: {
-      top: make('pcb-mask-copper-top', lighten(regions.maskColor, 0.1), 0.38, 0, true),
-      bottom: make('pcb-mask-copper-bottom', lighten(regions.bottomMaskColor, 0.1), 0.38, 0, true),
+      top: make('pcb-mask-copper-top', lighten(regions.maskColor, 0.1), maskRoughness, 0, maskSpecular),
+      bottom: make('pcb-mask-copper-bottom', lighten(regions.bottomMaskColor, 0.1), maskRoughness, 0, maskSpecular),
     },
     silkscreen: {
       top: make('pcb-silkscreen-top', regions.silkColor, 0.65),

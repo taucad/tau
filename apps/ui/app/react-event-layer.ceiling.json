@@ -24,7 +24,7 @@
   "apps/ui/app/components/machines/machine-controls.tsx": 1,
   "apps/ui/app/components/machines/machine-section.tsx": 1,
   "apps/ui/app/components/magicui/typing-animation.tsx": 2,
-  "apps/ui/app/components/memory-kill-reporter.tsx": 1,
+  "apps/ui/app/components/memory-kill-reporter.tsx": 2,
   "apps/ui/app/components/nav/desktop-update.tsx": 1,
   "apps/ui/app/components/nav/project-close-dialogs.tsx": 1,
   "apps/ui/app/components/print/machine-settings-store.ts": 2,

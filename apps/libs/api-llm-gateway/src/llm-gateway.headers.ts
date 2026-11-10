@@ -11,7 +11,12 @@ import { httpHeader } from '@taucad/api-core/constants/http-header';
 import type { TurnTelemetry } from '#model-invocation.types.js';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
-const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);
+const allowedAnthropicBetas = new Set([
+  'fine-grained-tool-streaming-2025-05-14',
+  'interleaved-thinking-2025-05-14',
+  // Admits `thinking.block_binding` and the provider's report of the blocks it left out.
+  'thinking-binding-controls-2026-08-01',
+]);
 
 /** Rejects query inputs that are absent from the funded request identity. */
 export const assertNoQuery = (request: FastifyRequest): void => {

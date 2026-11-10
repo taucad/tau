@@ -441,6 +441,29 @@ describe('billable model request contract', () => {
         'anthropic',
       ).success,
     ).toBe(true);
+    /* How a replayed thinking block whose prefix changed is treated: refused, or left out and reported. */
+    for (const behavior of ['error', 'drop_block']) {
+      for (const thinking of [anthropic.thinking, { type: 'enabled', budget_tokens: 1024 }]) {
+        expect(
+          safeParseBillableModelRequest(
+            { ...anthropic, thinking: { ...thinking, block_binding: { prefix_mismatch_behavior: behavior } } },
+            'anthropic',
+          ).success,
+        ).toBe(true);
+      }
+    }
+    for (const binding of [
+      { prefix_mismatch_behavior: 'ignore' },
+      {},
+      { prefix_mismatch_behavior: 'error', extra: 1 },
+    ]) {
+      expect(
+        safeParseBillableModelRequest(
+          { ...anthropic, thinking: { ...anthropic.thinking, block_binding: binding } },
+          'anthropic',
+        ).success,
+      ).toBe(false);
+    }
     expect(safeParseBillableModelRequest(gemini, 'openai-completions').success).toBe(true);
     expect(
       safeParseBillableModelRequest(

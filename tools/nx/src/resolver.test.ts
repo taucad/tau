@@ -237,6 +237,25 @@ describe('validateTags()', () => {
     ]);
   });
 
+  it('allows any number of distinct known ci lanes and rejects unknown or repeated lanes', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('unlaned', ['scope:shared', 'type:lib'], undefined),
+          project('desktop-app', ['scope:ui', 'type:app', 'release:app', 'ci:desktop'], undefined),
+          project('two-lanes', ['scope:ui', 'type:app-lib', 'layer:feature', 'ci:shell', 'ci:desktop'], undefined),
+          project('browser-app', ['scope:ui', 'type:app', 'ci:browser', 'ci:standalone'], undefined),
+          project('quarantined-e2e', ['scope:ui', 'type:e2e', 'ci:standalone', 'ci:quarantined'], undefined),
+          project('unknown-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:packaged'], undefined),
+          project('repeated-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:desktop'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop)',
+      'fixture/repeated-lane: duplicate tag "ci:desktop"',
+    ]);
+  });
+
   it('allows one valid shell role on a private library and refuses it on every other project', () => {
     expect(
       validateTags({

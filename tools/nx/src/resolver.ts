@@ -166,7 +166,9 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
  * constraints; no other project may carry one. A `shell:` tag is optional and
  * only for private libraries (`type:lib` or `type:app-lib`): the published
  * owners that bundle them are selected by other tags. Host, release and deploy
- * tags are optional but must be unique and valid.
+ * tags are optional but must be unique and valid. `ci:` lane tags are optional
+ * and may repeat with different values, one per lane, but each must be valid
+ * and none may be listed twice.
  * The returned strings are the violations.
  *
  * @public
@@ -176,6 +178,15 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
     const reasons = Object.entries(projectTagVocabulary).flatMap(([dimension, values]) => {
       const allowed: readonly string[] = values;
       const present = tags.filter((tag) => tag.startsWith(`${dimension}:`));
+      if (dimension === 'ci') {
+        const repeated = present.filter((tag, index) => present.indexOf(tag) !== index);
+        const unknown = present.filter((tag) => !allowed.includes(tag.slice(dimension.length + 1)));
+        return [
+          ...unknown.map((tag) => `unknown tag "${tag}" (ci: must be one of ${allowed.join(', ')})`),
+          ...[...new Set(repeated)].map((tag) => `duplicate tag "${tag}"`),
+        ];
+      }
+
       const [tag, ...extra] = present;
       const apiLibrary = tags.includes('scope:api') && tags.includes('type:app-lib');
       const required =

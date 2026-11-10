@@ -26,3 +26,17 @@ describe('warmProjectWorkspace', () => {
     });
   });
 });
+
+describe('loadProjectWorkspace', () => {
+  it('shares one import and tags it fulfilled so a later render does not suspend', async () => {
+    const { loadProjectWorkspace, warmProjectWorkspace } = await import('#lib/project-workspace-warmup.js');
+    warmProjectWorkspace();
+    const load = loadProjectWorkspace();
+    expect(loadProjectWorkspace()).toBe(load);
+
+    const module = await load;
+    await Promise.resolve();
+
+    expect(load).toMatchObject({ status: 'fulfilled', value: module });
+  });
+});

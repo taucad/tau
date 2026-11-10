@@ -108,6 +108,12 @@ describe('ChatMessageReasoning', () => {
     expect(screen.queryByText(/Reasoning|Thinking/u)).not.toBeInTheDocument();
   });
 
+  it('should hand the renderer dollar-delimited math for reasoning stored with LaTeX delimiters', () => {
+    renderReasoning([reasoning(String.raw`The area is \(\pi r^2\).`)]);
+
+    expect(screen.getByTestId('reasoning-markdown')).toHaveTextContent(String.raw`The area is $\pi r^2$.`);
+  });
+
   it('toggles only from the trigger and reports the union duration', async () => {
     const user = userEvent.setup();
     renderReasoning([reasoning('One', { start: 0, end: 1000 }), reasoning('Two', { start: 3000, end: 5000 })]);

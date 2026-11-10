@@ -21,11 +21,28 @@ type ControlsListenerInput = {
   controls: CameraControlsAdapter;
 };
 
-type ControlsListenerEvent =
+/** Events the controls listener and its monitor share. */
+export type ControlsListenerEvent =
   | { type: 'stopListening' }
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsInteractionMoved' }
   | { type: 'controlsInteractionEnd' };
+
+/** The controls listener's public alphabet: every {@link ControlsListenerEvent} type, in the union's order. */
+export const controlsListenerEventTypes = [
+  'stopListening',
+  'controlsInteractionStart',
+  'controlsInteractionMoved',
+  'controlsInteractionEnd',
+] as const satisfies ReadonlyArray<ControlsListenerEvent['type']>;
+
+/**
+ * The (state, event) pairs the controls listener leaves unanswered today (MC-R17): its totality baseline.
+ * `stopListening` is the machine's message to its monitor, which the machine itself never handles.
+ */
+export const controlsListenerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ['active', 'stopListening'],
+];
 
 const controlsListenerLogic = createCallbackLogic<ControlsListenerEvent, ControlsListenerInput>(
   ({ input, sendBack, receive }) => {

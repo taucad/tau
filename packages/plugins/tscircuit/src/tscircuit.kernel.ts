@@ -832,7 +832,7 @@ export const tscircuitKernel = defineKernel({
     flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
-  version: `1.3.0+kicad.${kicadPackVersion}`,
+  version: `1.3.1+kicad.${kicadPackVersion}`,
   optionsSchema: tscircuitOptionsSchema,
   views: {
     board: {

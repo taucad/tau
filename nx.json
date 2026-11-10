@@ -66,7 +66,7 @@
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"]
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"]
     },
     "build": {
       "inputs": ["production", "^production"]
@@ -166,10 +166,16 @@
     "enabled": false
   },
   "namedInputs": {
-    "sharedGlobals": [
-      "{workspaceRoot}/.github/workflows/ci.yml",
-      "{workspaceRoot}/.github/workflows/publish.yml",
-      "{workspaceRoot}/tools/typescript/base.json"
+    "sharedGlobals": ["{workspaceRoot}/tools/typescript/base.json", { "runtime": "node --version" }],
+    "serviceEnvironment": [
+      { "env": "TAU_API_URL" },
+      { "env": "TAU_WEBSOCKET_URL" },
+      { "env": "TAU_FRONTEND_URL" },
+      { "env": "DATABASE_URL" },
+      { "env": "BILLING_TEST_DATABASE_URL" },
+      { "env": "REDIS_URL" },
+      { "env": "TAU_S3_CONFORMANCE_ENDPOINT" },
+      { "env": "TAU_S3_CONFORMANCE_BUCKET" }
     ],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [

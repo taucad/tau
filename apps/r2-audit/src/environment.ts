@@ -31,6 +31,11 @@ export type AuditEnvironment = Readonly<{
   AUDIT_EXPECTED_WRITERS?: string;
   /** `secret_text`, only behind tau-cloud's `query_token_enabled` gate: the Workers Observability Write token. */
   AUDIT_QUERY_TOKEN?: string;
+  /**
+   * `plain_text`, optional: JSON `["<bucket>", ...]`, the buckets another environment's audit Worker owns in
+   * this shared account. The poll skips their events.
+   */
+  AUDIT_FOREIGN_BUCKETS?: string;
 }>;
 
 /** One bucket's expected writers: token ids (Data Access Logs' `actor.accessKeyId`) and Worker script names. */
@@ -85,6 +90,36 @@ export const parseExpectedWriters = (raw: string | undefined): ExpectedWriterMap
     });
   }
   return { valid: true, buckets };
+};
+
+/** The parsed `AUDIT_FOREIGN_BUCKETS`; `valid` is false only when the binding is set but malformed. */
+export type ForeignBuckets = Readonly<{
+  valid: boolean;
+  buckets: ReadonlySet<string>;
+}>;
+
+/**
+ * Parse `AUDIT_FOREIGN_BUCKETS`.
+ *
+ * A missing or empty value names no buckets and is valid: the poll then checks every bucket, as it did
+ * before the binding existed. An unparseable or mistyped value also names no buckets, so the other
+ * environment's writes alarm instead of a broken binding silencing anything, and reads as invalid.
+ *
+ * @param raw - The binding's text.
+ * @returns The foreign bucket names, and whether the text was well formed.
+ */
+export const parseForeignBuckets = (raw: string | undefined): ForeignBuckets => {
+  if (raw === undefined || raw.trim() === '') {
+    return { valid: true, buckets: new Set() };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return { valid: false, buckets: new Set() };
+  }
+  const buckets = stringList(parsed);
+  return buckets === undefined ? { valid: false, buckets: new Set() } : { valid: true, buckets: new Set(buckets) };
 };
 
 /**

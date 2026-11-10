@@ -144,7 +144,7 @@ vi.mock('#hooks/use-context-payload.js', () => ({
   awaitContextPayload: async () => undefined,
 }));
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts' }),
+  useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts', geometryUnits: new Map() }),
 }));
 // Absent file manager: this scope publishes an explicit host-command stub.
 vi.mock('#hooks/use-file-manager.js', () => ({

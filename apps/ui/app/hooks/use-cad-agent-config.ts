@@ -351,7 +351,7 @@ export const useAgentHostPlacements = (): {
 export const useCadAgentConfig = (): CadAgentConfigInput => {
   const {
     execution: { execution },
-    kernel: { kernelId },
+    kernel: { preference },
     model: { model },
   } = useChatComposer();
   // Mounted for its effect, never to rewrite the execution. Capability gates a
@@ -362,13 +362,13 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
   const mode = useChatSelector((state) => state.draftMode as ChatMode);
   const toolChoice = useChatSelector((state) => state.draftToolChoice as ToolSelection);
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
-  const snapshot = useChatSnapshot(kernelId);
+  const snapshot = useChatSnapshot(preference);
   const contextPayload = useContextPayload();
 
   return {
     profile: 'cad',
     execution,
-    kernel: kernelId,
+    kernel: preference,
     mode,
     toolChoice,
     testingEnabled,

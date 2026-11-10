@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
 import { maxSnapshotFileTreeEntries, snapshotSchema } from '@taucad/chat';
 import type { FileEntry, FileProvenance, GeometryComponentManifest } from '@taucad/types';
+import { projectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 import {
-  projectKernelOwner,
   projectSnapshotKernel,
   boundedProjectFileTree,
   projectFileTree,

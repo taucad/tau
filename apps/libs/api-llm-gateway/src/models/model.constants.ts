@@ -53,14 +53,60 @@ export function assertSingleDefaultModel(models: ReadonlyArray<Pick<Model, 'id' 
 
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
+    'claude-fable-5.2': {
+      enabled: true,
+      id: 'anthropic-claude-fable-5.2',
+      providerKind: 'tau-hosted',
+      name: 'Fable 5.2',
+      slug: 'claude-fable-5.2',
+      recommended: true,
+      description: "Anthropic's strongest model for demanding reasoning and long-horizon agentic CAD work.",
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-fable-5-2',
+      support: {
+        reasoning: lowToExtraHighReasoning,
+        toolChoice: false,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 8,
+          outputTokens: 40,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 10,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-fable-5.1': {
       enabled: true,
       id: 'anthropic-claude-fable-5.1',
       providerKind: 'tau-hosted',
       name: 'Fable 5.1',
       slug: 'claude-fable-5.1',
-      recommended: true,
-      description: "Anthropic's strongest model for demanding reasoning and long-horizon agentic CAD work.",
+      recommended: false,
+      description: 'Previous Fable release for demanding reasoning and long-horizon agentic CAD work.',
       provider: {
         id: 'anthropic',
         name: 'Anthropic',

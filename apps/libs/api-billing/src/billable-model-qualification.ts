@@ -140,6 +140,15 @@ const route = (
 
 const routes = [
   route(
+    'anthropic-claude-fable-5.2',
+    'Fable 5.2',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('8', '.2', '10', '40'),
+    { pricingRevision: '2026-11-10' },
+  ),
+  route(
     'anthropic-claude-fable-5.1',
     'Fable 5.1',
     'anthropic',

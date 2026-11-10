@@ -220,7 +220,14 @@ export const createInlineCompute = (): ComputeWorker => {
         await indexPack({ fs, dir: '', gitdir: '', filepath: 'pack.pack' });
       } catch (error) {
         /* The indexer refuses a pack it cannot read; running out of room is not a verdict on the pack. */
-        throw error instanceof RangeError ? error : new CorruptBytesError('The pack does not index.', { cause: error });
+        if (error instanceof RangeError) {
+          throw error;
+        }
+        /* The indexer's own reason goes in the sentence: a refusal seen only on one device is read off its toast. */
+        /* The library's internal errors wrap the reason in a bug-report sentence; `data.message` is the reason itself. */
+        const own = (error as { data?: { message?: unknown } } | undefined)?.data?.message;
+        const reason = typeof own === 'string' ? own : error instanceof Error ? error.message : String(error);
+        throw new CorruptBytesError(`The pack does not index: ${reason}`, { cause: error });
       }
       const written = files.get('pack.idx');
       if (written === undefined) {
@@ -269,6 +276,14 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
 export const transfersArguments = (method: ComputeMethod, args: readonly unknown[]): boolean =>
   (method === 'sha256' && args[1] === true) || method === 'sha256Kept' || method === 'measureImportBytes';
 
+/** What an error was caused by, as far as it survives a structured clone: its class name and sentence. */
+type SeamCause = Readonly<{ name: string; message: string }>;
+
+const seamCauseOf = (error: unknown): SeamCause | undefined => {
+  const cause = (error as { cause?: unknown } | undefined)?.cause;
+  return cause instanceof Error ? { name: cause.name, message: cause.message } : undefined;
+};
+
 /** One request over the seam. */
 export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args: readonly unknown[] }>;
 
@@ -277,7 +292,7 @@ export type ComputeAnswer = Readonly<{
   id: number;
   result?: unknown;
   /** A refusal's `reason` travels with it, so the import's limits verdict survives the boundary. */
-  error?: Readonly<{ name: string; message: string; reason?: string }>;
+  error?: Readonly<{ name: string; message: string; reason?: string; cause?: SeamCause }>;
   started?: true;
   pong?: true;
 }>;
@@ -335,8 +350,17 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
       } catch (error) {
         const { name, message } = error instanceof Error ? error : new Error(String(error));
         const reason = (error as { reason?: unknown } | undefined)?.reason;
+        const cause = seamCauseOf(error);
         port.postMessage(
-          { id, error: { name, message, ...(typeof reason === 'string' ? { reason } : {}) } } satisfies ComputeAnswer,
+          {
+            id,
+            error: {
+              name,
+              message,
+              ...(typeof reason === 'string' ? { reason } : {}),
+              ...(cause === undefined ? {} : { cause }),
+            },
+          } satisfies ComputeAnswer,
           [],
         );
       }
@@ -346,13 +370,19 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
 };
 
 /* The error a worker threw: a verdict on the bytes as one, anything else as an error that judges nothing. */
-const reviveError = (error: Readonly<{ name: string; message: string; reason?: string }>): Error =>
-  error.name === 'CorruptBytesError'
-    ? new CorruptBytesError(error.message)
-    : Object.assign(new Error(error.message), {
+const reviveError = (error: NonNullable<ComputeAnswer['error']>): Error => {
+  /* The cause comes back as an error of its own, so a report reads it as it would have read the original. */
+  const options =
+    error.cause === undefined
+      ? undefined
+      : { cause: Object.assign(new Error(error.cause.message), { name: error.cause.name }) };
+  return error.name === 'CorruptBytesError'
+    ? new CorruptBytesError(error.message, options)
+    : Object.assign(new Error(error.message, options), {
         workerErrorName: error.name,
         ...(error.reason === undefined ? {} : { reason: error.reason }),
       });
+};
 
 /** The caller's half of one connection: the contract, and what fails every call it holds. */
 export type ComputeConnection = Readonly<{

@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +34,7 @@ const gitToolchainOnPath = await requireRevisionToolchain().then(
 const roots: string[] = [];
 
 afterEach(async () => {
+  delete process.env['TAU_CONFIG_DIR'];
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { force: true, recursive: true })));
 });
 
@@ -119,44 +120,40 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
 });
 
 /*
- * W6-a2 R2: AC15's Node half. `createProjectRevisions` has an `actor` seam, and
- * a host that leaves it empty authors every revision as the opaque `tau-host`.
- * This is the wiring both Node call sites use — `apps/desktop/src/tau/
- * services-host.impl.ts` and `packages/host/src/host-daemon.ts`.
+ * A1: a native host records the Tau account it is handed (the session a
+ * renderer sends with `setActor`, or the account a token belongs to) and, with
+ * none, this device's pseudonym. This is the wiring every Node entry point uses:
+ * the desktop (`apps/desktop/src/tau/services-host.impl.ts`) and `tau serve`
+ * (`packages/host/src/host-daemon.ts`) through `createProjectHost`, and
+ * `tau revisions save` through `openProjectRevisions`.
  */
-describe.runIf(gitToolchainOnPath)('a Node host records the person it runs for', () => {
-  it('authors what it mints as this machine\u2019s user, with Tau as the committer', async () => {
-    const workspaceRoot = await workspace();
-    const configDirectory = await mkdtemp(join(tmpdir(), 'tau-host-config-'));
-    roots.push(configDirectory);
-    process.env['TAU_CONFIG_DIR'] = configDirectory;
-    const person = hostRevisionActor();
+describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed', () => {
+  /**
+   * Mint one close cut and read its author and committer.
+   *
+   * Waits for the live checkout, not for a clock: `release()` flushes through
+   * whatever checkout the root has now, and a host that has not yet spawned one
+   * mints nothing. The one seam that says the spawn has happened is this host's
+   * own watcher, which calls `changed` only once `liveCheckoutId` is set.
+   *
+   * @param workspaceRoot - The project directory.
+   * @param projectId - The project id.
+   * @param before - What the page sends before the write, if anything.
+   * @returns `author name|author email|committer name|committer email` of `main`.
+   */
+  const closeCut = async (
+    workspaceRoot: string,
+    projectId: string,
+    before?: (revisions: ReturnType<typeof createProjectRevisions>) => Promise<void>,
+  ): Promise<string> => {
     /* The isomorphic leg on purpose: the claim is the attribution a host wires,
-     * not the engine (row 1 covers native git's), and a mint made of process
-     * spawns can outlast the close flush's own five-second bound on a loaded
-     * machine — which would make this row report a timing accident as a fact. */
+     * not the engine, and a mint made of process spawns can outlast the close
+     * flush's own bound on a loaded machine. */
     const port = createIsomorphicGitRevisionPort({
       filesystem: new NodeFsProvider(workspaceRoot),
-      checkouts: { projectId: 'project-host-actor', root: () => new NodeFsProvider(workspaceRoot) },
+      checkouts: { projectId, root: () => new NodeFsProvider(workspaceRoot) },
     });
-    const revisions = createProjectRevisions({
-      workspaceRoot,
-      projectId: 'project-host-actor',
-      port,
-      actor: person,
-    });
-
-    /*
-     * Wait for the live checkout, not for a clock.
-     *
-     * `release()` flushes through whatever checkout the root has *now*, and a
-     * host that has not yet spawned one — the registry answers asynchronously —
-     * mints nothing at all. The one seam that says the spawn has happened is
-     * this host's own watcher: it holds each observed write until
-     * `liveCheckoutId` is set and only then calls `changed`, so the first call
-     * through is the condition itself. (That it is the only such seam is a gap
-     * in `ProjectRevisions`, recorded for W7-a2/W13 in the report.)
-     */
+    const revisions = createProjectRevisions({ workspaceRoot, projectId, port });
     let liveCheckoutId: string | undefined;
     const { changed } = revisions;
     Object.assign(revisions, {
@@ -165,38 +162,92 @@ describe.runIf(gitToolchainOnPath)('a Node host records the person it runs for',
         changed(checkoutId, paths);
       },
     });
+    await before?.(revisions);
     await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
     await expect.poll(() => liveCheckoutId, { timeout: 20_000 }).toBeDefined();
-
-    /* The close flush is this host's own trigger-only mint: no turn, no lease,
-     * and the I5 gate decides — the same path a quit takes (S30 `close`). */
+    /* The close flush: no turn, no lease, the same path a quit takes (S30 `close`). */
     await revisions.release();
-
-    /* The flush's own outcome, before anything is cloned: `release()` bounds the
-     * cut, so a mint that did not land is a fact about this run, not a bad clone. */
     const storeDirectory = join(workspaceRoot, '.git');
     expect(execFileSync('git', ['-C', storeDirectory, 'for-each-ref'], { encoding: 'utf8' })).toContain(
       'refs/heads/main',
     );
-
-    const clone = join(workspaceRoot, '..', 'clone-host-actor');
-    execFileSync('git', ['clone', '--quiet', join(workspaceRoot, '.git'), clone], { stdio: 'ignore' });
-    /* The branch by name, not the clone's HEAD: Tau writes refs itself and
-     * never sets the store's default branch, so which branch a fresh clone
-     * checks out is `git init.defaultBranch` on the machine, not this project. */
-    const line = execFileSync('git', ['log', '-1', '--format=%an|%cn|%ce', 'refs/remotes/origin/main'], {
-      cwd: clone,
+    return execFileSync('git', ['-C', storeDirectory, 'log', '-1', '--format=%an|%ae|%cn|%ce', 'refs/heads/main'], {
       encoding: 'utf8',
     }).trim();
+  };
 
-    const expected = person({ runId: undefined, trigger: 'close' });
-    if (expected?.kind !== 'user') {
-      throw new Error('a Node host records a person, not an agent');
-    }
-    expect(line).toBe(`${expected.name ?? expected.id}|Tau|noreply@tau.new`);
-    /* The falsifying half: the opaque host id is what an unwired host records. */
-    expect(line.startsWith('tau-host|')).toBe(false);
+  const configDirectory = async (): Promise<string> => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-host-config-'));
+    roots.push(directory);
+    process.env['TAU_CONFIG_DIR'] = directory;
+    return directory;
+  };
+
+  it('authors a close cut after `setActor` as the session, under its no-reply address', async () => {
+    const workspaceRoot = await workspace();
+    await configDirectory();
+    const line = await closeCut(workspaceRoot, 'project-session-actor', async (revisions) => {
+      await revisions.channel.request({
+        command: 'setActor',
+        actor: { kind: 'user', id: 'usr_lane1', name: 'Lane Person' },
+      });
+    });
+    expect(line).toBe('Lane Person|usr_lane1@users.noreply.tau.new|Tau|noreply@tau.new');
   }, 60_000);
+
+  it('refuses a `setActor` that names anything but a person', async () => {
+    const workspaceRoot = await workspace();
+    await configDirectory();
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-bad-actor',
+      watchWorkspace: false,
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-bad-actor', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    try {
+      await expect(
+        revisions.channel.request({ command: 'setActor', actor: { kind: 'agent', id: 'agent' } }),
+      ).rejects.toThrow();
+    } finally {
+      await revisions.release();
+    }
+  }, 30_000);
+
+  it('authors a close cut with no session as this device’s pseudonym, kept outside the tree', async () => {
+    const workspaceRoot = await workspace();
+    const config = await configDirectory();
+    const line = await closeCut(workspaceRoot, 'project-pseudonym');
+    const person = hostRevisionActor()({ runId: undefined, trigger: 'close' });
+    expect(person).toMatchObject({ kind: 'user', name: 'Anonymous', anonymous: true });
+    const id = person?.kind === 'user' ? person.id : '';
+    expect(id).toMatch(/^anon:[\da-f]{8}$/u);
+    /* One device, one pseudonym: a second host on it records the same one. */
+    expect(hostRevisionActor()({ runId: undefined, trigger: 'save' })).toStrictEqual(person);
+    expect(line).toBe(`Anonymous|${id}@users.noreply.tau.new|Tau|noreply@tau.new`);
+    /* The salt stays in this host's config, never in the tree. */
+    const salt = await readFile(join(config, 'revision-salt'), 'utf8');
+    expect(salt.trim()).not.toBe('');
+    const tracked = execFileSync(
+      'git',
+      ['-C', join(workspaceRoot, '.git'), 'ls-tree', '-r', '--name-only', 'refs/heads/main'],
+      { encoding: 'utf8' },
+    );
+    expect(tracked).not.toContain('revision-salt');
+  }, 60_000);
+
+  it('records the account it was wired with until a session replaces it', () => {
+    const resolve = hostRevisionActor({ kind: 'user', id: 'usr_token1' });
+    expect(resolve({ runId: undefined, trigger: 'save' })).toStrictEqual({ kind: 'user', id: 'usr_token1' });
+    expect(resolve({ runId: 'run-1', trigger: 'turn' })).toStrictEqual({
+      kind: 'agent',
+      id: 'agent',
+      runId: 'run-1',
+      onBehalfOf: { kind: 'user', id: 'usr_token1' },
+    });
+  });
 });
 
 /*

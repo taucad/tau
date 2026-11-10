@@ -1803,9 +1803,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await sweepTemporarySiblings(place, rooted);
       /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
        * checkout a failed tree write owes a check is checked again here (D10). */
-      if (place.kind === 'live' || owedFills.has(place.id)) {
-        resumeFill(place);
-      }
+      checkFill(place);
       const { modeBasis, bypassMemo, changed, signal } = captureOptions;
       const memos = memosOf(place.id);
       const ignoreRoot = place.kind === 'live' ? undefined : place.root;
@@ -1870,6 +1868,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     onApplyingTree: (place, paths, bracket) => {
       if (bracket?.purpose === 'tree') {
         treeWrites.set(place.id, (treeWrites.get(place.id) ?? 0) + 1);
+        /* The write owns its generation's word (`fillSoon`): no check meanwhile starts a second fill. */
+        answeredFills.set(place.id, generationOf(place.id));
         largeObjects.forget(place.id);
       }
       return options.onApplyingTree?.(place, paths, bracket);
@@ -1936,63 +1936,60 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       useFileSystem(place, async (rooted) => rooted.capabilities.largeObjectSources === true),
     report: options.onLargeObjects,
   });
-  /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
-  const resumedFills = new Set<string>();
-  /* Checkouts a tree write left without the fill's word (its check failed): the next capture checks again (D10). */
-  const owedFills = new Set<string>();
+  /*
+   * The fill's word, level-triggered (D10; Brain
+   * research/new-project-viewer-stuck-downloading-blueprint.md, T2-T4).
+   *
+   * A checkout's readiness waits on the fill's word for its current write
+   * generation (`treeWrites`). Only a write of a tree, a new checkout or a
+   * previous session's disk can put a placeholder in it; a mint moves the head
+   * without writing the tree, so the word is per generation, never per head.
+   * Every path that may meet a checkout (the root's start, any capture, a
+   * pull, a new checkout) asks `checkFill`, and the one check a generation
+   * owes runs once, with or without a head: with no placeholder there is
+   * nothing to fetch, so the answer needs none. A failed check is not
+   * recorded, so the next path that meets the checkout checks again.
+   */
+  const answeredFills = new Map<string, number>();
+  const checkingFills = new Set<string>();
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
-  /*
-   * Off the caller's path: a resume starts a fill only where none runs. No
-   * place is the project directory, found as the root starts. A write of
-   * another revision's tree starts its own fill (`writeRevisionTree`).
-   */
-  const fillLater = (place: Checkout | undefined, owed = false): void => {
-    if (fillsStopped) {
+  const generationOf = (checkoutId: string): number => treeWrites.get(checkoutId) ?? 0;
+  const unanswerFill = (checkoutId: string): void => {
+    if (answeredFills.get(checkoutId) === generationOf(checkoutId)) {
+      answeredFills.delete(checkoutId);
+    }
+  };
+  const checkFill = (place: Checkout): void => {
+    if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
       return;
     }
-    /* Taken before any await, as `fillSoon` does: a tree write that begins in the gap owns the checkout's next word (D10). */
-    const writes = place === undefined ? undefined : treeWrites.get(place.id);
+    /* Taken before any await: a tree write that begins in the gap owns the checkout's next word. */
+    const generation = generationOf(place.id);
+    checkingFills.add(place.id);
     const timer = setTimeout(() => {
       resumeTimers.delete(timer);
-      // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
+      // async-iife: bootstrap -- a background check; a fill's own failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
-        let target = place;
         try {
-          if (target === undefined) {
-            const places = await listPlaces();
-            target = places.find((candidate) => candidate.kind === 'live');
+          const head = await headOf(place);
+          const placeholders = largeObjectPlaceholders(await capture(place));
+          if (fillsStopped || generationOf(place.id) !== generation) {
+            return;
           }
-          const head = target === undefined ? undefined : await headOf(target);
-          if (target !== undefined && head !== undefined && !fillsStopped) {
-            resumedFills.add(target.id);
-            /* Owed: given its placeholders, the fill gives its word even with none to fetch. */
-            const placeholders = owed ? largeObjectPlaceholders(await capture(target)) : undefined;
-            if (place !== undefined && treeWrites.get(place.id) !== writes) {
-              return;
-            }
-            await (placeholders === undefined
-              ? largeObjects.resume(target, revisionId(head))
-              : largeObjects.fill(target, revisionId(head), placeholders));
-          }
+          answeredFills.set(place.id, generation);
+          await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
         } catch (error) {
-          /* Unmarked, so the next capture or pull checks again. */
-          resumedFills.delete(target?.id ?? '');
-          if (owed && target !== undefined) {
-            owedFills.add(target.id);
+          if (answeredFills.get(place.id) === generation) {
+            answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+        } finally {
+          checkingFills.delete(place.id);
         }
       })();
     }, 0);
     resumeTimers.add(timer);
-  };
-  const resumeFill = (place: Checkout): void => {
-    const owed = owedFills.delete(place.id);
-    if (!resumedFills.has(place.id) || owed) {
-      resumedFills.add(place.id);
-      fillLater(place, owed);
-    }
   };
   /* A close: no fill starts again, and none is still writing when this resolves. */
   const stopFills = async (): Promise<void> => {
@@ -2003,8 +2000,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.clear();
     await largeObjects.stop();
   };
-  /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
-  fillLater(undefined);
+  /* As the root starts, every checkout: a reload may show any of them, live or linked. */
+  // async-iife: bootstrap -- the start's checks run off the caller's path; a listing that fails is checked again at the next capture.
+  void (async (): Promise<void> => {
+    try {
+      for (const place of await listPlaces()) {
+        checkFill(place);
+      }
+    } catch (error) {
+      console.warn('[revisions] checkouts could not be listed for their large objects', error);
+    }
+  })();
 
   /* `before` with `paths` as `written` holds them: a path `written` lacks is removed, every other path kept. */
   const overlay = (
@@ -2089,22 +2095,25 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const fillSoon = (tree: ImmutableRevisionTree | undefined): void => {
       /* Taken before any await: a tree write that begins in the gap owns the checkout's next word (D10). */
       const writes = treeWrites.get(place.id);
+      /* This write's generation is answered here, before any await: a capture meanwhile starts no second fill. */
+      answeredFills.set(place.id, writes ?? 0);
       // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
           const head = (tree === undefined ? undefined : fillFrom) ?? (await headOf(place));
-          if (head === undefined || fillsStopped) {
+          if (fillsStopped) {
             return;
           }
           const placeholders = largeObjectPlaceholders(tree ?? (await capture(place)));
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
-          resumedFills.add(place.id);
-          await largeObjects.fill(place, revisionId(head), placeholders);
+          await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
         } catch (error) {
-          /* Owed, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
-          owedFills.add(place.id);
+          /* Unanswered, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
+          if (answeredFills.get(place.id) === (writes ?? 0)) {
+            answeredFills.delete(place.id);
+          }
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
       })();
@@ -2114,7 +2123,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       fillSoon(written);
       return answer;
     } catch (error) {
-      if (written !== undefined) {
+      if (written === undefined) {
+        /* Nothing was written, so no fill speaks for this generation: the next capture checks it. */
+        unanswerFill(place.id);
+      } else {
         fillSoon(undefined);
       }
       throw error;
@@ -2150,7 +2162,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (head === undefined || fillsStopped) {
         return;
       }
-      resumedFills.add(place.id);
+      answeredFills.set(place.id, generationOf(place.id));
       /* Given its placeholders, the fill is registered before this returns, so the caller's wait finds it. */
       void largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(await capture(place)));
     },
@@ -4567,6 +4579,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ...(input.from === '' ? {} : { from: revisionId(input.from) }),
         });
         await noteRemovedCheckout(added.id, false);
+        /* A new checkout is a new tree: its readiness waits on the fill's word, owed here even with nothing to fetch. */
+        checkFill(added);
         return { checkout: await recordOf(added, await readLeases()) };
       }),
 
@@ -5637,7 +5651,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ]);
         const active = places.find((place) => place.branch === input.branch);
         if (active !== undefined) {
-          resumeFill(active);
+          checkFill(active);
         }
         const wanted = authoredFetchReferences(advertised, input.remote);
         /* Skip unchanged tips only after this effect session completed a fetch

@@ -1607,7 +1607,7 @@ describe('restore, through the machine that owns it', () => {
    * Red rows (Brain research/new-project-viewer-stuck-downloading-blueprint.md):
    * a checkout's readiness waits on the fill's word, and these two paths never give it.
    */
-  it.fails('tells the fill result for a new linked checkout (E1, L2)', async () => {
+  it('tells the fill result for a new linked checkout (E1, L2)', async () => {
     const reports: LargeObjectsReport[] = [];
     const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
       onLargeObjects: (report) => reports.push(report),
@@ -1631,7 +1631,7 @@ describe('restore, through the machine that owns it', () => {
     });
   }, 30_000);
 
-  it.fails('tells the fill result once a project with no revision gets its first one (E2, L1)', async () => {
+  it('tells the fill result once a project with no revision gets its first one (E2, L1)', async () => {
     const reports: LargeObjectsReport[] = [];
     const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
       onLargeObjects: (report) => reports.push(report),
@@ -2023,9 +2023,9 @@ describe('the checkout registry', () => {
         events.push(placement.status);
       },
     });
-    /* The root checks the project directory for large-object placeholders as it starts. */
+    /* The root checks every checkout for large-object placeholders as it starts: a reload may show a linked one. */
     await vi.waitFor(() => {
-      expect(events).toEqual(['open:live', 'close:live']);
+      expect(events.toSorted()).toEqual(['close:linked', 'close:live', 'open:linked', 'open:live']);
     });
     events.length = 0;
 

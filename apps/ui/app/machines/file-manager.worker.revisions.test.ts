@@ -2298,7 +2298,7 @@ describe('readiness settles without a large-object download', () => {
     return { alpha, root: await fixture.root('alpha') };
   };
 
-  it.fails('reaches filled after the first revision of a new project is saved (S1)', async () => {
+  it('reaches filled after the first revision of a new project is saved (S1)', async () => {
     const fixture = harness(['alpha']);
     await seed(fixture);
     await fixture.open('alpha');
@@ -2313,7 +2313,7 @@ describe('readiness settles without a large-object download', () => {
     expect(root.status().readiness).toBe('filled');
   }, 30_000);
 
-  it.fails('reaches filled when the first turn of a new project mints its base revision (S2)', async () => {
+  it('reaches filled when the first turn of a new project mints its base revision (S2)', async () => {
     const fixture = harness(['alpha']);
     const project = await seed(fixture);
     const alpha = await fixture.open('alpha');
@@ -2332,7 +2332,7 @@ describe('readiness settles without a large-object download', () => {
     expect(root.status().readiness).toBe('filled');
   }, 30_000);
 
-  it.fails('reaches filled on a linked checkout selected after it is created (S5)', async () => {
+  it('reaches filled on a linked checkout selected after it is created (S5)', async () => {
     const fixture = harness(['alpha']);
     const project = await seed(fixture);
     const { alpha, root } = await openOnHead(fixture, project);

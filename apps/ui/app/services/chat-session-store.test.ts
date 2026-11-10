@@ -7182,7 +7182,8 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
     // Admitted, but no host connector is published, so the dispatch fails.
     publishAdmission(session.chatId, (gesture) => {
       admitted.push(gesture);
-      return { kind: 'continue' } as ChatRequest;
+      const request: ChatRequest = { kind: 'continue' };
+      return request;
     });
     publishLogRows(store, session.chatId, rateLimitedRows('run_r5_undispatched'));
 

@@ -3019,7 +3019,7 @@ export class ChatSessionStore {
       departed = false;
       /* After this emit settles, so the gesture is admitted rather than queued behind it, and its refusal is heard. */
       queueMicrotask(() => {
-        void this.requestTurn(chatId, { kind: 'continue' }).finally(endRefusedResume);
+        void this.#resumeAutomatically(chatId, endRefusedResume);
       });
     });
     /*
@@ -3082,6 +3082,20 @@ export class ChatSessionStore {
       persistence,
       { unsubscribe: unsubscribePull },
     ];
+  }
+
+  /**
+   * Resume a chat whose automatic resume's wait ended, then let its waits hear how the resume settled (audit R5).
+   *
+   * @param chatId - The chat.
+   * @param settled - Called once the resume is admitted, held or refused.
+   */
+  async #resumeAutomatically(chatId: string, settled: () => void): Promise<void> {
+    try {
+      await this.requestTurn(chatId, { kind: 'continue' });
+    } finally {
+      settled();
+    }
   }
 
   /** Dispatch one admitted command, then let the SDK read only its projected chunks. */

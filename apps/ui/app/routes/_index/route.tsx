@@ -5,7 +5,7 @@ import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
 import type { Handle } from '#types/matches.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { setEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },

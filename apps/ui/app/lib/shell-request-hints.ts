@@ -4,7 +4,7 @@ import { UNSAFE_DataRouterStateContext as DataRouterStateContext } from 'react-r
 import { detectRequestPlatform, serverPlatform } from '@taucad/ui/utils/platform';
 import type { DetectedPlatform } from '@taucad/ui/utils/platform';
 import { metaConfig } from '#constants/meta.constants.js';
-import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
+import { sidebarDefaultOpen } from '@taucad/ui-core/constants/sidebar.constants';
 
 /**
  * What the server needs to render the application shell at its final geometry: the

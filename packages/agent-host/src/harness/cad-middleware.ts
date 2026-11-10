@@ -9,6 +9,7 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
+import { isChatStateMessage } from '#log/event-types.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
 import { toJsonValue } from '#harness/session-record.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
@@ -282,6 +283,11 @@ const historyCarriesCatalog = (
  * else in the pinned block, rides as a note in this turn's context messages instead, so a change is noted once: the
  * turns after it add no note, and the history keeps the one note where it was.
  *
+ * The client's state note (`chatStateMessage`) follows the same rule: it joins the turn's context only when its text
+ * differs from the newest state note the history carries, and a note that says "defaults" is left out of a chat that
+ * carries none. After a summary the history may no longer hold it, so the post-compaction context restates every
+ * note that is not the default, and a return to the defaults this turn announces.
+ *
  * @internal
  */
 export const createTurnContextSnapshot = async (options: {
@@ -302,6 +308,8 @@ export const createTurnContextSnapshot = async (options: {
    * turn's context noted a catalog change the history still holds.
    */
   readonly carriedSkillsNote?: string | undefined;
+  /** The newest state note the chat's request history carries before this turn (`carriedStateNote`). */
+  readonly carriedStateNote?: string | undefined;
 }): Promise<TurnContextSnapshot> => {
   const skills = options.clientContext?.skills ?? [];
   const memory = options.clientContext?.memory ?? {};
@@ -341,6 +349,15 @@ export const createTurnContextSnapshot = async (options: {
         });
   const initialRecent = recentMessage(false);
   const postCompactionRecent = recentMessage(true);
+  const stateNote = options.contextMessages?.find((message) => isChatStateMessage(message));
+  const contextMessages = options.contextMessages?.filter((message) => !isChatStateMessage(message)) ?? [];
+  const stateIsDefault = stateNote?.metadata?.tauInternal?.['default'] === true;
+  const stateChange =
+    stateNote === undefined ||
+    stateNote.content === options.carriedStateNote ||
+    (stateIsDefault && options.carriedStateNote === undefined)
+      ? undefined
+      : stateNote;
   const systemPromptBlocks = options.systemPromptBlocks
     ? [
         ...options.systemPromptBlocks.slice(0, -1),
@@ -362,14 +379,15 @@ export const createTurnContextSnapshot = async (options: {
     ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
-    initialMessages: [initialRecent, memoryMessage, skillsNote, ...(options.contextMessages ?? [])].filter(
+    initialMessages: [initialRecent, memoryMessage, skillsNote, ...contextMessages, stateChange].filter(
       (message): message is UserProviderMessage => message !== undefined,
     ),
     postCompactionMessages: [
       postCompactionRecent,
       memoryMessage,
       skillsNote,
-      ...(options.contextMessages ?? []),
+      ...contextMessages,
+      stateChange ?? (stateIsDefault ? undefined : stateNote),
     ].filter((message): message is UserProviderMessage => message !== undefined),
   };
 };

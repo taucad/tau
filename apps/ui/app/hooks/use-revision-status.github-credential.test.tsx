@@ -12,7 +12,7 @@ import { render } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
 import { createActor, setup, types } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { Topic } from '@taucad/events';
 import type { GitRemoteCredential, RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
@@ -26,7 +26,7 @@ import type { RevisionClient } from '#types/revision-client.types.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import type { WorkerRevisionCommand } from '#machines/file-manager.worker.revisions.js';
 

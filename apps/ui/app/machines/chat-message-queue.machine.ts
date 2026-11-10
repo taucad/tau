@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createActor, createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { QueuedChatMessage } from '@taucad/chat-ui/db/chat-message-queue-store';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 
 export type ChatMessageQueueMachineInput = Readonly<{ chatId: string; projectId: string }>;
 export type QueueAdvanceResult = Readonly<{

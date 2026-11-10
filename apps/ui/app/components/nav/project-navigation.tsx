@@ -8,7 +8,7 @@ import { useProjectListShape } from '#hooks/use-project-list-shape.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
 import { projectChatUrl, projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import {
   SidebarGroup,
   SidebarGroupLabel,

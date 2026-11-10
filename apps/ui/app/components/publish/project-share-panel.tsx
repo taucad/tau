@@ -32,7 +32,7 @@ import type {
 import { toast } from '@taucad/ui/components/sonner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';

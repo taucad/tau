@@ -1,4 +1,4 @@
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { deriveProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';

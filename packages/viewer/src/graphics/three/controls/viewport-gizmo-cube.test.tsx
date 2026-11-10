@@ -92,6 +92,8 @@ const createDriverSnapshot = (requestedVerticalFieldOfView: number, revision: nu
   }),
   perspectiveVerticalFieldOfView: requestedVerticalFieldOfView === 0 ? 60 : requestedVerticalFieldOfView,
   revision,
+  lastChange: { source: 'framing', revision },
+  renderFrame: { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
 });
 
 vi.mock('@react-three/fiber', () => ({

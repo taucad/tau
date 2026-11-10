@@ -40,6 +40,8 @@ const createDriverSnapshot = (projection: CameraProjection, revision: number): C
   }),
   perspectiveVerticalFieldOfView: projection.kind === 'orthographic' ? 60 : projection.verticalFieldOfView,
   revision,
+  lastChange: { source: 'framing', revision },
+  renderFrame: mockRenderFrame,
 });
 
 vi.mock('@react-three/fiber', () => ({

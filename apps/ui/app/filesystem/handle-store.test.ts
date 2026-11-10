@@ -623,7 +623,7 @@ describe('storage quota errors', () => {
   it('maps a QuotaExceededError write failure to a typed workspace error', async () => {
     const { setProjectFileSystemConfig } = await loadStore();
     const { StorageQuotaExceededError: storageQuotaExceededErrorClass } =
-      await import('#filesystem/workspace-errors.js');
+      await import('@taucad/ui-core/filesystem/workspace-errors');
     vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
       throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
     });

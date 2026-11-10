@@ -113,23 +113,25 @@ Tau CAD authentication and optional GitHub Gist sharing for Prod US.
 
 Use these sRGB values wherever a provider asks for a hex colour or an asset must be flattened. They are projections of the product's teal identity for surfaces that cannot use tokens.
 
-| Role                     | Value     | Use                                                                                                                      | Contrast                                      |
-| ------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| Brand teal (mark)        | `#00987c` | The mark and wordmark on light backgrounds; provider "brand colour" fields                                               | 3.63:1 on white: graphics only, not body text |
-| Brand teal (text)        | `#007e6e` | Teal text or links on white where a provider renders text in the brand colour                                            | 4.99:1 on white                               |
-| Brand teal (on dark)     | `#27c7a7` | The mark on dark backgrounds                                                                                             | 7.69:1 on `#18211f`                           |
-| Brand background (light) | `#ffffff` | Badge and icon backgrounds, page and email "accent/background" fields, web manifest `background_color` and `theme_color` | n/a                                           |
-| Brand background (dark)  | `#18211f` | Dark app-icon tile and dark badge backgrounds                                                                            | n/a                                           |
+| Role                     | Value     | Use                                                                                                               | Contrast                                      |
+| ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Brand teal (mark)        | `#00987c` | The mark and wordmark on light backgrounds; provider "brand colour" fields                                        | 3.63:1 on white: graphics only, not body text |
+| Brand teal (text)        | `#007e6e` | Teal text or links on white where a provider renders text in the brand colour                                     | 4.99:1 on white                               |
+| Brand teal (on dark)     | `#27c7a7` | The mark on dark backgrounds                                                                                      | 7.69:1 on `#18211f`                           |
+| Brand background (light) | `#ffffff` | Badge and icon backgrounds, page and email "background" fields, web manifest `background_color` and `theme_color` | n/a                                           |
+| Brand background (dark)  | `#18211f` | Dark app-icon tile and dark badge backgrounds                                                                     | n/a                                           |
 
 | Provider field                                               | Value     |
 | ------------------------------------------------------------ | --------- |
 | GitHub "Badge background color" (OAuth Apps and GitHub Apps) | `#ffffff` |
-| Stripe "Brand colour"                                        | `#00987c` |
-| Stripe "Accent colour"                                       | `#ffffff` |
+| Stripe "Brand colour"                                        | `#ffffff` |
+| Stripe "Accent colour"                                       | `#00987c` |
 | Any other single "brand/primary colour" field                | `#00987c` |
 | Any other "background colour" field                          | `#ffffff` |
 
 In product code, never hardcode these values: use the tokens defined by [color policy](color-policy.md). The hex values exist for provider consoles, static assets and generated email palettes only.
+
+Stripe's brand colour fills the Checkout page behind the summary and its accent colour fills buttons, so on Stripe the page takes white and the button takes teal.
 
 **Why**: The default identity is a teal mark on white, matching the favicon, the installed-app icon and the marketing site; a provider page that inverts or recolours it looks like a different product.
 

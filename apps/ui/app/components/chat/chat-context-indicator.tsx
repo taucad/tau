@@ -1,6 +1,6 @@
 import type { ContextUsageData } from '@taucad/chat';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 // A 16 px ring: the meter sits beside the model it measures, and reads at a glance (D6).

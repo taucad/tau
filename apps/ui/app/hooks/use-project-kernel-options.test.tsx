@@ -32,12 +32,12 @@ vi.mock('#constants/remote-kernel-options.js', () => ({
   remoteKernelOptions: mocks.remoteFactory,
 }));
 
-vi.mock('#lib/remote-compute-placement.js', () => ({
+vi.mock('@taucad/ui-core/lib/remote-compute-placement', () => ({
   useRemoteComputePlacement: () => mocks.placement,
   useRemoteComputeSelectionRevision: () => mocks.revision,
 }));
 
-vi.mock('#lib/compute-reuse-preference.js', () => ({
+vi.mock('@taucad/ui-core/lib/compute-reuse-preference', () => ({
   useComputeReuseMode: () => mocks.computeMode,
   useComputeReuseRevision: () => mocks.computeRevision,
 }));

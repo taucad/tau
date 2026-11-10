@@ -13,6 +13,7 @@ const uiKitDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-kit/s
 /* Chat components cut into `@taucad/chat-ui` (UI wave B) stay in the scan too. */
 const chatUiDirectory = join(import.meta.dirname, '../../../../apps/libs/chat-ui/src');
 const projectWorkspaceDirectory = join(import.meta.dirname, '../../../../apps/libs/project-workspace/src');
+const uiCoreDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-core/src');
 
 const sourcesIn = (directory: string, recursive = false) =>
   readdirSync(directory, { recursive })
@@ -26,6 +27,7 @@ const appSources = [
   ...sourcesIn(uiKitDirectory, true),
   ...sourcesIn(chatUiDirectory, true),
   ...sourcesIn(projectWorkspaceDirectory, true),
+  ...sourcesIn(uiCoreDirectory, true),
 ];
 
 /**

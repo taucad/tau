@@ -3,8 +3,8 @@ import { createActor, setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Rendering, RuntimeDocument, ViewSubscription } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
-import { eventSchemas } from '#lib/xstate.lib.js';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import { awaitFreshRender, AwaitFreshOperationTimeoutError } from '#machines/await-fresh-render.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 

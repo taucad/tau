@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';

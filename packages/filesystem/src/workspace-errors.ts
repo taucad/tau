@@ -5,7 +5,7 @@
  * These errors replace string-matched `Error` shapes (e.g. legacy
  * `'No directory handle set...'`) so UI-side recovery surfaces can switch
  * on `error.code` instead of parsing messages. Mirrors the UI-side
- * `WorkspaceDirectoryRequiredError` shape (`apps/ui/app/filesystem/workspace-errors.ts`)
+ * `WorkspaceDirectoryRequiredError` shape (`apps/libs/ui-core/src/filesystem/workspace-errors.ts`)
  * so worker-thrown errors can be mapped one-to-one at the bridge boundary.
  *
  * @public
@@ -77,7 +77,7 @@ export class RootedFileSystemError extends Error {
  * `canMove` / `canRename` / `canCreate` / `canDelete` family on
  * {@link WorkspaceFileService}. The UI surfaces these via a copy
  * registry rather than parsing message strings — see
- * `apps/ui/app/filesystem/workspace-errors.ts:workspaceErrorCopy`.
+ * `apps/libs/ui-core/src/filesystem/workspace-errors.ts:workspaceErrorCopy`.
  *
  * - `NAME_EXISTS` — destination path already occupied. Create/upload
  *   flows may confirm a content overwrite; move/rename callers must

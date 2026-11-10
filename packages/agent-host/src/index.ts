@@ -142,7 +142,7 @@ export type {
   TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
-export { isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+export { chatStateMessage, isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
 export type { PromptCacheControl } from '#log/event-types.js';
 export type {
   DurableEventLog,

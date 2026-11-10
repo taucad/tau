@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from 'react';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
-import { defaultPanelState } from '#constants/editor.constants.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
-import { sidebarDefaultOpen, sidebarPreferredWidth } from '#constants/sidebar.constants.js';
+import { sidebarDefaultOpen, sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
 
 const { chatWidth, workbenchWidth } = defaultPanelState.desktopLayout;

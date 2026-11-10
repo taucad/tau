@@ -11,7 +11,7 @@ import { requireParameterRecord, serializeParameterRecord } from '@taucad/parame
 import { Topic } from '@taucad/events';
 import { assertRootedPath } from '@taucad/utils/path';
 import { URI } from 'vscode-uri';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';

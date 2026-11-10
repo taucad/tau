@@ -7199,6 +7199,47 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
     store.release(session.chatId);
   });
 
+  it('should end the wait when a gesture held over the resume is refused with it', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_held');
+    const runId = 'run_r5_held';
+    const command: HostCommand = {
+      type: 'resume',
+      commandId: 'req_r5_held',
+      payload: { chatId: session.chatId, runId },
+    };
+    const hostCommand = vi.fn(async () => Promise.withResolvers<CommandAnswer>().promise);
+    const unpublish = store.publishProjectHostConnector('project_chat_r5_held', async () =>
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
+    );
+    // The store's resume is admitted; the person's gesture after it is refused.
+    publishAdmission(session.chatId, (gesture) => {
+      admitted.push(gesture);
+      if (admitted.length > 1) {
+        throw new Error('Refused by the row.');
+      }
+      return { kind: 'continue', command };
+    });
+    publishLogRows(store, session.chatId, rateLimitedRows(runId));
+
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledOnce();
+    });
+    expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+    // The person resumes by hand while the store's resume is with the host; the gesture is held over it.
+    void store.requestTurn(session.chatId, { kind: 'continue' });
+    // The store's resume ends without reaching the run, as a refused dispatch reports it.
+    session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed' });
+
+    await vi.waitFor(() => {
+      expect(admitted).toHaveLength(2);
+      expect(session.stateActorRef.getSnapshot().matches({ run: 'failed' })).toBe(true);
+      expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
+    });
+    unpublish();
+    store.release(session.chatId);
+  });
+
   it('should wait anew when the resumed run fails again on its next attempt', async () => {
     const { clock, store, session } = await openOnClock('chat_r5_again');
     const admission = Promise.withResolvers<never>();

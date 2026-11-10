@@ -2974,7 +2974,7 @@ export class ChatSessionStore {
     let offered: string | undefined;
     /* The wait this page resumed: its card stays until the failure it answered leaves (`autoResume.resuming`). */
     let resumed: AutoResumePlan | undefined;
-    let landed = false;
+    let departed = false;
     let awaitsPull = false;
     const live = (): boolean =>
       this.#sessions.get(chatId) === session && stateActorRef.getSnapshot().status === 'active';
@@ -3016,30 +3016,39 @@ export class ChatSessionStore {
         return;
       }
       resumed = plan;
-      landed = false;
+      departed = false;
       /* After this emit settles, so the gesture is admitted rather than queued behind it, and its refusal is heard. */
       queueMicrotask(() => {
-        void (async () => {
-          try {
-            await this.requestTurn(chatId, { kind: 'continue' });
-            if (landed) {
-              await session.dispatchTask;
-            }
-          } finally {
-            // A resume refused at admission or at dispatch leaves the failure in place: the wait ends, spent, and the
-            // card offers Resume again. A resume that reached the host waits for its run to report instead.
-            const refused = !landed || stateActorRef.getSnapshot().matches({ run: 'failed' });
-            if (resumed === plan && refused && live() && !this.#isAdmittingTurn(session)) {
-              resumed = undefined;
-              offered = undefined;
-              stateActorRef.send({ type: 'autoResumeWithdrawn' });
-            }
-          }
-        })();
+        void this.requestTurn(chatId, { kind: 'continue' }).finally(endRefusedResume);
       });
     });
-    const resumeLanded = stateActorRef.on('startTurnRequest', () => {
-      landed = true;
+    /*
+     * A resume refused at admission or at dispatch, or by a gesture held over it, puts the run back in `failed` on the
+     * same visible failure: the wait ends, spent, and the card offers Resume again. A resume that reached the host
+     * leaves `failed` and waits for its run to report instead.
+     */
+    const endRefusedResume = (): void => {
+      if (
+        resumed === undefined ||
+        !live() ||
+        this.#isAdmittingTurn(session) ||
+        !stateActorRef.getSnapshot().matches({ run: 'failed' })
+      ) {
+        return;
+      }
+      resumed = undefined;
+      offered = undefined;
+      stateActorRef.send({ type: 'autoResumeWithdrawn' });
+    };
+    const watchResume = stateActorRef.subscribe(() => {
+      if (resumed === undefined) {
+        return;
+      }
+      if (!stateActorRef.getSnapshot().matches({ run: 'failed' })) {
+        departed = true;
+      } else if (departed) {
+        endRefusedResume();
+      }
     });
     const offerPull = (): void => {
       if (!live()) {
@@ -3067,7 +3076,7 @@ export class ChatSessionStore {
     };
     return [
       autoResumeDue,
-      resumeLanded,
+      watchResume,
       { unsubscribe: unsubscribeChat },
       { unsubscribe: unsubscribeProjection },
       persistence,

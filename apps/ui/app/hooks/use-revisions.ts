@@ -22,6 +22,7 @@ import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revis
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
+import { holdRevisionGraph, refreshPushRecords } from '#lib/revision-pushes.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
@@ -182,6 +183,50 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
   };
+};
+
+/**
+ * Hand the rows a surface read to the push join, so the who-resolver can
+ * name the account that backed each one up (A3).
+ *
+ * @param projectId - The project the rows belong to.
+ * @param rows - The rows read, as a list or by id; each one's parents are every parent it names.
+ */
+const useHeldGraph = (projectId: string, rows: Readonly<{ values: () => Iterable<RevisionRow> }> | undefined): void => {
+  useEffect(() => {
+    if (rows === undefined) {
+      return;
+    }
+    holdRevisionGraph(
+      projectId,
+      [...rows.values()].map((row) => ({
+        revisionId: row.revisionId,
+        parents: [...(row.parent === undefined ? [] : [row.parent]), ...(row.otherParents ?? [])],
+      })),
+    );
+  }, [projectId, rows]);
+};
+
+/**
+ * Read Tau Cloud's push records at the page's own refresh points (A3): when
+ * a connected Tau Cloud project opens signed in, and each time its backup
+ * settles on a new head. A local-only or GitHub-backed project, or a
+ * signed-out page, reads nothing. Each read asks only for what follows the
+ * records held (`after=`).
+ *
+ * @param input - The project, the signed-in account and the status that names the refresh points.
+ */
+const usePushRecordRefresh = (
+  input: Readonly<{ projectId: string; accountId: string | undefined; status: ReturnType<typeof useRevisionStatus> }>,
+): void => {
+  const { projectId, accountId, status } = input;
+  const isTauCloud = status?.remote.kind === 'tau' && status.remote.phase === 'connected';
+  const backedUpAt = status?.sync.state === 'backedUp' ? `backedUp:${status.headRevisionId ?? ''}` : undefined;
+  useEffect(() => {
+    if (isTauCloud && accountId !== undefined) {
+      refreshPushRecords({ projectId, accountId, token: backedUpAt });
+    }
+  }, [accountId, backedUpAt, isTauCloud, projectId]);
 };
 
 /**
@@ -363,6 +408,7 @@ export function useRevisions(): RevisionsView {
   const headRevisionId = status?.headRevisionId;
   /* Subscribed, not read once: a sign-in mid-session relabels every card. */
   const who = useRevisionWhoContext(projectId);
+  usePushRecordRefresh({ projectId, accountId: who.session?.id, status });
   const finalized = useHostFinalizedTurns(projectId);
   const queryClient = useQueryClient();
   const logKey = useMemo(() => ['revision-log', projectId, branch ?? ''] as const, [branch, projectId]);
@@ -475,6 +521,8 @@ export function useRevisions(): RevisionsView {
     projectId,
     useMemo(() => others.map((entry) => entry.head), [others]),
   );
+  useHeldGraph(projectId, rows);
+  useHeldGraph(projectId, otherHeads);
   /*
    * `combine` is not an optimisation here, it is the difference between this
    * hook having a memo and not (rule 20's log cost, C51).
@@ -580,6 +628,7 @@ export function useRevisionCards(ids: readonly string[]): ReadonlyMap<string, Re
   const client = useRevisionClient();
   const who = useRevisionWhoContext(projectId);
   const rows = useRevisionRows(client, projectId, ids);
+  useHeldGraph(projectId, rows);
   return useMemo(() => new Map([...rows].map(([id, row]) => [id, cardOf(row, who)] as const)), [rows, who]);
 }
 

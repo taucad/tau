@@ -131,7 +131,7 @@ export class ProjectsController {
    * register, spent only by a call that passed the ownership and plan checks.
    *
    * @param projectId - The project id, which is also its repository name.
-   * @param body - The name to record when the row is created.
+   * @param body - The name and origin to record when the row is created; a row that exists keeps its own.
    * @param userId - The signed-in caller, who becomes the owner.
    * @returns The registered project's id.
    * @throws BadRequestException When the id cannot name a repository.
@@ -226,9 +226,12 @@ export class ProjectsController {
           message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
         });
       }
-      await transaction
-        .insert(project)
-        .values({ id: projectId, ownerId: userId, name: body.name ?? 'Untitled project', origin: 'local-mirror' });
+      await transaction.insert(project).values({
+        id: projectId,
+        ownerId: userId,
+        name: body.name ?? 'Untitled project',
+        origin: body.origin ?? 'local-mirror',
+      });
     });
 
     /* No repository is created here any more (charter D1). A repository *is*

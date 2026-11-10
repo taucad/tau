@@ -15,7 +15,7 @@ const sourcePath = 'public/models/honeycomb.js';
 const previousSource = 'export default function main() { throw new Error("native-one-shot-previous-source"); }\n';
 const currentSource = 'export default function main() { throw new Error("native-one-shot-current-source"); }\n';
 
-test('native Fix with AI reads current rooted bytes after an external filesystem replacement', async () => {
+test('native Fix in chat reads current rooted bytes after an external filesystem replacement', async () => {
   const fixture = await startGatewayFixture({ toolCalls: [], textChunks: ['Native current source received.'] });
   const account = tauTestAccount('filesystem-one-shot-fix');
   let session: Awaited<ReturnType<typeof launchDesktopApp>> | undefined;
@@ -63,7 +63,7 @@ test('native Fix with AI reads current rooted bytes after an external filesystem
         sourceSha256,
         deadline,
         instructions:
-          'Principal owns Fix with AI, branch placement/Send and Update thumbnail gestures. Previous/current are explicit fixed-path mutations. Capture records actual rooted checkout inventory and thumbnail bytes. End finishes. No product gestures after READY.',
+          'Principal owns Fix in chat, branch placement/Send and Update thumbnail gestures. Previous/current are explicit fixed-path mutations. Capture records actual rooted checkout inventory and thumbnail bytes. End finishes. No product gestures after READY.',
       };
       await writeFile(join(session.homeRoot, 'one-shot-manual-ready.json'), JSON.stringify(receipt, null, 2));
       console.info('ONE SHOT MANUAL READY', JSON.stringify(receipt));
@@ -160,7 +160,7 @@ test('native Fix with AI reads current rooted bytes after an external filesystem
     await expectVisible(page.getByText('native-one-shot-current-source', { exact: false }), 180_000);
     expect(await readFile(nativeSource, 'utf8')).toBe(currentSource);
     expect(fixture.gatewayRequests).toHaveLength(0);
-    await page.getByRole('button', { name: 'Fix with AI', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Fix in chat', exact: true }).first().click();
     await expectVisible(page.getByText('Native current source received.', { exact: true }), 120_000);
     expect(fixture.gatewayRequests).toHaveLength(1);
     const request = fixture.gatewayRequests[0] as { readonly messages?: unknown };

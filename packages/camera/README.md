@@ -83,11 +83,11 @@ The actor tracks the person's gesture in its `input` state. Send `interactionSta
 
 `adoptPersistedPose` applies a saved record's pose, orientation, field of view or up direction only in `input.idle`, as one change, and emits `adoptionApplied`. While the person drags or the camera settles, the record is dropped and the actor emits `adoptionDropped`. It is never queued, so the person's pose wins.
 
-A controls update that a driver synchronization caused carries `echoRevision` on `poseObserved`. The camera ignores it.
+A controls update that a driver synchronization caused carries an integer `echoRevision` on `poseObserved`. The camera ignores it; a stamp that is not an integer is refused.
 
 ### Refused events
 
-A payload the camera cannot use, such as a non-finite field of view, a zero-sized viewport, inverted bounds, a zero or parallel direction or a margin above 0.5, is refused. The actor stays active on its last valid view and `snapshot.can(event)` answers `false`. To observe refusals, create the actor with `createCameraActor`, which reports each one to `onRejectedEvent` with the reason `refusedPayload`, next to XState's own dead letters:
+A payload the camera cannot use, such as a non-finite field of view, a zero-sized viewport, inverted bounds, a zero or parallel direction, a margin above 0.5, or a missing or null field, is refused. The actor stays active on its last valid view and `snapshot.can(event)` answers `false`. To observe refusals, create the actor with `createCameraActor`, which reports each one to `onRejectedEvent` with the reason `refusedPayload`, next to XState's own dead letters:
 
 ```ts
 import { cameraMachine, createCameraActor } from '@taucad/camera/machine';

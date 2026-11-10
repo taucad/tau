@@ -118,6 +118,11 @@ const serializeState = (snapshot: AnyMachineSnapshot): string => {
 
 const enumeration = { input, events: publicEvents, limit: 1000, serializeState };
 
+/* A payload from an untyped sender, which the event type would not admit. */
+// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the payload is malformed on purpose.
+const untyped = (event: Readonly<Record<string, unknown>>): CameraMachineEvent =>
+  event as unknown as CameraMachineEvent;
+
 /* Payloads the camera refuses, at least one per payload-carrying event type. */
 const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachineEvent]> = [
   ['a non-finite field of view', { type: 'setVerticalFieldOfView', verticalFieldOfView: Number.NaN }],
@@ -211,6 +216,62 @@ const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachi
     },
   ],
   ['a legacy frame margin above 0.5', { type: 'frame', margin: 0.6 }],
+  // Malformed payloads: a missing or null field is refused like an invalid value, never an actor error.
+  ['a missing viewport', untyped({ type: 'setViewport' })],
+  ['a null viewport', untyped({ type: 'setViewport', viewport: null })],
+  ['missing bounds', untyped({ type: 'setBounds' })],
+  ['bounds with a null minimum', untyped({ type: 'setBounds', bounds: { min: null, max: [1, 1, 1] } })],
+  ['a missing render frame', untyped({ type: 'setRenderFrame' })],
+  [
+    'a render frame with no origin',
+    untyped({ type: 'setRenderFrame', renderFrame: { anchorFrameId: 'test-root', metersPerRenderUnit: 1 } }),
+  ],
+  ['a null clip policy', untyped({ type: 'setClipPolicy', clipPolicy: null })],
+  [
+    'a presentation plane with no normal',
+    untyped({
+      type: 'setClipPolicy',
+      clipPolicy: { farPaddingVerticalSpans: 0, presentationPlane: { offsetMeters: 0 } },
+    }),
+  ],
+  ['a pose with no target', untyped({ type: 'poseObserved', ...pose, target: undefined, source: 'input' })],
+  ['a pose with a null direction', untyped({ type: 'poseObserved', ...pose, direction: null, source: 'input' })],
+  ['a pose with a null echo stamp', untyped({ type: 'poseObserved', ...pose, source: 'input', echoRevision: null })],
+  [
+    'a pose with a non-integer echo stamp',
+    { type: 'poseObserved', ...pose, source: 'input', echoRevision: Number.NaN },
+  ],
+  ['an empty legacy pose', untyped({ type: 'setView' })],
+  ['a frame with no bounds', untyped({ type: 'frameGeometry', margin: 0.1, source: 'fit' })],
+  [
+    'a frame with an empty orientation',
+    untyped({ type: 'frameGeometry', bounds: sampleBounds, margin: 0.1, orientation: {}, source: 'fit' }),
+  ],
+  ['a frame with no margin', untyped({ type: 'frameGeometry', bounds: sampleBounds, source: 'framing' })],
+  ['a focus with no bounds', untyped({ type: 'frameBounds', margin: 0.1, source: 'focus' })],
+  ['a focus with no margin', untyped({ type: 'frameBounds', bounds: sampleBounds, source: 'focus' })],
+  [
+    'a focus from the framing source',
+    untyped({ type: 'frameBounds', bounds: sampleBounds, margin: 0.1, source: 'framing' }),
+  ],
+  ['a focus with no source', untyped({ type: 'frameBounds', bounds: sampleBounds, margin: 0.1 })],
+  ['an up axis from the object prototype', untyped({ type: 'setUpDirection', axis: 'constructor' })],
+  ['the up axis toString', untyped({ type: 'setUpDirection', axis: 'toString' })],
+  ['the up axis __proto__', untyped({ type: 'setUpDirection', axis: '__proto__' })],
+  ['an adoption with a null pose', untyped({ type: 'adoptPersistedPose', requestId: 'refused', pose: null })],
+  ['an adoption with an empty pose', untyped({ type: 'adoptPersistedPose', requestId: 'refused', pose: {} })],
+  [
+    'an adoption whose only field is null',
+    untyped({ type: 'adoptPersistedPose', requestId: 'refused', orientation: null }),
+  ],
+  [
+    'an adoption with a non-finite margin',
+    { type: 'adoptPersistedPose', requestId: 'refused', pose, margin: Number.NaN },
+  ],
+  [
+    'an adoption with an up axis from the object prototype',
+    untyped({ type: 'adoptPersistedPose', requestId: 'refused', upDirection: 'constructor' }),
+  ],
 ];
 
 /* A driver that records every `sync` it receives, in order. */

@@ -387,7 +387,7 @@ describe('resolveCameraUp', () => {
     const coordinate = fc.double({ min: -1000, max: 1000, noNaN: true });
     const vector = fc.tuple(coordinate, coordinate, coordinate);
     const unitOf = (value: readonly [number, number, number]): readonly [number, number, number] => {
-      const length = Math.sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+      const length = Math.hypot(...value);
       return [value[0] / length, value[1] / length, value[2] / length];
     };
     fc.assert(

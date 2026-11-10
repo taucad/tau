@@ -339,11 +339,15 @@ const fieldOfViewPatch = (context: CameraMachineContext, verticalFieldOfView: nu
 };
 
 const upDirectionPatch = (context: CameraMachineContext, axis: CameraUpAxis): CameraPatch => {
-  const preferredUp = upAxes[axis] as CameraVector | undefined;
-  if (preferredUp === undefined) {
+  // Own keys only: `constructor` or `__proto__` must not find a prototype member.
+  if (!Object.hasOwn(upAxes, axis)) {
     throw new RangeError(`axis must be 'x', 'y' or 'z'.`);
   }
-  const up = resolveCameraUp({ direction: context.view.direction, preferredUp, fallbackUp: context.view.up });
+  const up = resolveCameraUp({
+    direction: context.view.direction,
+    preferredUp: upAxes[axis],
+    fallbackUp: context.view.up,
+  });
   return viewPatch(context, createCameraView({ ...context.view, up }));
 };
 
@@ -360,9 +364,17 @@ const posePatch = (context: CameraMachineContext, pose: CameraPose): CameraPatch
     }),
   );
 
+/* A fractional framing margin: a number from 0 to 0.5. */
+const assertMargin = (margin: unknown): number => {
+  if (typeof margin !== 'number' || !(margin >= 0 && margin <= 0.5)) {
+    throw new RangeError('margin must be between 0 and 0.5.');
+  }
+  return margin;
+};
+
 const framePatch = (
   context: CameraMachineContext,
-  options: Readonly<{ bounds: CameraBounds; margin: number | undefined; orientation?: CameraOrientation }>,
+  options: Readonly<{ bounds: CameraBounds; margin: number; orientation?: CameraOrientation }>,
 ): CameraPatch =>
   viewPatch(
     context,
@@ -375,7 +387,7 @@ const framePatch = (
           })
         : context.view,
       bounds: options.bounds,
-      margin: options.margin,
+      margin: assertMargin(options.margin),
     }),
   );
 
@@ -384,55 +396,60 @@ const focusPatch = (context: CameraMachineContext, event: CameraEvent<'frameBoun
   viewPatch(
     context,
     createCameraView({
-      ...frameCameraBounds({ view: context.view, bounds: event.bounds, margin: event.margin }),
+      ...frameCameraBounds({ view: context.view, bounds: event.bounds, margin: assertMargin(event.margin) }),
       bounds: context.view.bounds,
     }),
   );
 
-/* Compose the record's fields in order, each reading the context the one before it produced. */
+/* Whether a sender gave the field: an untyped one may leave it out or set it to null. */
+const given = <Value>(value: Value): value is NonNullable<Value> => value !== undefined && value !== null;
+
+/*
+ * Compose the record's fields in order, each reading the context the one before it produced. A null field is an
+ * absent one; a margin that is given is validated even with no orientation to re-frame.
+ */
 const adoptionPatch = (context: CameraMachineContext, adoption: CameraAdoption): CameraPatch => {
-  const { pose, orientation, verticalFieldOfView, upDirection } = adoption;
+  const { pose, orientation, verticalFieldOfView, upDirection, margin } = adoption;
   if (typeof adoption.requestId !== 'string' || adoption.requestId.length === 0) {
     throw new RangeError('requestId must not be empty.');
   }
-  if (pose !== undefined && orientation !== undefined) {
+  if (given(pose) && given(orientation)) {
     throw new RangeError('An adoption carries a pose or an orientation, not both.');
   }
-  if (
-    pose === undefined &&
-    orientation === undefined &&
-    verticalFieldOfView === undefined &&
-    upDirection === undefined
-  ) {
+  if (![pose, orientation, verticalFieldOfView, upDirection].some((field) => given(field))) {
     throw new RangeError('An adoption carries at least one camera field.');
+  }
+  if (given(margin)) {
+    assertMargin(margin);
   }
   let patch: CameraPatch = {};
   const compose = (next: (current: CameraMachineContext) => CameraPatch): void => {
     patch = { ...patch, ...next({ ...context, ...patch }) };
   };
-  if (verticalFieldOfView !== undefined) {
+  if (given(verticalFieldOfView)) {
     compose((current) => fieldOfViewPatch(current, verticalFieldOfView));
   }
-  if (upDirection !== undefined) {
+  if (given(upDirection)) {
     compose((current) => upDirectionPatch(current, upDirection));
   }
-  if (pose !== undefined) {
+  if (given(pose)) {
     compose((current) => posePatch(current, pose));
   }
-  if (orientation !== undefined) {
-    compose((current) =>
-      framePatch(current, { bounds: current.view.bounds, margin: adoption.margin ?? 0.1, orientation }),
-    );
+  if (given(orientation)) {
+    compose((current) => framePatch(current, { bounds: current.view.bounds, margin: margin ?? 0.1, orientation }));
   }
   return patch;
 };
 
-/* The camera domain refuses a payload by throwing a RangeError; the event is then refused, not taken. */
+/*
+ * The camera domain refuses a payload by throwing a RangeError, and a malformed one (a missing or null field) throws a
+ * TypeError where it is read; either way the event is refused, not taken.
+ */
 const attempt = <Result>(compute: () => Result): Result | undefined => {
   try {
     return compute();
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RangeError || error instanceof TypeError) {
       return undefined;
     }
     throw error;
@@ -478,9 +495,9 @@ const firstOf = <Transition>(...candidates: Transition[]): Transition =>
 type InputState = 'idle' | 'dragging' | 'settling';
 type PoseTransition = Readonly<{ target?: InputState; reenter?: boolean; context?: CameraPatch }> | undefined;
 
-/* A controls update a driver synchronization caused: any stamp marks one, and it never changes the camera (I3). */
+/* A controls update a driver synchronization caused: an integer stamp marks one, and it never changes the camera (I3). */
 const observeEcho = ({ event }: Readonly<{ event: CameraEvent<'poseObserved' | 'setView'> }>): PoseTransition =>
-  event.type === 'poseObserved' && event.echoRevision !== undefined ? {} : undefined;
+  event.type === 'poseObserved' && Number.isInteger(event.echoRevision) ? {} : undefined;
 
 /*
  * A pose the person made. Held, the gesture is live and the camera is `dragging`. Released, the pose restarts the
@@ -495,7 +512,11 @@ const observePose = (
   enq: CameraEnqueue,
 ): PoseTransition => {
   const source = event.type === 'setView' ? 'input' : event.source;
-  const patch = dragSources.has(source) ? attempt(() => posePatch(context, event)) : undefined;
+  // A stamp that is not an integer marks no echo and no pose: the payload is refused.
+  const patch =
+    dragSources.has(source) && (event.type === 'setView' || event.echoRevision === undefined)
+      ? attempt(() => posePatch(context, event))
+      : undefined;
   if (patch === undefined) {
     return undefined;
   }
@@ -596,12 +617,12 @@ const cameraMachineDefinition = setup({
       return patch && { context: commit(context, { patch, source: event.source }, enq) };
     }),
     frameBounds: refines('Changed', ({ context, event }, enq) => {
-      const patch = attempt(() => focusPatch(context, event));
+      const patch = String(event.source) === 'focus' ? attempt(() => focusPatch(context, event)) : undefined;
       return patch && { context: commit(context, { patch, source: 'focus' }, enq) };
     }),
     frame: refines('Changed', ({ context, event }, enq) => {
       const patch = attempt(() =>
-        framePatch(context, { bounds: event.bounds ?? context.view.bounds, margin: event.margin }),
+        framePatch(context, { bounds: event.bounds ?? context.view.bounds, margin: event.margin ?? 0.1 }),
       );
       return patch && { context: commit(context, { patch, source: 'framing' }, enq) };
     }),
@@ -748,7 +769,7 @@ export type CameraActorOptions = CameraActorSystemOptions &
 /** The reason a refused camera event carries on `onRejectedEvent`. @public */
 export const cameraRefusedPayloadReason = 'refusedPayload';
 
-const isLifecycleEvent = (type: string): boolean => /^(?:@xstate\.|xstate\.)/u.test(type);
+const isLifecycleEvent = (type: string): boolean => /^@?xstate\./u.test(type);
 
 /**
  * Creates the camera actor as the root of its own system.
@@ -794,7 +815,7 @@ export const createCameraActor = (options: CameraActorOptions): Actor<CameraMach
       sourceRef: undefined,
       eventOrigin: event.sourceRef === undefined ? 'external' : 'actor',
       reason: cameraRefusedPayloadReason,
-      error: new RangeError(`The camera refused '${type}': its payload is not a valid camera value.`),
+      error: new RangeError(`The camera refused the payload of '${type}'.`),
     });
   };
   const actor: Actor<CameraMachine> = createActor(machine, {

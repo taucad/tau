@@ -93,7 +93,14 @@ export type CameraHandoffOptions = Readonly<{
 
 type MutableVector = [number, number, number];
 
-/** Shared with the camera machine; not part of the package root. @internal */
+/**
+ * Refuses a non-finite number. Shared with the camera machine; not part of the package root.
+ *
+ * @internal
+ * @param value - The number to check.
+ * @param label - The field named in the error.
+ * @returns The value, when finite.
+ */
 export const assertFinite = (value: number, label: string): number => {
   if (!Number.isFinite(value)) {
     throw new RangeError(`${label} must be finite.`);
@@ -101,7 +108,15 @@ export const assertFinite = (value: number, label: string): number => {
   return value;
 };
 
-/** Shared with the camera machine; not part of the package root. @internal */
+/**
+ * Refuses a number that is not finite and greater than zero. Shared with the camera machine; not part of the package
+ * root.
+ *
+ * @internal
+ * @param value - The number to check.
+ * @param label - The field named in the error.
+ * @returns The value, when finite and positive.
+ */
 export const assertPositive = (value: number, label: string): number => {
   assertFinite(value, label);
   if (value <= 0) {
@@ -118,7 +133,14 @@ const assertVerticalFieldOfView = (verticalFieldOfView: number): number => {
   return verticalFieldOfView;
 };
 
-/** Shared with the camera machine; not part of the package root. @internal */
+/**
+ * Copies a vector whose components are finite. Shared with the camera machine; not part of the package root.
+ *
+ * @internal
+ * @param value - The vector to check.
+ * @param label - The field named in the error.
+ * @returns A mutable copy of the vector.
+ */
 export const vector = (value: CameraVector, label: string): MutableVector => [
   assertFinite(value[0], `${label}[0]`),
   assertFinite(value[1], `${label}[1]`),
@@ -142,7 +164,15 @@ const cross = (left: CameraVector, right: CameraVector): MutableVector => [
 
 const magnitude = (value: CameraVector): number => Math.hypot(value[0], value[1], value[2]);
 
-/** Shared with the camera machine; not part of the package root. @internal */
+/**
+ * Scales a vector to unit length, refusing a zero or non-finite one. Shared with the camera machine; not part of the
+ * package root.
+ *
+ * @internal
+ * @param value - The vector to normalize.
+ * @param label - The field named in the error.
+ * @returns The unit vector.
+ */
 export const normalize = (value: CameraVector, label: string): MutableVector => {
   const length = magnitude(value);
   if (length === 0 || !Number.isFinite(length)) {

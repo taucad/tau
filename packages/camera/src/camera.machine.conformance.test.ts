@@ -113,8 +113,6 @@ const startHarness = () => {
 
 type Harness = ReturnType<typeof startHarness>;
 
-const harnesses: Harness[] = [];
-
 /* The camera event for a spec step that carries a source, with a payload no earlier revision produced. */
 const eventFor = (harness: Harness, label: string): CameraMachineEvent => {
   const { context } = harness.actor.getSnapshot();
@@ -245,12 +243,17 @@ const applyStep = (harness: Harness, label: string): void => {
   }
   const key = poseKey(after.context.view);
   if (key !== world.key) {
+    // A pose that changed with no revision is a change the camera did not record (I1).
+    if (changes === 0) {
+      throw new Error(`${label} changed the pose with no revision.`);
+    }
     world.key = key;
     world.pose = adopted ?? after.context.revision;
   }
 };
 
-const adapter: ConformanceAdapter<Harness> = {
+/* Builds an adapter that keeps every harness it starts, so a later row can replay what each one recorded. */
+const createAdapter = (harnesses: Harness[]): ConformanceAdapter<Harness> => ({
   start() {
     const harness = startHarness();
     harnesses.push(harness);
@@ -274,9 +277,20 @@ const adapter: ConformanceAdapter<Harness> = {
   stop(harness) {
     harness.actor.stop();
   },
-};
+});
 
 const actionOf = (state: SpecView): readonly unknown[] => [state['act']];
+
+/* One replay of the covering suite, shared by the rows that need it and run by whichever of them runs first. */
+let replay: Promise<Readonly<{ divergences: readonly unknown[]; harnesses: Harness[] }>> | undefined;
+const replayCoveringSuite = async () => {
+  replay ??= (async () => {
+    const harnesses: Harness[] = [];
+    const divergences = await replaySuite(suiteBehaviours(graph, suite), createAdapter(harnesses), actionOf);
+    return { divergences, harnesses };
+  })();
+  return replay;
+};
 
 type TransitionNode = Readonly<{
   id: string;
@@ -331,10 +345,14 @@ describe('cameraMachine conforms to CameraAuthority.tla', () => {
       'RecordOwn',
       'SettleElapsed',
     ]);
-    expect(await replaySuite(behaviours, adapter, actionOf)).toEqual([]);
+    const { divergences } = await replayCoveringSuite();
+
+    expect(divergences).toEqual([]);
   });
 
-  it('should reproduce every recorded delivery through the pure transition function', () => {
+  it('should reproduce every recorded delivery through the pure transition function', async () => {
+    const { harnesses } = await replayCoveringSuite();
+
     expect(harnesses.length).toBeGreaterThan(0);
     for (const harness of harnesses) {
       const records = harness.recorder

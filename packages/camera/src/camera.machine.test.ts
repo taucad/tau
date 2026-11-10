@@ -39,6 +39,11 @@ const initialView = createCameraView({
 
 const createCameraActor = () => createActor(cameraMachine, { input: { initialView } });
 
+/* A payload from an untyped sender, which the event type would not admit. */
+// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the payload is malformed on purpose.
+const untyped = (event: Readonly<Record<string, unknown>>): CameraMachineEvent =>
+  event as unknown as CameraMachineEvent;
+
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
@@ -802,6 +807,26 @@ describe('createCameraActor', () => {
     ['a zero direction', { type: 'poseObserved', ...pose, direction: [0, 0, 0], source: 'input' }],
     ['a margin above 0.5', { type: 'frameGeometry', bounds: initialView.bounds, margin: 0.6, source: 'fit' }],
     ['an adoption with no field', { type: 'adoptPersistedPose', requestId: 'r8' }],
+    // A malformed payload from an untyped sender is refused the same way, and never errors the actor.
+    ['a missing viewport', untyped({ type: 'setViewport' })],
+    [
+      'a render frame with no origin',
+      untyped({ type: 'setRenderFrame', renderFrame: { anchorFrameId: 'test-root', metersPerRenderUnit: 1 } }),
+    ],
+    ['a null clip policy', untyped({ type: 'setClipPolicy', clipPolicy: null })],
+    ['a pose with a null direction', untyped({ type: 'poseObserved', ...pose, direction: null, source: 'input' })],
+    ['a pose with a null echo stamp', untyped({ type: 'poseObserved', ...pose, source: 'input', echoRevision: null })],
+    [
+      'a focus from the framing source',
+      untyped({ type: 'frameBounds', bounds: initialView.bounds, margin: 0.1, source: 'framing' }),
+    ],
+    ['a frame with no margin', untyped({ type: 'frameGeometry', bounds: initialView.bounds, source: 'fit' })],
+    ['an up axis from the object prototype', untyped({ type: 'setUpDirection', axis: 'constructor' })],
+    [
+      'an adoption whose only field is null',
+      untyped({ type: 'adoptPersistedPose', requestId: 'r9', orientation: null }),
+    ],
+    ['an adoption with an empty pose', untyped({ type: 'adoptPersistedPose', requestId: 'r10', pose: {} })],
   ];
 
   it.each(refused)('should report %s through onRejectedEvent and keep the camera', (_label, event) => {

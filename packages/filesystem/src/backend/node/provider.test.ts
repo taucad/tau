@@ -203,14 +203,20 @@ describe('NodeFsProvider atomic writes', () => {
       const busy = Array.from({ length: poolSize }, async () => pbkdf2Async('busy', 'pool', 200_000, 32, 'sha256'));
       stopClosing();
       stop = await provider.watch({ paths: ['target.txt'], recursive: false }, (event) => events.push(event));
-      writeFileSync(join(root, 'target.txt'), 'new');
+      /* The race is decided once the watch is admitted; free the pool and cores before writing. */
+      await Promise.all(busy);
+      /* The claim is that the watch is alive, not that the OS armed it by admission: Windows' backend issues
+       * ReadDirectoryChangesW from an APC on its own thread after subscribe resolves, so the first write may predate
+       * it. Each attempt writes again; a watch bound to a destroyed backend sees none of them. */
+      let attempt = 0;
       await vi.waitFor(
         () => {
+          attempt += 1;
+          writeFileSync(join(root, 'target.txt'), `new-${attempt}`);
           expect(events).toContainEqual({ type: 'change', path: 'target.txt', kind: 'file' });
         },
-        { timeout: 2000 },
+        { timeout: 2000, interval: 100 },
       );
-      await Promise.all(busy);
     } finally {
       stop?.();
       await drainNodeFsProviderWatchClosures(closing);

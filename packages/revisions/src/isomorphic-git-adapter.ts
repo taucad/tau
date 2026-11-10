@@ -66,6 +66,7 @@ import { installBufferGlobal } from '#buffer-global.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { settleBounded } from '#chat-projection-pool.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
 import { coldOpenFromCatalogue, importReachableFromCatalogue } from '#object-store/cold-open.js';
 import type { CatalogueFamily, ColdOpenOptions, ColdOpenReport } from '#object-store/cold-open.js';
@@ -2429,7 +2430,22 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           pack.byteLength > 32 &&
           new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0
         ) {
-          await objects.addPack(pack);
+          try {
+            await objects.addPack(pack);
+          } catch (error) {
+            /*
+             * A pack the indexer refuses is a verdict on these bytes, not on
+             * the objects: where a catalogue serves the remote they come from
+             * it one by one, as past the ceiling. Anywhere else the refusal
+             * stands, with the indexer's reason in its sentence.
+             */
+            if (
+              !(error instanceof CorruptBytesError) ||
+              !(await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
+            ) {
+              throw error;
+            }
+          }
           await objects.repackIfDue();
         }
         /* What arrived may complete a boundary commit's history. */

@@ -6,6 +6,7 @@ import {
   killTrailLimit,
   markerByteLimit,
   pendingKillLimit,
+  scrubPath,
   setKillContextSink,
 } from '#lib/memory-kill-signal.js';
 
@@ -258,5 +259,110 @@ describe('memory kill signal (B-01, D-UI-25, SB3)', () => {
     } finally {
       setKillContextSink(undefined);
     }
+  });
+
+  describe('marker v3: the work block (crash capture blueprint)', () => {
+    it('carries what the page was working on into the kill, in the order one render writes it', () => {
+      const storage = memoryStorage();
+      let clock = 1000;
+      const page = load(storage, 'navigate', { now: () => clock });
+      page.takeDetectedKills();
+      const phases: unknown[] = [];
+      const step = (patch: Readonly<Record<string, unknown>>): void => {
+        clock += 100;
+        page.work(patch);
+        phases.push(page.currentWork().phase);
+      };
+      step({ kernel: 'replicad', builtin: 'replicad.worm-gear-system', shareProvider: 'builtin' });
+      step({ phase: 'kernel-init' });
+      step({ phase: 'evaluate' });
+      step({ phase: 'mesh', renderCount: 1 });
+      step({ phase: 'geometry-receive', geometryBytes: 50_000_000, triangles: 2_000_000 });
+      step({ phase: 'gpu-upload', backend: 'webgl' });
+
+      const [kill] = load(storage, 'reload').takeDetectedKills();
+
+      expect(phases).toEqual(['boot', 'kernel-init', 'evaluate', 'mesh', 'geometry-receive', 'gpu-upload']);
+      expect(kill?.work).toEqual({
+        kernel: 'replicad',
+        builtin: 'replicad.worm-gear-system',
+        shareProvider: 'builtin',
+        phase: 'gpu-upload',
+        phaseStartedAt: 1600,
+        renderCount: 1,
+        geometryBytes: 50_000_000,
+        triangles: 2_000_000,
+        backend: 'webgl',
+      });
+    });
+
+    it('accepts nothing but closed names and finite numbers', () => {
+      const page = load(memoryStorage(), 'navigate');
+      page.takeDetectedKills();
+      page.work({
+        kernel: 'Model by Alice <script>',
+        builtin: 'gist secret',
+        shareProvider: 'my-server',
+        phase: 'rendering my file.ts',
+        lastInteraction: 'typed hello',
+        triangles: Number.NaN,
+        geometryBytes: -1,
+        source: 'const secret = 1;',
+      });
+
+      expect(page.currentWork()).toEqual({ phase: 'boot', phaseStartedAt: 1000 });
+    });
+
+    it('stays under the budget with a full work block and three pending kills', () => {
+      const storage = memoryStorage();
+      const full = {
+        kernel: 'replicad',
+        builtin: 'replicad.worm-gear-system',
+        shareProvider: 'builtin',
+        phase: 'gpu-upload',
+        renderCount: 99,
+        lastEvaluate: 123_456,
+        lastRender: 123_456,
+        triangles: 999_999_999,
+        geometryBytes: 999_999_999,
+        gpuGeometries: 9999,
+        textures: 9999,
+        peakWasmBytes: 4_000_000_000,
+        backend: 'webgpu',
+        contextLost: true,
+        lastInteraction: 'parameter',
+        interactionAt: 1_793_324_757_000,
+        parameterChanges: 999,
+      };
+      for (let index = 0; index < pendingKillLimit + 2; index += 1) {
+        const page = load(storage, 'reload');
+        page.takeDetectedKills();
+        page.work(full);
+        for (let crumb = 0; crumb < killTrailLimit; crumb += 1) {
+          page.breadcrumb('render');
+        }
+      }
+
+      expect(new TextEncoder().encode(storage.getItem('tau:alive') ?? '').length).toBeLessThanOrEqual(markerByteLimit);
+      expect(storedMarker(storage).pending?.length).toBeGreaterThan(0);
+    });
+
+    it('ignores a version 2 marker', () => {
+      const storage = memoryStorage();
+      storage.setItem(
+        'tau:alive',
+        JSON.stringify({ version: 2, finished: false, startedAt: 1, updatedAt: 2, trail: [], pending: [] }),
+      );
+
+      expect(load(storage, 'reload').takeDetectedKills()).toEqual([]);
+    });
+
+    it('keeps a builtin share reference and removes any other', () => {
+      expect(scrubPath('/s/builtin~replicad.worm-gear-system')).toBe('/s/builtin~replicad.worm-gear-system');
+      expect(scrubPath('/s/github-gist~aliceabc123?x=1#frag')).toBe('/s/github-gist~…');
+      expect(scrubPath('/s/tau~pub_123/edit')).toBe('/s/tau~…/edit');
+      expect(scrubPath('/s/direct')).toBe('/s/direct');
+      expect(scrubPath('/w/a/b?q=1')).toBe('/w/a/b');
+    });
   });
 });

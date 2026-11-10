@@ -430,6 +430,49 @@ describe('BillableModelInvocationService', () => {
     expect(ledger.issueCurrentPromotion).not.toHaveBeenCalled();
   });
 
+  /* A refusal before admission has no qualification, yet the Together output-field fault was one:
+   * it must still reach the admission and error-rate series, labelled only by funded routes. */
+  it.each([
+    {
+      model: 'google-gemini-3.5-flash',
+      labels: { 'gen_ai.provider.name': 'vertexai', 'gen_ai.request.model': 'gemini-3.5-flash' },
+      warned: true,
+    },
+    { model: 'not-a-funded-route', labels: { 'gen_ai.provider.name': 'other' }, warned: false },
+  ])('should record a refusal before admission of $model under bounded labels', async ({ model, labels, warned }) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const metrics = genAiMetrics();
+    const refusal = new LlmGatewayError(400, 'INVALID_REQUEST', 'Model request is outside the funded request contract');
+    const service = new BillableModelInvocationService(
+      { getOperationForAttempt: vi.fn(async () => undefined) } as unknown as CreditLedgerService,
+      {
+        resolve: () => {
+          throw refusal;
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(service.invoke({ ...intent(), body: { model } })).rejects.toBe(refusal);
+
+    expect(metrics.llmGatewayAdmissionDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      'gen_ai.provider.name': labels['gen_ai.provider.name'],
+      'tau.surface': 'gateway',
+      outcome: 'refused',
+    });
+    expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      ...labels,
+      'tau.surface': 'gateway',
+      'error.type': 'refused',
+    });
+    expect(warn).toHaveBeenCalledTimes(warned ? 1 : 0);
+    warn.mockRestore();
+  });
+
   describe('request bound', () => {
     /** A Responses body whose one tool output carries `bytes` of base64 capture. */
     const captureBody = (bytes: number) => ({

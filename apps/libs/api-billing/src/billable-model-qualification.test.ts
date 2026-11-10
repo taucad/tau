@@ -102,6 +102,46 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
+  /* A host and a route that disagree on the output field read as Tau's own fault only if the
+   * refusal names the route and the field it expects. */
+  it.each([
+    {
+      failure: 'no output maximum',
+      limits: {},
+      message:
+        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+    },
+    {
+      failure: 'two output maxima',
+      limits: { max_tokens: 16, max_completion_tokens: 16 },
+      message:
+        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+    },
+    {
+      failure: 'the field the route does not accept',
+      limits: { max_tokens: 16 },
+      message:
+        'Model request bounds output with a field route google-gemini-3.5-flash does not accept; it expects max_completion_tokens',
+    },
+    {
+      failure: 'a maximum past the route ceiling',
+      limits: { max_completion_tokens: 65_537 },
+      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-3.5-flash's maximum of 65536",
+    },
+  ])('should refuse $failure naming the route and its output field', ({ limits, message }) => {
+    expect(() =>
+      resolver.resolve({
+        ...intent({
+          model: 'google-gemini-3.5-flash',
+          messages: [{ role: 'user', content: 'hello' }],
+          stream: true,
+          ...limits,
+        }),
+        providerWire: 'openai-completions',
+      }),
+    ).toThrow(message);
+  });
+
   it('should bound the input by the request itself', () => {
     const result = resolver.resolve(
       intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 100, stream: true }),

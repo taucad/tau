@@ -79,7 +79,8 @@ const register = async (projectId: string): Promise<void> => {
   const response = await fetch(`${gitE2EApiUrl}/v1/projects/${projectId}`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Cloud deletion acceptance' }),
+    /* Stock git commits carry no Tau record: a project linked to GitHub admits them (B4). */
+    body: JSON.stringify({ name: 'Cloud deletion acceptance', origin: 'github' }),
   });
   expect(response.status, await response.text()).toBe(200);
 };

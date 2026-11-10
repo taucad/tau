@@ -977,6 +977,93 @@ describe('recordSync', () => {
     });
   });
 
+  describe('round-one review rows', () => {
+    it('should keep the edits a reset folded in while a write was on the wire when that write is blocked', async () => {
+      const store = harness();
+      await store.observe();
+      const front = store.commands.edit({ name: 'Front' });
+      store.foreign('!x');
+      void store.commands.read();
+      await store.serve();
+      const mode = store.commands.edit({ name: 'Front', mode: 'a' });
+      const reset = store.commands.reset({ name: 'fresh' }, bytesOf('!x'));
+      await flush();
+
+      expect(store.context().deferred).toEqual({ mode: 'a' });
+
+      store.foreign('!y');
+      await store.reply(0);
+      await store.serve();
+
+      expect(await front).toBe(false);
+      expect(await mode).toBe(false);
+      expect(await reset).toBe(false);
+      expect(store.context().deferred).toEqual({ name: 'Front', mode: 'a' });
+    });
+
+    it('should still owe the edits a reset folded in when the write on the wire is applied after the close', async () => {
+      const store = harness();
+      await store.observe();
+      const front = store.commands.edit({ name: 'Front' });
+      store.foreign('!x');
+      void store.commands.read();
+      await store.serve();
+      store.foreign('name=seed');
+      void store.commands.edit({ name: 'Front', mode: 'a' });
+      void store.commands.reset({ name: 'fresh' }, bytesOf('!x'));
+      await flush();
+      store.commands.close();
+      await store.reply(0);
+
+      expect(await front).toBe(true);
+      expect(store.actor.getSnapshot().status).toBe('done');
+      expect(store.context().deferred).toEqual({ mode: 'a' });
+      expect(await store.commands.flush()).toBe(false);
+    });
+
+    it('should keep the retry of a failed edit due when an ensure is served during its backoff', async () => {
+      const store = harness();
+      await store.observe();
+      const front = store.commands.edit({ name: 'Front' });
+      store.writes[0]?.settle({ status: 'failed', error: new Error('offline'), lost: false });
+      await flush();
+
+      expect(await front).toBe(false);
+
+      const ensured = store.commands.ensure({ name: 'seed' });
+      await flush();
+
+      expect(await ensured).toBe(true);
+      expect(store.writes).toHaveLength(1);
+      expect(store.clock.nextDue()).toBeDefined();
+
+      store.clock.advance(60_000);
+      await flush();
+
+      expect(store.writes).toHaveLength(2);
+      expect(store.writes[1]?.input.data).toBe('name=Front');
+    });
+
+    it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
+      const store = harness();
+      await store.observe();
+      void store.commands.read();
+      store.reads.at(-1)?.settle({ status: 'failed', error: new Error('disk busy') });
+      await flush();
+
+      expect(store.context().health.read).toBe('retrying');
+
+      store.clock.advance(60_000);
+      await flush();
+      void store.commands.edit({ name: 'Front' });
+      await flush();
+      await store.reply();
+
+      expect(store.context().health.read).toBe('ok');
+      expect(store.context().readFailures).toBe(0);
+    });
+  });
+
   describe('machine discipline', () => {
     const machine = createRecordSyncMachine(policy);
     const sample = (snapshot: AnyMachineSnapshot): Array<RecordSyncEvent<Fields>> => [
@@ -1032,9 +1119,7 @@ describe('recordSync', () => {
         },
       });
       actor.start();
-      void commands.edit({ explode: 'yes' });
-      await flush();
-
+      expect(await commands.edit({ explode: 'yes' })).toBe(false);
       expect(actor.getSnapshot().context.fault).toBe('diff defect');
       expect(actor.getSnapshot().status).toBe('active');
       expect(await commands.edit({ name: 'Front' })).toBe(true);

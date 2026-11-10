@@ -154,6 +154,8 @@ export type RecordSyncContext<T, P> = Readonly<{
   closeFenced: boolean;
   /** An effect or child failure no transition modelled; the store keeps answering (MC-R12). */
   fault: string | undefined;
+  /** How many faults the store has recorded, so a request whose own step faulted can be answered. */
+  faults: number;
 }>;
 
 /** Input of a `recordSync` actor. */
@@ -399,10 +401,10 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           attempt: 0,
           flushed,
         },
-        patch: { pending: undefined },
+        patch: { pending: undefined, deferred: undefined },
       };
     }
-    return { cycle: deferredCycle(context, 'request'), patch: {} };
+    return { cycle: deferredCycle(context, 'request'), patch: { deferred: undefined } };
   };
 
   /** The cycle ends: its requesters are answered, what it still owes is deferred, and a waiting flush learns the result. */
@@ -421,8 +423,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     const patch: { -readonly [K in keyof Context]?: Context[K] } = { cycle: undefined };
     let { deferred } = context;
     if (cycle.kind === 'edit') {
+      /* The cycle carried what was deferred when it formed; edits deferred since (a reset's fold) come after it. */
       const owes = outcome === 'retry' || (cycle.patch !== undefined && !policy.isEmpty(cycle.patch));
-      deferred = saved || !owes ? undefined : cycle.patch;
+      if (owes && !saved) {
+        deferred = deferred === undefined ? cycle.patch : policy.combine(cycle.patch, deferred);
+      }
       if (cycle.trigger === 'edit' && latest) {
         patch.intended = saved ? context.published.record : cycle.next;
       }
@@ -445,14 +450,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       patch.writeFailed = false;
     }
     if (context.closeFenced) {
-      /* Edits the close kept back from the cycle on the wire are still owed after it settles (target rule 7). */
-      const folded = context.pending ? policy.combine(deferred, context.pending.patch) : deferred;
-      const owed = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
-      answer(enq, context.flushes, saved && owed === undefined);
-      return {
-        target: 'fenced',
-        context: reported(context, { ...patch, deferred: owed, pending: undefined, flushes: [] }, enq),
-      };
+      answer(enq, context.flushes, saved && deferred === undefined);
+      return { target: 'fenced', context: reported(context, { ...patch, flushes: [] }, enq) };
     }
     const owed = deferred !== undefined || !latest || context.commands.length > 0 || context.readBack !== 'none';
     if (context.flushes.length > 0 && (!owed || (!saved && cycle.flushed && latest && context.commands.length === 0))) {
@@ -460,7 +459,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       patch.flushes = [];
     }
     return {
-      target: outcome === 'retry' && deferred !== undefined ? 'retrying' : 'idle',
+      /* A command served while a failed edit waited for its timer leaves that edit's retry due. */
+      target:
+        deferred !== undefined && (outcome === 'retry' || (cycle.kind !== 'edit' && context.writeFailed))
+          ? 'retrying'
+          : 'idle',
       context: reported(context, patch, enq),
     };
   };
@@ -543,7 +546,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     id: 'record-sync',
     version: '1',
     /* A fault no transition modelled is recorded and the store keeps answering (MC-R12). */
-    onError: refines('Unmodelled', ({ event }) => ({ context: { fault: messageOf(event.error) } })),
+    onError: refines('Unmodelled', ({ context, event }) => ({
+      context: { fault: messageOf(event.error), faults: context.faults + 1 },
+    })),
     context: ({ input }) => ({
       editDebounce: input.editDebounce ?? 0,
       published: { record: undefined, bytes: null, refusal: undefined },
@@ -569,6 +574,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       writeFailed: false,
       closeFenced: false,
       fault: undefined,
+      faults: 0,
     }),
     type: 'parallel',
     states: {
@@ -682,9 +688,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 return { target: settledSource(context), context: dropRead(context, enq) };
               }),
               /* Target rule 5: the reply of a write no read overlapped supersedes the read in flight. */
+              /* The authority answered the write, so a read retry this supersedes is no longer owed. */
               'write.published': refines('ReplyApplied', ({ context }, enq) => ({
                 target: settledSource(context),
-                context: dropRead(context, enq),
+                context: reported(
+                  context,
+                  { ...dropRead(context, enq), readFailures: 0, health: { ...context.health, read: 'ok' } },
+                  enq,
+                ),
               })),
             },
           },
@@ -785,9 +796,10 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               context.commands.map((command) => command.requestId),
               false,
             );
-            /* The edits no cycle has taken are kept apart, so settling a cycle cannot drop them. */
-            const pending = context.pending && { ...context.pending, requests: [] };
-            const fenced = { closeFenced: true, pending, commands: [] };
+            /* No cycle carries what is deferred, so settling the cycle on the wire folds these edits in, not over. */
+            const folded = context.pending ? policy.combine(context.deferred, context.pending.patch) : context.deferred;
+            const deferred = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
+            const fenced = { closeFenced: true, pending: undefined, commands: [], deferred };
             if (matchesState({ write: 'writing' }, value)) {
               /* The write on the wire still answers its requesters; nothing is published after the close. */
               return { context: fenced };
@@ -799,10 +811,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               const settled = settle({ ...context, ...fenced }, enq, { cycle, outcome: applied ? 'saved' : 'blocked' });
               return { target: '.fenced', context: { ...fenced, ...settled.context } };
             }
-            const folded = pending ? policy.combine(context.deferred, pending.patch) : context.deferred;
-            const deferred = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
             answer(enq, context.flushes, deferred === undefined);
-            return { target: '.fenced', context: { ...fenced, pending: undefined, deferred, flushes: [] } };
+            return { target: '.fenced', context: { ...fenced, flushes: [] } };
           }),
           /* Stale outside the two waiting states: the writer was not waiting for this read. */
           'source.completed': refines('Unmodelled', () => ({})),
@@ -1065,7 +1075,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
             after: {
               retryDelay: refines('IssueWrite', ({ context }) => ({
                 target: 'starting',
-                context: { cycle: deferredCycle(context, 'timer') },
+                context: { cycle: deferredCycle(context, 'timer'), deferred: undefined },
               })),
             },
           },

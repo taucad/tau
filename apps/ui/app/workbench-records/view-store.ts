@@ -168,7 +168,9 @@ export function createWorkbenchViewStore(
     input.onError(error);
   });
   on('healthChanged', ({ health }) => {
-    input.onHealth?.(health);
+    if (!fenced()) {
+      input.onHealth?.(health);
+    }
   });
   actor.start();
   /**

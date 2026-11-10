@@ -1381,4 +1381,29 @@ describe('workbench view checked store', () => {
       vi.useRealTimers();
     }
   });
+
+  it('should report no health after dispose, even when the write on the wire replies later', async () => {
+    const data = memory();
+    const onHealth = vi.fn();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-health01',
+      files: data.files,
+      onChange: () => undefined,
+      onError: vi.fn(),
+      onHealth,
+    });
+    await store.read();
+    const release = data.delay();
+    const edited = store.edit({ ...seed(), name: 'Front' });
+    await vi.waitFor(() => {
+      expect(data.writes).toHaveBeenCalledTimes(1);
+    });
+    store.dispose();
+    onHealth.mockClear();
+    release();
+
+    expect(await edited).toBe(true);
+    expect(onHealth).not.toHaveBeenCalled();
+  });
 });

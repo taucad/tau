@@ -130,7 +130,12 @@ export function createRecordSync<T, P>(
     }
     return new Promise<boolean>((resolve) => {
       waiting.set(requestId, resolve);
+      const { faults } = actor.getSnapshot().context;
       send(requestId);
+      // MC-R12: a step that faulted dropped the request with it, so nothing else would answer it.
+      if (actor.getSnapshot().context.faults !== faults && waiting.delete(requestId)) {
+        resolve(false);
+      }
     });
   };
   return {

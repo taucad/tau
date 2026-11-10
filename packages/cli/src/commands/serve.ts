@@ -37,7 +37,7 @@ import { prepareServeUi } from '#serve-ui.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
-import { requireGitToolchain } from '#commands/revisions.js';
+import { requireGitToolchain, tokenRevisionActor } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import { loadCloudHostObserver } from '#cloud-host-observer.js';
@@ -335,10 +335,17 @@ const agentOptions = async (
    * reason: a terminal has no cookie jar, and the device credential this daemon
    * paired with authenticates the relay only (C67). */
   const tauApiToken = await resolveAuthToken(args.gateway ?? args.apiUrl);
+  /* A1: the account that token belongs to is who every served project records as, until a renderer names its own
+   * session; without one, this device's pseudonym. Never the OS login name or an environment email. */
+  const revisionActor =
+    tauApiToken === undefined || tauApiToken === ''
+      ? undefined
+      : await tokenRevisionActor(args.gateway ?? args.apiUrl, tauApiToken);
   return {
     workspaceRoot: agentWorkspaceRoot(args.workspace, process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
     ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
+    ...(revisionActor === undefined ? {} : { revisionActor }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
     gatewayBaseUrl: args.gateway ?? args.apiUrl,

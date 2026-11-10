@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useId } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
 import { Info } from 'lucide-react';
@@ -69,7 +70,9 @@ export function SettingsGroup({
       {title === undefined ? undefined : (
         <div className='flex min-h-8 items-center justify-between gap-4'>
           <div className='flex items-center gap-1.5'>
-            <h2 className='text-sm font-medium'>{title}</h2>
+            <Heading level={2} variant='label'>
+              {title}
+            </Heading>
             {info === undefined ? undefined : <SettingsInfo label={title}>{info}</SettingsInfo>}
           </div>
           {action}

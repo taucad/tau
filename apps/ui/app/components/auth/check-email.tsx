@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { cn } from '@taucad/ui/utils/cn';
-import { authErrorMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 
 /** Seconds before another verification email may be requested from this view. */
 export const resendCooldownSeconds = 60;
@@ -61,8 +61,8 @@ export function CheckEmail({ className, email, reason, onUseDifferentEmail }: Ch
         <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
           <MailCheck className='size-5' aria-hidden='true' />
         </div>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>Check your email</h1>
+        <CardTitle level={1} variant='title'>
+          Check your email
         </CardTitle>
         <CardDescription>
           {reason === 'sign-up'

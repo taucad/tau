@@ -106,7 +106,7 @@ runs:
         restore-keys: |
           ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
 
-    # Postinstall scripts fetch release binaries (Vale, Electron) from GitHub, which can answer 504 for
+    # Postinstall scripts fetch release binaries (Electron) from GitHub, which can answer 504 for
     # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
     - name: Install dependencies
       run: |

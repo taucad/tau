@@ -41,7 +41,7 @@ vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
 }));
 
 const { initSentry, createBeforeSend, stopSentry } = await import('#lib/sentry.lib.js');
-const { recordActivityBreadcrumb } = await import('#lib/activity-breadcrumbs.js');
+const { recordActivityBreadcrumb } = await import('@taucad/ui-core/lib/activity-breadcrumbs');
 
 type BeforeSend = ReturnType<typeof createBeforeSend>;
 

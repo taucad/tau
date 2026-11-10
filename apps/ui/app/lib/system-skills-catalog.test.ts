@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
-import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
+import { createModelSkillMarkdown } from '@taucad/ui-core/lib/create-model-skill';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 

@@ -11,9 +11,9 @@ import {
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
-import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
+import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { BranchOperation } from '@taucad/revisions';
 import { needsDecision, revisionName } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.js';

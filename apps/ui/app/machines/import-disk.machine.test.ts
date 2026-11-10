@@ -3,8 +3,8 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import type { ImportPlanner } from '#machines/import-disk.machine.js';
-import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ImportListing, ImportSourceDescriptor } from '@taucad/ui-core/machines/import-staging';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 vi.mock('#routes/import.$/import.utils.js', () => ({
   findMainFile: vi.fn(() => 'main.ts'),

@@ -103,7 +103,7 @@ const resizeObserver: ResizeObserver = {
 
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
 const { panelMinSizeChat, panelMinSizeViewer, panelMinSizeViewerTight, panelMinSizeWorkbench, tightWorkspaceWidth } =
-  await import('#constants/editor.constants.js');
+  await import('@taucad/ui-core/constants/editor.constants');
 const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
 
 const renderDesktop = () =>

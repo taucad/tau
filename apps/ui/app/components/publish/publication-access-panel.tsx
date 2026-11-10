@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Trash2 } from 'lucide-react';
@@ -167,7 +168,9 @@ export function PublicationAccessPanel({
 
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-medium'>People with access</h3>
+          <Heading level={3} variant='label'>
+            People with access
+          </Heading>
           {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
         </div>
         {grants.length === 0 && !loading ? (

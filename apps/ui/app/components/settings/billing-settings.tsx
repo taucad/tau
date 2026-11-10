@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 import { useRef, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
@@ -8,7 +9,7 @@ import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent } from '@taucad/ui/components/card';
@@ -119,7 +120,9 @@ export function BillingSettings(): React.JSX.Element {
         </p>
       ) : undefined}
       <SettingsItem settingId='plan'>
-        <h2 className='mb-3 text-sm font-medium'>Your plan</h2>
+        <Heading level={2} variant='label' className='mb-3'>
+          Your plan
+        </Heading>
         <SettingsSectionCard>
           <CardContent className='flex flex-col gap-3 text-sm'>
             <div className='flex flex-wrap items-center justify-between gap-4'>
@@ -185,7 +188,9 @@ export function BillingSettings(): React.JSX.Element {
 
       {monthly !== undefined || (entitlements.isResolved && entitlements.tier !== 'free') ? (
         <SettingsItem settingId='plan-limits'>
-          <h2 className='mb-3 text-sm font-medium'>Plan limits</h2>
+          <Heading level={2} variant='label' className='mb-3'>
+            Plan limits
+          </Heading>
           <SettingsSectionCard>
             <CardContent className='flex flex-col gap-3'>
               <MonthlyCreditsMeter
@@ -205,7 +210,9 @@ export function BillingSettings(): React.JSX.Element {
 
       {availableBalance && BigInt(availableBalance.promoGrantCreditAtoms) > 0n ? (
         <div>
-          <h2 className='mb-3 text-sm font-medium'>Promotional credits</h2>
+          <Heading level={2} variant='label' className='mb-3'>
+            Promotional credits
+          </Heading>
           <SettingsSectionCard>
             <CardContent className='space-y-2 text-sm'>
               <p>
@@ -226,7 +233,9 @@ export function BillingSettings(): React.JSX.Element {
         </div>
       ) : undefined}
       <SettingsItem settingId='credit-balance'>
-        <h2 className='mb-3 text-sm font-medium'>Credits</h2>
+        <Heading level={2} variant='label' className='mb-3'>
+          Credits
+        </Heading>
         <SettingsSectionCard>
           <CardContent className='flex flex-col gap-3 text-sm'>
             <div className='flex flex-wrap items-center justify-between gap-4'>

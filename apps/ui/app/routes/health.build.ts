@@ -1,5 +1,5 @@
 import type { LoaderFunction } from 'react-router';
-import { cdnCacheControlResponseHeader } from '#constants/cache.constants.js';
+import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
 import { readBuildId } from '#lib/build-identity.js';
 
 /**

@@ -73,7 +73,7 @@
     "validate-prose": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "./node_modules/.bin/vale --config apps/docs/.vale.ini apps/docs/content",
+        "command": "node scripts/src/ensure-vale.ts && node_modules/@vvago/vale/bin/vale --config apps/docs/.vale.ini apps/docs/content",
         "cwd": "."
       }
     },

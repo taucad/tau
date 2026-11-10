@@ -4,7 +4,7 @@
 import { createActor, createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 import * as machineModule from './sessions.machine.js';
 import { guardActors } from '@taucad/xstate-testing/inspect';

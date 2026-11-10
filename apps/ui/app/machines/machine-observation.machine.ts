@@ -7,7 +7,7 @@ import type {
   MachineProvider,
 } from '@taucad/runtime/machine';
 import { projectMachineDirectoryFrame } from '#machines/machine-directory-projection.js';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 /** The projection to observe; the host client is injected outside serializable state. */
 export type MachineObservationMachineInput = { readonly machineId?: string };

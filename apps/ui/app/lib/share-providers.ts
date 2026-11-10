@@ -10,7 +10,7 @@ import { ShareError } from '@taucad/share/provider';
 import { createShareProviderRegistry } from '@taucad/share/registry';
 import { tauShareProvider, tauShareProviderDescriptor } from '@taucad/share/tau';
 import { authClient } from '#lib/auth-client.js';
-import { builtinShareProviderDescriptor } from '#lib/builtin-share-provider-descriptor.js';
+import { builtinShareProviderDescriptor } from '@taucad/ui-core/lib/builtin-share-provider-descriptor';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';

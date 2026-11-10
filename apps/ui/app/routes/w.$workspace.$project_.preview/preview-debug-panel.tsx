@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime';
@@ -39,7 +40,9 @@ export function PreviewDebugPanel({ cadRef }: Props): React.JSX.Element {
     <>
       <Separator />
       <div data-testid='preview-debug-panel'>
-        <h3 className='mb-3 text-sm font-semibold'>Debug</h3>
+        <Heading level={3} variant='label' className='mb-3'>
+          Debug
+        </Heading>
         {inspection ? (
           <DebugBody inspection={inspection} />
         ) : (

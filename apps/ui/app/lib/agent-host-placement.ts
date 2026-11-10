@@ -11,7 +11,7 @@ import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#l
 import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { getComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { loopbackHostIdPrefix } from '@taucad/chat-ui/utils/chat-execution';
 
 /**

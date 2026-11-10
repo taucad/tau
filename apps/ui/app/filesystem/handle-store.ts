@@ -51,12 +51,12 @@ import {
   workspaceMarkerSchemaUrl,
 } from '@taucad/types';
 import { metaConfig } from '#constants/meta.constants.js';
-import { allocateSlug, projectNameToSlug } from '#utils/project-directory.utils.js';
-import { toStorageWriteError, WorkspaceIdentityConflictError } from '#filesystem/workspace-errors.js';
+import { allocateSlug, projectNameToSlug } from '@taucad/ui-core/utils/project-directory.utils';
+import { toStorageWriteError, WorkspaceIdentityConflictError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
 import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 
 const dbName = `${metaConfig.databasePrefix}fs-handles`;

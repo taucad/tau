@@ -132,6 +132,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(laneSelectors).toEqual({
       apps: { type: 'app' },
       api: { tags: ['scope:api'] },
+      'api-image': { targets: ['docker:smoke'] },
       billing: { targets: ['test:billing-foundation'] },
       'cli-e2e': { targets: ['test:scenarios'] },
       size: { targets: ['size'] },
@@ -231,7 +232,8 @@ describe('ci.yml affected-only lanes', () => {
     ]) {
       expect(slim, lane).toMatch(new RegExp(`^\\s*${lane}=false$`, 'mu'));
     }
-    // The PR-only Docker smoke test keeps its own flag, the raw API selection.
+    // The PR-only Docker smoke test keeps its own flag: Nx's selection of the image's project.
+    expect(planScript).toContain('api_image=$(flag api-image)');
     expect(planScript).toContain('echo "api-image=$api_image"');
     expect(ci.jobs['api-docker-smoke']?.if).toBe(
       "github.event_name == 'pull_request' && needs.plan.outputs.api-image == 'true'",

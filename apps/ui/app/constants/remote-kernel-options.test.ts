@@ -14,7 +14,7 @@ import {
   getRemoteComputeSelectionRevision,
   selectLocalCompute,
   selectRemoteComputeDevice,
-} from '#lib/remote-compute-placement.js';
+} from '@taucad/ui-core/lib/remote-compute-placement';
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),

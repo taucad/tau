@@ -3,7 +3,7 @@ import { useRouteLoaderData } from 'react-router';
 import { consentChannelName, consentCookieName } from '@taucad/consent';
 import type { RootLoaderData } from '#root-layout.js';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';
-import { recordRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
+import { recordRequestGlobalPrivacyControl } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import type { ConsentStatus } from '@taucad/consent';
 
 type ConsentLoaderData = RootLoaderData & {

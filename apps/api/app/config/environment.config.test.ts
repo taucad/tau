@@ -423,13 +423,10 @@ describe('environmentSchema', () => {
       expect(parseDeadline(value).success).toBe(false);
     });
 
-    it('should leave production on the default while staging sets the maximum', () => {
+    it.each(['fly.prod.toml', 'fly.staging.toml'])('should set the maximum in %s', (file) => {
       const apiRoot = new URL('../../', import.meta.url);
 
-      expect(readFileSync(new URL('fly.prod.toml', apiRoot), 'utf8')).not.toContain('BILLING_INVOCATION_DEADLINE');
-      expect(readFileSync(new URL('fly.staging.toml', apiRoot), 'utf8')).toMatch(
-        /^BILLING_INVOCATION_DEADLINE = '600000'$/mu,
-      );
+      expect(readFileSync(new URL(file, apiRoot), 'utf8')).toMatch(/^BILLING_INVOCATION_DEADLINE = '600000'$/mu);
     });
   });
 

@@ -1321,11 +1321,13 @@ describe('Revisions pane vocabulary and History', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Rev 2 · Thicker base' }));
     const files = await screen.findByRole('list', { name: 'Changed files' });
+    /* The label is not a file, so assistive technology counts only the two files as items. */
     expect(
       within(files)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toStrictEqual([expect.stringContaining('main.scad'), 'Project setup', expect.stringContaining('.gitattributes')]);
+    ).toStrictEqual([expect.stringContaining('main.scad'), expect.stringContaining('.gitattributes')]);
+    expect(files.textContent).toMatch(/main\.scad.*Project setup.*\.gitattributes/u);
   });
 
   it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {

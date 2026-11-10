@@ -54,7 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
-import { generatedGitattributesPath, generatedIgnorePath } from '@taucad/revisions';
+import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
@@ -99,8 +99,7 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
 const initialFileRows = 3;
 
 /* The files Tau owns as project setup, at the project root (A4). */
-const setupPaths: ReadonlySet<string> = new Set([generatedIgnorePath, generatedGitattributesPath]);
-const isSetupPath = (path: string): boolean => setupPaths.has(path);
+const isSetupPath = (path: string): boolean => generatedSetupPaths.has(path);
 const comparisonNotices: Readonly<Record<RevisionComparisonNotice, string>> = {
   'empty-added': 'Empty file added.',
   'empty-deleted': 'Empty file deleted.',
@@ -270,7 +269,8 @@ function FileList({
       {shown.flatMap((change, index) => [
         ...(index === firstSetup
           ? [
-              <li key='project-setup' className='px-2 py-1 text-xs text-muted-foreground'>
+              /* A label, not a file: assistive technology counts only the files as items. */
+              <li key='project-setup' role='presentation' className='px-2 py-1 text-xs text-muted-foreground'>
                 Project setup
               </li>,
             ]

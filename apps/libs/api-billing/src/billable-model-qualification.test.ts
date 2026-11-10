@@ -14,6 +14,7 @@ import type {
   BillableProviderWire,
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
+import { createGatewayModelTransport } from '@taucad/agent-host';
 import { isModelListEntryEnabled, LlmGatewayError, modelList } from '@taucad/api-llm-gateway';
 
 const adapter = mock<BillableModelProviderAdapter>();
@@ -381,7 +382,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
         stream: true,
         stream_options: { include_usage: true },
         store: false,
-        max_completion_tokens: 8192,
+        max_tokens: 8192,
         tools: [
           {
             type: 'function',
@@ -514,14 +515,14 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
         model: 'morph-deepseek-v4.1-flash',
         messages: [{ role: 'user', content: 'hello' }],
         stream: true,
-        max_tokens: 512,
+        max_completion_tokens: 512,
       }),
       providerWire: 'openai-completions',
     });
 
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 4275n },
-      { dimension: 'cache_read', tier: null, quantity: 4275n },
+      { dimension: 'uncached_input', tier: null, quantity: 4286n },
+      { dimension: 'cache_read', tier: null, quantity: 4286n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
   });
@@ -531,7 +532,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       ...intent({
         model: 'together-glm-5.3',
         messages: [{ role: 'user', content: 'hello' }],
-        max_completion_tokens: 16,
+        max_tokens: 16,
         stream: true,
       }),
       providerWire: 'openai-completions',
@@ -755,4 +756,71 @@ describe('catalog route vocabulary', () => {
       catalogResolver.resolve(intent({ model: 'gpt-5.6-luna', input: 'hello', max_output_tokens: 1, stream: true })),
     ).toThrow('Model route is not qualified');
   });
+});
+
+/* The host and the route table name the output-limit field independently, and the live matrix runs with
+ * Tau Cloud off, so only this join sees a route and its codec disagreeing. */
+describe('funded route admission of the request the host sends', () => {
+  const catalogRows = new Map(
+    Object.values(modelList)
+      .flatMap((provider) => Object.values(provider))
+      .map((row) => [row.id, row] as const),
+  );
+  const fundedResolver = new CodeOwnedBillableModelQualificationResolver({
+    adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, adapter])),
+    executionTimeout: 30_000,
+  });
+  const drain = async (events: AsyncIterable<unknown>): Promise<readonly unknown[]> => {
+    const seen: unknown[] = [];
+    for await (const event of events) {
+      seen.push(event);
+    }
+    return seen;
+  };
+  const wireForUrl = (url: string): BillableProviderWire => {
+    if (url.endsWith('/responses')) {
+      return 'openai-responses';
+    }
+    return url.endsWith('/messages') ? 'anthropic' : 'openai-completions';
+  };
+
+  it.each(billableModelRouteIds)(
+    'should admit the host request for %s at its catalog output ceiling',
+    async (routeId) => {
+      const row = catalogRows.get(routeId)!;
+      let sent: { body: unknown; wire: BillableProviderWire } | undefined;
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        async fetch(input, init) {
+          sent = {
+            body: JSON.parse(init?.body as string) as unknown,
+            wire: wireForUrl(input instanceof Request ? input.url : String(input)),
+          };
+          throw new Error('The request has been captured');
+        },
+      });
+
+      await drain(
+        transport.stream({
+          attemptId: `attempt-${routeId}`,
+          invocationPurpose: 'generation',
+          modelId: routeId,
+          providerKind: row.provider.id,
+          maxTokens: row.details.maxTokens,
+          contextWindow: row.details.contextWindow,
+          systemPrompt: 'static',
+          messages: [{ id: 'user-1', role: 'user', content: 'hello' }],
+          tools: [],
+          signal: new AbortController().signal,
+        }),
+      ).catch(() => undefined);
+
+      const qualified = fundedResolver.resolve({
+        ...intent(sent!.body),
+        providerWire: sent!.wire,
+        priceHeaders: sent!.wire === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {},
+      });
+      expect(qualified.routeId).toBe(routeId);
+    },
+  );
 });

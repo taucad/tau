@@ -1,6 +1,6 @@
 ---
 host: minor
-native-process-core: patch
+native-process-core: minor
 ---
 
 The agent's shell can read the project's git history. Each command gets a git directory in its private root holding only `HEAD`, `refs/heads`, `refs/tags`, `shallow` when present, a copy of the checkout's index and `info/exclude` (so `git status` is truthful), and a fresh `config` with no remote, credential helper or hook; its alternates name the checkout's real object store, which the shell may read but never write. `GIT_DIR`, `GIT_WORK_TREE` and `GIT_OPTIONAL_LOCKS=0` point git at it, so `git log`, `diff`, `show` and `blame` work, `git for-each-ref` lists no `refs/tau` ref, and every write fails. The real `.git` stays otherwise denied. Objects only `refs/tau/*` reaches stay readable by id through the shared store (`git cat-file --batch-all-objects`); that residual is accepted. A store file the view copies that exists but cannot be read or parsed exactly (including a split or sparse index, or one over 32 MiB) gives no view, and a view the host cannot write leaves the command without git rather than failing it. `compileShellFilesystem` takes the view as `git`, and `shellEnvironment` takes it as `git`.

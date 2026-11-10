@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useSyncExternalStore } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -12,12 +13,15 @@ const load = async () => {
   vi.resetModules();
   const skew = await import('#filesystem/build-skew.js');
   loaded.push(skew);
-  const { useReloadOffered, useSupersedingBuild } = await import('#hooks/use-superseding-build.js');
+  const recovery = await import('#lib/stale-build-recovery.js');
   /** The reload prompt as every update surface words it, shown exactly while the offer stands. */
   function ReloadPrompt(): React.JSX.Element | undefined {
-    const offered = useReloadOffered();
-    const { supersedingBuildId } = useSupersedingBuild();
-    return offered ? <div role='alert'>{skew.describeSupersession(supersedingBuildId)}</div> : undefined;
+    const offered = useSyncExternalStore(skew.subscribeReloadOffer, skew.isReloadOffered);
+    const reloadState = useSyncExternalStore(recovery.subscribeReloadState, recovery.readReloadState);
+    const supersedingBuildId = useSyncExternalStore(skew.subscribeSupersedingBuildId, skew.readSupersedingBuildId);
+    return recovery.isReloadPromptShown(offered, reloadState) ? (
+      <div role='alert'>{skew.describeSupersession(supersedingBuildId)}</div>
+    ) : undefined;
   }
   return { ...skew, ReloadPrompt };
 };

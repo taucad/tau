@@ -340,7 +340,7 @@ const fieldOfViewPatch = (context: CameraMachineContext, verticalFieldOfView: nu
 
 const upDirectionPatch = (context: CameraMachineContext, axis: CameraUpAxis): CameraPatch => {
   // Own keys only: `constructor` or `__proto__` must not find a prototype member.
-  if (!Object.hasOwn(upAxes, axis)) {
+  if (typeof axis !== 'string' || !Object.hasOwn(upAxes, axis)) {
     throw new RangeError(`axis must be 'x', 'y' or 'z'.`);
   }
   const up = resolveCameraUp({
@@ -364,6 +364,9 @@ const posePatch = (context: CameraMachineContext, pose: CameraPose): CameraPatch
     }),
   );
 
+/* Whether a sender gave the field: an untyped one may leave it out or set it to null. */
+const given = <Value>(value: Value): value is NonNullable<Value> => value !== undefined && value !== null;
+
 /* A fractional framing margin: a number from 0 to 0.5. */
 const assertMargin = (margin: unknown): number => {
   if (typeof margin !== 'number' || !(margin >= 0 && margin <= 0.5)) {
@@ -379,7 +382,8 @@ const framePatch = (
   viewPatch(
     context,
     frameCameraBounds({
-      view: options.orientation
+      // A given orientation of any other shape fails the view's own vector checks and is refused.
+      view: given(options.orientation)
         ? createCameraView({
             ...context.view,
             direction: options.orientation.direction,
@@ -400,9 +404,6 @@ const focusPatch = (context: CameraMachineContext, event: CameraEvent<'frameBoun
       bounds: context.view.bounds,
     }),
   );
-
-/* Whether a sender gave the field: an untyped one may leave it out or set it to null. */
-const given = <Value>(value: Value): value is NonNullable<Value> => value !== undefined && value !== null;
 
 /*
  * Compose the record's fields in order, each reading the context the one before it produced. A null field is an
@@ -617,7 +618,7 @@ const cameraMachineDefinition = setup({
       return patch && { context: commit(context, { patch, source: event.source }, enq) };
     }),
     frameBounds: refines('Changed', ({ context, event }, enq) => {
-      const patch = String(event.source) === 'focus' ? attempt(() => focusPatch(context, event)) : undefined;
+      const patch = (event.source as unknown) === 'focus' ? attempt(() => focusPatch(context, event)) : undefined;
       return patch && { context: commit(context, { patch, source: 'focus' }, enq) };
     }),
     frame: refines('Changed', ({ context, event }, enq) => {

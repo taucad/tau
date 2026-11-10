@@ -271,6 +271,27 @@ const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachi
   [
     'an adoption with an up axis from the object prototype',
     untyped({ type: 'adoptPersistedPose', requestId: 'refused', upDirection: 'constructor' }),
+  ], // A falsy orientation is a given field of the wrong shape, not an absent one.
+  ...[0, false, '', Number.NaN].map(
+    (orientation) =>
+      [
+        `an adoption whose orientation is ${String(orientation) || "''"}`,
+        untyped({ type: 'adoptPersistedPose', requestId: 'refused', orientation }),
+      ] as const,
+  ),
+  [
+    'a frame whose orientation is false',
+    untyped({ type: 'frameGeometry', bounds: sampleBounds, margin: 0.1, orientation: false, source: 'framing' }),
+  ],
+  // An array is not its string: no coercion of an axis or a source.
+  ['an up axis in an array', untyped({ type: 'setUpDirection', axis: ['y'] })],
+  [
+    'an adoption with an up axis in an array',
+    untyped({ type: 'adoptPersistedPose', requestId: 'refused', upDirection: ['y'] }),
+  ],
+  [
+    'a focus whose source is in an array',
+    untyped({ type: 'frameBounds', bounds: sampleBounds, margin: 0.1, source: ['focus'] }),
   ],
 ];
 

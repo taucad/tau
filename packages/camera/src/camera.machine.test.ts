@@ -515,6 +515,20 @@ describe('cameraMachine persisted adoption (charter I2, I8, D15)', () => {
     actor.stop();
   });
 
+  it.each([
+    // Orthographic framing pads the bounds' half-height of 180 by 1 - margin; the default margin is 0.1.
+    ['the default margin', undefined, (2 * 180) / (1 - 0.1)],
+    ['a margin of 0.3', 0.3, (2 * 180) / (1 - 0.3)],
+  ])('should re-frame an adopted orientation with %s', (_label, margin, verticalSpan) => {
+    const { actor } = startCamera();
+    const orientation = { direction: [0, 0, 1], up: [0, 1, 0] } as const;
+
+    actor.send({ type: 'adoptPersistedPose', requestId: 'r6', verticalFieldOfView: 0, orientation, margin });
+
+    expect(actor.getSnapshot().context.view.verticalSpan).toBeCloseTo(verticalSpan, 9);
+    actor.stop();
+  });
+
   it('should adopt a foreign field of view and up direction as persisted, in one change', () => {
     const { actor, emitted } = startCamera();
 
@@ -827,6 +841,20 @@ describe('createCameraActor', () => {
       untyped({ type: 'adoptPersistedPose', requestId: 'r9', orientation: null }),
     ],
     ['an adoption with an empty pose', untyped({ type: 'adoptPersistedPose', requestId: 'r10', pose: {} })],
+    ['an adoption with a falsy orientation', untyped({ type: 'adoptPersistedPose', requestId: 'r11', orientation: 0 })],
+    [
+      'a frame whose orientation is false',
+      untyped({ type: 'frameGeometry', bounds: initialView.bounds, margin: 0.1, orientation: false, source: 'fit' }),
+    ],
+    ['an up axis in an array', untyped({ type: 'setUpDirection', axis: ['y'] })],
+    [
+      'an adoption with an up axis in an array',
+      untyped({ type: 'adoptPersistedPose', requestId: 'r12', upDirection: ['y'] }),
+    ],
+    [
+      'a focus whose source is in an array',
+      untyped({ type: 'frameBounds', bounds: initialView.bounds, margin: 0.1, source: ['focus'] }),
+    ],
   ];
 
   it.each(refused)('should report %s through onRejectedEvent and keep the camera', (_label, event) => {

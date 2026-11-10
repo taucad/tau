@@ -19,7 +19,6 @@
     "@taucad/api-core": "workspace:*",
     "@taucad/api-database": "workspace:*",
     "@taucad/api-email": "workspace:*",
-    "@taucad/api-extractor": "workspace:*",
     "@taucad/api-git-core": "workspace:*",
     "@taucad/api-git-mirror": "workspace:*",
     "@taucad/api-hosts": "workspace:*",
@@ -49,8 +48,6 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-testing": "workspace:*",
-    "@taucad/cli": "workspace:*",
-    "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*"
   },
   "imports": {

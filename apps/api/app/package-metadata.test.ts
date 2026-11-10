@@ -16,7 +16,11 @@ const readPackageJson = async (): Promise<PackageJson> =>
  * kernel package may be a production dependency here.
  *
  * A production edge on any of these also drags browser-worker code and
- * dependency-owned runtime assets into a service that renders nothing.
+ * dependency-owned runtime assets into a service that renders nothing. A
+ * development edge ships nothing, but Nx still counts it: it puts every kernel
+ * in the API's project graph, so a kernel or CLI change selects the API lane
+ * (PostgreSQL, MinIO and the image smoke build). The publication kernel table's
+ * parity with the CLI runtime is pinned from `apps/api-contracts` instead.
  *
  * See docs/research/api-server-side-geometry-prune.md.
  */
@@ -30,19 +34,16 @@ describe('@taucad/api package metadata', () => {
     },
   );
 
-  it('keeps the runtime, substrate and CLI runtime available to tests only', async () => {
-    const packageJson = await readPackageJson();
+  // The headless GeoSpec harness lives with the `test_model` projection in `@taucad/agent-tools`.
+  it.each(['@taucad/runtime', '@taucad/cli', '@taucad/api-extractor', 'geospec', 'geospec-engine'])(
+    'does not depend on %s at all, even for tests',
+    async (name) => {
+      const packageJson = await readPackageJson();
 
-    // `main.ts` is bundled from source, so these must resolve at build and
-    // test time without shipping. The CLI's runtime pins the publication
-    // kernel table (`publication-runtime.parity.test.ts`). The headless
-    // GeoSpec harness lives with the `test_model` projection in
-    // `@taucad/agent-tools`, so the API declares no GeoSpec package.
-    expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
-    expect(packageJson.devDependencies?.['geospec']).toBeUndefined();
-    expect(packageJson.devDependencies?.['geospec-engine']).toBeUndefined();
-    expect(packageJson.devDependencies?.['@taucad/cli']).toBe('workspace:*');
-  });
+      expect(packageJson.dependencies?.[name]).toBeUndefined();
+      expect(packageJson.devDependencies?.[name]).toBeUndefined();
+    },
+  );
 
   it('has no reference to the dissolved @taucad/testing package', async () => {
     const packageJson = await readPackageJson();

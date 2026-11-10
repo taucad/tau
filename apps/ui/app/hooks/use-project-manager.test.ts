@@ -3236,8 +3236,8 @@ describe('useProjectManager.createProject', () => {
       }),
     );
 
-    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as { files: Record<string, unknown> };
-    expect(Object.keys(prepared.files)).not.toContain(startRecordPath);
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(Object.keys(prepared?.files ?? {})).not.toContain(startRecordPath);
   });
 
   /* W7.3: a linked repository's own tau.json is committed as authored while it declares the journaled manifest. */

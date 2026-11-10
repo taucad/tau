@@ -1931,11 +1931,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }),
           summary: Object.freeze({ generated: startSummary(origin) }),
         });
-        await options.port.updateRef({
+        const moved = await options.port.updateRef({
           name: place.branch,
           expectedHead: undefined,
           head: revisionId(receipt.commitId),
         });
+        /* The record stays for the next open when the line gained a head first. */
+        if (moved.status !== 'updated') {
+          throw new RevisionPortError(
+            'CHECKOUT_CONFLICT',
+            `${place.branch} moved while the Start version was recorded.`,
+          );
+        }
       }
       await unlinkIfPresent(rooted, startRecordPath);
     });

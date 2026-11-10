@@ -5953,6 +5953,29 @@ for (const actorSet of actorSets) {
       expect(cut.treeId).toBe(head.treeId);
     }, 30_000);
 
+    it('keeps the record for the next open when the line gains a head before Start lands', async () => {
+      const { port, filesystem, actorFilesystem } = await fixture(
+        { 'main.scad': 'cube(1);\n', [startRecordPath]: record('created') },
+        undefined,
+        { actorSet: actorSet.name },
+      );
+      const racingPort: RevisionPort = {
+        ...port,
+        updateRef: async (input) => ({
+          status: 'conflicted',
+          name: input.name,
+          expectedHead: input.expectedHead,
+          actualHead: input.head,
+          proposedHead: input.head,
+        }),
+      };
+      const racing = createRevisionActors({ port: racingPort, projectId: 'project-1', filesystem: actorFilesystem });
+
+      /* The open warns and goes on; the record is what lets a later open mint V1 once the line is settled. */
+      await openHead(racing);
+      expect(await filesystem.exists(startRecordPath)).toBe(true);
+    }, 30_000);
+
     it('mints nothing where no creation flow asked, as an older build’s project opens', async () => {
       const { actors } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, { actorSet: actorSet.name });
 

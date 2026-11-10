@@ -713,7 +713,7 @@ type LayerMaterials = {
  */
 const maskRoughness = 0.6;
 const maskSpecular = 0.5;
-const maskCoat = { factor: 0.25, roughness: 0.25 } as const;
+const maskCoat = { factor: 0.15, roughness: 0.25 } as const;
 
 const createMaterials = (
   document: Document,

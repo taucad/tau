@@ -4,7 +4,7 @@ import { reachesReadiness } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { canOpenCloudProject, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { followCloudOpen } from '#lib/cloud-open-lock.js';
+import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =

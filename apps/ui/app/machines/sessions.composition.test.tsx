@@ -24,7 +24,7 @@
 
 /* oxlint-disable eslint/no-await-in-loop, eslint/no-restricted-imports -- this composition suite is the boundary where ordered machine scripts meet their real hooks. */
 
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';

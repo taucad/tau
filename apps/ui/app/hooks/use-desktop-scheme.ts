@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
 
 import { ENV } from '#environment.config.js';
-import { selectDesktopScheme } from '#lib/desktop-deep-link.js';
-import type { DesktopScheme } from '#lib/desktop-deep-link.js';
+import { selectDesktopScheme } from '@taucad/ui-core/lib/desktop-deep-link';
+import type { DesktopScheme } from '@taucad/ui-core/lib/desktop-deep-link';
 
 // Browser platform and the bound deployment origin do not change during this page's lifetime.
 const subscribe = (): (() => void) => () => undefined;

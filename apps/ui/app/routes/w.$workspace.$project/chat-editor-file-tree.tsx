@@ -40,7 +40,7 @@ import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
 import { tauFileDragMime } from '@taucad/types/constants';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import type { KernelConfiguration } from '@taucad/types/constants';
-import type { FileItem } from '#types/editor.types.js';
+import type { FileItem } from '@taucad/ui-core/types/editor.types';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
@@ -90,9 +90,9 @@ import {
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { FileExtensionIcon, getIconIdForFilename } from '@taucad/ui-kit/icons/file-extension-icon';
-import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
+import { getFileExtension, encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
@@ -108,10 +108,10 @@ import {
   indexedItemData,
   isEditorSystemArtifactPath,
 } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
-import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
-import type { FileProvenanceLabel } from '#lib/file-provenance-labels.js';
-import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
-import type { WorkspaceMutationErrorLike } from '#filesystem/workspace-errors.js';
+import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
+import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
+import type { WorkspaceMutationErrorLike } from '@taucad/ui-core/filesystem/workspace-errors';
 import { OverwriteConfirmDialog } from '#components/filesystem/overwrite-confirm-dialog.js';
 import type { OverwriteConfirmResult } from '#components/filesystem/overwrite-confirm-dialog.js';
 import {

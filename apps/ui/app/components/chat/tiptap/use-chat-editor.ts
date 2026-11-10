@@ -33,7 +33,7 @@ import {
 } from '@taucad/chat-ui/components/tiptap/slash-command-suggestion';
 import { buildContextItemsFromSearch } from '@taucad/chat-ui/components/tiptap/context-suggestion.utils';
 import { chatComposerPlaceholder } from '@taucad/chat-ui/components/chat-input-styles';
-import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
 import type {
   ContextSuggestionItem,

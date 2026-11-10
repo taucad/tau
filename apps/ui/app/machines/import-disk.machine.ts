@@ -1,8 +1,8 @@
 import { assertEvent, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject } from 'xstate';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { listDataTransfer, listFileList } from '#utils/file-reader.utils.js';
-import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { listDataTransfer, listFileList } from '@taucad/ui-core/utils/file-reader.utils';
+import type { ImportListing, ImportSourceDescriptor } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import { findMainFile } from '#routes/import.$/import.utils.js';
 

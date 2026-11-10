@@ -2,8 +2,8 @@ import type { ClassValue } from 'clsx';
 import { cn } from '@taucad/ui/utils/cn';
 import { HighlightedLine } from '#components/code/highlighted-line.js';
 import { useHighlightedLines } from '#components/code/use-highlighted-lines.js';
-import type { HighlightLanguageInput } from '#lib/code-language-resolution.js';
-import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';
+import type { HighlightLanguageInput } from '@taucad/ui-core/lib/code-language-resolution';
+import { resolveHighlightLanguage } from '@taucad/ui-core/lib/code-language-resolution';
 
 type CodeViewerProps = {
   readonly text: string;

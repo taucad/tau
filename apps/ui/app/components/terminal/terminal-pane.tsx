@@ -31,7 +31,7 @@ import {
   ContextMenuItem,
 } from '@taucad/ui/components/context-menu';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
 import { useTerminalAvailability } from '#components/terminal/terminal-availability.js';

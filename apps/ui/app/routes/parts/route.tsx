@@ -21,14 +21,14 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { warehouseProjects } from '#constants/warehouse-parts.js';
 import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useImmediateSearchParameter } from '#hooks/use-immediate-search-parameter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useFeature } from '#flags/use-feature.js';
-import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.js';
-import { isFunction } from '#utils/function.utils.js';
+import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
+import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = { title: 'Parts', enableOverflowY: true };

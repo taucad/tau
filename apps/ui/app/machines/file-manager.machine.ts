@@ -19,9 +19,9 @@ import {
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
 import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
-import type { ProjectOpenPerformance } from '#lib/project-open-performance.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import type { ProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentBudget } from '@taucad/fs-client/file-content-budget';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -33,7 +33,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
+import { dependencyMountRoot } from '@taucad/ui-core/lib/bundled-types-tree.constants';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,

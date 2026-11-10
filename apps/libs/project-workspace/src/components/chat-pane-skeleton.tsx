@@ -2,7 +2,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 
 /**
  * Renders a low-fidelity placeholder shaped like the chat panel chrome
- * (header bar -> scrolling message stubs -> textarea footer) while the
+ * (header bar -> scrolling message stubs -> composer frame) while the
  * editor machine is running `ensureFocusedChatActor` to re-establish the
  * focused-chat invariant at runtime (e.g. after the user deletes the
  * last chat).
@@ -29,8 +29,13 @@ export function ChatPaneSkeleton({ variant }: { readonly variant: 'loading' | 'e
         <Skeleton className='h-12 w-2/3 self-end rounded-md' />
         <Skeleton className='h-20 w-4/5 self-start rounded-md' />
       </div>
-      <div className='mx-2 mb-2 shrink-0'>
-        <Skeleton className='h-20 w-full rounded-sm' />
+      {/* The composer is drawn where and as the live one rests (the empty composer's 82 px frame, F18),
+       * not as a pulsing block, so it stays still when the pane arrives and only its contents fill in. */}
+      <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+        <div
+          data-testid='chat-pane-skeleton-composer'
+          className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md'
+        />
       </div>
     </div>
   );

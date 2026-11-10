@@ -15,7 +15,7 @@ import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machin
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
-import { recordProviderUnavailableAutoResume, resetAutoResumes } from '#utils/run-auto-resume.js';
+import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 

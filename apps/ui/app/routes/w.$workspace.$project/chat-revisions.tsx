@@ -69,7 +69,7 @@ import {
   useRevisionCommands,
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';

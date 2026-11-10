@@ -1,7 +1,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/project-session.machine.js';
 

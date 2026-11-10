@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';

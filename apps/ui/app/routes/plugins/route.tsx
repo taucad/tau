@@ -35,9 +35,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
-import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
+import { tauStoreSkills } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
-import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
+import type { TauStoreSkill } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
 
 export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 

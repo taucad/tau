@@ -30,7 +30,7 @@ import {
 import { MaterialSlots, materialInUse } from '#components/machines/machine-materials.js';
 import { PrintDisclosure, PrintRow, PrintStage, StaleBadge, useNow } from '#components/machines/machine-section.js';
 import { formatRemaining, readableStage } from '#components/machines/machine-summary.js';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 
 const focusLinkedJob: React.RefCallback<HTMLElement> = (element): void => {
   element?.focus();

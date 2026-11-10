@@ -8,8 +8,8 @@ import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 
 /** Same shape the project-creation-location fixture accepts: one OPFS directory name. */
 const validWorkspaceFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;

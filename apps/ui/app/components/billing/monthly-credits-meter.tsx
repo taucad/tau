@@ -3,7 +3,7 @@ import { Info } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import type { ReactNode } from 'react';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { MonthlyCredits } from '@taucad/billing';

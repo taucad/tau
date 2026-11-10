@@ -68,7 +68,7 @@ import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/
 import { chatPlacementOf } from '@taucad/chat-ui/utils/chat-execution';
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
-import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
+import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
@@ -85,8 +85,8 @@ import {
   getKernelOption,
   getKernelProjectTemplate,
 } from '#utils/kernel.utils.js';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { defaultProjectName } from '#constants/project-names.js';
+import { encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
+import { defaultProjectName } from '@taucad/ui-core/constants/project-names';
 import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type {
   PendingProjectOperation,
@@ -95,18 +95,18 @@ import type {
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
-import { allocateProjectDirectorySlug } from '#utils/project-directory.utils.js';
+import { allocateProjectDirectorySlug } from '@taucad/ui-core/utils/project-directory.utils';
 import { directorySlug, homeWorkspaceSlug, projectSlugsOf } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
-import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
-import type { ProjectOpenOutcome } from '#lib/project-open-performance.js';
+import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import type { ProjectOpenOutcome } from '@taucad/ui-core/lib/project-open-performance';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,

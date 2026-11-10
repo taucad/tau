@@ -8,20 +8,23 @@ import {
 import type { KernelId } from '#constants/kernel.constants.js';
 import {
   exactGeometryKernelIds,
+  kernelRoutingCopy,
   kernelRoutingRules,
   kernelRoutingZones,
   kernelsReachedByNameOnly,
   voxelKernelIds,
 } from '#constants/kernel-routing.constants.js';
+import type { KernelRouting } from '#constants/kernel-routing.constants.js';
 
 const zonedKernels = new Set<string>(kernelRoutingZones.flatMap(({ acceptable }) => acceptable));
 const byNameOnly = new Set<string>(kernelsReachedByNameOnly);
 
 describe('kernel routing facets', () => {
   it('should give every kernel one-line use and avoid copy that names no default', () => {
-    for (const { id, routing } of kernelConfigurations) {
+    for (const { id } of kernelConfigurations) {
+      const routing: KernelRouting = kernelRoutingCopy[id];
       const lines: string[] = [routing.useWhen, routing.avoidWhen];
-      if ('prerequisites' in routing) {
+      if (routing.prerequisites !== undefined) {
         lines.push(routing.prerequisites);
       }
       for (const line of lines) {

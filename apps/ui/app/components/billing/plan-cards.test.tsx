@@ -133,7 +133,7 @@ describe('PlanCards', () => {
     expect(item).toHaveAttribute('data-coming-soon');
     expect(item?.querySelector('[data-slot=coming-soon-icon]')).not.toBeNull();
     expect(document.querySelectorAll('[data-slot=coming-soon-legend]')).toHaveLength(1);
-    expect(document.querySelector('[data-slot=coming-soon-legend]')).toHaveTextContent(/^Coming soon\./);
+    expect(document.querySelector('[data-slot=coming-soon-legend]')).toHaveTextContent(/^Coming soon$/);
   });
   it('makes bounded feature lists keyboard-scrollable', () => {
     render(

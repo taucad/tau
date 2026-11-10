@@ -839,7 +839,7 @@ describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past 
  * catalogue serves the remote, the fetch takes the wanted objects from it one by one, as it does past the ceiling.
  */
 describe.runIf(gitToolchainOnPath)('a fetch whose pack does not index', () => {
-  it.fails('takes the objects from the catalogue, and the project opens', async () => {
+  it('takes the objects from the catalogue, and the project opens', async () => {
     const own = await host();
     const root = await mkdtemp(join(tmpdir(), 'tau-pack-refused-'));
     const remote = await startGitHttpBackend({ root });

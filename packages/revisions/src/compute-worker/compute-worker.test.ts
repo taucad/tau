@@ -224,7 +224,7 @@ describe('the compute worker seam', () => {
   });
 
   /* A refusal seen only on a phone is diagnosed from its toast: the indexer's own reason crosses the port with it. */
-  it.fails('names why a pack does not index, across the port', async () => {
+  it('names why a pack does not index, across the port', async () => {
     const remote = remoteCompute();
     const notAPack = encoder.encode('PACK\u0000\u0000\u0000\u0009\u0000\u0000\u0000\u0001'.padEnd(64, 'x'));
 
@@ -232,7 +232,7 @@ describe('the compute worker seam', () => {
 
     expect(refusal).toBeInstanceOf(CorruptBytesError);
     expect((refusal as Error).message).toMatch(/^The pack does not index: .*packfile version/u);
-    expect((refusal as Error).cause).toMatchObject({ message: expect.stringMatching(/packfile version/u) });
+    expect(((refusal as Error).cause as Error | undefined)?.message).toMatch(/packfile version/u);
   });
 
   it('waits for nothing when a call cannot be posted', async () => {

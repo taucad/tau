@@ -31,7 +31,7 @@ import { useFeatureFlags } from '#flags/use-feature.js';
 import { DesktopTitlebarControls, TitlebarNavigation } from '#components/layout/desktop-titlebar-controls.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
-import { sidebarPreferredWidth } from '#constants/sidebar.constants.js';
+import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';

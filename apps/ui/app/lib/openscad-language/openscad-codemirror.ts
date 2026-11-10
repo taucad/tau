@@ -26,10 +26,10 @@ import { openscadBuiltinsUri, openscadWorkspaceLimits } from '@taucad/openscad-l
 import type { OpenscadLanguageAssets } from '@taucad/openscad-language/protocol';
 import type { EditorDocument, DocumentChange } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
+import { applyLspCompletion } from '@taucad/ui-core/lib/lsp-completion-apply';
 import { applyLspWorkspaceEdit, captureLspEditBasis } from '#lib/lsp-workspace-edit.js';
 import type { LspEditBasis } from '#lib/lsp-workspace-edit.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 
 /** The language server's diagnostics owner. */
 const owner = 'openscad-lsp';

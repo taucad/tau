@@ -39,7 +39,7 @@ vi.mock('@taucad/viewer/graphics/graphics-backend', () => ({
   resolveGraphicsBackendPreference: vi.fn((): string => 'webgl'),
 }));
 
-vi.mock('#utils/graphics-backend-override.js', () => ({
+vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
   readGraphicsBackendQueryOverride: vi.fn((): undefined => undefined),
 }));
 

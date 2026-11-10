@@ -29,7 +29,7 @@ import {
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '@taucad/workbench-panes/paneview/paneview-header';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
 import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
@@ -37,7 +37,7 @@ import {
   getInitialPanelOptions,
   usePaneviewPersistence,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
-import { stringToColor } from '#utils/color.utils.js';
+import { stringToColor } from '@taucad/ui-core/utils/color.utils';
 import { cn } from '@taucad/ui/utils/cn';
 
 const defaultLogLevels: Record<LogLevel, boolean> = {

@@ -3,7 +3,7 @@ import { createActor, createAsyncLogic } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
 
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { MyUIMessage } from '@taucad/chat';
 import * as machineModule from './chat-session.machine.js';
 import { guardActors } from '@taucad/xstate-testing/inspect';

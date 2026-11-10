@@ -47,20 +47,20 @@ import {
   useRevisionSessionUser,
 } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
-import { deviceId } from '#lib/device-id.js';
+import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { GithubRequestError, githubConnections, githubErrorMessage } from '#lib/github-connections.js';
-import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
-import type { GithubProjectBinding } from '#lib/github-project-binding.js';
+import { githubNoreplyAuthor, githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
+import type { GithubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
-import { holdTreeRefreshesWhileApplying } from '#lib/tree-refresh-hold.js';
+import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
 

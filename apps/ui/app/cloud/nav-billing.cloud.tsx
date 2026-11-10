@@ -8,7 +8,7 @@ import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { ProBadge } from '#components/tier-badge.js';
 import type { NavRoute } from '#constants/route.constants.js';
 

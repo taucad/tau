@@ -91,8 +91,8 @@ import type {
 import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { logWorkerTimings } from '#lib/worker-timing-report.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
@@ -101,7 +101,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
-import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
+import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '@taucad/ui-core/lib/geospec-candidate-git';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -271,7 +271,7 @@ export type WorkerRevisionCommand =
    * segments name a random record device per actor form (`.git/ops-devices.json`)
    * — but a worker that has not been told writes no chat refs at all, and the id
    * counts as this host's own for a segment written before record devices
-   * existed (`apps/ui/app/lib/device-id.ts` is the one source).
+   * existed (`apps/libs/ui-core/src/lib/device-id.ts` is the one source).
    */
   | Readonly<{ command: 'setDeviceId'; deviceId: string }>
   /*

@@ -52,7 +52,7 @@ import {
 } from '@taucad/ui/components/context-menu';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { markCodeEditorMilestone } from '#components/code/code-editor.client.js';
-import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-document.js';

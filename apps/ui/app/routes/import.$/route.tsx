@@ -6,17 +6,17 @@ import { useEffect, useId, useRef, useState, useCallback, useMemo } from 'react'
 import { useActorRef, useSelector } from '@xstate/react';
 import { createCallbackLogic } from 'xstate';
 import { ArrowRight, X } from 'lucide-react';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
-import { ImportChannelError, createFromStagedImport, openImportSession } from '#machines/import-staging.js';
+import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
-import type { ImportSession } from '#machines/import-staging.js';
+import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
 import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -50,11 +50,11 @@ import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
-import { isExcludedImportPath } from '#utils/file-reader.utils.js';
+import { isExcludedImportPath } from '@taucad/ui-core/utils/file-reader.utils';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
@@ -69,7 +69,7 @@ import {
   readLinkedGithubManifest,
 } from '#lib/github-linked-import.js';
 import { GithubRequestError } from '#lib/github-connections.js';
-import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubNoreplyAuthor, githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {

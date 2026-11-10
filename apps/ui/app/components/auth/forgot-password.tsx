@@ -11,7 +11,7 @@ import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/comp
 import { Input } from '@taucad/ui/components/input';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { Label } from '@taucad/ui/components/label';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
 

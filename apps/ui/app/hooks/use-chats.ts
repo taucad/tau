@@ -1,11 +1,11 @@
-import { filesystemSourceIdentity } from '#services/filesystem-source-identity.js';
+import { filesystemSourceIdentity } from '@taucad/ui-core/services/filesystem-source-identity';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import type { PartialDeep } from 'type-fest';
 import type { Chat } from '@taucad/chat';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { ChatHistoricalUsage, ChatSessionStore } from '#services/chat-session-store.js';
 
 /** Keep an observation slot until its host read settles, without holding every project log open. */

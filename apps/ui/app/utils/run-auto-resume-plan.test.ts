@@ -13,7 +13,7 @@ import {
   recordProviderUnavailableAutoResume,
   recordRateLimitAutoResume,
   resetAutoResumes,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
 import type { VisibleFailureSource } from '#utils/run-auto-resume-plan.js';
 

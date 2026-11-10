@@ -6,7 +6,7 @@ import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/
 import { getEnvironment } from '#environment.config.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { projectChatUrl } from '#utils/project-url.utils.js';
 
 /**

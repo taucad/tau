@@ -2,9 +2,13 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi } from 'dockview-react';
 import { useProject } from '#hooks/use-project.js';
-import { mobileDrawerOpenSnapPoint, mobileDrawerSnapPoints, mobilePanelIds } from '#constants/editor.constants.js';
-import type { MobilePanelId } from '#constants/editor.constants.js';
-import type { PaneviewPanelState, PanelState } from '#types/editor.types.js';
+import {
+  mobileDrawerOpenSnapPoint,
+  mobileDrawerSnapPoints,
+  mobilePanelIds,
+} from '@taucad/ui-core/constants/editor.constants';
+import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
+import type { PaneviewPanelState, PanelState } from '@taucad/ui-core/types/editor.types';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export type ChatInterfaceState = {

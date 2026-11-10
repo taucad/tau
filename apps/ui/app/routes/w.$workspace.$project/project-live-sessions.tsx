@@ -24,7 +24,7 @@ import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager
 import { useModels } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { isKernelId } from '@taucad/types/constants';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
@@ -48,7 +48,7 @@ import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -80,7 +80,7 @@ import {
 } from '#hooks/use-revision-status.js';
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';

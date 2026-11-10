@@ -8,10 +8,10 @@ import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-s
 import type { Workspace } from '#filesystem/handle-store.js';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();

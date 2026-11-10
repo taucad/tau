@@ -141,3 +141,4 @@ describe('marketingEvents', () => {
     expect(config).toEqual({ path: '/api/marketing-events' });
   });
 });
+/* eslint-enable @typescript-eslint/naming-convention -- restore application naming rules. */

@@ -102,3 +102,4 @@ describe('PostHog grant and Sentry link (SB7)', () => {
     view.unmount();
   });
 });
+/* eslint-enable @typescript-eslint/naming-convention -- restore application naming rules. */

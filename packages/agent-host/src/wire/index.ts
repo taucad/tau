@@ -76,9 +76,17 @@ export type {
   ReadInput,
   ReadRequest,
 } from '#wire/frames.schema.js';
-export { attemptReceiptSchema, gatewayErrorCodes, gatewayTurnGaps, gatewayTurnSteps } from '#wire/gateway.js';
+export {
+  attemptReceiptSchema,
+  gatewayErrorCodes,
+  gatewayHostKinds,
+  gatewayTurnGaps,
+  gatewayTurnSteps,
+} from '#wire/gateway.js';
 export type {
   GatewayErrorCode,
+  GatewayHostKind,
+  GatewayHostLabels,
   GatewayTurnGap,
   GatewayTurnLabels,
   GatewayTurnStep,

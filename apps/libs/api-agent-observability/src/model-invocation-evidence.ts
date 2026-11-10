@@ -3,7 +3,12 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@tauca
 import type { SourceProtection } from '#evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#provider-stream-facts.js';
-import type { ModelInvocationIntent, ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
+import type {
+  HostLabels,
+  ModelInvocationIntent,
+  ModelInvocationSurface,
+  ModelProviderWire,
+} from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
 export const apiProviderMapper = 'api-provider-v3';
@@ -78,6 +83,8 @@ export type ObservedAttempt = Readonly<{
   requestedModel: string | undefined;
   /** The supplier's model id for the requested route, which names the model when the stream did not. */
   supplierModel?: string | undefined;
+  /** The host labels the caller asserted (LW17), when it sent any. */
+  labels?: HostLabels | undefined;
   /** The supplier the route resolved to, when the API knows it. */
   provider: string | undefined;
   /** The funded operation, when Tau Cloud billed the attempt. */
@@ -122,6 +129,22 @@ const purposeOf = (attempt: ObservedAttempt): ProviderFact['purpose'] => {
 };
 
 /**
+ * The provider fact's host labels, each made a valid evidence id, as a member ready to spread into the fact; empty
+ * when the caller sent none, so a fact without labels is the fact written before LW17.
+ *
+ * @param labels - The labels the header boundary admitted.
+ * @returns The fact's `labels` member, or nothing.
+ */
+const labelsOf = async (
+  labels: HostLabels | undefined,
+): Promise<{ readonly labels?: NonNullable<ProviderFact['labels']> }> => {
+  const entries = await Promise.all(
+    Object.entries(labels ?? {}).map(async ([key, value]) => [key, await contractId('label', value)] as const),
+  );
+  return entries.length === 0 ? {} : { labels: Object.fromEntries(entries) };
+};
+
+/**
  * The API-reported summary of one supplier attempt (blueprint T07). It holds
  * ids, timing, model, stop reason and token counts, never request or output
  * text, and its source is the attempt itself, so a replay of the same attempt
@@ -146,6 +169,7 @@ export const providerAttemptEvidence = async (
     optionalId('provider', attempt.provider),
   ]);
   const run = chat ?? invocation;
+  const labels = await labelsOf(attempt.labels);
   const { stream } = attempt;
   const usage: ProviderFact['usage'] = stream?.usage ?? {
     input: null,
@@ -174,6 +198,7 @@ export const providerAttemptEvidence = async (
     callKind: callKindOf(attempt),
     stop: stopOf(attempt),
     usage,
+    ...labels,
   };
   const sourceDigest = await sha256Hex(
     canonicalEvidence(['api-provider-attempt', attempt.principal, invocation, fact]),

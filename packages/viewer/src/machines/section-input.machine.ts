@@ -30,7 +30,6 @@
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { SectionCut, SectionPlane } from '#graphics/section-cuts.js';
-import type { RenderFrame } from '@taucad/spatial';
 import type { SectionHandleTarget } from '#graphics/three/controls/section-handles.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
 
@@ -92,9 +91,7 @@ export type SectionInputCommand =
   /** The hovered handle's cut changed: link it with its chip. */
   | { type: 'hoverCutChanged'; cutId: string | undefined }
   /** Paint and set the cursor for this gesture. */
-  | { type: 'gestureChanged'; gesture: SectionInputGesture }
-  /** The view's physical-to-render frame changed: lay the drawing out in it. */
-  | { type: 'renderFrameChanged'; renderFrame: RenderFrame };
+  | { type: 'gestureChanged'; gesture: SectionInputGesture };
 
 /**
  * A DOM adapter: callback logic that owns one surface's listeners and the host objects behind them. The handles'
@@ -108,8 +105,7 @@ export type SectionInputAdapterLogic = CallbackActorLogic<SectionInputCommand, u
 type PointerAt = Readonly<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number }>;
 
 /**
- * Events accepted by the section input; every one comes from its DOM adapter except `renderFrameChanged`, which the
- * handles' owner forwards from the view.
+ * Events accepted by the section input, every one from its DOM adapter.
  *
  * @public
  */
@@ -137,8 +133,7 @@ export type SectionInputEvent =
       isPickerLive: boolean;
     }
   /** Section turned off: everything held is given back. */
-  | { type: 'sectionViewEnded' }
-  | { type: 'renderFrameChanged'; renderFrame: RenderFrame };
+  | { type: 'sectionViewEnded' };
 
 /**
  * The section input's context.
@@ -362,10 +357,6 @@ const sectionInputMachineDefinition = setup({
   on: {
     cutsChanged: (args, enq) => cutsChanged(args, enq),
     sectionViewEnded: (args, enq) => sectionViewEnded(args, enq),
-    renderFrameChanged: ({ event, children }, enq) => {
-      command(children, enq, { type: 'renderFrameChanged', renderFrame: event.renderFrame });
-      return {};
-    },
   },
 });
 
@@ -401,7 +392,6 @@ export const sectionInputEventTypes = [
   'pointerCancelled',
   'cutsChanged',
   'sectionViewEnded',
-  'renderFrameChanged',
 ] as const satisfies ReadonlyArray<SectionInputEvent['type']>;
 
 type SectionInputMachineDefinition = typeof sectionInputMachineDefinition;

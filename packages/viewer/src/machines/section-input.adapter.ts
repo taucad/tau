@@ -28,6 +28,7 @@ import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-
 import { subscribeToMatcapLoad } from '#graphics/three/materials/matcap-material.js';
 import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
+import { getViewCameraSession } from '#services/graphics-camera-registry.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type {
   SectionInputAdapterLogic,
@@ -125,8 +126,8 @@ const isLengthParameter = (cut: SectionCut): boolean => cut.kind === 'plane';
  * - while a press is held, disables the camera controls, suppresses the model's hover and captures the pointer;
  * - picks hover once per frame, the latest pointer winning (graphics policy §10);
  * - lands drag steps at most once per frame through {@link createSectionDragSteps}, and the release at once;
- * - keeps the drawing up to date with the graphics actor's cuts, the camera's bounds and the render frame, which never
- *   restarts it, so none of them ends a drag;
+ * - keeps the drawing up to date with the graphics actor's cuts, the camera's bounds and the view session's render
+ *   frame, none of which restarts it, so none of them ends a drag;
  * - paints the handles and the picker and sets the cursor for the gesture the section input reports.
  *
  * @param host - The surface and the host objects behind it.
@@ -146,7 +147,9 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
     const listeners = new AbortController();
     let graphicsContext = selectGraphicsSnapshot(graphics).context;
     let { bounds } = selectCameraSnapshot(cameraRig).context.view;
-    let { renderFrame } = cameraRig;
+    // The view's render frame, followed through its session: a rebase re-lays the drawing in place.
+    const session = getViewCameraSession(graphics);
+    let renderFrame = session?.renderFrame.current ?? cameraRig.renderFrame;
     let gesture: SectionInputGesture = {};
     let held: Held | undefined;
     // Whether the latest press was ours, so its click (and a double click) is swallowed. Reset by every press, so
@@ -544,11 +547,6 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
           }
           break;
         }
-        case 'renderFrameChanged': {
-          renderFrame = message.renderFrame;
-          sync();
-          break;
-        }
       }
     });
 
@@ -582,12 +580,20 @@ export const createSectionInputAdapter = (host: SectionInputHost): SectionInputA
         sync();
       }
     });
+    const followRenderFrame = (): void => {
+      if (session && session.renderFrame.current !== renderFrame) {
+        renderFrame = session.renderFrame.current;
+        sync();
+      }
+    };
+    session?.renderFrame.listeners.add(followRenderFrame);
     const releaseMatcap = subscribeToMatcapLoad(invalidate);
     sync();
 
     return () => {
       graphicsSubscription.unsubscribe();
       cameraSubscription.unsubscribe();
+      session?.renderFrame.listeners.delete(followRenderFrame);
       releaseMatcap();
       listeners.abort();
       hoverPicks.cancel();

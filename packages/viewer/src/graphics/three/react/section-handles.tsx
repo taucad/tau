@@ -1,15 +1,14 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useActorRef } from '@xstate/react';
-import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EventManager } from '@react-three/fiber';
-import type { RenderFrame } from '@taucad/spatial';
 import { createSectionHandles } from '#graphics/three/controls/section-handles.js';
 import type { SectionHandles as SectionHandlesDrawing } from '#graphics/three/controls/section-handles.js';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { SceneOverlay } from '#graphics/three/scene-overlay.jsx';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
-import { useCameraRig, useGraphics, useGraphicsSelector, useRenderFrameRetarget } from '#hooks/use-graphics.jsx';
+import { useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { createSectionInputAdapter } from '#machines/section-input.adapter.js';
 import { sectionInputMachine } from '#machines/section-input.machine.js';
 
@@ -18,22 +17,6 @@ import { sectionInputMachine } from '#machines/section-input.machine.js';
  * model, after a depth clear, and under the cube.
  */
 const sectionHandlesPriority = 2.5;
-
-/** A stable number per host object, so the section input restarts only when one of its host objects is replaced. */
-const hostIds = new WeakMap<WeakKey, number>();
-let nextHostId = 0;
-const hostId = (host: WeakKey | undefined): number => {
-  if (host === undefined) {
-    return 0;
-  }
-  let id = hostIds.get(host);
-  if (id === undefined) {
-    nextHostId++;
-    id = nextHostId;
-    hostIds.set(host, id);
-  }
-  return id;
-};
 
 type SectionHandlesProperties = Readonly<{
   /** Drawn beside the view cube by its render loop; picked here. Omitted without a view cube. */
@@ -49,8 +32,8 @@ type SectionInputProperties = Readonly<{
 
 /**
  * The section input for one surface: its gesture machine and the DOM adapter it invokes, built around the surface,
- * the drawing and the picker. It is keyed by those, so it starts once per surface; the cuts, the bounds and the render
- * frame reach the adapter as they change and never restart it, so none of them ends a drag.
+ * the drawing and the picker. It restarts only when one of those is replaced; the cuts, the bounds and the render
+ * frame reach the adapter through its own subscriptions and never restart it, so none of them ends a drag.
  */
 function SectionInput({ surface, canvas, handles, planePicker }: SectionInputProperties): ReactNode {
   const graphics = useGraphics();
@@ -75,14 +58,7 @@ function SectionInput({ surface, canvas, handles, planePicker }: SectionInputPro
       }),
     [cameraRig, canvas, get, graphics, handles, invalidate, planePicker, surface],
   );
-  const sectionInput = useActorRef(logic);
-  const retarget = useCallback(
-    (renderFrame: RenderFrame): void => {
-      sectionInput.send({ type: 'renderFrameChanged', renderFrame });
-    },
-    [sectionInput],
-  );
-  useRenderFrameRetarget(retarget);
+  useActorRef(logic);
   return null;
 }
 
@@ -126,17 +102,26 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     }
   });
 
+  // The section input restarts when a host object it is built around is replaced: a new generation keys it afresh.
+  const hostObjects = [surface, canvas, handles, planePicker, graphics, cameraRig, get, invalidate] as const;
+  const [hosts, setHosts] = useState({ objects: hostObjects, generation: 0 });
+  if (hostObjects.some((object, index) => object !== hosts.objects[index])) {
+    setHosts({ objects: hostObjects, generation: hosts.generation + 1 });
+  }
+
   if (!handles) {
     return null;
   }
 
-  const inputKey = [surface, canvas, handles, planePicker, graphics, cameraRig, get, invalidate]
-    .map((host) => hostId(host))
-    .join(':');
-
   return (
     <>
-      <SectionInput key={inputKey} surface={surface} canvas={canvas} handles={handles} planePicker={planePicker} />
+      <SectionInput
+        key={hosts.generation}
+        surface={surface}
+        canvas={canvas}
+        handles={handles}
+        planePicker={planePicker}
+      />
       <SceneOverlay shouldClearDepth overlayActive={isActive} renderPriority={sectionHandlesPriority}>
         {isActive ? <primitive object={handles.root} /> : null}
       </SceneOverlay>

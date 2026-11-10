@@ -26,7 +26,6 @@ const cut: SectionCut = { id: 'cut_a', kind: 'plane', plane: 'xy', offset: 0, is
 const other: SectionCut = { id: 'cut_b', kind: 'plane', plane: 'yz', offset: 0, isFlipped: false };
 const arrow: SectionHandleTarget = { kind: 'plane', cutId: cut.id };
 const fan: SectionHandleTarget = { kind: 'select', cutId: other.id };
-const renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 } as const;
 
 const pressArrow: SectionInputEvent = { type: 'pointerPressed', pointerId: 1, x: 100, y: 100, handle: arrow, cut };
 const travel = sectionDragThreshold + 1;
@@ -60,7 +59,6 @@ const samples: Record<SectionInputEvent['type'], readonly SectionInputEvent[]> =
   pointerCancelled: [{ type: 'pointerCancelled', pointerId: 1 }],
   cutsChanged: [cutsChanged([cut])],
   sectionViewEnded: [{ type: 'sectionViewEnded' }],
-  renderFrameChanged: [{ type: 'renderFrameChanged', renderFrame }],
 };
 
 const idleAdapter = createCallbackLogic<SectionInputCommand, undefined>(() => undefined);
@@ -141,19 +139,6 @@ describe('section input gesture', () => {
     ]);
     expect(input.take()).toEqual(['dragStep', 'pressEnded', 'gestureChanged']);
     expect(input.actor.getSnapshot().value).toBe('idle');
-  });
-
-  it('should keep dragging through a render-frame rebase, handing the new frame to the adapter', () => {
-    const input = startInput();
-    input.actor.send(pressArrow);
-    input.actor.send(moved(100 + travel));
-    input.take();
-
-    const rebased = { ...renderFrame, originMeters: [0, 0.02, 0.01] as const };
-    input.actor.send({ type: 'renderFrameChanged', renderFrame: rebased });
-
-    expect(input.commands).toEqual([{ type: 'renderFrameChanged', renderFrame: rebased }]);
-    expect(input.actor.getSnapshot().value).toBe('dragging');
   });
 
   it.each([

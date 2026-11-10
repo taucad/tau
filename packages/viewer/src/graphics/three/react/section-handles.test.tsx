@@ -24,8 +24,9 @@ const mocks = vi.hoisted(() => {
     frame: undefined as FrameCallback | undefined,
     bounds,
     renderFrame,
-    /** The view's render-frame consumer, as `useRenderFrameRetarget` registers it. */
-    retarget: undefined as ((renderFrame: RenderFrame) => void) | undefined,
+    /** The view session's render-frame listeners, called after each rebase. */
+    renderFrameListeners: new Set<() => void>(),
+    session: undefined as unknown,
     cameraRig: undefined as unknown,
   };
 });
@@ -40,11 +41,12 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
     useCameraSelector: (selector: (snapshot: unknown) => unknown) =>
       selector({ context: { view: { bounds: mocks.bounds } } }),
     useRenderFrame: () => mocks.renderFrame,
-    useRenderFrameRetarget: (handler: (renderFrame: RenderFrame) => void) => {
-      mocks.retarget = handler;
-    },
   };
 });
+
+vi.mock('#services/graphics-camera-registry.js', () => ({
+  getViewCameraSession: () => mocks.session,
+}));
 
 vi.mock('@react-three/fiber', () => ({
   useThree: (selector: (state: unknown) => unknown) => selector(mocks.state),
@@ -151,7 +153,15 @@ const mountHandles = ({
   const perspectiveCamera = new THREE.PerspectiveCamera();
   const orthographicCamera = new THREE.OrthographicCamera();
   mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
-  mocks.retarget = undefined;
+  mocks.renderFrameListeners = new Set();
+  mocks.session = {
+    renderFrame: {
+      get current() {
+        return mocks.renderFrame;
+      },
+      listeners: mocks.renderFrameListeners,
+    },
+  };
   mocks.cameraRig = {
     actorRef: {
       getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5], bounds: mocks.bounds } } }),
@@ -228,7 +238,9 @@ const mountHandles = ({
       camera.updateMatrixWorld();
       act(() => {
         mocks.renderFrame = next;
-        mocks.retarget?.(next);
+        for (const listener of mocks.renderFrameListeners) {
+          listener();
+        }
         rendered.rerender(element());
       });
     },

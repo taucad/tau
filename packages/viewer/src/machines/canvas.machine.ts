@@ -1,5 +1,5 @@
 /**
- * The canvas actor: one per mounted viewer surface, spawned by the graphics actor (charter G7, D1, D4).
+ * The canvas actor: one per mounted viewer surface, spawned by the graphics actor.
  *
  * ```text
  * canvas: creating → ready → presented ; lost ; failed
@@ -9,7 +9,7 @@
  * - **creating**: the surface is in the document and R3F is building its renderer. A placeholder surface (the stage
  *   held while the WebGPU probe answers) stays here until it is removed.
  * - **ready**: R3F's `onCreated` handed over the host. The host adapter, a callback actor started with the R3F root in
- *   its input, holds the renderer, the DOM canvas and `invalidate` in its closure; none of them enters context (D4).
+ *   its input, holds the renderer, the DOM canvas and `invalidate` in its closure; none of them enters context.
  * - **presented**: the first frame with area reached the screen.
  * - **lost**: the browser took the GPU context; the canvas shows its context-lost fallback until Retry remounts it.
  * - **failed**: the renderer could not start or its WebGPU device was destroyed; the viewer's error boundary takes it.
@@ -69,13 +69,14 @@ export type CanvasHostCommand = { type: 'requestRender' };
  */
 export type CanvasHostReport =
   | { type: 'framePresented' }
+  | { type: 'surfaceResized'; surface: CanvasSurface }
   | { type: 'contextLost' }
   | { type: 'rendererFailed'; failure: CanvasFailure };
 
 /**
  * A host adapter: callback logic that owns one R3F root's renderer listeners and first-frame observation. The canvas
  * component builds it in `onCreated` around the R3F root, so the renderer, the DOM canvas and `invalidate` live only in
- * its closure (D4); the canvas actor starts it from `hostCreated` and stops it when the renderer stops drawing.
+ * its closure; the canvas actor starts it from `hostCreated` and stops it when the renderer stops drawing.
  *
  * @public
  */

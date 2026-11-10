@@ -5,7 +5,7 @@ import { selectCanvasAwaitingFrame, selectCanvasBackend } from '#machines/canvas
 import type * as ReactThreeFiber from '@react-three/fiber';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
-import { StrictMode, useEffect, useLayoutEffect } from 'react';
+import { StrictMode, Suspense, use, useEffect, useLayoutEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import {
   OrthographicCamera,
@@ -636,8 +636,66 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(canvas()?.getSnapshot().value).toBe('presented');
     });
-    expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
+    // The observer stays only to report surface changes; it asked for no frame beyond the first.
+    expect(frameCallbacks.filter(({ priority }) => priority === 6)).toHaveLength(1);
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('hosts the canvas again on its live root when a Suspense boundary hides and reveals it', async () => {
+    let release: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    function Gate({ hold }: { readonly hold: boolean }): undefined {
+      if (hold) {
+        use(pending);
+      }
+      return undefined;
+    }
+    const tree = (hold: boolean) => (
+      <Suspense fallback={null}>
+        <Gate hold={hold} />
+        <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+          {null}
+        </ThreeCanvasInstance>
+      </Suspense>
+    );
+    const { rerender } = render(tree(false));
+    const observer = await waitForPresentationObserver();
+    act(() => {
+      observer.callback({ size: stubSize });
+    });
+    await waitFor(() => {
+      expect(canvas()?.getSnapshot().value).toBe('presented');
+    });
+    const first = canvas();
+
+    // Hidden: the surface detaches, its actor stops, and its host stops observing the root.
+    act(() => {
+      rerender(tree(true));
+    });
+    expect(canvas()).toBeUndefined();
+    expect(first?.getSnapshot().status).toBe('stopped');
+    expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
+
+    // Revealed: R3F keeps its root and does not call `onCreated` again, so the surface hosts the new actor on it.
+    await act(async () => {
+      release();
+      await pending;
+      rerender(tree(false));
+    });
+    const revealed = canvas();
+    expect(revealed).toBeDefined();
+    expect(revealed).not.toBe(first);
+    expect(revealed?.getSnapshot().value).toBe('ready');
+    expect(backend()).toBe('webgl');
+    const replacement = await waitForPresentationObserver();
+    act(() => {
+      replacement.callback({ size: stubSize });
+    });
+    await waitFor(() => {
+      expect(canvas()?.getSnapshot().value).toBe('presented');
+    });
   });
 
   it('waits for the canvas to have area before it observes a frame', async () => {
@@ -647,11 +705,12 @@ describe('ThreeCanvasInstance', () => {
     expect(stubInvalidate).not.toHaveBeenCalled();
     const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
     act(() => {
-      observer.callback({ size: { width: 0, height: 600 } });
+      observer.callback({ size: stubSize });
     });
     expect(frame).not.toHaveBeenCalled();
+    stubSize.width = 800;
     act(() => {
-      observer.callback({ size: { width: 800, height: 600 } });
+      observer.callback({ size: stubSize });
     });
     expect(frame).toHaveBeenCalledTimes(1);
   });

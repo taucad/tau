@@ -1,5 +1,5 @@
 /**
- * The canvas actor (charter G7a): its lifecycle, budget and load spans, and its host adapter driven through a scripted
+ * The canvas actor: its lifecycle, budget and load spans, and its host adapter driven through a scripted
  * R3F render loop. Path table (the shortest path to each state), kept current with `pathTable`:
  *
  * 1. `creating`: initial
@@ -192,8 +192,13 @@ describe('canvas lifecycle', () => {
       ['canvas.mount', 'ok'],
       ['frame.first', 'ok'],
     ]);
-    // It stops observing frames once one is on screen, and asked for no frame beyond the first.
-    expect(loop.subscribers).toEqual([]);
+    // It reports the first frame once, keeps observing frames only for surface changes, and asked for no frame beyond
+    // the first.
+    loop.frame();
+    frames.run();
+    frames.run();
+    expect(frames.pending).toBe(0);
+    expect(loop.subscribers.map(({ priority }) => priority)).toEqual([6]);
     expect(loop.invalidate).toHaveBeenCalledTimes(1);
     canvas.stop();
   });
@@ -208,11 +213,10 @@ describe('canvas lifecycle', () => {
     expect(loop.invalidate).not.toHaveBeenCalled();
     loop.frame();
     expect(frames.pending).toBe(0);
-    // The resize that gives it area asks for the frame the presentation waits on.
+    // The frame that gives it area reports the new surface and is the frame the presentation waits on.
     loop.root.size.width = 800;
-    canvas.send({ type: 'surfaceResized', surface });
-    expect(loop.invalidate).toHaveBeenCalledTimes(1);
     loop.frame();
+    expect(canvas.getSnapshot().context.surface).toEqual({ width: 800, height: 600, pixelRatio: 1 });
     expect(frames.pending).toBe(1);
     canvas.stop();
   });
@@ -291,6 +295,52 @@ describe('canvas lifecycle', () => {
     expect(starts).toHaveBeenCalledOnce();
     expect(Object.keys(canvas.getSnapshot().children)).toEqual(['loadSpans', 'host']);
     canvas.stop();
+  });
+
+  it('should re-size its budget slot when a frame draws at another pixel ratio', () => {
+    animationFrames();
+    const loop = scriptRoot();
+    const budget = createActor(webglContextMachine, { input: {} }).start();
+    const canvas = startCanvas({ canvasId: 'c', kind: 'canvas', webglContext: budget, admittedBytes: 10 });
+    canvas.send(
+      hostCreated(createCanvasHostLogic({ root: loop.root, isRetired: () => false }), { ...surface, pixelRatio: 1 }),
+    );
+    const atOneX = budget.getSnapshot().context.bytes;
+    loop.frame();
+    expect(budget.getSnapshot().context.bytes).toBe(atOneX);
+    // Moved to a 2x display: the CSS size is unchanged, but the drawing buffer is four times larger.
+    (loop.root.viewport as { dpr: number }).dpr = 2;
+    loop.frame();
+    expect(canvas.getSnapshot().context.surface).toEqual({ width: 800, height: 600, pixelRatio: 2 });
+    expect(budget.getSnapshot().context.bytes).toBe(atOneX * 4);
+    canvas.stop();
+  });
+
+  it('should emit surfaceAttached once for a hosted canvas, and never for a placeholder', () => {
+    const canvas = startCanvas();
+    const attached = vi.fn();
+    canvas.on('surfaceAttached', attached);
+    const created = hostCreated();
+    canvas.send(created);
+    canvas.send(hostCreated());
+    canvas.send({ type: 'framePresented' });
+    canvas.send(hostCreated());
+    expect(attached).toHaveBeenCalledOnce();
+    expect(attached).toHaveBeenCalledWith({
+      type: 'surfaceAttached',
+      canvasId: 'c',
+      backend: 'webgl',
+      surface,
+      domElement: (created as Extract<CanvasEvent, { type: 'hostCreated' }>).domElement,
+    });
+    canvas.stop();
+
+    const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder' });
+    const placeholderAttached = vi.fn();
+    placeholder.on('surfaceAttached', placeholderAttached);
+    placeholder.send(hostCreated());
+    expect(placeholderAttached).not.toHaveBeenCalled();
+    placeholder.stop();
   });
 
   it('should hold a placeholder busy without timing it, budgeting it or hosting a renderer', () => {

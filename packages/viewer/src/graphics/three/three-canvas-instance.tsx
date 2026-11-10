@@ -5,8 +5,6 @@ import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
-import { WebGPUCoordinateSystem } from 'three';
-import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
@@ -33,8 +31,9 @@ import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-envi
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
-import { createCanvasHostLogic } from '#graphics/three/three-canvas-instance-host.js';
-import type { CanvasEvent, CanvasFailure, CanvasSurface } from '#machines/canvas.machine.js';
+import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
+import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
+import type { CanvasEvent, CanvasFailure } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 /**
@@ -89,13 +88,6 @@ const failureError = (failure: CanvasFailure): Error =>
     ? new WebGpuInitializationError(failure.message)
     : new Error(failure.message);
 
-/** The R3F root's surface as the canvas actor records it. */
-const surfaceOf = (state: RootState): CanvasSurface => ({
-  width: state.size.width,
-  height: state.size.height,
-  pixelRatio: state.viewport.dpr,
-});
-
 /**
  * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
  * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
@@ -139,7 +131,8 @@ export function ThreeCanvasInstance({
   const isContextLost = phase === 'lost';
   const isCanvasReady = phase === 'ready' || phase === 'presented';
   const cameraRig = useCameraRig();
-  const rootRef = useRef<RootState | undefined>(undefined);
+  /** The live R3F root, kept so a surface that re-attaches (a Suspense reveal) hosts its new canvas actor on it. */
+  const rootRef = useRef<CanvasHostRoot | undefined>(undefined);
   /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
   const sendToCanvas = useCallback(
     (event: CanvasEvent): void => {
@@ -160,7 +153,7 @@ export function ThreeCanvasInstance({
           : class extends ResizeObserver {
               public constructor(callback: ResizeObserverCallback) {
                 super((entries, observer) => {
-                  const previousSize = rootRef.current?.get().size;
+                  const previousSize = rootRef.current?.root.get().size;
                   // Commit both React roots before drawing: the camera, composer and gizmo
                   // must see the new viewport in this same prepaint ResizeObserver delivery.
                   flushThreeSync(() => {
@@ -168,10 +161,7 @@ export function ThreeCanvasInstance({
                       callback(entries, observer);
                     });
                   });
-                  const state = rootRef.current?.get();
-                  if (state && state.size !== previousSize) {
-                    sendToCanvas({ type: 'surfaceResized', surface: surfaceOf(state) });
-                  }
+                  const state = rootRef.current?.root.get();
                   if (state && state.size !== previousSize && state.size.width > 0 && state.size.height > 0) {
                     const render = (): void => {
                       state.advance(performance.now(), false);
@@ -190,7 +180,7 @@ export function ThreeCanvasInstance({
               }
             },
     }),
-    [sendToCanvas],
+    [],
   );
 
   const glProperty = useMemo(
@@ -211,16 +201,22 @@ export function ThreeCanvasInstance({
   );
 
   // The surface attaches its canvas actor in the commit that mounts it, so the stage is never painted as ready in
-  // between, and detaches it when this mount leaves; the context-lost fallback keeps the actor (and its budget).
+  // between, and detaches it when this mount leaves; the context-lost fallback keeps the actor (and its budget). A
+  // Suspense boundary that hides and reveals this mount detaches and re-attaches the surface while the R3F root lives
+  // on without a second `onCreated`, so a re-attached surface hosts its new canvas actor on the root it already has.
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
-      if (element) {
-        graphicsRef.send({ type: 'canvasAttached', canvasId, kind: 'canvas', webglContext, admittedBytes });
-      } else {
+      if (!element) {
         graphicsRef.send({ type: 'canvasDetached', canvasId });
+        return;
+      }
+      graphicsRef.send({ type: 'canvasAttached', canvasId, kind: 'canvas', webglContext, admittedBytes });
+      const held = rootRef.current;
+      if (held && !held.isRetired()) {
+        sendToCanvas(canvasHostCreated(held));
       }
     },
-    [admittedBytes, canvasId, graphicsRef, webglContext],
+    [admittedBytes, canvasId, graphicsRef, sendToCanvas, webglContext],
   );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
@@ -253,19 +249,12 @@ export function ThreeCanvasInstance({
       if (glProperty.isRetired()) {
         return;
       }
-      rootRef.current = state;
+      const held: CanvasHostRoot = { root: state, isRetired: glProperty.isRetired };
+      rootRef.current = held;
       installTauPointerRays(state);
-      // R3F types its renderer as WebGL even when the factory supplies WebGPU.
-      const renderer = state.gl as RendererInstance;
-      const backend = renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
-      viewerRendererCreated(backend);
-      sendToCanvas({
-        type: 'hostCreated',
-        backend,
-        surface: surfaceOf(state),
-        domElement: renderer.domElement,
-        host: createCanvasHostLogic({ root: state, isRetired: glProperty.isRetired }),
-      });
+      const created = canvasHostCreated(held);
+      viewerRendererCreated(created.backend);
+      sendToCanvas(created);
     },
     [glProperty, sendToCanvas],
   );

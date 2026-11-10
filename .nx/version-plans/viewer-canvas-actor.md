@@ -1,6 +1,5 @@
 ---
 viewer: minor
-workbench-panes: patch
 ---
 
 The viewer's renderer lifecycle is a canvas actor. `@taucad/viewer/machines/canvas.machine` (new) exports `canvasMachine` (`creating → ready → presented ; lost ; failed`, context `canvasId`, `backend`, `surface`), its events and emitted `surfaceAttached`, `canvasEventTypes`, `canvasIgnoredEvents` and the selectors `selectCanvasAwaitingFrame` and `selectCanvasBackend`. The graphics machine spawns one canvas actor per mounted surface on `canvasAttached` and stops it on `canvasDetached`; its context holds it as `canvas: { canvasId, ref }`. The canvas actor holds the viewer's WebGL context budget slot, starts its host adapter from R3F's `onCreated` with the renderer, DOM canvas and `invalidate` in the adapter's closure, detects the first presented frame, and times the `canvas.mount` and `frame.first` load spans on its transitions.

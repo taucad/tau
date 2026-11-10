@@ -8,6 +8,7 @@ export default defineConfig({
     tauSentryDsn: '""',
     tauSentryRelease: '""',
     tauPostHogClientKey: '""',
+    tauDesktopHostBuild: '""',
   },
   test: {
     // `scripts/macos-package-mode.test.mts` is a `node:test` script owned by the

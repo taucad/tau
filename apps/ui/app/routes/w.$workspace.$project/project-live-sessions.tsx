@@ -46,6 +46,7 @@ import {
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
@@ -337,15 +338,22 @@ function ProjectSessionBinding({
         }
       },
       /*
-       * Every rating goes to the browser host, which reports one only for a run it observed in its own rows: the
-       * chat's current execution may have changed since the rated run ended, and a daemon's run is never reported.
+       * Every rating goes to the browser host and, in the desktop app, to the desktop host (LW8). Each reports one
+       * only for a run it observed in its own rows: the chat's current execution may have changed since the rated run
+       * ended, and a paired daemon's run is never reported.
        */
       rated: async (rating) => {
-        try {
-          await noteBrowserRunRated({ projectId, ...rating });
-        } catch {
-          /* A lost rating is only a missing feedback fact. */
-        }
+        const note = async (deliver: () => Promise<void> | undefined): Promise<void> => {
+          try {
+            await deliver();
+          } catch {
+            /* A lost rating is only a missing feedback fact. */
+          }
+        };
+        await Promise.all([
+          note(async () => noteBrowserRunRated({ projectId, ...rating })),
+          note(async () => desktopBridge()?.agentHost.rated({ projectId, ...rating })),
+        ]);
       },
     });
     return () => {

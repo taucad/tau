@@ -75,6 +75,9 @@
         },
         {
           "env": "SENTRY_RELEASE"
+        },
+        {
+          "runtime": "git rev-parse HEAD"
         }
       ],
       "dependsOn": [

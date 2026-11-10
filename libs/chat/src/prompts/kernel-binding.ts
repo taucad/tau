@@ -1,5 +1,5 @@
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
-import { isKernelId } from '@taucad/types/constants';
+import { catalogKernelOfRuntimeKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 
 /**
@@ -35,21 +35,6 @@ export type EntryBinding =
   | { readonly kind: 'undecided'; readonly candidates: readonly string[] }
   | { readonly kind: 'unbound' };
 
-/** Runtime kernel ids that differ from their catalog id. Every other authoring kernel shares its id. */
-const catalogIdByRuntimeId: Readonly<Record<string, KernelId>> = {
-  openrscad: 'openscad',
-  opencascade: 'opencascadejs',
-};
-
-/**
- * The catalog kernel a runtime kernel authors, or undefined for an import-only kernel (gltf, brep, assimp).
- *
- * @param runtimeKernel - A runtime kernel id.
- * @returns Its catalog id.
- */
-export const catalogKernelOf = (runtimeKernel: string): KernelId | undefined =>
-  catalogIdByRuntimeId[runtimeKernel] ?? (isKernelId(runtimeKernel) ? runtimeKernel : undefined);
-
 const patternOf = (detect: NonNullable<BindingKernelRow['detectImport']>): RegExp =>
   detect instanceof RegExp ? detect : new RegExp(detect.source, detect.flags);
 
@@ -75,10 +60,15 @@ export const bindEntryFirstPass = (input: {
       continue;
     }
     if (!row.detectImport) {
-      return { kind: 'bound', runtimeKernel: row.id, kernel: catalogKernelOf(row.id), method: 'extension' };
+      return {
+        kind: 'bound',
+        runtimeKernel: row.id,
+        kernel: catalogKernelOfRuntimeKernel(row.id),
+        method: 'extension',
+      };
     }
     if (patternOf(row.detectImport).test(input.source)) {
-      return { kind: 'bound', runtimeKernel: row.id, kernel: catalogKernelOf(row.id), method: 'regex' };
+      return { kind: 'bound', runtimeKernel: row.id, kernel: catalogKernelOfRuntimeKernel(row.id), method: 'regex' };
     }
     candidates.push(row.id);
   }

@@ -44,6 +44,49 @@ export const killLevel = (kill: DetectedMemoryKill): SeverityLevel => {
 const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Record<string, Value> =>
   Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, Value>;
 
+const mebibyte = 1024 * 1024;
+
+/** Bytes as MiB, rounded: the report never needs the exact size. */
+const toMebibytes = (bytes: number | undefined): number | undefined =>
+  bytes === undefined ? undefined : Math.round(bytes / mebibyte);
+
+/** Milliseconds as seconds to one decimal (100 ms). */
+const toTenths = (milliseconds: number | undefined): number | undefined =>
+  milliseconds === undefined ? undefined : Math.round(milliseconds / 100) / 10;
+
+/**
+ * The `tau.work` context: what the page was working on when it died, from the marker's v3 `work` block (crash
+ * capture blueprint). Bytes are rounded to MiB and durations to 100 ms.
+ *
+ * @param kill - The detected kill.
+ * @param diedAt - Epoch milliseconds of the marker's last write, the latest the page is known alive.
+ * @returns The context's fields; absent ones were never known.
+ */
+export const killWorkContext = (kill: DetectedMemoryKill, diedAt: number): Readonly<Record<string, unknown>> => {
+  const { work } = kill;
+  return defined<unknown>({
+    kernel: work.kernel,
+    builtin: work.builtin,
+    shareProvider: work.shareProvider,
+    phase: work.phase,
+    phaseSeconds: work.phaseStartedAt === undefined ? undefined : toTenths(Math.max(0, diedAt - work.phaseStartedAt)),
+    renderCount: work.renderCount,
+    lastEvaluateSeconds: toTenths(work.lastEvaluate),
+    lastRenderSeconds: toTenths(work.lastRender),
+    triangles: work.triangles,
+    geometryMiB: toMebibytes(work.geometryBytes),
+    gpuGeometries: work.gpuGeometries,
+    textures: work.textures,
+    peakWasmMiB: toMebibytes(work.peakWasmBytes ?? kill.highWaterWasmBytes),
+    backend: work.backend,
+    contextLost: work.contextLost,
+    lastInteraction: work.lastInteraction,
+    interactionSeconds:
+      work.interactionAt === undefined ? undefined : Math.round(Math.max(0, diedAt - work.interactionAt) / 1000),
+    parameterChanges: work.parameterChanges,
+  });
+};
+
 /**
  * Report one detected kill, and say whether it was handed over: only then may it leave the marker,
  * so a page that dies again while reporting still reports this kill on the load after that (G17).
@@ -59,7 +102,14 @@ export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<bool
   try {
     await reportUiError(error, {
       anonymous: true,
-      fingerprint: ['tab-killed', kill.classification, kill.route ?? 'unknown'],
+      // One issue is one kernel dying at one step (crash capture blueprint).
+      fingerprint: [
+        'tab-killed',
+        kill.classification,
+        kill.route ?? 'unknown',
+        kill.work.kernel ?? 'unknown',
+        kill.work.phase ?? 'unknown',
+      ],
       level: killLevel(kill),
       tags: defined({
         classification: kill.classification,
@@ -67,6 +117,10 @@ export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<bool
         device_class: kill.deviceClass,
         last_activity: kill.lastActivity,
         consecutive_kills: String(kill.consecutiveKills),
+        kernel: kill.work.kernel,
+        kill_phase: kill.work.phase,
+        builtin: kill.work.builtin,
+        ...(kill.work.lastInteraction === undefined ? {} : { last_interaction: kill.work.lastInteraction }),
       }),
       contexts: {
         'tau.kill': defined<unknown>({
@@ -82,6 +136,7 @@ export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<bool
           highWaterWasmBytes: kill.highWaterWasmBytes,
           ...(kill.sample === undefined ? {} : { memory: kill.sample }),
         }),
+        'tau.work': killWorkContext(kill, kill.diedAt),
       },
       // The dead page's trail, with its own timestamps: Sentry reads `timestamp` in seconds.
       breadcrumbs: kill.trail.map((entry) => ({

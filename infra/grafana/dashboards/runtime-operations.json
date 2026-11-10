@@ -650,7 +650,7 @@
       "id": 23
     },
     {
-      "title": "Stages and transport",
+      "title": "Tab kills",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -658,6 +658,72 @@
         "w": 24,
         "x": 0,
         "y": 57
+      },
+      "panels": [],
+      "id": 51
+    },
+    {
+      "title": "Tab Kills by Kernel and Phase (1h)",
+      "type": "timeseries",
+      "description": "Browser pages the browser ended (tab kills), reported by the next load, by kernel and the step the page was in. Outcome terminated; consented sessions only.",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_kill_phase) (increase(tau_runtime_page_kills_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_kill_phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No tab kills reported in this window. Kills are counted only from sessions whose usage and diagnostics setting resolves to on; if Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "id": 52
+    },
+    {
+      "title": "Tab Kills by Kernel, Phase, Class and Device (24h)",
+      "type": "table",
+      "description": "Tab kills in the last 24 hours by kernel, phase, foreground or background, device class and route.",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_kill_phase, tau_runtime_kill_class, tau_runtime_device, tau_runtime_route) (increase(tau_runtime_page_kills_total{app=~\"$app\",service_name=~\"$service\"}[24h]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No tab kills reported in this window. Kills are counted only from sessions whose usage and diagnostics setting resolves to on; if Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "id": 53
+    },
+    {
+      "title": "Stages and transport",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 66
       },
       "panels": [],
       "id": 24
@@ -684,7 +750,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 67
       },
       "id": 25
     },
@@ -709,7 +775,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 58
+        "y": 67
       },
       "id": 26
     },
@@ -736,7 +802,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 58
+        "y": 67
       },
       "id": 27
     },
@@ -762,7 +828,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 66
+        "y": 75
       },
       "id": 28
     },
@@ -789,7 +855,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 66
+        "y": 75
       },
       "id": 29
     },
@@ -801,7 +867,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 83
       },
       "panels": [],
       "id": 30
@@ -828,7 +894,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 75
+        "y": 84
       },
       "id": 31
     },
@@ -854,7 +920,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 75
+        "y": 84
       },
       "id": 32
     },
@@ -880,7 +946,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 75
+        "y": 84
       },
       "id": 33
     },
@@ -906,7 +972,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 75
+        "y": 84
       },
       "id": 34
     },
@@ -918,7 +984,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 92
       },
       "panels": [],
       "id": 35
@@ -945,7 +1011,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 93
       },
       "id": 36
     },
@@ -971,7 +1037,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 93
       },
       "id": 37
     },
@@ -983,7 +1049,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 101
       },
       "panels": [],
       "id": 38
@@ -1010,7 +1076,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 93
+        "y": 102
       },
       "id": 39
     },
@@ -1036,7 +1102,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 93
+        "y": 102
       },
       "id": 40
     },
@@ -1062,7 +1128,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 93
+        "y": 102
       },
       "id": 41
     },
@@ -1088,7 +1154,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 101
+        "y": 110
       },
       "id": 42
     },
@@ -1113,7 +1179,7 @@
         "h": 8,
         "w": 4,
         "x": 8,
-        "y": 101
+        "y": 110
       },
       "id": 43
     },
@@ -1139,7 +1205,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 101
+        "y": 110
       },
       "id": 44
     },
@@ -1165,7 +1231,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 109
+        "y": 118
       },
       "id": 45
     },
@@ -1191,7 +1257,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 109
+        "y": 118
       },
       "id": 46
     },
@@ -1216,7 +1282,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 109
+        "y": 118
       },
       "id": 47
     },
@@ -1242,7 +1308,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 109
+        "y": 118
       },
       "id": 48
     },
@@ -1254,7 +1320,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 117
+        "y": 126
       },
       "panels": [],
       "id": 49
@@ -1286,7 +1352,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 118
+        "y": 127
       },
       "id": 50
     }

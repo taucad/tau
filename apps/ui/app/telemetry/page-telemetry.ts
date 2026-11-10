@@ -23,6 +23,7 @@ import {
   createIngestReporter,
   isCloudHost,
   resolveTelemetryConsent,
+  toKillEntry,
   toLateEntry,
   toRuntimeEntry,
   toViewerEntry,
@@ -32,6 +33,7 @@ import type {
   DevicePreference,
   HostDeployment,
   IngestReporter,
+  PageKillInput,
   ReportingConsent,
   RuntimeEntryContext,
   RuntimeIngestEntry,
@@ -106,6 +108,8 @@ export type PageTelemetry = Readonly<{
   recordForwarded: (entry: unknown) => void;
   /** FR-17: one closed viewer event. */
   recordViewerEvent: (input: ViewerEventInput) => void;
+  /** Crash capture: one tab kill the next load detected, counted by kernel and phase (`tau.runtime.page_kills`). */
+  recordKill: (input: PageKillInput) => void;
   /** Report a runtime client's attempts under `caller`; returns the unsubscribe. */
   observeRuntimeClient: (client: ObservedRuntimeClient, caller: PageCaller) => () => void;
   /**
@@ -499,6 +503,18 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
   };
 
   /**
+   * Crash capture (blueprint question 8): one detected tab kill. The caller has already checked consent; the
+   * reporter checks it again at send time, as for every entry.
+   *
+   * @param input - The kill's kernel, phase and classification.
+   */
+  const recordKill = (input: PageKillInput): void => {
+    if (wantsEntries()) {
+      record(toKillEntry(input, { ...context(), caller: 'viewer' }));
+    }
+  };
+
+  /**
    * An entry a page worker mapped from its own client (agent host, GeoSpec runner). Fire-and-forget; anything that is
    * not an operation or late entry is ignored, and the ingest validates the rest.
    *
@@ -562,6 +578,7 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
     record,
     recordForwarded,
     recordViewerEvent,
+    recordKill,
     observeRuntimeClient,
     onConsentInputsChanged,
     pageHide,

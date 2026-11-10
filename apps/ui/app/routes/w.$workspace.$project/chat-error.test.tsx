@@ -15,16 +15,15 @@ import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machin
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
-import {
-  modelPendingAutoResumeBoundMilliseconds,
-  modelPendingPollMilliseconds,
-  recordProviderUnavailableAutoResume,
-  resetAutoResumes,
-} from '@taucad/ui-core/utils/run-auto-resume';
+import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
+/* What the chat's session machine is waiting out, as the store offers it (audit R5): the card only presents it. */
+const machine = vi.hoisted(() => ({ waiting: undefined as AutoResumePlan | undefined }));
 const debug = vi.hoisted(() => ({ enabled: false }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => debug.enabled }));
 
@@ -85,12 +84,14 @@ vi.mock('#components/code/code-viewer.js', () => ({
 const openNewChat = vi.fn(async () => undefined);
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ execution: { execution: { kind: 'tau', model: 'openai-gpt-6-astra' } } }),
+  useChatAutoResume: () => machine.waiting,
 }));
 vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
   useOpenNewChat: () => ({ openNewChat, isReady: true }),
 }));
 
 const persisted = (error: ChatErrorPayload): void => {
+  machine.waiting = undefined;
   vi.mocked(useChatSelector).mockImplementation((selector) =>
     selector({ error: undefined, persistedError: error } as unknown as CombinedChatState),
   );
@@ -135,6 +136,8 @@ const projectedFailure = (error: ChatErrorPayload): CombinedChatState => {
 /* A card promises Resume only for the caught-up log's current run, as the turn host admits it. */
 const projected = (error: ChatErrorPayload): void => {
   const state = projectedFailure(error);
+  /* The store offers the machine the wait the same facts allow. */
+  machine.waiting = autoResumePlanOf(state, Date.now(), () => 0.5);
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
 };
 
@@ -1351,14 +1354,6 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     details: { attemptId: incidentAttemptId, code: 'MODEL_ATTEMPT_PENDING' },
   };
   const pendingTitle = 'Checking whether the last model call finished';
-  const attemptRoute = `http://localhost:4000/v1/billing/attempts/gateway/${encodeURIComponent(incidentAttemptId)}`;
-  const answer = (body: unknown): Response => Response.json(body);
-  const pending = { state: 'pending', operationId: 'op_1' };
-  const terminal = {
-    state: 'terminal',
-    operationId: 'op_1',
-    receipt: { customerState: 'released', chargedCreditAtoms: '0' },
-  };
   const fetchAttempt = vi.fn<typeof globalThis.fetch>();
   const advance = async (milliseconds: number): Promise<void> => {
     await act(async () => {
@@ -1382,7 +1377,6 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
 
   it('should announce the approved pending card as busy status, not "Chat paused", and keep the raw failure in Tau Debug', async () => {
     debug.enabled = true;
-    fetchAttempt.mockResolvedValue(answer(pending));
     const user = userEvent.setup();
     projected(incidentEndingRow);
 
@@ -1397,7 +1391,7 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     expect(screen.queryByText(incidentMessage)).not.toBeInTheDocument();
 
     // Keyboard only: the one control is Tau Debug's disclosure, and it opens on Enter. Testing Library's async wrapper
-    // waits on a real macrotask, so the clock is real for the keystrokes; the next lookup stays on the fake one.
+    // waits on a real macrotask, so the clock is real for the keystrokes.
     vi.useRealTimers();
     await user.tab();
     const details = screen.getByRole('button', { name: 'Debug details' });
@@ -1406,71 +1400,39 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     expect(screen.getByTestId('code-viewer')).toHaveTextContent(incidentMessage);
   });
 
-  it('should resume once without a click when the attempt route answers terminal', async () => {
-    fetchAttempt.mockResolvedValueOnce(answer(pending)).mockResolvedValue(answer(terminal));
-    projected(incidentEndingRow);
-
-    render(<ChatErrorBanner />);
-    await advance(0);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(1);
-    expect(fetchAttempt).toHaveBeenCalledWith(attemptRoute, expect.objectContaining({ credentials: 'include' }));
-    expect(continueChat).not.toHaveBeenCalled();
-
-    await advance(modelPendingPollMilliseconds);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(2);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
-    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
-
-    await advance(modelPendingAutoResumeBoundMilliseconds);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(2);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-  });
-
-  it('should never resume the same failed attempt twice when its card mounts again', async () => {
-    fetchAttempt.mockResolvedValue(answer(terminal));
-    projected(incidentEndingRow);
-
-    const first = render(<ChatErrorBanner />);
-    await advance(0);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    first.unmount();
-
-    render(<ChatErrorBanner />);
-    await advance(modelPendingPollMilliseconds);
-
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('alert')).toHaveTextContent('Chat paused');
-  });
-
-  it('should show the resumable pause card past the bound and stop asking the route', async () => {
-    fetchAttempt.mockResolvedValue(answer(pending));
+  it('should show the resumable pause card once the chat no longer waits on the attempt', async () => {
     const user = userEvent.setup();
     projected(incidentEndingRow);
+    // Past the run's bound, or once the wait resumed the run, the machine waits on nothing.
+    machine.waiting = undefined;
 
     render(<ChatErrorBanner />);
-    await advance(modelPendingAutoResumeBoundMilliseconds - 1);
-    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
-
-    await advance(1);
 
     expect(screen.queryByRole('status', { name: pendingTitle })).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Chat paused');
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(continueChat).not.toHaveBeenCalled();
-    const lookups = fetchAttempt.mock.calls.length;
-    await advance(modelPendingPollMilliseconds * 3);
-    expect(fetchAttempt).toHaveBeenCalledTimes(lookups);
 
-    // Keyboard only: Resume is reachable by Tab and continues the turn on Enter (real clock, as above).
+    // Keyboard only: Resume is reachable by Tab and continues the turn on Enter.
     vi.useRealTimers();
     await user.tab();
     expect(screen.getByRole('button', { name: 'Resume' })).toHaveFocus();
     await user.keyboard('{Enter}');
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should never ask the attempt route or resume from the card itself', async () => {
+    projected(incidentEndingRow);
+
+    const first = render(<ChatErrorBanner />);
+    await advance(10 * 60 * 1000);
+    first.unmount();
+    render(<ChatErrorBanner />);
+    await advance(10 * 60 * 1000);
+
+    expect(fetchAttempt).not.toHaveBeenCalled();
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
   });
 });

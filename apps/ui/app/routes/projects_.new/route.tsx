@@ -32,6 +32,14 @@ import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/proj
 import { projectUrl } from '#utils/project-url.utils.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
+/*
+ * `autoFocus` is applied by the browser at its next rendering update, about 90 ms after navigation on an
+ * M2 Pro; a key typed before then lands on the body and is lost (20 of 40 loads lost the first key). This
+ * runs as soon as the parser reaches the field, before first paint, and leaves focus alone if the person
+ * already put it somewhere.
+ */
+const focusProjectNameScript = `(()=>{const input=document.getElementById('project-name');if(input&&(document.activeElement===null||document.activeElement===document.body))input.focus()})()`;
+
 const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
 export const meta: MetaFunction = () => [{ title: 'New project · Tau' }];
@@ -227,6 +235,10 @@ export default function ProjectsNew(): React.JSX.Element {
                   }}
                 />
               </div>
+              <script
+                // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; focuses the name field as soon as it is parsed.
+                dangerouslySetInnerHTML={{ __html: focusProjectNameScript }}
+              />
               <div className='flex-1 space-y-2'>
                 <Label htmlFor='project-description'>Description (optional)</Label>
                 <Input

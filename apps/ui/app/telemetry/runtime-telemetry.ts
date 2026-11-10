@@ -18,6 +18,7 @@ import { readBuildRelease } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
+import { recordViewerWork } from '#lib/kill-work-context.js';
 import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import { createPageTelemetry } from '#telemetry/page-telemetry.js';
 import type { ObservedRuntimeClient, PageCaller, PageTelemetry } from '#telemetry/page-telemetry.js';
@@ -103,7 +104,12 @@ export const pageTelemetry = (): PageTelemetry | undefined => {
   /* FR-17: the viewer emits closed events and never reports; the page decides. */
   const viewerPage = page;
   onViewerEvent((event) => {
-    viewerPage.recordViewerEvent(event);
+    /* Crash capture: every viewer step reaches the local tab-kill marker; `upload-start` is a phase marker only. */
+    recordViewerWork(event);
+    const { event: name, ...rest } = event;
+    if (name !== 'upload-start') {
+      viewerPage.recordViewerEvent({ ...rest, event: name });
+    }
   });
   return page;
 };

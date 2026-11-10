@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { recordInteraction } from '#lib/kill-work-context.js';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class';
@@ -754,6 +755,7 @@ export function ProjectProvider({
            * to re-render, and this machine keeps no second copy of the stored values. */
           performance.mark('tau:parameter-dispatch', { detail: { entryPath } });
           recordMemoryBreadcrumb('render');
+          recordInteraction('parameter');
           cadRef.send({ type: 'commitParameters', stage });
         }
       });

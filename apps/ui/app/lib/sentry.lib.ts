@@ -4,6 +4,7 @@ import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { setActivityBreadcrumbSink } from '@taucad/ui-core/lib/activity-breadcrumbs';
+import { applyAnalyticsLink } from '#lib/analytics-link.lib.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
 import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
@@ -246,8 +247,11 @@ export const initSentry = (): void => {
   if (sampleRate !== undefined) {
     nameSpansByRoute();
   }
-  // Error events only: the processor never touches a transaction or feedback.
-  Sentry.addEventProcessor((event) => (event.type === undefined ? applyTauEventContext(event) : event));
+  // Error events only: the processor never touches a transaction or feedback. While PostHog is capturing
+  // (consented on the web), the event also links to the PostHog person and replay (SB7, A8).
+  Sentry.addEventProcessor((event) =>
+    event.type === undefined ? applyAnalyticsLink(applyTauEventContext(event)) : event,
+  );
   setActivityBreadcrumbSink((message) => {
     Sentry.addBreadcrumb({ category: 'tau.activity', message, level: 'info' });
   });

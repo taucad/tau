@@ -266,6 +266,21 @@ export const runtimeMetrics = {
       'tau.runtime.route': v.route,
     }),
   }),
+  runtimePageKills: defineCounter({
+    name: 'tau.runtime.page_kills',
+    unit: '{kill}',
+    description:
+      'Browser pages the browser ended (tab kills), reported by the next load, by kernel, phase, classification, route, device class and population; outcome terminated',
+    attributes: z.object({
+      'kernel.id': kernelLabel,
+      'tau.runtime.kill_phase': v.killPhase,
+      'tau.runtime.kill_class': v.killClass,
+      'tau.runtime.outcome': z.literal('terminated'),
+      'tau.runtime.route': v.route,
+      'tau.runtime.device': v.device.optional(),
+      'tau.runtime.population': v.population,
+    }),
+  }),
   runtimeLateTerminals: defineCounter({
     name: 'tau.runtime.late_terminals',
     unit: '{reply}',

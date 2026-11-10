@@ -16,25 +16,37 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
-import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
+import { busyKillPhases, getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '@taucad/ui-core/lib/memory-sampler';
+import { installKillWorkReaders } from '#lib/kill-work-context.js';
+import { killMemory } from '#lib/kill-memory.js';
+import type { KillMemory } from '#lib/kill-memory.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 
-/** Where the reporter reads the telemetry consent: the page composition's one rule. @public */
+/** Where the reporter reads the telemetry consent (the page composition's one rule) and counts a kill. @public */
 export type KillReportConsent = Readonly<{
   read: () => ReportingConsent;
   /** Listen for each resolved change; returns the unsubscribe. */
   subscribe: (listener: () => void) => () => void;
+  /** Count one consented kill in runtime telemetry (`tau.runtime.page_kills`), by kernel and phase. */
+  count: (kill: DetectedMemoryKill) => void;
 }>;
 
 /** The page composition's consent; `unknown` (wait) where there is none, as during SSR. */
 const pageConsent: KillReportConsent = {
   read: () => pageTelemetry()?.consent() ?? 'unknown',
   subscribe: (listener) => pageTelemetry()?.onConsentChange(listener) ?? (() => undefined),
+  count: (kill) => {
+    pageTelemetry()?.recordKill({
+      ...(kill.work.kernel === undefined ? {} : { kernel: kill.work.kernel }),
+      ...(kill.work.phase === undefined ? {} : { phase: kill.work.phase }),
+      classification: kill.classification,
+    });
+  },
 };
 
 export function MemoryKillReporter({
@@ -42,11 +54,13 @@ export function MemoryKillReporter({
   liveProjectCount,
   chatCount,
   consent = pageConsent,
+  memory = killMemory,
 }: {
   readonly signal: MemoryKillSignal | undefined;
   readonly liveProjectCount: number;
   readonly chatCount: number;
   readonly consent?: KillReportConsent;
+  readonly memory?: KillMemory;
 }): undefined {
   const waiting = useRef<DetectedMemoryKill[] | undefined>(undefined);
 
@@ -54,7 +68,22 @@ export function MemoryKillReporter({
     if (signal === undefined) {
       return undefined;
     }
-    waiting.current ??= [...signal.takeDetectedKills()];
+    if (waiting.current === undefined) {
+      waiting.current = [...signal.takeDetectedKills()];
+      // Kill memory, in every consent state: a model that stopped the page while opening or rendering is paused
+      // the next time it opens on this device. Local functional state; nothing is sent.
+      for (const kill of waiting.current) {
+        const { model, phase } = kill.work;
+        if (
+          kill.classification === 'foreground' &&
+          model !== undefined &&
+          phase !== undefined &&
+          busyKillPhases.has(phase)
+        ) {
+          memory.record(model, kill.buildId, kill.diedAt);
+        }
+      }
+    }
     let isSending = false;
     const process = async (): Promise<void> => {
       const decided = consent.read();
@@ -74,6 +103,8 @@ export function MemoryKillReporter({
           // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
           if (await reportDetectedKill(kill)) {
             signal.settleKill(kill.id);
+            // Counted once, as it leaves the marker: a kill still pending is counted when it is delivered.
+            consent.count(kill);
           }
         }
       } finally {
@@ -87,7 +118,10 @@ export function MemoryKillReporter({
     // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
     void process();
     return unsubscribe;
-  }, [consent, signal]);
+  }, [consent, memory, signal]);
+
+  // SB2's kernel heap and renderer readers, which nothing registered before (crash capture, Finding 2).
+  useEffect(() => installKillWorkReaders(), []);
 
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });
@@ -134,9 +168,10 @@ export function MemoryKillReporter({
     if (signal === undefined) {
       return undefined;
     }
+    // Every 5 s; the signal writes each time while a model opens or renders, else every 30 s.
     const beat = globalThis.setInterval(() => {
       signal.heartbeat();
-    }, killHeartbeatMilliseconds);
+    }, killBusyHeartbeatMilliseconds);
     return () => {
       globalThis.clearInterval(beat);
     };

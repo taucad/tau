@@ -36,8 +36,7 @@ import type { TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
 
 /* The invitation card is the owner's half of a *connected Tau Cloud* project
  * (`revision-sync-region.tsx`: `role === 'owner' && remote.kind === 'tau' &&
- * remote.phase === 'connected'`), and a free owner's connect is refused with
- * `403 GIT_SYNC_NOT_ENTITLED`, so the plan is seeded exactly as the two-client
+ * remote.phase === 'connected'`); the plan is seeded exactly as the two-client
  * tier seeds it. */
 const account = tauTestAccount('share-link-copy');
 const projectName = 'R5 Share Link';

@@ -280,6 +280,55 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(bound.invocation.supplierRates).toStrictEqual(plain.invocation.supplierRates);
   });
 
+  it('should price an effort level carried in the transcript as the same request with a top-level effort', () => {
+    const anthropic = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    };
+    const responses = {
+      model: 'openai-gpt-5.6-sol',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 16,
+      stream: true,
+      reasoning: { effort: 'medium' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const resolve = (providerWire: 'anthropic' | 'openai-responses', body: unknown, beta?: string) =>
+      resolver.resolve({
+        ...intent(body),
+        providerWire,
+        ...(providerWire === 'anthropic'
+          ? { priceHeaders: beta === undefined ? headers : { ...headers, 'anthropic-beta': beta } }
+          : {}),
+      });
+    const marker = { role: 'system', content: [], output_config: { effort: 'low' } };
+    const update = { type: 'configuration_update', reasoning: { effort: 'high' } };
+
+    const anthropicPlain = resolve('anthropic', anthropic);
+    const anthropicMarked = resolve(
+      'anthropic',
+      { ...anthropic, messages: [...anthropic.messages, marker] },
+      'mid-conversation-output-config-2026-07-01',
+    );
+    const responsesPlain = resolve('openai-responses', responses);
+    const responsesMarked = resolve('openai-responses', { ...responses, input: [...responses.input, update] });
+
+    expect(anthropicMarked.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'mid-conversation-output-config-2026-07-01' },
+      body: { messages: [anthropic.messages[0], marker] },
+    });
+    expect(responsesMarked.normalizedRequest).toMatchObject({ body: { input: [responses.input[0], update] } });
+    /* The marker selects how hard the model thinks, as the top-level field does; tokens cost what they cost. */
+    expect(anthropicMarked.sku).toBe(anthropicPlain.sku);
+    expect(anthropicMarked.invocation.supplierRates).toStrictEqual(anthropicPlain.invocation.supplierRates);
+    expect(responsesMarked.sku).toBe(responsesPlain.sku);
+    expect(responsesMarked.invocation.supplierRates).toStrictEqual(responsesPlain.invocation.supplierRates);
+  });
+
   it('should accept the authoritative OpenAI-compatible host stream options and strict function shape', () => {
     const result = resolver.resolve({
       ...intent({

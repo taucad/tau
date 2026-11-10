@@ -57,9 +57,11 @@ export type PrefixStamp = {
   readonly cleared?: number;
   /** How many attachments the request's budget omitted. */
   readonly evicted?: number;
+  /** How many native reasoning payloads of this model the request replayed: their rows' prefixes still matched. */
+  readonly replayed?: number;
   /** Why this request did not reproduce the previous one's prefix; absent when it did. */
   readonly break?: PrefixBreakCause;
-  /** How many native reasoning blocks the break left out of this request, because their prefix no longer matches. */
+  /** How many native reasoning payloads the break took out of what the model reads, stale or summarised away. */
   readonly dropped?: number;
 };
 
@@ -75,7 +77,7 @@ export const readPrefixStamp = (value: unknown): PrefixStamp | undefined => {
     return undefined;
   }
   const record = value as Readonly<Record<string, JsonValue | undefined>>;
-  const { digest, system, tools, settings, release, summary, cleared, evicted, dropped } = record;
+  const { digest, system, tools, settings, release, summary, cleared, evicted, replayed, dropped } = record;
   const cause = prefixBreakCauses.find((candidate) => candidate === record['break']);
   if (
     typeof digest !== 'string' ||
@@ -94,6 +96,7 @@ export const readPrefixStamp = (value: unknown): PrefixStamp | undefined => {
     ...(typeof summary === 'string' ? { summary } : {}),
     ...(typeof cleared === 'number' ? { cleared } : {}),
     ...(typeof evicted === 'number' ? { evicted } : {}),
+    ...(typeof replayed === 'number' ? { replayed } : {}),
     ...(cause === undefined ? {} : { break: cause }),
     ...(typeof dropped === 'number' ? { dropped } : {}),
   };

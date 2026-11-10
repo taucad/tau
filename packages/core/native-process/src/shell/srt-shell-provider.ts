@@ -118,8 +118,8 @@ export type SandboxShellProviderOptions = Readonly<{
   /** The person's home root, for the baseline read-deny set. */
   home?: string;
   /**
-   * On macOS, allow `terminal` launches, carrying the session-scoped own-pty Seatbelt rule. Off until the operator's
-   * own-pty validation run passes (ruling 2026-10-24T05:39Z); off answers `unsupported: terminal`.
+   * On macOS, allow `terminal` launches, carrying the session-scoped own-pty Seatbelt rule. The desktop turns it on;
+   * shell conformance C08/C09 qualify it on MAC-A and MAC-X. Off answers `unsupported: terminal`.
    */
   macOSTerminal?: boolean;
   /** Load node-pty; injectable for tests. */

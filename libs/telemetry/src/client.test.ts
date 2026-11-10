@@ -6,6 +6,7 @@ import {
   resolveTelemetryConsent,
   toLateEntry,
   toRuntimeEntry,
+  toKillEntry,
   toViewerEntry,
   verifyEntry,
 } from '#client.js';
@@ -330,6 +331,38 @@ describe('toLateEntry', () => {
       duration: 1200,
       detail: { operation: 'render', settledAs: 'cancelled', route: 'browser', caller: '_OTHER' },
     });
+    expect(parseRuntimeEntry(entry)).toBeDefined();
+  });
+});
+
+describe('toKillEntry (crash capture blueprint, question 8)', () => {
+  it('should map a detected kill to an admissible entry with closed kernel, phase and class', () => {
+    const entry = toKillEntry(
+      { kernel: 'replicad', phase: 'gpu-upload', classification: 'foreground' },
+      { ...context, device: 'constrained', platform: 'webkit' },
+    );
+
+    expect(entry).toEqual({
+      name: 'runtime.kill',
+      duration: 0,
+      detail: {
+        kernel: 'replicad',
+        phase: 'gpu-upload',
+        classification: 'foreground',
+        route: 'browser',
+        release: '0123abc',
+        device: 'constrained',
+        platform: 'webkit',
+      },
+    });
+    expect(parseRuntimeEntry(entry)).toBeDefined();
+  });
+
+  it('should close anything outside the vocabularies and default a missing phase to boot', () => {
+    const entry = toKillEntry({ kernel: 'my-own-kernel', classification: 'sideways' }, context);
+
+    expect(entry.detail).toMatchObject({ kernel: '_OTHER', phase: 'boot', classification: '_OTHER' });
+    expect(entry.detail).not.toHaveProperty('kernel', 'my-own-kernel');
     expect(parseRuntimeEntry(entry)).toBeDefined();
   });
 });

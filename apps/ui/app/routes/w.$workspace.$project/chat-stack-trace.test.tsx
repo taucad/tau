@@ -395,9 +395,9 @@ describe('ViewerIssues — disclosure', () => {
   });
 });
 
-/** Fix with AI is named for what Shift does: a new chat while it is held. */
+/** Fix in chat is named for what Shift does: a new chat while it is held. */
 let shiftHeld = true;
-const fixLabel = (): string => (shiftHeld ? 'Fix in new chat' : 'Fix with AI');
+const fixLabel = (): string => (shiftHeld ? 'Fix in new chat' : 'Fix in chat');
 
 describe('ViewerIssues — new-chat (shift held) path', () => {
   beforeEach(() => {
@@ -520,10 +520,10 @@ describe('ViewerIssues — in-place (shift not held) path', () => {
 
   // Wire-format invariant — the captured agent identity must produce a body
   // that satisfies the shared chatTurnRequestSchema. Regression coverage for
-  // the original Fix-with-AI missing-kernel / missing-mode / missing-
+  // the original Fix-in-chat missing-kernel / missing-mode / missing-
   // testingEnabled bug — all three fields previously needed to be hand-
   // stamped on the user message metadata and frequently drifted.
-  it('produces a wire body satisfying chatTurnRequestSchema for the Fix-with-AI in-place path', async () => {
+  it('produces a wire body satisfying chatTurnRequestSchema for the Fix-in-chat in-place path', async () => {
     renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
@@ -561,7 +561,7 @@ describe('ViewerIssues — in-place (shift not held) path', () => {
     mockKernelIssues = new Map([['main.scad', [issue, second]]]);
     renderOpen();
 
-    fireEvent.click(screen.getByRole('button', { name: /Fix all 2 with AI/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Fix all 2 in chat/ }));
 
     await waitFor(() => {
       expect(mockSubmit).toHaveBeenCalledOnce();

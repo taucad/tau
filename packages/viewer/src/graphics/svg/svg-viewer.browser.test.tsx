@@ -40,18 +40,17 @@ describe('SVG viewer in Chromium', () => {
     // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Browser assertion checks the authored fixture color survives sanitization.
     expect(getComputedStyle(rectangle).fill).toBe('rgb(181, 94, 42)');
 
-    const canvas = shadow?.querySelector('div');
-    expect(canvas).not.toBeNull();
+    const viewport = shadow?.querySelector('svg');
+    expect(viewport).not.toBeNull();
+    const widthBefore = rectangle.getBoundingClientRect().width;
     for (let turn = 0; turn < 15; turn += 1) {
-      canvas?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -1 }));
+      viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -50 }));
       await new Promise((resolve) => {
         setTimeout(resolve, 120);
       });
     }
-    const panzoomRoot = shadow?.querySelector('#panzoom-root');
-    const transform = panzoomRoot instanceof SVGElement ? panzoomRoot.style.transform : '';
-    expect(transform).toContain('scale(');
-    expect(Number(/scale\(([^)]+)\)/.exec(transform)?.[1])).toBeGreaterThan(3.5);
+    // Fifteen 50 px turns at 0.002 per pixel zoom by e^1.5.
+    expect(rectangle.getBoundingClientRect().width / widthBefore).toBeCloseTo(Math.exp(1.5), 1);
     const screenshot = await page.screenshot({
       element: screen.getByTestId('frame'),
       path: '../../../../../out/tscircuit-closeout/svg-copper-zoom.png',

@@ -86,6 +86,18 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
+import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
+import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
+import {
+  canAutoResumeModelPending,
+  lookUpModelAttempt,
+  nextProviderUnavailableRetry,
+  nextRateLimitRetry,
+  recordModelPendingAutoResume,
+  recordProviderUnavailableAutoResume,
+  recordRateLimitAutoResume,
+} from '@taucad/ui-core/utils/run-auto-resume';
 import {
   chatProjectionLogic,
   selectAttentionRow,
@@ -93,6 +105,7 @@ import {
   selectCurrentRun,
   selectOpenInterrupts,
   selectRunFailure,
+  selectRunElsewhereAwaitsPull,
   selectRunPhase,
   selectTranscriptSource,
   selectToolsInFlight,
@@ -104,7 +117,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
-import { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '@taucad/agent-host';
+import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -574,6 +587,8 @@ type InternalSession = ChatSession & {
   readonly projectId: string;
   /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
+  /** Read the chat's waits now (`#bindChatWaits`); bound with the root. */
+  offerChatWaits: () => void;
   /**
    * The chat's record store and project. Known at acquire (PV-S4); a reacquired chat's I/O waits only for its released
    * predecessor's drain (D7).
@@ -726,6 +741,50 @@ const receivedAtOf = async (client: SegmentStatClient, path: string): Promise<Re
   return mtimeMs === undefined || mtimeMs <= 0 ? {} : { receivedAt: mtimeMs };
 };
 
+/* The attempt route, asked with the page's session cookie while a chat waits on a pending model attempt (RA-R1). */
+const modelAttemptLookup = createAsyncLogic<'settled' | 'waiting', { readonly attemptId: string }>({
+  run: async ({ input, signal }) => {
+    const answer = await lookUpModelAttempt({ apiBaseUrl: ENV.TAU_API_URL, attemptId: input.attemptId, signal });
+    signal.throwIfAborted();
+    return answer;
+  },
+});
+
+/**
+ * Whether an automatic resume's wait may still resume the run, and the ledger entry that spends it: checked again
+ * when the wait ends, so a failed attempt is never resumed twice by this page.
+ *
+ * @param plan - The wait that ended.
+ * @param now - The current time, in epoch milliseconds.
+ * @returns Whether the run was resumed on the ledger.
+ */
+const spendAutoResume = (plan: AutoResumePlan, now: number): boolean => {
+  const { runId, attempt } = plan;
+  switch (plan.kind) {
+    case 'rateLimit': {
+      if (nextRateLimitRetry(runId, attempt) === undefined) {
+        return false;
+      }
+      recordRateLimitAutoResume(runId, attempt);
+      return true;
+    }
+    case 'providerUnavailable': {
+      if (nextProviderUnavailableRetry(runId, attempt) === undefined) {
+        return false;
+      }
+      recordProviderUnavailableAutoResume(runId, attempt);
+      return true;
+    }
+    case 'modelPending': {
+      if (!canAutoResumeModelPending(runId, attempt, now)) {
+        return false;
+      }
+      recordModelPendingAutoResume(runId, attempt);
+      return true;
+    }
+  }
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
@@ -843,7 +902,7 @@ export class ChatSessionStore {
     this.#chatSessionLogic =
       chatSession ??
       chatSessionMachine.provide({
-        actors: { admitTurn: chatTurnAdmission },
+        actors: { admitTurn: chatTurnAdmission, lookUpModelAttempt: modelAttemptLookup },
       });
     this.#rootOptions = rootOptions;
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
@@ -1368,6 +1427,7 @@ export class ChatSessionStore {
         throw new Error(`Chat ${chatId} is already acquired in project ${existing.projectId}.`);
       }
       existing.viewRefcount += 1;
+      existing.offerChatWaits();
       return existing;
     }
 
@@ -1377,6 +1437,8 @@ export class ChatSessionStore {
     session.observationRelease = this.observe(chatId, projectId);
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
+    // The root bound before the session was registered; its first read of the chat's waits is now.
+    session.offerChatWaits();
     this.#refreshSnapshot();
     this.#notifyMembership();
     return session;
@@ -1388,6 +1450,8 @@ export class ChatSessionStore {
       return;
     }
     session.viewRefcount -= 1;
+    // An unviewed chat resumes nothing on its own: its wait ends unspent, and is offered again on return.
+    session.offerChatWaits();
     this.#disposeIfUnreferenced(session);
   }
 
@@ -1725,6 +1789,8 @@ export class ChatSessionStore {
     if (actor?.getSnapshot().status === 'active') {
       actor.send({ type: 'refresh' });
     }
+    // A newly published admission lets the chat's automatic resume be offered.
+    this.#sessions.get(chatId)?.offerChatWaits();
   }
 
   /** Retry a retained delivery with its original command identity. */
@@ -2868,6 +2934,11 @@ export class ChatSessionStore {
      * whose last view unmounted mid-admission is never asked about again. */
     let admitting = this.#isAdmittingTurn(session);
     session.turnSubscriptions = [
+      /* The chat's own waits (audit R5): the machine holds them on the store's clock, the store carries them out. */
+      stateActorRef.on('remotePullDue', () => {
+        void this.requestRemotePull(session.chatId);
+      }),
+      ...this.#bindChatWaits(session),
       stateActorRef.on('startTurnRequest', ({ request }) => {
         /* Recency counts a taken gesture: a refused one never gets here (L3 D16, LT08). */
         void this.touchChatRecency(
@@ -2887,6 +2958,144 @@ export class ChatSessionStore {
         admitting = admits;
       }),
     ];
+  }
+
+  /**
+   * Offer the chat's machine what it waits out on its own (audit R5), from the facts the chat's views read: the
+   * automatic resume its visible failure allows (`autoResumePlanOf`), and whether another device's run awaits pulls
+   * (`selectRunElsewhereAwaitsPull`, re-read at the moments that changes with the clock alone). Nothing here depends on
+   * a card or a composer being mounted.
+   *
+   * @param session - The chat whose root was just bound.
+   * @returns The subscriptions, ended with the session.
+   */
+  #bindChatWaits(session: InternalSession): Array<{ unsubscribe: () => void }> {
+    const { chatId, stateActorRef } = session;
+    let offered: string | undefined;
+    /* The wait this page resumed: its card stays until the failure it answered leaves (`autoResume.resuming`). */
+    let resumed: AutoResumePlan | undefined;
+    let departed = false;
+    let awaitsPull = false;
+    const live = (): boolean =>
+      this.#sessions.get(chatId) === session && stateActorRef.getSnapshot().status === 'active';
+    /* Only a viewed chat that can admit a turn resumes on its own: a resume needs both to land (audit R5). */
+    const canResume = (): boolean => session.viewRefcount > 0 && chatTurnAdmit(chatId) !== undefined;
+    const offerAutoResume = (): void => {
+      if (!live()) {
+        return;
+      }
+      const source = {
+        projection: this.getProjection(chatId),
+        attachmentStatus: this.getAttachmentStatus(chatId),
+        error: session.chat.error,
+        persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
+      };
+      const plan = canResume() ? autoResumePlanOf(source, Date.now()) : undefined;
+      if (
+        plan === undefined &&
+        resumed !== undefined &&
+        resumed.key === offered &&
+        autoResumeStillAnswers(resumed, source)
+      ) {
+        return;
+      }
+      resumed = undefined;
+      if (plan?.key === offered) {
+        return;
+      }
+      offered = plan?.key;
+      stateActorRef.send(plan === undefined ? { type: 'autoResumeWithdrawn' } : { type: 'autoResumeOffered', plan });
+    };
+    const autoResumeDue = stateActorRef.on('autoResumeDue', ({ plan }) => {
+      if (!live() || plan.key !== offered) {
+        return;
+      }
+      if (!canResume() || !spendAutoResume(plan, Date.now())) {
+        offered = undefined;
+        stateActorRef.send({ type: 'autoResumeWithdrawn' });
+        return;
+      }
+      resumed = plan;
+      departed = false;
+      /* After this emit settles, so the gesture is admitted rather than queued behind it, and its refusal is heard. */
+      queueMicrotask(() => {
+        void this.#resumeAutomatically(chatId, endRefusedResume);
+      });
+    });
+    /*
+     * A resume refused at admission or at dispatch, or by a gesture held over it, puts the run back in `failed` on the
+     * same visible failure: the wait ends, spent, and the card offers Resume again. A resume that reached the host
+     * leaves `failed` and waits for its run to report instead.
+     */
+    const endRefusedResume = (): void => {
+      if (
+        resumed === undefined ||
+        !live() ||
+        this.#isAdmittingTurn(session) ||
+        !stateActorRef.getSnapshot().matches({ run: 'failed' })
+      ) {
+        return;
+      }
+      resumed = undefined;
+      offered = undefined;
+      stateActorRef.send({ type: 'autoResumeWithdrawn' });
+    };
+    const watchResume = stateActorRef.subscribe(() => {
+      if (resumed === undefined) {
+        return;
+      }
+      if (!stateActorRef.getSnapshot().matches({ run: 'failed' })) {
+        departed = true;
+      } else if (departed) {
+        endRefusedResume();
+      }
+    });
+    const offerPull = (): void => {
+      if (!live()) {
+        return;
+      }
+      const projection = this.getProjection(chatId);
+      const awaits = projection !== undefined && selectRunElsewhereAwaitsPull(projection, Date.now());
+      if (awaits === awaitsPull) {
+        return;
+      }
+      awaitsPull = awaits;
+      stateActorRef.send(
+        awaits
+          ? { type: 'runElsewhereAwaitsPull', heartbeatMilliseconds: runHeartbeatMilliseconds }
+          : { type: 'runElsewherePullSettled' },
+      );
+    };
+    const unsubscribeChat = this.subscribeChat(chatId, offerAutoResume);
+    const unsubscribeProjection = this.subscribeProjection(chatId, offerAutoResume);
+    const persistence = session.persistenceActorRef.subscribe(offerAutoResume);
+    const unsubscribePull = subscribeRunElsewhere(this, chatId, offerPull);
+    session.offerChatWaits = () => {
+      offerAutoResume();
+      offerPull();
+    };
+    return [
+      autoResumeDue,
+      watchResume,
+      { unsubscribe: unsubscribeChat },
+      { unsubscribe: unsubscribeProjection },
+      persistence,
+      { unsubscribe: unsubscribePull },
+    ];
+  }
+
+  /**
+   * Resume a chat whose automatic resume's wait ended, then let its waits hear how the resume settled (audit R5).
+   *
+   * @param chatId - The chat.
+   * @param settled - Called once the resume is admitted, held or refused.
+   */
+  async #resumeAutomatically(chatId: string, settled: () => void): Promise<void> {
+    try {
+      await this.requestTurn(chatId, { kind: 'continue' });
+    } finally {
+      settled();
+    }
   }
 
   /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
@@ -3063,6 +3272,7 @@ export class ChatSessionStore {
   #startChatRoot(session: InternalSession): void {
     this.#bindTurnEmits(session);
     session.chatRoot.start();
+    session.offerChatWaits();
     const facts = this.#revisionFacts.get(session.projectId);
     if (facts !== undefined) {
       sendRevisionFacts(session.stateActorRef, facts);
@@ -4309,6 +4519,7 @@ export class ChatSessionStore {
       presentedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],
+      offerChatWaits: () => undefined,
       dispose: () => {
         unsubscribeReachability?.();
         heldSubscription.unsubscribe();

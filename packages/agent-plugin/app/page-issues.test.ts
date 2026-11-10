@@ -15,7 +15,7 @@ const warning: TauViewerIssue = {
 };
 
 describe('issueChatText', () => {
-  it('should name the source and list one issue as desktop Fix with AI does', () => {
+  it('should name the source and list one issue as desktop Fix in chat does', () => {
     expect(issueChatText([syntaxError], 'main.ts')).toBe(
       'Fix this issue in main.ts:\n\n- **Message:** Unexpected token\n- **Location:** Line 3, Column 7',
     );

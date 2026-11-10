@@ -604,3 +604,45 @@ describe('the model-stream stall bound (RA-S12, E9)', () => {
     await session.close();
   });
 });
+
+describe('provider bytes', () => {
+  it('should store the reply as the provider wrote it, math delimiters included', async () => {
+    const thinking = String.raw`The area is \(\int_0^3 x^2\,dx\).`;
+    const text = String.raw`So \[ \int_0^3 x^2\,dx = 9 \] and \(x\) stays in code as ` + '`\\(x\\)`.';
+    const session = await createAgentSession({
+      chatId: 'chat-bytes',
+      runId: 'run-bytes',
+      leaderEpoch: 'epoch-bytes',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 200_000 },
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream() {
+          yield { type: 'thinking-start', contentIndex: 0 };
+          yield { type: 'thinking-delta', contentIndex: 0, text: thinking };
+          yield { type: 'thinking-end', contentIndex: 0, content: thinking };
+          yield { type: 'thinking-signature', contentIndex: 0, signature: 'sig-1' };
+          yield { type: 'text-start', contentIndex: 1 };
+          yield { type: 'text-delta', contentIndex: 1, text };
+          yield { type: 'text-end', contentIndex: 1, content: text };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: await createMemoryEventLogFile().open(),
+    });
+
+    await expect(session.prompt({ id: 'user-bytes', role: 'user', content: 'Integrate.' })).resolves.toEqual({
+      outcome: 'completed',
+    });
+    const { messages } = await session.snapshot();
+    const stored = messages.findLast((message) => message.role === 'assistant');
+    await session.close();
+
+    /* A signed thinking block is bound to its own bytes, and a rewritten reply is an edit every later request replays. */
+    expect(stored?.content).toMatchObject([
+      { type: 'thinking', thinking, thinkingSignature: 'sig-1' },
+      { type: 'text', text },
+    ]);
+  });
+});

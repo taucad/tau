@@ -110,6 +110,23 @@ export const viewerEvents = [
   'long-frame-burst',
   'download',
 ] as const;
+/**
+ * The step a browser page was in when the browser ended it (crash capture blueprint, marker v3 `phase`), recorded
+ * by the next load. @public
+ */
+export const killPhases = [
+  'boot',
+  'kernel-init',
+  'evaluate',
+  'mesh',
+  'geometry-receive',
+  'gpu-upload',
+  'idle',
+  'export',
+  'capture',
+] as const;
+/** How a killed page stood: visible, hidden (a background discard) or not known. @public */
+export const killClasses = ['foreground', 'background', 'unknown'] as const;
 /** Viewer graphics backends. @public */
 export const viewerBackends = ['webgl', 'webgpu'] as const;
 /** Limit ids that keep their numbers on the wire; any other id is sent as `_OTHER` alone. @public */
@@ -433,6 +450,8 @@ export const runtimeVocabulary = {
   reuse: closed(reuseResults),
   phase: z.enum(runtimePhases),
   viewerEvent: z.enum(viewerEvents),
+  killPhase: closed(killPhases),
+  killClass: closed(killClasses),
   viewerBackend: closed(viewerBackends),
   limitId: closed(runtimeLimitIds),
   limitUnit: z.enum(runtimeLimitUnits),
@@ -461,6 +480,7 @@ export const RuntimeEntryName = {
   LATE: 'runtime.late',
   VIEWER: 'runtime.viewer',
   DELIVERY: 'telemetry.delivery',
+  KILL: 'runtime.kill',
 } as const;
 /** The runtime entry names, as a list. @public */
 export const runtimeEntryNames = Object.values(RuntimeEntryName);

@@ -141,7 +141,8 @@ describe('ChatMessageToolRevisions', () => {
 
     expect(verb()).toBe('Read');
     expect(description()).toBe('main · Rev 2 · 2 revisions');
-    expect(rows()).toEqual(['Rev 2Thickened the bracketAnother account', 'Rev 1First revisionAnother account']);
+    /* Q2: a single-person project's rows carry no who line, and an id is never printed. */
+    expect(rows()).toEqual(['Rev 2Thickened the bracket', 'Rev 1First revision']);
     // Never a commit id, on any row (A18, I12).
     expect(screen.queryByText(/96b7f7e2/u)).toBeNull();
   });
@@ -162,9 +163,33 @@ describe('ChatMessageToolRevisions', () => {
       />,
     );
 
-    expect(rows()[0]).toContain('Tau agent');
-    expect(rows()[1]).toContain('Another account');
+    expect(rows()[0]).toContain('Agent');
+    expect(rows()[1]).toBe('Rev 1Thickened the bracket');
     expect(screen.queryByText(/claude-opus-4|user_2abc|^agent$/u)).toBeNull();
+  });
+
+  /* A2: the card asks the resolver History asks, so L1–L4 and a pseudonym read the same here. */
+  it('reads the fallback ids L1–L4 as no name and a pseudonym as Anonymous, as History does', () => {
+    const fallbacks = ['prj_x', 'tau-host', 'richard', 'maker@example.com'];
+    render(
+      <ChatMessageToolRevisions
+        part={answered(
+          { action: 'log' },
+          {
+            where: 'main · Rev 5',
+            revisions: [
+              revision({ revisionNumber: 5, revisionId: 'r5', actor: 'anon:3fa9c1', summary: 'Hidden' }),
+              ...fallbacks.map((actor, index) =>
+                revision({ revisionNumber: 4 - index, revisionId: `r${String(4 - index)}`, actor, summary: 'Saved' }),
+              ),
+            ],
+          },
+        )}
+      />,
+    );
+
+    expect(rows()).toEqual(['Rev 5HiddenAnonymous', 'Rev 4Saved', 'Rev 3Saved', 'Rev 2Saved', 'Rev 1Saved']);
+    expect(screen.queryByText(/3fa9c1|prj_x|tau-host|richard|example\.com/u)).toBeNull();
   });
 
   it('gives a merged-in revision no number, and marks one that needs your decision', () => {

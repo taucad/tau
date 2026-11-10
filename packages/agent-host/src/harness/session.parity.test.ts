@@ -668,7 +668,8 @@ describe('pi full-turn parity fixture', () => {
       isError: false,
     });
     expect(JSON.stringify(toolOutput?.content)).toContain('cached.ts');
-    expect(JSON.stringify(final?.content)).toContain('Finished $x$.');
+    /* The reply is stored as the provider wrote it; the renderer owns the `$` delimiters. */
+    expect(final?.content).toMatchObject([{ type: 'text', text: String.raw`Finished \(x\).` }]);
     const safeguardEvents = events.filter((event) => event.type === 'safeguard.recorded');
     const safeguardMessage = snapshot.messages.find((message) => message.id.startsWith('tau:safeguard:'));
     expect(safeguardEvents).toHaveLength(1);

@@ -680,6 +680,13 @@ describe('funded route admission of the request the host sends', () => {
     adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, adapter])),
     executionTimeout: 30_000,
   });
+  const drain = async (events: AsyncIterable<unknown>): Promise<readonly unknown[]> => {
+    const seen: unknown[] = [];
+    for await (const event of events) {
+      seen.push(event);
+    }
+    return seen;
+  };
   const wireForUrl = (url: string): BillableProviderWire => {
     if (url.endsWith('/responses')) {
       return 'openai-responses';
@@ -696,14 +703,14 @@ describe('funded route admission of the request the host sends', () => {
         baseUrl: 'https://gateway.example',
         async fetch(input, init) {
           sent = {
-            body: JSON.parse(String(init?.body)),
+            body: JSON.parse(init?.body as string) as unknown,
             wire: wireForUrl(input instanceof Request ? input.url : String(input)),
           };
           throw new Error('The request has been captured');
         },
       });
 
-      await Array.fromAsync(
+      await drain(
         transport.stream({
           attemptId: `attempt-${routeId}`,
           invocationPurpose: 'generation',
@@ -714,6 +721,7 @@ describe('funded route admission of the request the host sends', () => {
           systemPrompt: 'static',
           messages: [{ id: 'user-1', role: 'user', content: 'hello' }],
           tools: [],
+          signal: new AbortController().signal,
         }),
       ).catch(() => undefined);
 

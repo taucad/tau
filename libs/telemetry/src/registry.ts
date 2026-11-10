@@ -242,6 +242,15 @@ const agentEvidenceBacklogStates = [
  */
 const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object'] as const;
 
+/** `tau.agent_evidence.score`: the Langfuse score one agent-evidence write carried (Langfuse blueprint LW7). */
+const agentEvidenceScoreNames = ['user-rating', 'run-termination', 'task-success'] as const;
+
+/**
+ * `outcome` of one Langfuse score write, settled by its answer alone (nothing reads a score back): `held` waits for its
+ * score config id, `not_sent` never reached Langfuse and is retried with its receipt.
+ */
+const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent', 'held'] as const;
+
 /** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
 const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
 
@@ -2034,6 +2043,17 @@ export const TauMetrics = {
     attributes: z.object({
       'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  agentEvidenceScores: defineCounter({
+    name: 'tau.agent_evidence.scores',
+    unit: '{score}',
+    description:
+      'Langfuse score writes for agent ratings and outcomes, by score and outcome; `held` waits for its score config id',
+    attributes: z.object({
+      'tau.agent_evidence.score': z.enum(agentEvidenceScoreNames),
+      outcome: z.enum(agentEvidenceScoreOutcomes),
     }),
   }),
 

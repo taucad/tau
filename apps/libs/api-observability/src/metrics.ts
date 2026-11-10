@@ -850,6 +850,11 @@ export class MetricsService {
     description: TauMetrics.agentEvidencePasses.description,
     unit: TauMetrics.agentEvidencePasses.unit,
   });
+
+  public readonly agentEvidenceScores = this.apiMeter.createCounter(TauMetrics.agentEvidenceScores.name, {
+    description: TauMetrics.agentEvidenceScores.description,
+    unit: TauMetrics.agentEvidenceScores.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
@@ -869,6 +874,9 @@ export type AgentEvidenceDeliveryOutcome = z.infer<typeof TauMetrics.agentEviden
 
 /** `reason` of one `tau.agent_evidence.superseded_receipts` increment. */
 export type AgentEvidenceSupersededReason = z.infer<typeof TauMetrics.agentEvidenceSuperseded.attributes>['reason'];
+
+/** `outcome` of one `tau.agent_evidence.scores` increment. */
+export type AgentEvidenceScoreOutcome = z.infer<typeof TauMetrics.agentEvidenceScores.attributes>['outcome'];
 
 /** `outcome` of one `tau.agent_evidence.erasure_traces` increment. */
 export type AgentEvidenceErasureOutcome = z.infer<typeof TauMetrics.agentEvidenceErasureTraces.attributes>['outcome'];

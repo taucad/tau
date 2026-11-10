@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(200);
+    expect(metrics).toHaveLength(201);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -703,6 +703,7 @@ describe('TauMetrics', () => {
       TauMetrics.agentEvidenceErasureTraces,
       TauMetrics.agentEvidenceLifecycleRecords,
       TauMetrics.agentEvidencePasses,
+      TauMetrics.agentEvidenceScores,
     ];
     expect(
       Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
@@ -715,6 +716,7 @@ describe('TauMetrics', () => {
       tau_agent_evidence_erasure_traces_total: 'counter',
       tau_agent_evidence_lifecycle_records_total: 'counter',
       tau_agent_evidence_passes_total: 'counter',
+      tau_agent_evidence_scores_total: 'counter',
     });
     for (const metric of series) {
       for (const label of Object.values(metric.attributes.shape)) {
@@ -729,6 +731,19 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
+    /* A score write names its score and outcome only, never the trace or the config id (LW7). */
+    expect(
+      TauMetrics.agentEvidenceScores.attributes.safeParse({
+        'tau.agent_evidence.score': 'user-rating',
+        outcome: 'held',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.agentEvidenceScores.attributes.safeParse({
+        'tau.agent_evidence.score': 'reply-quality',
+        outcome: 'accepted',
+      }).success,
+    ).toBe(false);
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

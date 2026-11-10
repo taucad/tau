@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import { Resend } from 'resend';
 import type { Environment } from '@taucad/api-core';
 import type { EmailMessage } from '#email.types.js';
@@ -39,6 +40,9 @@ export class EmailService {
       subject,
       html: rendered.html,
       text: rendered.text,
+      // A unique reference per send stops Gmail threading same-subject transactional emails into one conversation,
+      // where it trims repeated content and buries the newest link (email readiness R8).
+      headers: { 'X-Entity-Ref-ID': randomUUID() },
     });
 
     if (response.error) {
@@ -79,7 +83,23 @@ export class EmailService {
   }
 
   public async sendVerification(args: { readonly email: string; readonly url: string }): Promise<void> {
-    await this.send({ to: args.email, template: { kind: 'verify-email', ...args } });
+    await this.send({
+      to: args.email,
+      template: { kind: 'verify-email', ...args },
+    });
+  }
+
+  /** Answers a sign-up for an address that already has a verified account, instead of silence. */
+  public async sendAccountExists(args: {
+    readonly email: string;
+    readonly url: string;
+    readonly resetUrl: string;
+    readonly device?: string;
+  }): Promise<void> {
+    await this.send({
+      to: args.email,
+      template: { kind: 'account-exists', ...args },
+    });
   }
 
   public async sendPaymentFailed(args: {

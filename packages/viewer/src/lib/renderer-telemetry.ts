@@ -19,6 +19,7 @@ import { randomUuid } from '@taucad/utils/id';
 import type { TelemetryOrigin, TelemetrySpanRecord } from '@taucad/runtime';
 import {
   flushViewerLongFrames,
+  readViewerRendererMemory,
   subscribeViewerEvents,
   viewerGeometryDownloaded,
   viewerLongFrameBurst,
@@ -36,6 +37,15 @@ import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
  */
 export const onViewerEvent = (handler: (event: ViewerTelemetryEvent) => void): (() => void) =>
   subscribeViewerEvents(handler);
+
+/**
+ * The live renderer's geometry and texture counts (`renderer.info.memory`), for a host's memory sample. Counts only.
+ *
+ * @returns The counts, or `undefined` before a renderer exists.
+ * @public
+ */
+export const readRendererMemory = (): Readonly<{ geometries: number; textures: number }> | undefined =>
+  readViewerRendererMemory();
 
 // Geometry objects and their immutable content remain weakly owned by the CAD/viewer lifecycle.
 const geometryReceipts = new WeakMap<Uint8Array<ArrayBuffer>, number>();

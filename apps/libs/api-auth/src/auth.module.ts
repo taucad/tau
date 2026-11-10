@@ -13,8 +13,18 @@ import { AuthService } from '#auth.service.js';
 import { BetterAuthService } from '#better-auth.service.js';
 import type { Environment } from '@taucad/api-core';
 import { EmailModule, EmailService } from '@taucad/api-email';
-import { accountDeletionGateToken, accountDeletionHooksToken, authRouteExtensionsToken } from '#auth-extensions.js';
-import type { AccountDeletionGate, AccountDeletionHook, AuthRouteExtension } from '#auth-extensions.js';
+import {
+  accountDeletionGateToken,
+  accountDeletionHooksToken,
+  authRateLimitStoreToken,
+  authRouteExtensionsToken,
+} from '#auth-extensions.js';
+import type {
+  AccountDeletionGate,
+  AccountDeletionHook,
+  AuthRateLimitStore,
+  AuthRouteExtension,
+} from '#auth-extensions.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
@@ -40,16 +50,24 @@ export class AuthModule implements NestModule, OnModuleInit {
   public static forRootAsync(_options: { readonly tauCloudEnabled: boolean }): DynamicModule {
     const authProvider = {
       provide: authInstanceKey,
-      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct auth composition tokens.
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves six distinct auth composition tokens.
       async useFactory(
         databaseService: DatabaseService,
         configService: ConfigService<Environment, true>,
         emailService: EmailService,
         closure: AccountDeletionGate | undefined,
         deletionHooks: readonly AccountDeletionHook[] | undefined,
+        rateLimitStore: AuthRateLimitStore | undefined,
       ): Promise<AuthInstance> {
         return betterAuth(
-          getBetterAuthConfig({ databaseService, configService, emailService, closure, deletionHooks }),
+          getBetterAuthConfig({
+            databaseService,
+            configService,
+            emailService,
+            closure,
+            deletionHooks,
+            rateLimitStore,
+          }),
         );
       },
       inject: [
@@ -58,6 +76,7 @@ export class AuthModule implements NestModule, OnModuleInit {
         EmailService,
         { token: accountDeletionGateToken, optional: true },
         { token: accountDeletionHooksToken, optional: true },
+        { token: authRateLimitStoreToken, optional: true },
       ],
     };
     return {

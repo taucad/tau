@@ -51,7 +51,6 @@ import { isAbandonedTurn, isPersonsMessage } from '#log/event-types.js';
 import {
   createTurnContextSnapshot,
   createToolResultTrimmerMiddleware,
-  latexDelimiterMiddleware,
   skillsUpdateMessageId,
 } from '#harness/cad-middleware.js';
 import { omitAttachments, planAttachmentOmissions } from '#transport/document-payload.js';
@@ -2083,7 +2082,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       allowImageBlocks: options.allowImageBlocks,
     }),
     asMiddleware(safeguards.wrapStreamFn),
-    latexDelimiterMiddleware,
   ]);
 
   let state: RunLifecycleState = 'admitted';

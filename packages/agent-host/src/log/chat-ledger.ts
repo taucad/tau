@@ -9,6 +9,8 @@
 import { safeguardPatternOf } from '#harness/safeguard-pattern.js';
 import type { SafeguardPattern } from '#harness/safeguard-pattern.js';
 import { canonicalJson } from '#log/canonical-json.js';
+import { readPrefixStamp } from '#log/prefix-stamp.js';
+import type { PrefixBreakCause } from '#log/prefix-stamp.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
 import type { ClassifiedRow } from '#log/event-schema.js';
 import { projectionBatchSchema } from '#log/projection-facts.js';
@@ -29,6 +31,7 @@ import type {
   JsonValue,
   LogEventBase,
   ProviderMessage,
+  ProviderMessageMetadata,
   RunFailureDetail,
   RunLifecycleEvent,
   RunLifecycleState,
@@ -77,6 +80,40 @@ export type LedgerCompaction = Readonly<{
   outcome: 'cleared' | 'generated' | 'placeholder';
 }>;
 
+/**
+ * One prefix break a run's replies recorded (`metadata.prefix.break`): the first request after the break did not
+ * reproduce the previous request's prefix, so the provider's prompt cache restarted there.
+ * @public
+ */
+export type LedgerPrefixBreak = Readonly<{
+  cause: PrefixBreakCause;
+  /** The provider the request went to, as its reply's row names it. */
+  provider?: string;
+  /** Native reasoning blocks the request left out because of the break. */
+  dropped: number;
+  /**
+   * What the break cost in prompt cache, read from the usage its reply reported: `hit` when cache reads are at least
+   * half of the prompt the request sent, `partial` below that, `miss` with none. The gateway classifies a step the
+   * same way (`tau.prompt_cache.outcome`). Absent when the reply reported no prompt tokens.
+   */
+  cache?: 'hit' | 'partial' | 'miss';
+}>;
+
+/**
+ * How much of one request's prompt the provider read from its cache.
+ *
+ * @param usage - The usage the request's reply reported.
+ * @returns The outcome, or `undefined` when the reply reported no prompt tokens.
+ */
+const cacheOutcomeOf = (usage: ProviderMessageMetadata['usage']): LedgerPrefixBreak['cache'] => {
+  const read = usage?.cacheRead ?? 0;
+  const prompt = read + (usage?.input ?? 0) + (usage?.cacheWrite ?? 0);
+  if (prompt === 0) {
+    return undefined;
+  }
+  return read === 0 ? 'miss' : read * 2 >= prompt ? 'hit' : 'partial';
+};
+
 /** @public */
 export type RunEntry = Readonly<{
   kind: 'tau' | 'external';
@@ -111,6 +148,8 @@ export type RunEntry = Readonly<{
   safeguards?: readonly LedgerSafeguard[];
   /** Compaction decisions across the run's attempts, in log order; absent until one is taken. */
   compactions?: readonly LedgerCompaction[];
+  /** Prefix breaks across the run's attempts, in log order; absent until a request suffers one. */
+  prefixBreaks?: readonly LedgerPrefixBreak[];
 }>;
 
 /** @public */
@@ -550,6 +589,22 @@ const createFold = (ledger: ChatLedger) => {
         const binding = message.metadata?.tauInternal;
         const attemptId = binding?.['attemptId'];
         const stop = message.metadata?.stopReason;
+        /* A reply's final row carries its request's stamp; a stream checkpoint of the same reply carries none. */
+        const stamp = message.role === 'assistant' ? readPrefixStamp(message.metadata?.['prefix']) : undefined;
+        if (stamp?.break !== undefined) {
+          const entry = entryOf(event.runId);
+          const provider = message.metadata?.provider;
+          const cache = cacheOutcomeOf(message.metadata?.usage);
+          entry.prefixBreaks = [
+            ...(entry.prefixBreaks ?? []),
+            {
+              cause: stamp.break,
+              ...(provider === undefined ? {} : { provider }),
+              dropped: stamp.dropped ?? 0,
+              ...(cache === undefined ? {} : { cache }),
+            },
+          ];
+        }
         if (
           message.role === 'assistant' &&
           binding?.['kind'] === 'billing-invocation' &&

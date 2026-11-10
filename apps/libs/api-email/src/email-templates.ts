@@ -1,9 +1,19 @@
 import { createElement } from 'react';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { render, toPlainText } from 'react-email';
 import type { EmailTemplate, RenderedEmail } from '#email.types.js';
 import { expiresIn, footerCopy } from '#email-copy.js';
-import { details, inlineLink, note, paragraph, primaryAction, strong, tauEmailLayout } from '#templates/shared.js';
+import {
+  address,
+  details,
+  finalizeEmailHtml,
+  inlineLink,
+  note,
+  paragraph,
+  primaryAction,
+  sentence,
+  tauEmailLayout,
+} from '#templates/shared.js';
 import type { DetailRow, LayoutOptions } from '#templates/shared.js';
 
 export type EmailSpec = {
@@ -13,12 +23,12 @@ export type EmailSpec = {
   readonly kicker: string;
   readonly heading: string;
   /** Footer sentence explaining why this person received the email. */
-  readonly reason: string;
+  readonly reason: ReactNode;
   /** Body elements in the fixed order: paragraphs, detail rows, action, note. */
   readonly body: ReadonlyArray<ReactElement | undefined>;
 };
 
-const row = (label: string, value: string | undefined): DetailRow | undefined =>
+const row = (label: string, value: ReactNode | undefined): DetailRow | undefined =>
   value === undefined ? undefined : { label, value };
 
 export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
@@ -29,13 +39,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: `This link signs you in once and expires in ${expiresIn('magicLink')}.`,
         kicker: 'Sign in',
         heading: 'Sign in to Tau',
-        reason: `You received this email because someone asked to sign in to Tau as ${template.email}.`,
+        reason: sentence(
+          'You received this email because someone asked to sign in to Tau as ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          '.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'Use the button below to sign in as ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             `. The link works once and expires in ${expiresIn('magicLink')}.`,
           ),
           createElement(details, { rows: [row('Device', template.device)] }),
@@ -54,13 +68,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: 'Choose a new password within the next hour. Nothing changes until you do.',
         kicker: 'Password reset',
         heading: 'Reset your password',
-        reason: `You received this email because a password reset was requested for ${template.email}.`,
+        reason: sentence(
+          'You received this email because a password reset was requested for ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          '.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'We received a request to reset the password for ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             `. The link expires in ${expiresIn('resetPassword')}.`,
           ),
           createElement(paragraph, null, 'Choosing a new password signs out every other session on your account.'),
@@ -80,25 +98,33 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: "If this was you, there's nothing to do. If not, secure your account now.",
         kicker: 'Security',
         heading: 'Your password was changed',
-        reason: `You received this email because the password for ${template.email} was changed.`,
+        reason: sentence(
+          'You received this email because the password for ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          ' was changed.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'The password for ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             ' was changed and other sessions were signed out.',
           ),
           createElement(details, {
-            rows: [row('Account', template.email), row('When', template.changedAt), row('Device', template.device)],
+            rows: [
+              row('Account', createElement(address, { email: template.email })),
+              row('When', template.changedAt),
+              row('Device', template.device),
+            ],
           }),
           createElement(paragraph, null, "If this was you, there's nothing else to do."),
-          createElement(primaryAction, { href: template.url }, "I didn't do this"),
           createElement(
-            note,
+            paragraph,
             null,
-            "That button starts a new password reset for this address. If you can't sign in afterwards, reply to this email and we'll help.",
+            "If it wasn't, reset your password now. That signs out every other session. If you can't sign in, reply to this email and we'll help.",
           ),
+          createElement(primaryAction, { href: template.url }, 'Reset your password'),
         ],
       };
     }
@@ -108,13 +134,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: `One click finishes setting up your account. The link expires in ${expiresIn('verifyEmail')}.`,
         kicker: 'Email verification',
         heading: 'Confirm your email address',
-        reason: `You received this email because a Tau account was created with ${template.email}.`,
+        reason: sentence(
+          'You received this email because a Tau account was created with ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          '.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'Confirm ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             ` to finish setting up your Tau account. The link expires in ${expiresIn('verifyEmail')}.`,
           ),
           createElement(primaryAction, { href: template.url }, 'Confirm email'),
@@ -126,19 +156,62 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         ],
       };
     }
+    case 'account-exists': {
+      return {
+        subject: 'You already have a Tau account',
+        preheader: 'Someone tried to sign up with this address. Sign in instead, or reset your password.',
+        kicker: 'Account',
+        heading: 'You already have a Tau account',
+        reason: sentence(
+          'You received this email because someone tried to create a Tau account with ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          '.',
+        ),
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'Someone just tried to create a Tau account with ',
+            createElement(address, { email: template.email }),
+            ', which already has one. If that was you, sign in instead.',
+          ),
+          createElement(details, { rows: [row('Device', template.device)] }),
+          createElement(primaryAction, { href: template.url }, 'Sign in to Tau'),
+          createElement(
+            paragraph,
+            null,
+            'Forgot your password? You can ',
+            createElement(inlineLink, { href: template.resetUrl }, 'reset it here'),
+            '.',
+          ),
+          createElement(
+            note,
+            null,
+            "If this wasn't you, you can ignore this email. Your account and password have not changed.",
+          ),
+        ],
+      };
+    }
     case 'publication-invite': {
       return {
         subject: `${template.ownerName} shared “${template.publicationTitle}” with you on Tau`,
         preheader: `Sign in as ${template.recipientEmail} to open this private design.`,
         kicker: 'Shared with you',
         heading: `${template.ownerName} shared a design with you`,
-        reason: `You received this email because ${template.ownerName} added ${template.recipientEmail} to a private Tau design.`,
+        reason: sentence(
+          `You received this email because ${template.ownerName} added `,
+          createElement(address, {
+            email: template.recipientEmail,
+            tone: 'footer',
+          }),
+          ' to a private Tau design.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'This design is private. Sign in with ',
-            createElement(strong, null, template.recipientEmail),
+            createElement(address, { email: template.recipientEmail }),
             ' to view it in the Tau viewer.',
           ),
           createElement(details, {
@@ -167,13 +240,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: `Update your payment method to keep Pro. ${retry}`,
         kicker: 'Billing',
         heading: "We couldn't process your Pro payment",
-        reason: `You received this email because ${template.email} has an active Tau Pro subscription.`,
+        reason: sentence(
+          'You received this email because ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          ' has an active Tau Pro subscription.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'The renewal payment for ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             " didn't go through. We'll retry automatically; update your payment method to keep Pro without interruption.",
           ),
           createElement(details, {
@@ -201,13 +278,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: "Your saved card couldn't be charged. Your current credits are not affected.",
         kicker: 'Billing',
         heading: 'We turned off automatic reload',
-        reason: `You received this email because ${template.email} turned on automatic credit reload for Tau.`,
+        reason: sentence(
+          'You received this email because ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          ' turned on automatic credit reload for Tau.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'Automatic credit reload for ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             " couldn't charge your saved card, so we turned it off. No more automatic reloads will run until you set it up again.",
           ),
           createElement(
@@ -232,13 +313,17 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         preheader: 'Your bank asked to confirm this payment. No credits are added until you do.',
         kicker: 'Billing',
         heading: 'Your automatic reload needs confirmation',
-        reason: `You received this email because ${template.email} turned on automatic credit reload for Tau.`,
+        reason: sentence(
+          'You received this email because ',
+          createElement(address, { email: template.email, tone: 'footer' }),
+          ' turned on automatic credit reload for Tau.',
+        ),
         body: [
           createElement(
             paragraph,
             null,
             'Your bank asked for confirmation before it approves an automatic credit reload for ',
-            createElement(strong, null, template.email),
+            createElement(address, { email: template.email }),
             '. Your card was not charged, and no credits were added.',
           ),
           createElement(paragraph, null, 'Open billing settings to finish the payment.'),
@@ -276,6 +361,12 @@ const plainTextOptions = {
     { selector: 'h1', options: { uppercase: false } },
     { selector: 'img', format: 'altTextOnly' },
     { selector: '.tau-detail-row', format: 'dataTable' },
+    // An address is a mailto link only so clients cannot restyle it; the text part states it once.
+    {
+      selector: 'a.tau-address',
+      format: 'anchor',
+      options: { ignoreHref: true },
+    },
   ],
 };
 
@@ -283,7 +374,7 @@ export const subjectForEmailTemplate = (template: EmailTemplate): string => spec
 
 export const renderEmailTemplate = async (template: EmailTemplate, options: LayoutOptions): Promise<RenderedEmail> => {
   const { body, ...spec } = specForEmailTemplate(template);
-  const html = await render(createElement(tauEmailLayout, { ...spec, ...options }, ...body));
+  const html = finalizeEmailHtml(await render(createElement(tauEmailLayout, { ...spec, ...options }, ...body)));
   return {
     html,
     text: toPlainText(html, plainTextOptions),

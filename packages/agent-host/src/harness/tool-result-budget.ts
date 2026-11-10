@@ -1,7 +1,7 @@
 /**
  * The aggregate tool-result budget of one batch (regression review R4).
  *
- * The LangChain plane let one batch of parallel tool results put at most 200,000 characters into context; past that
+ * The server agent plane let one batch of parallel tool results put at most 200,000 characters into context; past that
  * the largest fresh results were retained on disk and previewed. The session restores the cap: each model response's
  * calls share one {@link HostToolResultBudget}, which the registry spends as results arrive and which the next model
  * request resets. Reservation is synchronous, so concurrent calls cannot both take the last of it.
@@ -13,7 +13,7 @@
  */
 import type { HostToolResultBudget } from '#waist/ports.js';
 
-/** Characters one batch of tool results may put into context, as on the LangChain plane. @public */
+/** Characters one batch of tool results may put into context, as on the server agent plane. @public */
 export const toolResultBatchBudget = 200_000;
 
 /**

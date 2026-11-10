@@ -79,6 +79,11 @@ DATABASE_STATEMENT_TIMEOUT_MS = '15000'
 DATABASE_LOCK_TIMEOUT_MS = '5000'
 DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
 DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
+# Deploy-cut charter D15, operator ruling 2026-11-10: a funded model step may run up to
+# 600 s in production as on staging, so high-effort reasoning is not cut at the 300 s
+# schema default. kill_timeout stays 120 s: a step cut by a deploy still settles at zero
+# with service_restart.
+BILLING_INVOCATION_DEADLINE = '600000'
 # Additional CORS origin for the Netlify default domain of the prod-us site
 # (`taucad-prod-us.netlify.app`). Required for pre-cutover smoke-testing the
 # Netlify deploy before `tau.new` NS authority moves to Cloudflare. After

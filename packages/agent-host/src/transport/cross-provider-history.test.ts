@@ -5,6 +5,7 @@ import type { JsonObject, ModelProviderKind, ProviderMessage } from '#log/event-
 import type { ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
+import { stampedHistory } from '#transport/prefix-stamp.fixture.js';
 
 /*
  * The cross-provider history contract (blueprint "Cross-Provider Contract").
@@ -270,6 +271,8 @@ const outboundBody = async (options: {
   readonly variant: Variant;
   readonly targetModelId?: string;
   readonly messages?: readonly ProviderMessage[];
+  /** What happens to the history after its rows were stamped: an edit, or a log written before stamps existed. */
+  readonly afterStamping?: (messages: readonly ProviderMessage[]) => readonly ProviderMessage[];
 }): Promise<WireRecord> => {
   const bodies: WireRecord[] = [];
   const transport = createGatewayModelTransport({
@@ -306,9 +309,19 @@ const outboundBody = async (options: {
     ...(options.target === 'vertexai' ? { reasoning: { effort: 'medium' } as const } : {}),
   };
   const events: ModelStreamEvent[] = [];
-  for await (const event of transport.stream(request)) {
+  /* The rows as a chat on the source model wrote them: each stamped by the request that produced it. */
+  const stamped = await stampedHistory({
+    ...request,
+    modelId: flavours[options.source].modelId,
+    providerKind: options.source as ModelProviderKind,
+  });
+  const history = options.afterStamping?.(stamped) ?? stamped;
+  const durable = structuredClone(history);
+  for await (const event of transport.stream({ ...request, messages: history })) {
     events.push(event);
   }
+  /* Whatever the request leaves out, the durable rows are not touched. */
+  expect(history).toEqual(durable);
   expect(bodies).toHaveLength(1);
   return bodies[0]!;
 };
@@ -576,6 +589,55 @@ describe('cross-provider history contract', () => {
         expect(view.assistantText).not.toContain(thinkingText);
       },
     );
+  });
+
+  describe('native reasoning under a changed prefix (P2)', () => {
+    /** The opening message reworded after the rows that follow it were written. */
+    const edited = (messages: readonly ProviderMessage[]): readonly ProviderMessage[] =>
+      messages.map((message) => (message.id === 'user-1' ? { ...message, content: 'design a cube' } : message));
+    /** A log written before rows carried stamps. */
+    const unstamped = (messages: readonly ProviderMessage[]): readonly ProviderMessage[] =>
+      messages.map((message) => {
+        const { prefix: _stamp, ...metadata } = message.metadata ?? {};
+        return message.role === 'assistant' ? { ...message, metadata } : message;
+      });
+
+    it.each(
+      wireFamilies.flatMap((family) => [
+        { family, change: 'an earlier message was edited', afterStamping: edited },
+        { family, change: 'its row carries no stamp', afterStamping: unstamped },
+      ]),
+    )('should leave $family native reasoning out when $change', async ({ family, afterStamping }) => {
+      const body = await outboundBody({ source: family, target: family, variant: 'baseline', afterStamping });
+      const view = viewOf(family, body);
+
+      expect(view.nativeReasoning).toEqual([]);
+      for (const secret of flavours[family].secrets) {
+        expect(JSON.stringify(body)).not.toContain(secret);
+      }
+      /* Left out, not downgraded: stale reasoning is not shown to the model as its own visible text. */
+      expect(view.assistantText).not.toContain(thinkingText);
+      /* Everything the provider binds reasoning to is still sent. */
+      expect(view.assistantText).toContain(firstAssistantText);
+      expect(view.calls).toHaveLength(1);
+      expect(view.results).toHaveLength(1);
+    });
+
+    it('should give a stale current-turn Gemini call the validator placeholder in place of its signature', async () => {
+      const resumed = viewOf(
+        'vertexai',
+        await outboundBody({
+          source: 'vertexai',
+          target: 'vertexai',
+          variant: 'parallelResume',
+          afterStamping: edited,
+        }),
+      );
+
+      /* Vertex validates the first call of a current-turn batch, so a call left without its signature gets the
+       * placeholder instead of failing the turn (U13). */
+      expect(resumed.calls.map((call) => call.signature)).toEqual([dummyThoughtSignature, undefined]);
+    });
   });
 
   describe('Gemini thought signatures on a switched target', () => {

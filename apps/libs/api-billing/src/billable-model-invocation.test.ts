@@ -218,6 +218,7 @@ describe('BillableModelInvocationService', () => {
   it('maps every catalog route through the production adapter factory and actual resolver', () => {
     const routeCases = (
       [
+        ['anthropic-claude-fable-5.2', 'claude-fable-5-2', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5.1', 'claude-fable-5-1', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5', 'claude-fable-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],
@@ -1631,6 +1632,30 @@ describe('BillableModelInvocationService', () => {
         gatewayErrorType(error) === 'UPSTREAM_REJECTED' &&
         error.message === 'The request exceeds the context window of the selected model.' &&
         !error.message.includes(supplierSentence),
+    );
+  });
+
+  /* Anthropic binds a thinking signature to everything sent before it. Resuming re-sends the same history, so the
+   * funded path answers with a code no client resumes, in Tau's own sentence. */
+  it('should code a refused reasoning replay as its own refusal without quoting the supplier on the funded path', async () => {
+    const supplierSentence =
+      'messages.1.content.4: Invalid `signature` in `thinking` block. The block is bound to a different conversation.';
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: supplierSentence } }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError &&
+        error.getStatus() === 502 &&
+        gatewayErrorType(error) === 'REASONING_REPLAY_REJECTED' &&
+        error.message === 'The model provider rejected reasoning replayed from earlier in this chat.',
     );
   });
 

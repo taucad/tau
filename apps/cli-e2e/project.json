@@ -22,7 +22,7 @@
           "target": "seed"
         }
       ],
-      "inputs": ["default", "^production"],
+      "inputs": ["default", "^production", "serviceEnvironment"],
       "cache": true,
       "options": {
         "cwd": "{projectRoot}",

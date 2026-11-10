@@ -133,64 +133,6 @@ describe('normalizeError', () => {
     });
   });
 
-  describe('LangChain error codes', () => {
-    it('should detect INVALID_TOOL_RESULTS and set tool_error category', () => {
-      const error = Object.assign(new Error('Tool results mismatch'), {
-        lc_error_code: 'INVALID_TOOL_RESULTS',
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('tool_error');
-      expect(result.code).toBe('INVALID_TOOL_RESULTS');
-    });
-
-    it('should detect MODEL_RATE_LIMIT and set rate_limit category', () => {
-      const error = Object.assign(new Error('Rate limit exceeded'), {
-        lc_error_code: 'MODEL_RATE_LIMIT',
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('rate_limit');
-      expect(result.code).toBe('MODEL_RATE_LIMIT');
-      expect(result.title).toBe('Rate Limit Exceeded');
-    });
-
-    it('should detect MODEL_AUTHENTICATION and set auth category', () => {
-      const error = Object.assign(new Error('Authentication failed'), {
-        lc_error_code: 'MODEL_AUTHENTICATION',
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('auth');
-      expect(result.code).toBe('MODEL_AUTHENTICATION');
-    });
-
-    it('should detect GRAPH_RECURSION_LIMIT and set server category', () => {
-      const error = Object.assign(new Error('Recursion limit exceeded'), {
-        lc_error_code: 'GRAPH_RECURSION_LIMIT',
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('server');
-      expect(result.code).toBe('GRAPH_RECURSION_LIMIT');
-    });
-
-    it('should detect OUTPUT_PARSING_FAILURE and set tool_error category', () => {
-      const error = Object.assign(new Error('Failed to parse output'), {
-        lc_error_code: 'OUTPUT_PARSING_FAILURE',
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('tool_error');
-      expect(result.code).toBe('OUTPUT_PARSING_FAILURE');
-    });
-  });
-
   describe('HTTP status codes', () => {
     it('should detect 400 status as tool_error', () => {
       const error = Object.assign(new Error('Bad request'), { status: 400 });
@@ -295,16 +237,15 @@ describe('normalizeError', () => {
     });
   });
 
-  describe('LangChain wrapped Anthropic errors', () => {
+  describe('nested Anthropic SDK errors', () => {
     it('should extract message from nested error.error.error structure', () => {
-      // This is the exact structure LangChain creates when wrapping Anthropic errors
+      // The Anthropic SDK carries the response body on `error`; the message itself can be malformed
       const error = Object.assign(
         new Error(
-          '400 {"type":"error","error":,"request_id":"req_123"}\n\nTroubleshooting URL: https://js.langchain.com/docs/troubleshooting/errors/INVALID_TOOL_RESULTS/\n',
+          '400 {"type":"error","error":,"request_id":"req_123"}\n\nTroubleshooting URL: https://docs.example.test/errors/invalid-tool-results/\n',
         ),
         {
           status: 400,
-          lc_error_code: 'INVALID_TOOL_RESULTS',
           requestID: 'req_123',
           error: {
             type: 'error',
@@ -320,7 +261,6 @@ describe('normalizeError', () => {
       const result = parseNormalizedError(normalizeError(error));
 
       expect(result.category).toBe('tool_error');
-      expect(result.code).toBe('INVALID_TOOL_RESULTS');
       expect(result.httpStatus).toBe(400);
       expect(result.requestId).toBe('req_123');
       // Should extract the actual message from nested structure, not the malformed message string
@@ -328,13 +268,12 @@ describe('normalizeError', () => {
       expect(result.message).toContain('ids were found without');
       expect(result.message).toContain('blocks');
       // Should extract the help URL from the message
-      expect(result.helpUrl).toBe('https://js.langchain.com/docs/troubleshooting/errors/INVALID_TOOL_RESULTS/');
+      expect(result.helpUrl).toBe('https://docs.example.test/errors/invalid-tool-results/');
     });
 
     it('should handle nested error with rate_limit_error type', () => {
       const error = Object.assign(new Error('429 rate limit'), {
         status: 429,
-        lc_error_code: 'MODEL_RATE_LIMIT',
         error: {
           type: 'error',
           error: {
@@ -351,18 +290,17 @@ describe('normalizeError', () => {
       expect(result.message).toContain('Rate limit exceeded');
     });
 
-    it('should classify nested billing message as credits even when LangChain wrapper is a tool error', () => {
+    it('should classify nested billing message as credits even when the HTTP status is a tool error', () => {
       const error = Object.assign(new Error(statusPrefixedAnthropicCreditErrorText), {
         status: 400,
-        lc_error_code: 'INVALID_TOOL_RESULTS',
-        requestID: 'req_credit_lc',
+        requestID: 'req_credit',
         error: {
           type: 'error',
           error: {
             type: 'invalid_request_error',
             message: anthropicCreditMessage,
           },
-          request_id: 'req_credit_lc',
+          request_id: 'req_credit',
         },
       });
 
@@ -371,15 +309,14 @@ describe('normalizeError', () => {
       expect(result.category).toBe('credits');
       expect(result.title).toBe('Credit Limit Reached');
       expect(result.message).toBe(anthropicCreditMessage);
-      expect(result.code).toBe('INVALID_TOOL_RESULTS');
+      expect(result.code).toBe('invalid_request_error');
       expect(result.httpStatus).toBe(400);
-      expect(result.requestId).toBe('req_credit_lc');
+      expect(result.requestId).toBe('req_credit');
     });
 
     it('should fall back to raw message if nested error structure is missing', () => {
       const error = Object.assign(new Error('400 some error'), {
         status: 400,
-        lc_error_code: 'INVALID_TOOL_RESULTS',
       });
 
       const result = parseNormalizedError(normalizeError(error));
@@ -545,32 +482,6 @@ describe('normalizeError', () => {
     });
   });
 
-  describe('priority handling', () => {
-    it('should prioritize LangChain error code over HTTP status', () => {
-      const error = Object.assign(new Error('Error'), {
-        lc_error_code: 'MODEL_AUTHENTICATION',
-        status: 500, // Would normally be 'server'
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('auth');
-      expect(result.httpStatus).toBe(500);
-    });
-
-    it('should include httpStatus even when category comes from lc_error_code', () => {
-      const error = Object.assign(new Error('Error'), {
-        lc_error_code: 'MODEL_RATE_LIMIT',
-        status: 429,
-      });
-
-      const result = parseNormalizedError(normalizeError(error));
-
-      expect(result.category).toBe('rate_limit');
-      expect(result.httpStatus).toBe(429);
-    });
-  });
-
   describe('output format', () => {
     it('should return valid JSON string', () => {
       const result = normalizeError(new Error('Test'));
@@ -596,15 +507,17 @@ describe('normalizeError', () => {
     });
 
     it('should include all fields when available', () => {
-      const error = Object.assign(new Error('Error'), {
-        lc_error_code: 'INVALID_TOOL_RESULTS',
-        status: 400,
-        requestID: 'req-full',
-      });
+      const error = Object.assign(
+        new Error('400 {"type":"error","error":{"type":"invalid_request_error","message":"Bad request"}}'),
+        {
+          status: 400,
+          requestID: 'req-full',
+        },
+      );
 
       const result = parseNormalizedError(normalizeError(error));
 
-      expect(result.code).toBe('INVALID_TOOL_RESULTS');
+      expect(result.code).toBe('invalid_request_error');
       expect(result.httpStatus).toBe(400);
       expect(result.requestId).toBe('req-full');
     });

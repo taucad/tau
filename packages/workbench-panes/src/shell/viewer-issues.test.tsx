@@ -126,13 +126,24 @@ describe('ViewerIssues', () => {
     ]);
   });
 
-  it('should name the default action Fix with AI, and Fix all when there are several', async () => {
+  it('should name the default action Fix in chat, and Fix all when there are several', async () => {
     const user = userEvent.setup();
     renderIssues({ issues: [syntaxError, warning], onFix: vi.fn(), onFixInNewChat: vi.fn() });
     await user.click(segment());
 
-    expect(screen.getAllByRole('button', { name: 'Fix with AI' })).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Fix all 2 with AI' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Fix in chat' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Fix all 2 in chat' })).toBeInTheDocument();
+  });
+
+  it('should say on Fix all that Shift starts a new chat', async () => {
+    const user = userEvent.setup();
+    renderIssues({ issues: [syntaxError, warning], onFix: vi.fn(), onFixInNewChat: vi.fn() });
+    await user.click(segment());
+    await user.hover(screen.getByRole('button', { name: 'Fix all 2 in chat' }));
+
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Fix all 2 in chat');
+    expect(tooltip).toHaveTextContent('for new chat');
   });
 
   it('should offer Prepare on a kernel that is not prepared', async () => {

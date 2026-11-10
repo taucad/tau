@@ -75,8 +75,6 @@ class TestResizeObserver implements ResizeObserver {
 
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- test fixture asserts authored SVG color survives sanitization.
 const testStrokeColor = '#ff0000';
-// oxlint-disable-next-line tau-lint/no-hardcoded-color -- test asserts staging SVG grid parity.
-const expectedLightGridStroke = 'rgba(128, 128, 128, 0.15)';
 const geometry: Extract<KnownArtifact, { mimeType: 'image/svg+xml' }> = {
   mimeType: 'image/svg+xml',
   content: `<svg viewBox="0 0 20 10"><script>alert("x")</script><path d="M0 0 C5 10 15 10 20 0" fill="none" stroke="${testStrokeColor}" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>`,
@@ -153,36 +151,32 @@ describe('SvgViewer', () => {
     expect(geometryPath?.getAttribute('stroke-width')).toBe('1');
     expect(geometryPath?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
 
-    const gridPaths = [...viewerRoot().querySelectorAll('pattern path')];
-    expect(gridPaths).toHaveLength(2);
-    const [smallGridPath, largeGridPath] = gridPaths;
-    expect(smallGridPath?.getAttribute('stroke')).toBe(expectedLightGridStroke);
-    expect(smallGridPath?.getAttribute('stroke-width')).toBe('2');
-    expect(smallGridPath?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
-    expect(smallGridPath?.hasAttribute('stroke-opacity')).toBe(false);
-    expect(largeGridPath?.getAttribute('stroke')).toBe(expectedLightGridStroke);
-    expect(largeGridPath?.getAttribute('stroke-width')).toBe('4');
-    expect(largeGridPath?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
-    expect(largeGridPath?.hasAttribute('stroke-opacity')).toBe(false);
+    // The grid is a canvas behind the drawing, at the 3D grid's line opacity.
+    const grid = viewerRoot().querySelector<HTMLCanvasElement>('canvas[data-slot="grid"]');
+    expect(grid?.style.opacity).toBe('0.3');
+    expect(viewerRoot().querySelector('pattern')).toBeNull();
 
     expect(typeof getRegisteredReset()).toBe('function');
     const [target, options] = mocks.panzoom.mock.calls[0]!;
     expect(target).toBe(root);
-    expect(options).toMatchObject({
-      animate: true,
-      canvas: true,
-      cursor: 'auto',
-      maxScale: 10_000,
-      minScale: 1e-5,
-      step: 0.1,
-    });
+    expect(options).toMatchObject({ canvas: true, cursor: 'grab', noBind: true, maxScale: 10_000, minScale: 1e-5 });
     const { setTransform } = options;
-    expect(typeof setTransform).toBe('function');
     if (typeof setTransform !== 'function') {
       throw new TypeError('expected Panzoom setTransform option');
     }
-    setTransform(root as SVGElement, { scale: 2, x: 12, y: 34 }, options);
-    expect(panzoomInstance.setStyle).toHaveBeenCalledWith('transform', 'scale(2)');
+    // The 20 x 10 drawing fits an 800 x 600 viewport as -2 -4 24 18: 0.03 units per pixel.
+    const viewport = viewerRoot().querySelector('svg');
+    expect(viewport?.getAttribute('viewBox')).toBe('-2 -4 24 18');
+    act(() => {
+      setTransform(root as SVGElement, { scale: 2, x: 12, y: 34 }, options);
+    });
+    // Panzoom's pan is in pixels before its scale: the view moves by 12 and 34 px of drawing and shows half as much.
+    expect(viewport?.getAttribute('viewBox')).toBe('-2.36 -5.02 12 9');
+    // Drawing units are millimetres, so 9 units top to bottom is 9 mm for the grid.
+    const cameraViewEvent = mocks.graphicsSend.mock.calls
+      .map(([payload]) => payload)
+      .findLast((payload) => payload.type === 'cameraViewChanged');
+    expect(cameraViewEvent?.verticalSpan).toBeCloseTo(0.009, 12);
   });
 
   it('should apply constant-screen stroke defaults to sanitized stroked geometry paths', async () => {
@@ -199,48 +193,31 @@ describe('SvgViewer', () => {
     expect(geometryPath?.hasAttribute('stroke-width')).toBe(false);
   });
 
-  it('should zoom with the mouse wheel and notify graphics state on Panzoom changes', async () => {
+  it('should zoom about the pointer with the mouse wheel', async () => {
     render(<SvgViewer artifact={geometry} />);
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();
     });
 
-    const root = viewerRoot().querySelector('#panzoom-root');
-    const container = root?.closest('div');
-    expect(root?.tagName.toLowerCase()).toBe('g');
-    expect(container).toBeInstanceOf(HTMLDivElement);
-    if (!root || !container) {
-      throw new Error('expected SVG Panzoom root and container');
+    const viewport = viewerRoot().querySelector('svg');
+    if (!viewport) {
+      throw new Error('expected the SVG viewport');
     }
-
-    const wheelEvent = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -1 });
+    const wheelEvent = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -100,
+      clientX: 120,
+      clientY: 80,
+    });
     act(() => {
-      container.dispatchEvent(wheelEvent);
+      viewport.dispatchEvent(wheelEvent);
     });
 
     expect(wheelEvent.defaultPrevented).toBe(true);
     const [scale, point] = vi.mocked(panzoomInstance.zoomToPoint).mock.calls[0]!;
-    expect(scale).toBe(1.1);
-    expect(typeof point.clientX).toBe('number');
-    expect(typeof point.clientY).toBe('number');
-
-    vi.mocked(panzoomInstance.getScale).mockReturnValue(2);
-    vi.mocked(panzoomInstance.getPan).mockReturnValue({ x: 4, y: 6 });
-
-    act(() => {
-      root.dispatchEvent(new Event('panzoomchange'));
-      root.dispatchEvent(new Event('panzoomzoom'));
-    });
-
-    const patternTransforms = [...viewerRoot().querySelectorAll('pattern')].map((pattern) =>
-      pattern.getAttribute('patternTransform'),
-    );
-    expect(patternTransforms).toEqual(['translate(0 0)', 'translate(0 0)']);
-
-    const cameraViewEvent = mocks.graphicsSend.mock.calls
-      .map(([payload]) => payload)
-      .findLast((payload) => payload.type === 'cameraViewChanged');
-    expect(cameraViewEvent?.verticalSpan).toBe(9);
+    expect(scale).toBeCloseTo(Math.exp(0.2), 12);
+    expect([point.clientX, point.clientY]).toEqual([120, 80]);
   });
 
   it('should reset the SVG view through the renderer-neutral reset event', async () => {

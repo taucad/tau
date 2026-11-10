@@ -1,36 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { convertMessagesToResponsesInput } from '@langchain/openai';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { modelFamilySchema, providerIdSchema } from '@taucad/chat/model-catalog';
-
-/**
- * Regression test for @langchain/openai Responses API converter.
- *
- * The converter's `phase` extraction calls `content.findIndex()` without
- * guarding for string content, crashing with "content.findIndex is not a
- * function" when an AIMessage has string content (the default shape).
- *
- * Patched in `tools/pnpm/patches/@langchain__openai@1.4.0.patch`. This test ensures
- * the fix holds across dependency updates.
- */
-describe('OpenAI Responses API converter', () => {
-  it('should handle AIMessage with string content without crashing', () => {
-    const messages = [new HumanMessage('Hello'), new AIMessage('Here is my response.')];
-
-    const result = convertMessagesToResponsesInput({
-      messages,
-      zdrEnabled: false,
-      model: 'gpt-5.5',
-    });
-
-    expect(result).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'message', role: 'user' }),
-        expect.objectContaining({ type: 'message', role: 'assistant' }),
-      ]),
-    );
-  });
-});
+import { ProviderService } from '#providers/provider.service.js';
 
 /**
  * The `tau` provider existed only for the TAU_TEST_MODE replay model, which
@@ -44,4 +14,31 @@ describe('provider identity catalog', () => {
     expect(modelFamilySchema.safeParse('tau').success).toBe(false);
     expect(providerIdSchema.safeParse('openai').success).toBe(true);
   });
+});
+
+describe('ProviderService metadata', () => {
+  const service = new ProviderService();
+
+  it.each(providerIdSchema.options)('should describe %s without carrying a credential', (providerId) => {
+    const provider = service.getProvider(providerId);
+
+    expect(provider.provider).toBe(providerId);
+    expect(provider.configuration).toEqual({});
+  });
+
+  it.each([
+    { providerId: 'together', otelProviderName: 'together', cacheRead: true, cacheWrite: false },
+    { providerId: 'moonshot', otelProviderName: 'moonshot', cacheRead: true, cacheWrite: false },
+    { providerId: 'vertexai', otelProviderName: 'gcp.vertex_ai', cacheRead: true, cacheWrite: false },
+    { providerId: 'anthropic', otelProviderName: 'anthropic', cacheRead: true, cacheWrite: true },
+  ] as const)(
+    'should expose the $providerId telemetry name and inclusive-cache accounting',
+    ({ providerId, otelProviderName, cacheRead, cacheWrite }) => {
+      expect(service.getProvider(providerId)).toMatchObject({
+        otelProviderName,
+        inputTokensIncludesCacheReadTokens: cacheRead,
+        inputTokensIncludesCacheWriteTokens: cacheWrite,
+      });
+    },
+  );
 });

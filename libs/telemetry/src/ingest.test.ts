@@ -233,7 +233,36 @@ describe('agent usage entries', () => {
     expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
   });
 
+  it('should accept prefix breaks by cause and provider, with the reasoning they left out', () => {
+    const entry = {
+      name: IngestEntryName.AGENT_TURN,
+      duration: 4000,
+      detail: {
+        agentId: 'tau',
+        placement: 'browser',
+        outcome: 'completed',
+        prefixBreaks: [
+          { cause: 'attachment-eviction', provider: 'anthropic', count: 1, reasoningOmitted: 3 },
+          { cause: 'clearing', provider: 'anthropic', outcome: 'partial', count: 2, reasoningOmitted: 0 },
+        ],
+      },
+    };
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+  });
+
   it.each([
+    [
+      'an unknown prefix-break cause',
+      { prefixBreaks: [{ cause: 'cosmic-ray', provider: 'anthropic', count: 1, reasoningOmitted: 0 }] },
+    ],
+    [
+      'an unknown prefix-break cache outcome',
+      { prefixBreaks: [{ cause: 'model', provider: 'anthropic', outcome: 'warm', count: 1, reasoningOmitted: 0 }] },
+    ],
+    [
+      'an unknown prefix-break provider',
+      { prefixBreaks: [{ cause: 'model', provider: 'acme', count: 1, reasoningOmitted: 0 }] },
+    ],
     ['an unknown safeguard pattern', { safeguards: [{ pattern: 'doom_loop', action: 'nudge', count: 1 }] }],
     [
       'an unknown compaction lane',

@@ -35,6 +35,7 @@ export {
   agentCompactionLanes,
   agentCompactionTiers,
   agentCompactionOutcomes,
+  agentPrefixBreakCauses,
   lfsTransports,
   workerTimingSpanNames,
 } from '#ingest.js';
@@ -106,6 +107,8 @@ export {
   telemetryPolicyAnswerSchema,
   ingestReceiptSchema,
   usageCoverage,
+  killPhases,
+  killClasses,
 } from '#runtime-ingest.js';
 export type {
   PluginUsageId,
@@ -122,6 +125,7 @@ export {
   runtimeOperationEntrySchema,
   runtimeLateEntrySchema,
   runtimeViewerEntrySchema,
+  runtimeKillEntrySchema,
   deliveryHealthEntrySchema,
   parseRuntimeEntry,
   runtimeEntryEnvelopeSchema,
@@ -130,6 +134,7 @@ export type {
   RuntimeOperationRecord,
   RuntimeLateRecord,
   RuntimeViewerRecord,
+  RuntimeKillRecord,
   DeliveryHealthRecord,
   RuntimeEntryRecord,
 } from '#runtime-entry.js';

@@ -64,11 +64,11 @@ export type ViewerIssuesProps = Readonly<{
   notices?: readonly ViewerNotice[] | undefined;
   /** Open a location. Absent, locations and frames show as text. */
   onOpenLocation?: ((location: ViewerIssueLocation) => void) | undefined;
-  /** "Fix with AI" (desktop) or "Add to chat" (plugin, VUI-3), per issue and as "Fix all". Absent, no action. */
+  /** "Fix in chat" (desktop) or "Add to chat" (plugin, VUI-3), per issue and as "Fix all". Absent, no action. */
   onFix?: ((input: ViewerIssueActionInput) => Promise<void> | void) | undefined;
   /** The action while Shift is held, into a new chat. Absent, Shift changes nothing. */
   onFixInNewChat?: ((input: ViewerIssueActionInput) => Promise<void> | void) | undefined;
-  /** The action's name; "Fix with AI" by default. */
+  /** The action's name; "Fix in chat" by default. */
   fixLabel?: string | undefined;
   /** Offered on a `KERNEL_NOT_PREPARED` issue as "Prepare". Absent, the issue shows as it is. */
   onPrepareKernel?: ((issue: KernelIssue) => void) | undefined;
@@ -82,7 +82,7 @@ export type ViewerIssuesProps = Readonly<{
 }>;
 
 /**
- * One issue as Markdown for a chat message: its message, its location and its stack. Fix with AI and Add to chat send
+ * One issue as Markdown for a chat message: its message, its location and its stack. Fix in chat and Add to chat send
  * this text.
  *
  * @param issue - The issue.
@@ -151,6 +151,17 @@ export const unpreparedKernelOf = (
 };
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
+
+/**
+ * The tooltip line that says holding Shift sends the action to a new chat.
+ *
+ * @returns The Shift key and "for new chat".
+ */
+const NewChatHint = (): React.JSX.Element => (
+  <span className='flex items-center gap-1 text-xs opacity-70'>
+    <KeyShortcut variant='tooltip'>{shiftKey}</KeyShortcut> for new chat
+  </span>
+);
 
 /** Each severity's glyph: status colour lives in the glyph alone. */
 const severityGlyphs = {
@@ -376,11 +387,7 @@ function IssueRow({
             </TooltipTrigger>
             <TooltipContent side='top' className='flex flex-col gap-1'>
               <span>{label}</span>
-              {hasNewChat ? (
-                <span className='flex items-center gap-1 text-xs opacity-70'>
-                  <KeyShortcut variant='tooltip'>{shiftKey}</KeyShortcut> for new chat
-                </span>
-              ) : null}
+              {hasNewChat ? <NewChatHint /> : null}
             </TooltipContent>
           </Tooltip>
         )}
@@ -397,6 +404,32 @@ function IssueRow({
         </Collapsible>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The action on every issue, under the list. Its tooltip names it and, when Shift starts a new chat, says so.
+ *
+ * @returns The button and its tooltip.
+ */
+function FixAllButton({
+  label,
+  hasNewChat,
+  onAct,
+}: Readonly<{ label: string; hasNewChat: boolean; onAct: () => void }>): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button size='xs' variant='ghost' className='text-muted-foreground hover:text-foreground' onClick={onAct}>
+          <Sparkles />
+          {label}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side='top' className='flex flex-col gap-1'>
+        <span>{label}</span>
+        {hasNewChat ? <NewChatHint /> : null}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -506,12 +539,12 @@ export function ViewerIssues({
   const fix = isShiftHeld && onFixInNewChat !== undefined ? onFixInNewChat : onFix;
   const isNewChat = fix !== undefined && fix === onFixInNewChat;
   /* Desktop's names stay as they were; a host's own label names the one action and counts the rest. */
-  const label = isNewChat ? 'Fix in new chat' : (fixLabel ?? 'Fix with AI');
+  const label = isNewChat ? 'Fix in new chat' : (fixLabel ?? 'Fix in chat');
   const allLabel = (count: number): string =>
     isNewChat
       ? `Fix all ${count} in new chat`
       : fixLabel === undefined
-        ? `Fix all ${count} with AI`
+        ? `Fix all ${count} in chat`
         : `${fixLabel} (${count})`;
   const act = (targets: readonly KernelIssue[]): void => {
     void fix?.({ issues: targets });
@@ -616,17 +649,13 @@ export function ViewerIssues({
       </ul>
       {sorted.length > 1 && fix !== undefined ? (
         <div className='flex justify-end border-t px-1 pt-1'>
-          <Button
-            size='xs'
-            variant='ghost'
-            className='text-muted-foreground hover:text-foreground'
-            onClick={() => {
+          <FixAllButton
+            label={allLabel(sorted.length)}
+            hasNewChat={onFixInNewChat !== undefined}
+            onAct={() => {
               act(sorted);
             }}
-          >
-            <Sparkles />
-            {allLabel(sorted.length)}
-          </Button>
+          />
         </div>
       ) : null}
     </div>

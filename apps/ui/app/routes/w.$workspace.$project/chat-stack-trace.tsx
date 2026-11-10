@@ -10,11 +10,11 @@ import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
 import type { NativeKernelDownload } from '#hooks/use-native-kernel-download.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -125,7 +125,7 @@ const renderIssueMessage = (message: string): React.ReactNode => (
 );
 
 /**
- * The viewer's issues with Fix with AI, which needs the focused chat.
+ * The viewer's issues with Fix in chat, which needs the focused chat.
  */
 function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
   const { getMainFilename, projectId, setFocusedChatId } = useProject();
@@ -134,13 +134,13 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
   const { createChat } = useChats(projectId, { enabled: false });
   // The chat-client composes the per-request `agent` payload (model, kernel,
   // mode, toolChoice, testingEnabled, snapshot, contextPayload) from the
-  // current chat's active values. Fix-with-AI no longer stamps any of those
+  // current chat's active values. Fix-in-chat no longer stamps any of those
   // fields onto the user message — the regression-coverage test asserts the
   // captured wire body carries the full `agent` block via the chat-client.
   const cadChat = useCadChatClient();
   const { agent } = cadChat;
 
-  const handleFixWithAi = useCallback(
+  const handleFixInChat = useCallback(
     async (targets: readonly KernelIssue[], createNewChat: boolean) => {
       if (targets.length === 0) {
         return;
@@ -161,7 +161,7 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
 
       if (createNewChat) {
         // Persist the pending user message with an explicit one-shot startup
-        // request so hydration can fire this intentional Fix-with-AI turn
+        // request so hydration can fire this intentional Fix-in-chat turn
         // without treating every pending user tail as command state.
         const message = buildUserMessage({ text: errorPrompt });
         const newChat = await createChat({
@@ -185,7 +185,7 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
     },
     [getMainFilename, fileManager, agent.kernel, agent.execution, createChat, setFocusedChatId, cadChat, setChatOpen],
   );
-  return <ViewerIssuesContent {...props} onFixWithAi={handleFixWithAi} />;
+  return <ViewerIssuesContent {...props} onFixInChat={handleFixInChat} />;
 }
 
 /**
@@ -196,10 +196,10 @@ function ViewerIssuesContent({
   entryPath,
   notice,
   children,
-  onFixWithAi,
+  onFixInChat,
 }: ViewerIssuesProps &
   Readonly<{
-    onFixWithAi?: (issues: readonly KernelIssue[], createNewChat: boolean) => Promise<void>;
+    onFixInChat?: (issues: readonly KernelIssue[], createNewChat: boolean) => Promise<void>;
   }>): React.ReactNode {
   const { projectRef, editorRef } = useProject();
   const openLocation = useCallback(
@@ -249,8 +249,8 @@ function ViewerIssuesContent({
       isFailed={isFailed}
       notices={notices}
       onOpenLocation={openLocation}
-      onFix={onFixWithAi === undefined ? undefined : async ({ issues }) => onFixWithAi(issues, false)}
-      onFixInNewChat={onFixWithAi === undefined ? undefined : async ({ issues }) => onFixWithAi(issues, true)}
+      onFix={onFixInChat === undefined ? undefined : async ({ issues }) => onFixInChat(issues, false)}
+      onFixInNewChat={onFixInChat === undefined ? undefined : async ({ issues }) => onFixInChat(issues, true)}
       renderMessage={renderIssueMessage}
     >
       {children}

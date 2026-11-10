@@ -231,7 +231,7 @@ const loadTab = async (tab: Tab): Promise<void> => {
     },
   }));
   const { storage } = tab;
-  vi.doMock('#lib/session-storage.js', () => ({
+  vi.doMock('@taucad/ui-core/lib/session-storage', () => ({
     readSessionStorage: () => ({
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),

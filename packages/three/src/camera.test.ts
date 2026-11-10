@@ -1,12 +1,17 @@
 import { OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
-import { describe, expect, it } from 'vitest';
-import { createActor } from 'xstate';
-import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta } from '@taucad/camera';
-import type { CameraVector } from '@taucad/camera';
+import { describe, expect, it, vi } from 'vitest';
+import { createActor, SimulatedClock } from 'xstate';
+import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta, resolveCameraState } from '@taucad/camera';
+import type { CameraVector, CameraView } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
-import { selectCameraDriverSnapshot, selectCameraProjection } from '@taucad/camera/machine';
+import {
+  cameraPoseSettleMilliseconds,
+  selectCameraDriverSnapshot,
+  selectCameraProjection,
+} from '@taucad/camera/machine';
 import * as threeModule from '#index.js';
 import { createThreeCameraRig, readThreeCameraState } from '#camera.js';
+import { toThreeRenderPoint } from '#spatial.js';
 
 const initialView = createCameraView({
   frameId: 'test-root',
@@ -121,6 +126,13 @@ const expectedPresentationNear = ({
     oracle,
   };
 };
+
+/* Where the perspective camera sits, in render units of `renderFrame`, for the rig's view (or `view`). */
+const expectedPosition = (
+  rig: ReturnType<typeof createThreeCameraRig>,
+  renderFrame: RenderFrame,
+  view: CameraView = rig.actorRef.getSnapshot().context.view,
+): number[] => toThreeRenderPoint({ renderFrame, pointMeters: resolveCameraState({ view }).position }).toArray();
 
 describe('createThreeCameraRig', () => {
   it('publishes only the consumed root runtime surface', () => {
@@ -1078,6 +1090,273 @@ describe('createThreeCameraRig', () => {
     rig.setClipPlanes(presentationClipPlanes(initialView.up));
 
     expect(updates).toBe(afterFirstPolicy);
+    rig.dispose();
+  });
+
+  it('should keep the render frame and the clip policy in the camera actor while it runs', () => {
+    const updates: Array<Readonly<{ renderFrame: RenderFrame; clipPolicy: unknown; revision: number }>> = [];
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate(_camera, snapshot) {
+        updates.push({
+          renderFrame: snapshot.renderFrame,
+          clipPolicy: snapshot.clipPolicy,
+          revision: snapshot.revision,
+        });
+      },
+    });
+    rig.actorRef.start();
+    updates.length = 0;
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [30, -25, 10],
+      metersPerRenderUnit: 1e-3,
+    };
+    const clipPlanes = presentationClipPlanes(initialView.up, 2);
+
+    rig.setRenderFrame(renderFrame);
+    rig.setClipPlanes(clipPlanes);
+
+    const { context } = rig.actorRef.getSnapshot();
+    expect(context.renderFrame).toEqual(renderFrame);
+    expect(context.clipPolicy).toEqual(clipPlanes);
+    expect(rig.renderFrame).toEqual(renderFrame);
+    // Presentation changes are not view changes: one synchronization each, at the same revision.
+    expect(updates).toEqual([
+      { renderFrame, clipPolicy: undefined, revision: 0 },
+      { renderFrame, clipPolicy: clipPlanes, revision: 0 },
+    ]);
+    expect(context.lastChange).toEqual({ source: 'framing', revision: 0 });
+    rig.dispose();
+  });
+
+  it('should present a render frame the camera actor takes as an event', () => {
+    const rig = createThreeCameraRig({ initialView });
+    rig.actorRef.start();
+    const before = rig.perspectiveCamera.position.clone();
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 10,
+    };
+
+    rig.actorRef.send({ type: 'setRenderFrame', renderFrame });
+
+    expect(rig.renderFrame).toEqual(renderFrame);
+    expect(rig.perspectiveCamera.position.x).toBeCloseTo(before.x / 10, 9);
+    expect(rig.perspectiveCamera.position.y).toBeCloseTo(before.y / 10, 9);
+    expect(rig.perspectiveCamera.position.z).toBeCloseTo(before.z / 10, 9);
+    rig.dispose();
+  });
+
+  it('should present a change made before the actor starts at once, and keep it once it starts', () => {
+    const updates: Array<Readonly<{ renderFrame: RenderFrame; clipPolicy: unknown; revision: number }>> = [];
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate(_camera, snapshot) {
+        updates.push({
+          renderFrame: snapshot.renderFrame,
+          clipPolicy: snapshot.clipPolicy,
+          revision: snapshot.revision,
+        });
+      },
+    });
+    const reference = createThreeCameraRig({ initialView, clipPlanes: presentationClipPlanes(initialView.up, 3) });
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [1, 2, 3],
+      metersPerRenderUnit: 0.5,
+    };
+    const clipPlanes = presentationClipPlanes(initialView.up, 3);
+
+    rig.setRenderFrame(renderFrame);
+    rig.setClipPlanes(clipPlanes);
+
+    expect(rig.renderFrame).toEqual(renderFrame);
+    expect(rig.perspectiveCamera.near).toBeCloseTo(reference.perspectiveCamera.near / 0.5, 9);
+    // Each change presents at once, as it did before the camera actor owned the frame.
+    expect(updates).toEqual([
+      { renderFrame, clipPolicy: undefined, revision: 0 },
+      { renderFrame, clipPolicy: clipPlanes, revision: 0 },
+    ]);
+    const { near } = rig.perspectiveCamera;
+    const position = rig.perspectiveCamera.position.clone();
+    updates.length = 0;
+
+    rig.actorRef.start();
+
+    // One presentation on start, of the final frame and policy: no superseded frame is replayed.
+    expect(updates).toEqual([{ renderFrame, clipPolicy: clipPlanes, revision: 0 }]);
+    expect(rig.actorRef.getSnapshot().context.renderFrame).toEqual(renderFrame);
+    expect(rig.actorRef.getSnapshot().context.clipPolicy).toEqual(clipPlanes);
+    expect(rig.renderFrame).toEqual(renderFrame);
+    expect(rig.perspectiveCamera.near).toBe(near);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(position.toArray());
+    reference.dispose();
+    rig.dispose();
+  });
+
+  it('should take a change made from inside onUpdate at once, and keep it after the actor takes it', () => {
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 4,
+    };
+    const clipPlanes = { farPaddingVerticalSpans: 6 };
+    const presented: Array<Readonly<{ metersPerRenderUnit: number; clipPolicy: unknown; revision: number }>> = [];
+    const readBack: unknown[] = [];
+    let reentered = false;
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate(_camera, snapshot) {
+        presented.push({
+          metersPerRenderUnit: snapshot.renderFrame.metersPerRenderUnit,
+          clipPolicy: snapshot.clipPolicy,
+          revision: snapshot.revision,
+        });
+        if (snapshot.revision === 1 && !reentered) {
+          reentered = true;
+          rig.setRenderFrame(renderFrame);
+          rig.setClipPlanes(clipPlanes);
+          readBack.push(rig.renderFrame, expectedPosition(rig, renderFrame), rig.perspectiveCamera.position.toArray());
+        }
+      },
+    });
+    rig.actorRef.start();
+    presented.length = 0;
+
+    rig.actorRef.send({ type: 'setViewport', viewport: { width: 900, height: 600, pixelRatio: 1 } });
+
+    // Read back on return from the setters, while the actor was still delivering revision 1.
+    expect(readBack[0]).toEqual(renderFrame);
+    expect(readBack[2]).toEqual(readBack[1]);
+    const { context } = rig.actorRef.getSnapshot();
+    expect(context.renderFrame).toEqual(renderFrame);
+    expect(context.clipPolicy).toEqual(clipPlanes);
+    expect(rig.renderFrame).toEqual(renderFrame);
+    // Each setter presents at once inside the delivery; the actor takes the queued events afterwards, which changes
+    // nothing presented, so they neither notify again nor present an older frame.
+    expect(presented).toEqual([
+      { metersPerRenderUnit: 1, clipPolicy: undefined, revision: 1 },
+      { metersPerRenderUnit: 4, clipPolicy: undefined, revision: 1 },
+      { metersPerRenderUnit: 4, clipPolicy: clipPlanes, revision: 1 },
+    ]);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(readBack[1]);
+    rig.dispose();
+  });
+
+  it('should present a change made after the actor stops without a dead letter', () => {
+    const rejections: string[] = [];
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const rig = createThreeCameraRig({
+      initialView,
+      onRejectedEvent: (rejection) => rejections.push(`${rejection.event.type}:${rejection.reason}`),
+    });
+    rig.actorRef.start();
+    rig.actorRef.stop();
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 2,
+    };
+    const { far } = rig.perspectiveCamera;
+
+    rig.setRenderFrame(renderFrame);
+    rig.setClipPlanes({ farPaddingVerticalSpans: 8 });
+
+    expect(rejections).toEqual([]);
+    expect(warnings).not.toHaveBeenCalled();
+    expect(rig.renderFrame).toEqual(renderFrame);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(expectedPosition(rig, renderFrame));
+    expect(rig.perspectiveCamera.far).toBeCloseTo((far + initialView.verticalSpan * 8) / 2, 6);
+    warnings.mockRestore();
+    rig.dispose();
+  });
+
+  it('should keep a frame set while stopped when a restored actor starts, and keep presenting its changes', () => {
+    const rig = createThreeCameraRig({ initialView });
+    rig.actorRef.start();
+    rig.actorRef.send({ type: 'setViewport', viewport: { width: 900, height: 600, pixelRatio: 1 } });
+    const persisted = rig.actorRef.getPersistedSnapshot();
+    rig.actorRef.stop();
+    const stoppedFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 5,
+    };
+    rig.setRenderFrame(stoppedFrame);
+
+    const restored = createActor(rig.actorRef.logic, { snapshot: persisted }).start();
+
+    expect(rig.renderFrame).toEqual(stoppedFrame);
+    expect(restored.getSnapshot().context.renderFrame).toEqual(stoppedFrame);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(expectedPosition(rig, stoppedFrame));
+
+    const laterFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [1, 1, 1],
+      metersPerRenderUnit: 3,
+    };
+    rig.setRenderFrame(laterFrame);
+    expect(rig.renderFrame).toEqual(laterFrame);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(expectedPosition(rig, laterFrame));
+
+    // A later change of the restored actor presents in the frame the rig set, not the stale one.
+    restored.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 45 });
+    expect(rig.renderFrame).toEqual(laterFrame);
+    expect(rig.perspectiveCamera.fov).toBe(45);
+    expect(rig.perspectiveCamera.position.toArray()).toEqual(
+      expectedPosition(rig, laterFrame, restored.getSnapshot().context.view),
+    );
+    restored.stop();
+    rig.dispose();
+  });
+
+  it('should present a change made after disposal without sending the stopped actor anything', () => {
+    const rejections: unknown[] = [];
+    const rig = createThreeCameraRig({ initialView, onRejectedEvent: (rejection) => rejections.push(rejection) });
+    rig.actorRef.start();
+    rig.dispose();
+    const renderFrame: RenderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 2,
+    };
+    const { far } = rig.perspectiveCamera;
+
+    rig.setRenderFrame(renderFrame);
+    rig.setClipPlanes({ farPaddingVerticalSpans: 8 });
+
+    expect(rig.renderFrame).toEqual(renderFrame);
+    expect(rig.perspectiveCamera.far).toBeCloseTo((far + initialView.verticalSpan * 8) / 2, 6);
+    expect(rejections).toEqual([]);
+  });
+
+  it('should forward the clock and the rejection hook to the camera actor', () => {
+    const clock = new SimulatedClock();
+    const rejections: string[] = [];
+    const rig = createThreeCameraRig({
+      initialView,
+      clock,
+      onRejectedEvent: (rejection) => rejections.push(`${rejection.event.type}:${rejection.reason}`),
+    });
+    rig.actorRef.start();
+
+    rig.actorRef.send({
+      type: 'poseObserved',
+      target: [1, 2, 3],
+      direction: [0, -1, 0],
+      up: [0, 0, 1],
+      verticalSpan: 20,
+      source: 'input',
+    });
+    expect(rig.actorRef.getSnapshot().matches({ input: 'settling' })).toBe(true);
+    clock.increment(cameraPoseSettleMilliseconds);
+    expect(rig.actorRef.getSnapshot().matches({ input: 'idle' })).toBe(true);
+
+    rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: Number.NaN });
+    expect(rejections).toEqual(['setVerticalFieldOfView:refusedPayload']);
+    expect(rig.actorRef.getSnapshot().status).toBe('active');
     rig.dispose();
   });
 

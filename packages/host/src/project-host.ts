@@ -18,6 +18,7 @@ import { chatIdSchema } from '@taucad/agent-host/wire';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
 import type { NodeFsProviderClient } from '@taucad/filesystem/backend';
+import type { RevisionUserActor } from '@taucad/revisions';
 import type { RuntimeFileSystemBase } from '@taucad/runtime/types';
 import { createActor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
@@ -96,6 +97,13 @@ export type ProjectHostOptions = Pick<
     fileSystem: ProjectFileSystem;
     /** The runtime client for the root the calling turn works in, which the caller memoizes. */
     runtimeClient: (root: string) => Promise<ProjectHostRuntimeClient>;
+    /**
+     * The Tau account this host runs for, when it holds one (`tau serve` with a session token, A1).
+     *
+     * Absent, the host records the cloud owner or this device's pseudonym until a renderer names its session with
+     * `setActor`. Never the OS login name or an environment email.
+     */
+    revisionActor?: RevisionUserActor | undefined;
     /** The adapters this machine discovered; the host builds the ACP port over its own checkouts. */
     externalAgents?: Readonly<{ agents: readonly AcpAdapter[]; mcpUrl: () => string }> | undefined;
     /** Each revision fact; reporting only, never fatal. */
@@ -429,8 +437,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       }
     },
     checkoutMutation: fileSystem.mutate,
-    /* AC15: the person this machine belongs to, as Git already knows them. */
-    actor: hostRevisionActor(),
+    /* A1: the account this host was handed, else the cloud owner or this device's pseudonym; a renderer's
+     * `setActor` replaces it for every mint after it. */
+    actor: hostRevisionActor(options.revisionActor),
     projectId: options.projectId,
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),

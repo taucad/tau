@@ -2794,9 +2794,8 @@ describe('a terminal as the third client', () => {
 /*
  * Backup by default and one library (charter D19, D20; W11's desktop rows).
  *
- * The suite's account is Pro, so its plan admits the default connection without
- * D23's gate; the gate-closed Free row is `sync-refusals.spec.ts`'s. Nothing
- * here clicks *Connect*: the subject is that nobody has to.
+ * The suite's account is Pro; the Free row is `sync-refusals.spec.ts`'s.
+ * Nothing here clicks *Connect*: the subject is that nobody has to.
  */
 describe('backup by default and one library', () => {
   const name = 'W11 Default Backup';

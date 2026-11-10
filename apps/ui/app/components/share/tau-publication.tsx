@@ -246,6 +246,7 @@ export const PublicationInteractiveSurface = ({
         <SharedProjectWorkbench
           shouldTrackView={shouldTrackView}
           projectId={data.manifest.projectId}
+          kernel={data.manifest.kernels[0]}
           publication={publication}
           hydratedFiles={filesRecord}
           archive={archive}

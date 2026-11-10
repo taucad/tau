@@ -208,6 +208,13 @@ export const createApplyTreeEffects = (
     target: MaterializeTarget,
     materialization?: MaterializeTreeOptions<Result>,
   ) => Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>>;
+  /**
+   * Put back what a failed write left torn when its own rollback failed too:
+   * the same rollback, run again against the checkout as it is now.
+   *
+   * @returns Whether the checkout was torn and is whole again.
+   */
+  repairTornCheckout: (place: Checkout) => Promise<boolean>;
 }> => {
   const {
     useFileSystem,
@@ -787,6 +794,9 @@ export const createApplyTreeEffects = (
    *   validation and graph update that bracket the write.
    * @returns The paths written and whatever `publish` answered.
    */
+  /* A checkout a failed write left torn, with what it held before and what the write meant to land (L5). */
+  const torn = new Map<string, Readonly<{ before: ImmutableRevisionTree; target: ImmutableRevisionTree }>>();
+
   const materializeTree = async <Result = void>(
     place: Checkout,
     wanted: MaterializeTarget,
@@ -818,6 +828,7 @@ export const createApplyTreeEffects = (
         materialization.signal?.throwIfAborted();
         await prepared.verify?.();
         materialization.signal?.throwIfAborted();
+        torn.delete(place.id);
         return { paths, result: await materialization.publish?.() };
       } catch (error) {
         /* A failed write is told as failed only when it left the checkout torn: one that changed nothing, or undid
@@ -830,15 +841,16 @@ export const createApplyTreeEffects = (
         try {
           const current = await capture(place, before);
           const recovery = recoveryTree(before, recoveryTarget, current);
-          const torn = (await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery));
-          tell(torn);
-          if (torn) {
+          if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
             await applyTree(place, recovery, {
               from: current,
               ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
             });
           }
+          /* Told after the rollback, not before: a rollback that landed left the checkout whole (L5). */
+          tell(false);
         } catch (recoveryError) {
+          torn.set(place.id, { before, target: recoveryTarget });
           tell(true);
           const reason = error instanceof Error ? error.message : String(error);
           throw new AggregateError(
@@ -854,5 +866,22 @@ export const createApplyTreeEffects = (
       : materialize(materialization.before);
   };
 
-  return { equalEntry, entryOf, materializeTree };
+  const repairTornCheckout = async (place: Checkout): Promise<boolean> => {
+    const left = torn.get(place.id);
+    if (left === undefined) {
+      return false;
+    }
+    await withCheckoutFence(place.id, async () => {
+      const current = await capture(place);
+      /* A tree write since then replaced what the failed one left: nothing of it is here to put back. */
+      if (torn.get(place.id) !== left) {
+        return;
+      }
+      await applyTree(place, recoveryTree(left.before, left.target, current), { from: current, purpose: 'tree' });
+      torn.delete(place.id);
+    });
+    return true;
+  };
+
+  return { equalEntry, entryOf, materializeTree, repairTornCheckout };
 };

@@ -2,7 +2,7 @@ import { Link as LinkIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import type { Components } from 'streamdown';
 import { cn } from '@taucad/ui/utils/cn';
-import { extractTextFromChildren } from '#utils/react.utils.js';
+import { extractTextFromChildren } from '@taucad/ui-core/utils/react.utils';
 
 /**
  * Converts heading text to a URL-friendly slug for anchor links.

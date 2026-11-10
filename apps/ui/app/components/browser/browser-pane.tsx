@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { randomUuid } from '@taucad/utils/id';
 import type { BrowserCommand, BrowserSnapshot } from '@taucad/types/browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -158,7 +159,9 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
   if (!bridge) {
     return (
       <div className='p-6 text-sm'>
-        <h2 className='font-medium'>Browse in Tau desktop</h2>
+        <Heading level={2} variant='label'>
+          Browse in Tau desktop
+        </Heading>
         <p className='mt-2 text-muted-foreground'>The desktop app lets you browse the web alongside your project.</p>
       </div>
     );

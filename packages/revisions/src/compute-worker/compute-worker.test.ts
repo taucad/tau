@@ -14,6 +14,7 @@ import {
   serveComputeWorker,
 } from '#compute-worker/compute-worker.js';
 import type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import { readPackIndex } from '#pack-reader/pack-index.js';
 import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
 import { buildPack, indexBuiltPack } from '#object-store/pack-writer.js';
@@ -220,6 +221,18 @@ describe('the compute worker seam', () => {
     const remote = connectComputeWorker(domPort(channel.port1));
 
     await expect(remote.inflate(encoder.encode('not zlib'))).rejects.toThrow();
+  });
+
+  /* A refusal seen only on a phone is diagnosed from its toast: the indexer's own reason crosses the port with it. */
+  it('names why a pack does not index, across the port', async () => {
+    const remote = remoteCompute();
+    const garbage = encoder.encode('PACK\u0000\u0000\u0000\u0009\u0000\u0000\u0000\u0001'.padEnd(64, 'x'));
+
+    const refusal = await remote.indexPack(new Uint8Array(garbage)).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(CorruptBytesError);
+    expect((refusal as Error).message).toMatch(/^The pack does not index: .*packfile version/u);
+    expect(((refusal as Error).cause as Error | undefined)?.message).toMatch(/packfile version/u);
   });
 
   it('waits for nothing when a call cannot be posted', async () => {

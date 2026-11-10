@@ -4,11 +4,14 @@ import {
   assertGenerationSucceeds,
   assertSameIncarnation,
   decodeManifest,
+  decodePushLogSegment,
   encodeManifest,
   isTombstoned,
   manifestFormat,
   pushLogByteLimit,
+  pushRecordPageLimit,
   pushRecordRefLimit,
+  pushRecordsAfter,
   spilledPushLog,
   succeedManifest,
   tombstoneManifest,
@@ -118,6 +121,20 @@ describe('repository manifest codec', () => {
               committedAt: '2026-09-18T01:02:03.000Z',
               committedBy: 'user_abc',
               refs: [{ ref: 'refs/heads/main', tip: 'zz' }],
+            },
+          ],
+        },
+      ],
+      [
+        'a push record that marks anonymity with something other than true',
+        {
+          pushes: [
+            {
+              generation: 1,
+              committedAt: '2026-09-18T01:02:03.000Z',
+              committedBy: 'user_abc',
+              refs: [],
+              anonymous: false,
             },
           ],
         },
@@ -307,6 +324,127 @@ describe('repository manifest codec', () => {
       const base = sample();
 
       expect(spilledPushLog(base, pushOnce(base, 1))).toBeUndefined();
+    });
+  });
+
+  /**
+   * A3: the push-record read pages the whole log, oldest first, across the
+   * spilled segments, and an anonymous push says so on its record (Q3).
+   */
+  describe('push-record read (A3)', () => {
+    const pushOnce = (base: Manifest, push: number): Manifest =>
+      succeedManifest(base, {
+        refs: { ...base.refs, 'refs/heads/main': { oid: push % 2 === 0 ? oid : peeled } },
+        packs: base.packs,
+        committedBy: `user_${String(push % 3)}`,
+      });
+
+    /** 300 pushes over `sample()`, with every spilled segment kept where a reader can fetch it. */
+    const spilledHistory = (): { manifest: Manifest; segments: Map<string, Uint8Array<ArrayBuffer>> } => {
+      const segments = new Map<string, Uint8Array<ArrayBuffer>>();
+      let manifest = sample();
+      for (let push = 1; push <= 300; push += 1) {
+        const next = pushOnce(manifest, push);
+        const spilled = spilledPushLog(manifest, next);
+        if (spilled !== undefined) {
+          segments.set(spilled.key, spilled.bytes);
+        }
+        manifest = next;
+      }
+      return { manifest, segments };
+    };
+
+    it('should mark a push that brought an anonymous commit, and only such a push', () => {
+      const anonymous = succeedManifest(sample(), {
+        refs: { 'refs/heads/main': { oid: peeled } },
+        packs: [],
+        committedBy: 'user_abc',
+        anonymous: true,
+      });
+      const attributed = succeedManifest(anonymous, {
+        refs: { 'refs/heads/main': { oid } },
+        packs: [],
+        committedBy: 'user_abc',
+        anonymous: false,
+      });
+
+      expect(anonymous.pushes.at(-1)?.anonymous).toBe(true);
+      expect(attributed.pushes.at(-1)).not.toHaveProperty('anonymous');
+      expect(decodeManifest(encodeManifest(attributed))).toStrictEqual(attributed);
+    });
+
+    it('should decode a stored segment and refuse one that is not', () => {
+      const { segments } = spilledHistory();
+      const [bytes] = segments.values();
+
+      expect(bytes).toBeDefined();
+      expect(decodePushLogSegment(bytes ?? new Uint8Array()).pushes.length).toBeGreaterThan(0);
+      expect(() => decodePushLogSegment(new TextEncoder().encode('{"previous":null}'))).toThrow(ManifestError);
+      expect(() => decodePushLogSegment(new TextEncoder().encode('['))).toThrow(ManifestError);
+    });
+
+    it('should page every record from the start through the segments, oldest first', async () => {
+      const { manifest, segments } = spilledHistory();
+      const readSegment = async (key: string): Promise<Uint8Array<ArrayBuffer>> => {
+        const bytes = segments.get(key);
+        if (bytes === undefined) {
+          throw new Error(`no segment ${key}`);
+        }
+        return bytes;
+      };
+
+      const generations: number[] = [];
+      let after = 0;
+      let pages = 0;
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- each page continues from the one before
+        const page = await pushRecordsAfter({ manifest, readSegment, after });
+        pages += 1;
+        generations.push(...page.records.map((record) => record.generation));
+        if (page.next === undefined) {
+          break;
+        }
+        expect(page.records).toHaveLength(pushRecordPageLimit);
+        after = page.next;
+      }
+
+      expect(segments.size).toBeGreaterThan(1);
+      expect(pages).toBe(Math.ceil(301 / pushRecordPageLimit));
+      expect(generations).toStrictEqual(Array.from({ length: 301 }, (_, index) => index + 3));
+    });
+
+    it('should read only the manifest for a page after a recent generation', async () => {
+      const { manifest } = spilledHistory();
+      const read: string[] = [];
+
+      const page = await pushRecordsAfter({
+        manifest,
+        readSegment: async (key) => {
+          read.push(key);
+          throw new Error('not read');
+        },
+        after: manifest.generation - 2,
+      });
+
+      expect(read).toStrictEqual([]);
+      expect(page.records.map((record) => record.generation)).toStrictEqual([
+        manifest.generation - 1,
+        manifest.generation,
+      ]);
+      expect(page.next).toBeUndefined();
+    });
+
+    it('should answer nothing after the newest generation', async () => {
+      const { manifest } = spilledHistory();
+
+      await expect(
+        pushRecordsAfter({
+          manifest,
+          readSegment: async () => new Uint8Array(),
+          after: manifest.generation,
+          limit: 5,
+        }),
+      ).resolves.toStrictEqual({ records: [] });
     });
   });
 

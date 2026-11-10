@@ -20,8 +20,6 @@ export type OwnerPlanSettings = {
   readonly tauCloudEnabled: boolean;
   /** `BILLING_ENVIRONMENT`; unset or invalid binds no account, so every owner is `free`. */
   readonly environment: string | undefined;
-  /** `TAU_FREE_TIER_SYNC_ENABLED` outside production (charter D23): the free tier's sync gate. */
-  readonly freeTierSync: boolean;
 };
 
 export type OwnerPlan = { readonly plan: BillingTier; readonly limitBytes: number };
@@ -36,8 +34,8 @@ const ownerBatch = 1000;
 
 /**
  * Folds the owners' subscription rows to plans and allowances, as `storageLimitOf` computes them:
- * nothing without `canSyncFiles` (the free tier while D23's gate is closed, or an Enterprise override
- * that turns sync off), otherwise the tier's allowance.
+ * nothing without `canSyncFiles` (an Enterprise override that turns sync off), otherwise the tier's
+ * allowance.
  *
  * @param ownerIds - The owners to resolve.
  * @param rows - Their subscriptions in this environment, each owner's newest `paid_through` first.
@@ -60,7 +58,7 @@ export const ownerPlansOf = (
       }
       const { relevant, tier } = subscriptionTierOf(byOwner.get(ownerId) ?? [], settings.now);
       const override = tier === 'enterprise' ? relevant?.overrides?.['canSyncFiles'] : undefined;
-      const canSyncFiles = typeof override === 'boolean' ? override : tier !== 'free' || settings.freeTierSync;
+      const canSyncFiles = override !== false;
       return [ownerId, { plan: tier, limitBytes: canSyncFiles ? storageLimitBytesByTier[tier] : 0 }];
     }),
   );

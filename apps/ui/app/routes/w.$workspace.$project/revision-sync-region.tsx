@@ -45,7 +45,7 @@ import {
   GithubRequestError,
 } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
@@ -54,7 +54,7 @@ import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-co
 import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import {
   cloudUnavailableSentence,
   asksTauSignIn,
@@ -306,8 +306,8 @@ const authoritySentence = (githubAvailable: boolean | undefined): string =>
 /**
  * *Available on Pro*, with the route the rest of the app already uses (N4).
  *
- * Only an account the plan still refuses sees it — while D23's gate keeps the
- * free tier closed; an entitled account is told its allowance instead (D16).
+ * Only an account the plan refuses sees it; an entitled account, Free
+ * included, is told its allowance instead (D16).
  *
  * @param props - The upgrade verb the pane supplied, when this build has one.
  * @returns The label, or nothing on a build with no plans to sell.

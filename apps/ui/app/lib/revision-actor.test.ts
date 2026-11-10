@@ -13,9 +13,10 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deviceId } from '#lib/device-id.js';
-import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
-import { revisionUserActor, useRevisionSalt } from '#lib/revision-actor.js';
+import { deviceId } from '@taucad/ui-core/lib/device-id';
+import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
+import { revisionUserActor, revisionWho, useRevisionSalt } from '#lib/revision-actor.js';
+import type { RevisionPushRecord, RevisionWhoContext } from '#lib/revision-actor.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test.local/' } }));
@@ -163,5 +164,162 @@ describe('useRevisionSalt', () => {
       expect(result.current).toBe('e'.repeat(64));
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('revisionWho', () => {
+  const ada = { id: 'user-ada', name: 'Ada' };
+  const solo: RevisionWhoContext = { session: ada, projectId: 'prj_1', pushRecord: undefined, showAnonymousId: false };
+  const entry = (actor: string, source = 'user'): Readonly<{ revisionId: string; actor: string; source: string }> => ({
+    revisionId: 'rev-1',
+    actor,
+    source,
+  });
+  /* A3's slot: the record names who pushed each entry. */
+  const pushedBy =
+    (accountId: string, name: string): RevisionPushRecord['pushedBy'] =>
+    () => ({ kind: 'account', accountId, name });
+  const directory = new Map([
+    [ada.id, 'Ada'],
+    ['user-maya', 'Maya'],
+  ]);
+  const shared = (pushes?: RevisionPushRecord['pushedBy']): RevisionWhoContext => ({
+    ...solo,
+    pushRecord: { pushedBy: pushes ?? (() => undefined), memberName: (id) => directory.get(id), memberCount: 2 },
+  });
+
+  it('names an agent result Agent, never the model id', () => {
+    expect(revisionWho(entry('claude-opus-4', 'agent'), solo)).toEqual({ line: 'Agent', isYou: false, isAgent: true });
+    expect(revisionWho(entry('claude-opus-4', 'agent'), shared()).line).toBe('Agent');
+  });
+
+  it('reads L1–L4 as the signed-in person or no name on a single-person project', () => {
+    for (const actor of ['prj_1', 'tau-host', 'richard', 'maker@example.com']) {
+      expect(revisionWho(entry(actor), solo).line).toBe('');
+    }
+    expect(revisionWho(entry('prj_1'), solo).isYou).toBe(true);
+    expect(revisionWho(entry('tau-host'), solo).isYou).toBe(true);
+    expect(revisionWho(entry(ada.id), solo).isYou).toBe(true);
+  });
+
+  it('shows no name for an entry made on this device while signed out', () => {
+    expect(revisionWho(entry('tau-host'), { ...solo, session: undefined })).toEqual({
+      line: '',
+      isYou: false,
+      isAgent: false,
+    });
+  });
+
+  it('names a shared project entry made here You, and guesses no name from a recorded id (Q2)', () => {
+    expect(revisionWho(entry('prj_1'), shared()).line).toBe('You');
+    expect(revisionWho(entry('richard'), shared()).line).toBe('');
+  });
+
+  it('prefers the account that pushed an entry over whatever its trailer recorded (I2)', () => {
+    expect(revisionWho(entry('richard'), shared(pushedBy('user-maya', 'Maya')))).toEqual({
+      line: 'Maya',
+      isYou: false,
+      isAgent: false,
+    });
+    expect(revisionWho(entry('user-sam'), shared(pushedBy(ada.id, 'Ada'))).line).toBe('You');
+    /* One member: the pushing account is you, and the row shows no who line. */
+    expect(
+      revisionWho(entry('richard'), {
+        ...solo,
+        pushRecord: { pushedBy: pushedBy(ada.id, 'Ada'), memberName: () => undefined, memberCount: 1 },
+      }),
+    ).toEqual({ line: '', isYou: true, isAgent: false });
+  });
+
+  it('reads a pseudonym as Anonymous, with its hash only behind the debug setting (Q3)', () => {
+    expect(revisionWho(entry('anon:3fa9c1'), solo).line).toBe('Anonymous');
+    expect(revisionWho(entry('anon:3fa9c1'), { ...solo, showAnonymousId: true }).line).toBe('Anonymous · 3fa9c1');
+  });
+
+  it('names a commit Tau did not write by its author, and nothing else by a guess', () => {
+    expect(revisionWho({ ...entry('unknown', 'import'), authorName: 'octo-dev' }, solo).line).toBe('octo-dev');
+    expect(revisionWho(entry('unknown', 'import'), solo).line).toBe('');
+    expect(revisionWho(entry('github:12345'), solo).line).toBe('');
+  });
+
+  /* Blueprint A3 acceptance: on a one-member project every pushed entry is that member's, whatever its trailer says. */
+  it('resolves root, prj_x, tau-host and a forged Tau-Actor on a one-member project to that member', () => {
+    const one: RevisionWhoContext = {
+      ...solo,
+      projectId: 'prj_x',
+      pushRecord: {
+        pushedBy: pushedBy(ada.id, 'Ada'),
+        memberName: (id) => (id === ada.id ? 'Ada' : undefined),
+        memberCount: 1,
+      },
+    };
+    for (const actor of ['root', 'prj_x', 'tau-host', 'user-forged']) {
+      expect(revisionWho(entry(actor), one), actor).toEqual({ line: '', isYou: true, isAgent: false });
+    }
+    /* Read by someone else signed in, the member is still the one named, never the trailer. */
+    expect(revisionWho(entry('user-forged'), { ...one, session: { id: 'user-other' } }).isYou).toBe(false);
+  });
+
+  it('shows the account that pushed an entry recorded as another member, with recorded as beside it', () => {
+    expect(revisionWho(entry('user-maya'), shared(pushedBy('user-bea', 'Bea')))).toEqual({
+      line: 'Bea · recorded as Maya',
+      isYou: false,
+      isAgent: false,
+    });
+    expect(revisionWho(entry(ada.id), shared(pushedBy('user-maya', 'Maya'))).line).toBe('Maya · recorded as You');
+    /* Never folded away on a single-person read either. */
+    expect(
+      revisionWho(entry('user-maya'), {
+        ...solo,
+        pushRecord: { pushedBy: pushedBy(ada.id, 'Ada'), memberName: (id) => directory.get(id), memberCount: 1 },
+      }).line,
+    ).toBe('You · recorded as Maya');
+  });
+
+  it('reads a push the server withholds as Anonymous, and the owner reads the account recorded as Anonymous (Q3)', () => {
+    expect(
+      revisionWho(
+        entry('anon:3fa9c1'),
+        shared(() => ({ kind: 'anonymous' })),
+      ).line,
+    ).toBe('Anonymous');
+    expect(
+      revisionWho(
+        entry('anon:3fa9c1'),
+        shared(() => ({ kind: 'account', accountId: 'user-maya', name: 'Maya', recordedAnonymous: true })),
+      ),
+    ).toEqual({ line: 'Maya · recorded as Anonymous', isYou: false, isAgent: false });
+    /* A pseudonym the record did not mark for the owner stays a pseudonym. */
+    expect(revisionWho(entry('anon:3fa9c1'), shared(pushedBy('user-maya', 'Maya'))).line).toBe('Anonymous');
+  });
+
+  it('says a host device pushed it, on a line that names someone', () => {
+    const viaHost: RevisionPushRecord['pushedBy'] = () => ({
+      kind: 'account',
+      accountId: 'user-maya',
+      name: 'Maya',
+      viaDevice: true,
+    });
+    expect(revisionWho(entry('tau-host'), shared(viaHost)).line).toBe('Maya · by a cloud agent host');
+    expect(
+      revisionWho(
+        entry('anon:1'),
+        shared(() => ({ kind: 'anonymous', viaDevice: true })),
+      ).line,
+    ).toBe('Anonymous · by a cloud agent host');
+    expect(
+      revisionWho(entry('tau-host'), {
+        ...solo,
+        pushRecord: {
+          pushedBy: () => ({ kind: 'account', accountId: ada.id, name: 'Ada', viaDevice: true }),
+          memberName: () => undefined,
+          memberCount: 1,
+        },
+      }).line,
+    ).toBe('');
+  });
+
+  it('keeps an agent result Agent whoever pushed it', () => {
+    expect(revisionWho(entry('claude-opus-4', 'agent'), shared(pushedBy('user-maya', 'Maya'))).line).toBe('Agent');
   });
 });

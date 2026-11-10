@@ -5,7 +5,7 @@ import { safeDispose } from '@taucad/utils/dispose';
 // oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- web worker default import
 import ObjectStoreWorker from '#hooks/object-store.worker.js?worker';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 type ProjectManagerContext = {
   worker: Worker | undefined;

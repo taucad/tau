@@ -6,7 +6,7 @@ import type { ProjectListItem } from '#types/project-library.types.js';
 import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';

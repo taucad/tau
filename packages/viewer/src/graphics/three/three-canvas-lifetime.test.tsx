@@ -1,4 +1,5 @@
-import type { GraphicsEvent } from '#machines/graphics.machine.js';
+import { createActor, createAsyncLogic } from 'xstate';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, cleanup } from '@testing-library/react';
 import { Canvas, createRoot, _roots, flushSync as flushThreeSync } from '@react-three/fiber';
@@ -46,10 +47,16 @@ const cameraRig = {
   orthographicCamera,
   setClipPlanes: vi.fn(),
 };
-const graphicsRef = { send: vi.fn<(event: GraphicsEvent) => void>() };
+/** The graphics actor the canvas attaches to; each test starts a fresh one and records what reaches it. */
+const graphics = vi.hoisted(
+  (): {
+    current: ReturnType<typeof createActor<typeof graphicsMachine>> | undefined;
+    sent: string[];
+  } => ({ current: undefined, sent: [] }),
+);
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => cameraRig,
-  useGraphics: () => graphicsRef,
+  useGraphics: () => graphics.current,
 }));
 vi.mock('#graphics/three/scene.jsx', () => ({
   Scene: ({ children }: { readonly children: ReactNode }): ReactNode => children,
@@ -109,7 +116,18 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   };
 
   beforeEach(() => {
-    graphicsRef.send.mockClear();
+    graphics.sent = [];
+    graphics.current = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: {},
+        inspect(event) {
+          if (event.type === '@xstate.transition' && event.event.type.startsWith('canvas')) {
+            graphics.sent.push(event.event.type);
+          }
+        },
+      },
+    ).start();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frameId += 1;
@@ -512,8 +530,9 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect.soft(disposeCalls[0]).toHaveBeenCalledOnce();
       expect.soft(perspectiveCamera.coordinateSystem).toBe(WebGLCoordinateSystem);
       expect(root.store.getState().internal.active).toBe(false);
-      // No renderer status from the retired canvas: only its mount declaration, withdrawn at removal.
-      expect(graphicsRef.send.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted', 'canvasUnmounted']);
+      // No renderer status from the retired canvas: only its surface's attach, withdrawn at removal.
+      expect(graphics.sent).toEqual(['canvasAttached', 'canvasDetached']);
+      expect(graphics.current?.getSnapshot().context.canvas).toBeUndefined();
     },
   );
 });

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { FolderOpen, House, MemoryStick, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
@@ -54,7 +55,9 @@ function FileSystemInfo({
 
   return (
     <section aria-label='Storage' className='overflow-hidden rounded-xl border border-border bg-card'>
-      <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Storage</h2>
+      <Heading level={2} variant='label' className='border-b px-3 py-2 text-foreground'>
+        Storage
+      </Heading>
       <div className='flex items-center gap-2 p-3'>
         <Icon className='size-4 shrink-0 text-muted-foreground' />
         <div className='flex flex-col gap-0.5'>
@@ -195,7 +198,9 @@ export function DetailsPanelContent({
       <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         <div className='flex min-h-full flex-col gap-2'>
           <section aria-label='Project' className='overflow-hidden rounded-xl border border-border bg-card'>
-            <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Project</h2>
+            <Heading level={2} variant='label' className='border-b px-3 py-2 text-foreground'>
+              Project
+            </Heading>
             <div className='space-y-3 p-3'>
               {hasManifestIssue ? (
                 <p className='text-sm text-muted-foreground'>Repair tau.json to edit these details.</p>

@@ -54,7 +54,7 @@ Use each term for exactly one concept and keep engineering terms out of product 
 
 Use **Revision**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Discard**, **Work in**, **Sync**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, or HEAD as product vocabulary.
 
-Carry a refusal across the worker boundary as a `RevisionPortErrorCode`, never as a sentence: the page owns the words (`apps/ui/app/lib/revision-failure-copy.ts`) and a port or machine message is a diagnostic for logs and tests. `tau-lint/no-engineering-vocabulary-in-copy` enforces the banned vocabulary in toast copy.
+Carry a refusal across the worker boundary as a `RevisionPortErrorCode`, never as a sentence: the page owns the words (`apps/libs/ui-core/src/lib/revision-failure-copy.ts`) and a port or machine message is a diagnostic for logs and tests. `tau-lint/no-engineering-vocabulary-in-copy` enforces the banned vocabulary in toast copy.
 
 ### 2. Keep one immutable graph per project
 
@@ -346,33 +346,33 @@ Carry the server's own sentence as the error `message` whenever the answer has o
 
 Map the Hosted Remote's own refusals onto those classes. The table is exhaustive for the Hosted Remote's routes in `apps/api/app/api/git/` (`git-transport.ts`, `git.controller.ts`, `git.service.ts`, `git-lfs.service.ts`, `usage.controller.ts`); add a row in the same change as a new code. The third-party Git-endpoint proxy's codes (`GIT_PROXY_*`, `GIT_LFS_HANDLE_*`, `GIT_LFS_ACTION_REFUSED`, `GIT_LFS_OBJECT_TOO_LARGE`, `GIT_LFS_OBJECT_SIZE_MISMATCH`) are owned by `git-proxy.controller.ts` and classified by status alone.
 
-| Server code                       | Status                                 | Client class                                                                          |
-| --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------- |
-| `UNAUTHORIZED`                    | 401                                    | `REMOTE_UNAUTHORIZED`                                                                 |
-| `GIT_SERVICE_UNKNOWN`             | 400                                    | none; stock git only                                                                  |
-| `GIT_SYNC_NOT_ENTITLED`           | 403                                    | `REMOTE_NOT_ENTITLED`                                                                 |
-| `PROJECT_ROLE_INSUFFICIENT`       | 403                                    | `REMOTE_FORBIDDEN`                                                                    |
-| `PROJECT_NOT_FOUND`               | 404                                    | `REMOTE_NOT_FOUND`                                                                    |
-| `GIT_REPOSITORY_NOT_FOUND`        | 404                                    | `REMOTE_NOT_FOUND`                                                                    |
-| `GIT_REPOSITORY_DELETED`          | 410                                    | `REMOTE_NOT_FOUND`, terminal                                                          |
-| `GIT_QUOTA_EXCEEDED`              | 413                                    | `REMOTE_QUOTA_EXCEEDED`                                                               |
-| `GIT_REPOSITORY_CEILING_EXCEEDED` | 413                                    | `REMOTE_QUOTA_EXCEEDED`                                                               |
-| `GIT_LFS_QUOTA_EXCEEDED`          | 413 on the LFS batch                   | `LfsQuotaError` with the largest files; settled per ref as a storage refusal          |
-| `GIT_LFS_SIZE_MISMATCH`           | 400 on the LFS batch                   | none; the push fails and is retried                                                   |
-| `GIT_LFS_OBJECT_MISSING`          | 404 on LFS verify                      | none; the push fails and is retried                                                   |
-| `GIT_PUSH_NOT_COMMITTABLE`        | 422                                    | `REMOTE_REJECTED`                                                                     |
-| `GIT_RATE_LIMITED`                | 429 + `Retry-After`                    | `REMOTE_UNAVAILABLE`; waits out `Retry-After` without escalating the backoff          |
-| `GIT_HYDRATE_BUDGET_EXHAUSTED`    | 429 + `Retry-After`                    | `REMOTE_UNAVAILABLE`; waits out `Retry-After` (the rest of the daily window)          |
-| `GIT_REPOSITORY_INCOMPLETE`       | 500                                    | `REMOTE_DAMAGED`, terminal — operator repair                                          |
-| `GIT_PUSH_RACE_LOST`              | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                       |
-| `GIT_LEASE_DISK_FULL`             | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                       |
-| `GIT_LEASE_OWNER_BUSY`            | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                       |
-| `SERVICE_UNAVAILABLE`             | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; a cloud host's credential could not be checked                  |
-| `GIT_REF_REMOVAL_OWNER_ONLY`      | 403 on the removal verb                | none; the removal surface's own sentence (`apps/ui/app/lib/revision-failure-copy.ts`) |
-| `GIT_REF_NOT_REMOVABLE`           | 400 on the removal verb                | none; the removal surface's own sentence                                              |
-| `GIT_REF_NOT_FOUND`               | 404 on the removal verb                | none; the name or line is already gone                                                |
-| `GIT_REF_PUBLISHED`               | 409 on the removal verb                | none; the confirmation showing the publication the name serves (rule 14)              |
-| `USAGE_RATE_LIMITED`              | 429 + `Retry-After` on the usage route | none; the Sync row shows no usage figure until the next read                          |
+| Server code                       | Status                                 | Client class                                                                                    |
+| --------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                    | 401                                    | `REMOTE_UNAUTHORIZED`                                                                           |
+| `GIT_SERVICE_UNKNOWN`             | 400                                    | none; stock git only                                                                            |
+| `GIT_SYNC_NOT_ENTITLED`           | 403                                    | `REMOTE_NOT_ENTITLED`                                                                           |
+| `PROJECT_ROLE_INSUFFICIENT`       | 403                                    | `REMOTE_FORBIDDEN`                                                                              |
+| `PROJECT_NOT_FOUND`               | 404                                    | `REMOTE_NOT_FOUND`                                                                              |
+| `GIT_REPOSITORY_NOT_FOUND`        | 404                                    | `REMOTE_NOT_FOUND`                                                                              |
+| `GIT_REPOSITORY_DELETED`          | 410                                    | `REMOTE_NOT_FOUND`, terminal                                                                    |
+| `GIT_QUOTA_EXCEEDED`              | 413                                    | `REMOTE_QUOTA_EXCEEDED`                                                                         |
+| `GIT_REPOSITORY_CEILING_EXCEEDED` | 413                                    | `REMOTE_QUOTA_EXCEEDED`                                                                         |
+| `GIT_LFS_QUOTA_EXCEEDED`          | 413 on the LFS batch                   | `LfsQuotaError` with the largest files; settled per ref as a storage refusal                    |
+| `GIT_LFS_SIZE_MISMATCH`           | 400 on the LFS batch                   | none; the push fails and is retried                                                             |
+| `GIT_LFS_OBJECT_MISSING`          | 404 on LFS verify                      | none; the push fails and is retried                                                             |
+| `GIT_PUSH_NOT_COMMITTABLE`        | 422                                    | `REMOTE_REJECTED`                                                                               |
+| `GIT_RATE_LIMITED`                | 429 + `Retry-After`                    | `REMOTE_UNAVAILABLE`; waits out `Retry-After` without escalating the backoff                    |
+| `GIT_HYDRATE_BUDGET_EXHAUSTED`    | 429 + `Retry-After`                    | `REMOTE_UNAVAILABLE`; waits out `Retry-After` (the rest of the daily window)                    |
+| `GIT_REPOSITORY_INCOMPLETE`       | 500                                    | `REMOTE_DAMAGED`, terminal — operator repair                                                    |
+| `GIT_PUSH_RACE_LOST`              | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                                 |
+| `GIT_LEASE_DISK_FULL`             | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                                 |
+| `GIT_LEASE_OWNER_BUSY`            | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; retried and self-clearing                                                 |
+| `SERVICE_UNAVAILABLE`             | 503 + `Retry-After: 5`                 | `REMOTE_UNAVAILABLE`; a cloud host's credential could not be checked                            |
+| `GIT_REF_REMOVAL_OWNER_ONLY`      | 403 on the removal verb                | none; the removal surface's own sentence (`apps/libs/ui-core/src/lib/revision-failure-copy.ts`) |
+| `GIT_REF_NOT_REMOVABLE`           | 400 on the removal verb                | none; the removal surface's own sentence                                                        |
+| `GIT_REF_NOT_FOUND`               | 404 on the removal verb                | none; the name or line is already gone                                                          |
+| `GIT_REF_PUBLISHED`               | 409 on the removal verb                | none; the confirmation showing the publication the name serves (rule 14)                        |
+| `USAGE_RATE_LIMITED`              | 429 + `Retry-After` on the usage route | none; the Sync row shows no usage figure until the next read                                    |
 
 `GIT_REPOSITORY_INCOMPLETE` is the one server answer no retry clears: the manifest names a pack the store does not hold, so only an operator restore repairs the repository. Keep it terminal and watch for it.
 
@@ -386,7 +386,7 @@ Render the reason on every surface showing **Not backed up**, `failed`, `reconne
 
 Render a storage refusal with its largest-files list and choose its one action by the caller's relationship to the project: the owner on Free gets _Upgrade_; the owner on the top tier gets the file-list action only; a collaborator gets the owner-directed sentence with the file list and no plan action. The per-repository ceiling is a hydration guard that no plan raises, so a ceiling refusal (`isCeilingRefusal`) gets the file list and no plan action whoever asks. Render a revoked collaborator's refusal as the calm **Access removed** state with the same owner-directed sentence, never as a backup failure.
 
-Consult `canSyncFiles` before offering Tau Cloud or creating it by default (rule 11); a Git remote, GitHub included, is offered on every plan. Every plan carries an account storage allowance (`storageLimitBytesByTier` in `@taucad/billing`): 1 GiB on Free, 10 GiB on Pro, 100 GiB on Enterprise. The upgrade affordance answers that allowance, never the tier. Free carries `canSyncFiles` only behind the D23 gate `TAU_FREE_TIER_SYNC_ENABLED` (default closed), which the API ignores under `NODE_ENV=production` until the go-live commit removes that guard; until then a Free push is refused `GIT_SYNC_NOT_ENTITLED` (rule 11). Show the existing upgrade affordance to an account the entitlement does not admit, and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
+Consult `canSyncFiles` before offering Tau Cloud or creating it by default (rule 11); a Git remote, GitHub included, is offered on every plan. Every plan carries an account storage allowance (`storageLimitBytesByTier` in `@taucad/billing`): 1 GiB on Free, 10 GiB on Pro, 100 GiB on Enterprise. The upgrade affordance answers that allowance, never the tier. Every plan, Free included, carries `canSyncFiles`; only an Enterprise override can turn it off, and a push from an account without it is refused `GIT_SYNC_NOT_ENTITLED` (rule 11). Show the existing upgrade affordance to an account the entitlement does not admit, and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
 
 Answer git-facing refusals as `text/plain` when the request carries no `Origin`, so stock Git prints the sentence; keep the JSON envelope for browsers and carry CORS headers on every 401.
 

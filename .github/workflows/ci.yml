@@ -4,8 +4,11 @@ on:
   push:
     branches: [main] # Only run on pushes to main branch
   pull_request:
-    # PRs vs `main`: full CI. PRs targeting `production` only (trail PR): skip
+    # PRs vs `main`: the fast lanes (plan, workspace, the seven affected lanes and the
+    # PR-only reports); the merge queue runs everything. A draft runs nothing until it is
+    # marked ready (`ready_for_review`). PRs targeting `production` only (trail PR): skip
     # checks — release gate is staging smoke + human merge.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches-ignore:
       - production
   # The merge queue runs the required checks on the exact commit that will land:
@@ -19,6 +22,8 @@ env:
   pnpm_config_verify_deps_before_run: warn
   # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
   # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  # Same-repository pull request jobs granted `id-token: write` swap the read token for a session that
+  # writes only their own pull request's entries (tau-cloud CP-5b; setup-nx `nx-guard.ts`, item 5).
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
   TAU_API_URL: http://localhost:4000
@@ -52,6 +57,9 @@ jobs:
   # workflow may name a project.
   plan:
     name: Plan affected lanes
+    # A draft pull request runs no CI (the runner pool is the queue's bottleneck,
+    # 2026-11-10); marking it ready runs this workflow.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -60,6 +68,7 @@ jobs:
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
+      api-image: ${{ steps.plan.outputs.api-image }}
       billing: ${{ steps.plan.outputs.billing }}
       cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
@@ -110,9 +119,13 @@ jobs:
           # factory); Nx marks each affected when any dependency of it changes. Billing
           # contracts: the project that owns them (`api-billing`) or one it depends on changed.
           # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
+          # API image: the project with the `docker:smoke` target (`api`) or one it depends on
+          # changed, so a change to another `scope:api` project (an end-to-end suite, `files`)
+          # does not rebuild the production image.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"]},
+             "api-image": {"targets": ["docker:smoke"]},
              "billing": {"targets": ["test:billing-foundation"]},
              "cli-e2e": {"targets": ["test:scenarios"]},
              "size": {"targets": ["size"]},
@@ -166,17 +179,37 @@ jobs:
             if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi
             echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec and CLI end-to-end lanes skip; queue service lanes: $QUEUE_LANES."
           fi
+          # A pull request runs the fast lanes only. The service, formal, browser, GeoSpec,
+          # CLI end-to-end and standalone lanes run in the merge queue, on the exact commit
+          # that lands: a PR run of them proved nothing the queue does not prove again, and
+          # PR runs held about six times the queue's runner minutes when the 60-job pool was
+          # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
+          # test on the PRs that affect the API image.
+          api_image=$(flag api-image)
+          standalone=$(flag standalone)
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            run_api=false
+            run_billing=false
+            formal=false
+            browser=false
+            geospec_examples=false
+            cli_e2e=false
+            browser_projects='[]'
+            standalone=false
+            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end and standalone lanes run in the merge queue."
+          fi
           {
             echo "apps=$(jq -c '.apps' <<< "$lanes")"
             echo "browser-projects=$browser_projects"
             echo "api=$run_api"
+            echo "api-image=$api_image"
             echo "billing=$run_billing"
             echo "cli-e2e=$cli_e2e"
             echo "size=$(flag size)"
             echo "formal=$formal"
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
-            echo "standalone=$(flag standalone)"
+            echo "standalone=$standalone"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes this plan found affected (`api`,
           # `billing-e2e`), and the merge-queue run this push reused with that run's
@@ -205,10 +238,12 @@ jobs:
   # verdict (`queue-verdict`); it still reports, so `staging.yml` reads it.
   workspace:
     name: Validate workspace
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions:
+      id-token: write # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: read
       actions: read
     steps:
@@ -262,9 +297,11 @@ jobs:
   # the required `affected` gate passes on the plan's own verdict.
   affected-lane:
     name: Affected (${{ matrix.lane }})
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -305,6 +342,47 @@ jobs:
       - name: Check version plans
         if: matrix.lane == 'build' && github.event_name == 'pull_request'
         run: pnpm nx release plan:check
+
+      # Pinned third-party downloads come from the Actions cache, so only a pin change asks their
+      # origin (Brain research/ci-flake-classes.md class 1, R3: during a GitHub Releases outage the
+      # wasi-sdk of `prepare` and the CPython of `seed` failed 34 lane jobs in two days). The lane's
+      # task graph, for the same targets as the step below, decides which entries it needs, so a
+      # lane that runs neither task restores nothing (the kernel seeds are about 350 MB, the
+      # wasi-sdk archive 125 MB); the test shards read the whole affected `test` graph, as the
+      # deal happens in the step below. Keys digest the pins themselves
+      # (scripts/src/ci-pinned-downloads.ts). The consumers re-verify every byte against its pin,
+      # and on a miss they download as before; `ci-pinned-downloads.yml` saves the entries from
+      # `main`, whose cache scope pull requests and the merge queue restore from.
+      - name: Find the lane's pinned downloads
+        id: pins
+        if: steps.queue.outputs.run-id == ''
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          graph="$RUNNER_TEMP/lane-graph.json"
+          case "$LANE" in
+            lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
+            typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size --graph="$graph" > /dev/null ;;
+            pkgcheck) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
 
       # Nx Affected runs only tasks affected by the changes in this PR/commit.
       # Browser-backed targets are not in this list — they run nightly in
@@ -484,7 +562,12 @@ jobs:
           CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
           CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
           REUSED: ${{ needs.plan.outputs.reused }}
+          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: |
+          if [ "$DRAFT" = true ]; then
+            echo "Draft pull request: no CI runs until it is marked ready for review."
+            exit 0
+          fi
           test "$PLAN_RESULT" = success
           if [ -n "$REUSED" ]; then
             echo "Merge-queue run $REUSED passed every affected lane on this commit."
@@ -509,6 +592,7 @@ jobs:
     if: needs.plan.outputs.formal == 'true'
     timeout-minutes: 15
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -557,6 +641,7 @@ jobs:
     if: needs.plan.outputs.geospec-examples == 'true'
     timeout-minutes: 30
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -757,7 +842,7 @@ jobs:
     name: API Docker smoke test
     runs-on: ubuntu-latest
     needs: [plan]
-    if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
+    if: github.event_name == 'pull_request' && needs.plan.outputs.api-image == 'true'
     # A production API refuses to boot without Redis, a reachable database and a schema at
     # this build's migration head, so the smoke test brings both up and runs the image's
     # own release command before starting it.
@@ -941,6 +1026,7 @@ jobs:
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'

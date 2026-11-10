@@ -16,14 +16,14 @@ import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { recordApiRequestId } from '#lib/api-request-id.js';
-import { holdCloudOpen } from '#lib/cloud-open-lock.js';
+import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
@@ -623,7 +623,7 @@ export type TauCloudEligibility = Readonly<{
   auth: 'authed' | 'anonymous' | 'indeterminate';
   /** Whether the plan is known yet; nothing is decided before it is. */
   isResolved: boolean;
-  /** W8's entitlement: closed for Free while the D23 gate is. */
+  /** W8's entitlement: closed only for a plan that cannot sync (an Enterprise override). */
   canSyncFiles: boolean;
 }>;
 

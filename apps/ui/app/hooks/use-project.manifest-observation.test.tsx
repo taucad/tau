@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { cadMachine } from '#machines/cad.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { AppRuntimeClient, KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
@@ -17,9 +17,9 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
+import { withAuthorityDigest } from '@taucad/ui-core/lib/composed-view-client.fixture';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 
 const fixture = vi.hoisted(() => {
@@ -75,8 +75,10 @@ vi.mock('#hooks/use-file-manager.js', () => {
 });
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({}) }));
 vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => fixture.query }));
-vi.mock('#services/parameter-set-service.js', () => ({ createParameterSetService: () => fixture.parameter }));
-vi.mock('#lib/compute-reuse-preference.js', () => ({ useComputeReuseMode: () => 'local' }));
+vi.mock('@taucad/ui-core/services/parameter-set-service', () => ({
+  createParameterSetService: () => fixture.parameter,
+}));
+vi.mock('@taucad/ui-core/lib/compute-reuse-preference', () => ({ useComputeReuseMode: () => 'local' }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 it('should show manifest observation closure and retry without rewriting the healthy manifest', async () => {

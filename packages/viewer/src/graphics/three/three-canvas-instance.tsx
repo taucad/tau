@@ -1,12 +1,11 @@
 import type { RootState } from '@react-three/fiber';
-import { Canvas, flushSync as flushThreeSync, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
+import { useSelector } from '@xstate/react';
 import { flushSync } from 'react-dom';
+import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { WebGPUCoordinateSystem } from 'three';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { RendererInstance } from '#graphics/three/renderer.js';
-import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
-import type { WebGPURenderer } from 'three/webgpu';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
@@ -31,14 +30,12 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
-import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
-import { viewerContextLost, viewerRendererCreated } from '#lib/viewer-events.js';
-import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
-import type { FinishViewerLoadSpan } from '#lib/viewer-load-timing.js';
+import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
-
-/** The part of a `GPUDevice` that reports its loss; `lib.dom` baselines may predate the WebGPU types. */
-type WebGpuLossObservable = Readonly<{ lost: Promise<Readonly<{ reason: string; message: string }>> }>;
+import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
+import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
+import type { CanvasEvent, CanvasFailure, CanvasSnapshot } from '#machines/canvas.machine.js';
+import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -48,78 +45,11 @@ type WebGpuLossObservable = Readonly<{ lost: Promise<Readonly<{ reason: string; 
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Parent bumps canvas key — remount this instance fresh after real device/context loss retry. */
   readonly onRetry: () => void;
-  /** Receives the canvas's CSS pixel area and drawing-buffer pixel ratio when they change. */
-  readonly onSurfaceResize?: (cssPixels: number, pixelRatio: number) => void;
+  /** The viewer's WebGL context budget; the canvas actor holds a slot in it for the canvas's life. */
+  readonly webglContext?: ActorRefFrom<typeof webglContextMachine>;
+  /** The surface estimate the viewer was admitted with, held until the canvas reports its own size. */
+  readonly admittedBytes?: number;
 };
-
-/**
- * Reports once that the stage's first frame has reached the screen. The frame's GPU work is submitted when its
- * callbacks run, but the page only paints it once the compositor produces frames again: on a software adapter the
- * browser first compiles every pipeline, which can hold the compositor for seconds. A second animation frame after
- * that submission is the earliest point the page can show, and answer input over, the drawn stage. A canvas with no
- * area draws nothing, so observation starts only once it has one.
- * @param props - The callback to run once the first frame is on screen.
- * @param props.onPresented - Called once, two animation frames after the first frame with area was submitted.
- * @returns Nothing; the component only observes.
- */
-function FirstFramePresented({ onPresented }: Readonly<{ onPresented: () => void }>): undefined {
-  const invalidate = useThree((state) => state.invalidate);
-  const hasArea = useThree((state) => state.size.width > 0 && state.size.height > 0);
-  const submittedRef = useRef(false);
-  const requestRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (hasArea) {
-      // The canvas may have drawn before this observer subscribed; on demand, ask for the one frame it observes.
-      invalidate();
-    }
-  }, [hasArea, invalidate]);
-  useEffect(
-    () => () => {
-      if (requestRef.current !== undefined) {
-        cancelAnimationFrame(requestRef.current);
-      }
-    },
-    [],
-  );
-  // After the final encoding (3.5) and the render-loop observer (5); requests no frame beyond the one above.
-  useFrame((state) => {
-    if (submittedRef.current || state.size.width === 0 || state.size.height === 0) {
-      return;
-    }
-    submittedRef.current = true;
-    requestRef.current = requestAnimationFrame(() => {
-      requestRef.current = requestAnimationFrame(() => {
-        requestRef.current = undefined;
-        onPresented();
-      });
-    });
-  }, 6);
-  return undefined;
-}
-
-/** Reports the canvas's surface size from inside the R3F root, on mount and whenever it changes. */
-function SurfaceSizeReporter({
-  onSurfaceResize,
-}: Readonly<{
-  onSurfaceResize: (cssPixels: number, pixelRatio: number) => void;
-}>): undefined {
-  const cssPixels = useThree((state) => state.size.width * state.size.height);
-  const pixelRatio = useThree((state) => state.viewport.dpr);
-  useEffect(() => {
-    onSurfaceResize(cssPixels, pixelRatio);
-  }, [onSurfaceResize, cssPixels, pixelRatio]);
-  return undefined;
-}
-
-/**
- * The surface reporter for a canvas whose owner wants its size, mounted only then.
- * @param onSurfaceResize - The owner's callback, if any.
- * @returns The reporter, or nothing.
- */
-const renderSurfaceSizeReporter = (
-  onSurfaceResize: ((cssPixels: number, pixelRatio: number) => void) | undefined,
-): React.JSX.Element | undefined =>
-  onSurfaceResize ? <SurfaceSizeReporter onSurfaceResize={onSurfaceResize} /> : undefined;
 
 /**
  * Sets R3F's pointer rays with {@link setRaycasterFromCamera} after whichever compute the root settled on: its own, or
@@ -149,15 +79,28 @@ function CanvasRendererLifetime({ factory }: { readonly factory: TauR3fGlFactory
 }
 
 /**
- * One R3F `<Canvas>` mount plus lifecycle state tied to that GPU binding (`isCanvasReady`, loss handlers).
- * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}` so teardown listeners never update a survivor instance.
+ * Rebuilds the error a failed canvas hands to the viewer's error boundary, which remounts on WebGL only for a WebGPU
+ * initialization error.
+ * @param failure - The canvas actor's recorded failure.
+ * @returns The error to throw.
+ */
+const failureError = (failure: CanvasFailure): Error =>
+  failure.kind === 'webgpu-initialization'
+    ? new WebGpuInitializationError(failure.message)
+    : new Error(failure.message);
+
+/**
+ * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
+ * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
+ * the canvas, its context-lost fallback or its failure from that actor's state.
+ * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}`, so each mount is a new canvas actor.
  * @public
  */
 export function ThreeCanvasInstance({
   children,
   graphicsBackend,
   onRetry,
-  onSurfaceResize,
+
   enableGizmo = false,
   enableGrid = false,
   enableAxes = false,
@@ -171,6 +114,8 @@ export function ThreeCanvasInstance({
   postProcessingSettings,
   zoomSpeed = 2,
   gizmoContainer,
+  webglContext,
+  admittedBytes,
   ...canvasProperties
 }: ThreeCanvasInstanceProps): React.JSX.Element {
   const dpr = resolveViewerPixelRatio();
@@ -179,15 +124,26 @@ export function ThreeCanvasInstance({
   const isTauDebugEnabled = useViewerFeature('tauDebug');
   const canvasId = useId();
   const graphicsRef = useGraphics();
-  const [initializedRenderer, setInitializedRenderer] = useState<{
-    factory: TauR3fGlFactory;
-    backend: ResolvedGraphicsBackend;
-  }>();
-  const [isContextLost, setIsContextLost] = useState(false);
-  const [rendererError, setRendererError] = useState<Error>();
-  const [presentedFactory, setPresentedFactory] = useState<TauR3fGlFactory>();
+  const canvasRef = useSelector(graphicsRef, (snapshot) =>
+    snapshot.context.canvas?.canvasId === canvasId ? snapshot.context.canvas.ref : undefined,
+  );
+  const phase = useSelector(canvasRef, (snapshot) => snapshot?.value);
+  const failure = useSelector(canvasRef, (snapshot) => snapshot?.context.failure);
+  const isContextLost = phase === 'lost';
+  const isCanvasReady = phase === 'ready' || phase === 'presented';
   const cameraRig = useCameraRig();
-  const rootRef = useRef<RootState | undefined>(undefined);
+  /** The live R3F root, kept so a surface that re-attaches (a Suspense reveal) hosts its new canvas actor on it. */
+  const rootRef = useRef<CanvasHostRoot | undefined>(undefined);
+  /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
+  const sendToCanvas = useCallback(
+    (event: CanvasEvent): void => {
+      const { canvas } = graphicsRef.getSnapshot().context;
+      if (canvas?.canvasId === canvasId) {
+        canvas.ref.send(event);
+      }
+    },
+    [canvasId, graphicsRef],
+  );
   const resize = useMemo(
     () => ({
       // React-use-measure uses the scroll debounce for native element resizes too.
@@ -198,7 +154,7 @@ export function ThreeCanvasInstance({
           : class extends ResizeObserver {
               public constructor(callback: ResizeObserverCallback) {
                 super((entries, observer) => {
-                  const previousSize = rootRef.current?.get().size;
+                  const previousSize = rootRef.current?.root.get().size;
                   // Commit both React roots before drawing: the camera, composer and gizmo
                   // must see the new viewport in this same prepaint ResizeObserver delivery.
                   flushThreeSync(() => {
@@ -206,7 +162,7 @@ export function ThreeCanvasInstance({
                       callback(entries, observer);
                     });
                   });
-                  const state = rootRef.current?.get();
+                  const state = rootRef.current?.root.get();
                   if (state && state.size !== previousSize && state.size.width > 0 && state.size.height > 0) {
                     const render = (): void => {
                       state.advance(performance.now(), false);
@@ -231,66 +187,47 @@ export function ThreeCanvasInstance({
   const glProperty = useMemo(
     () =>
       createTauR3fGlProp(graphicsBackend, [cameraRig.perspectiveCamera, cameraRig.orthographicCamera], {
-        onCreateError: setRendererError,
+        onCreateError(error) {
+          sendToCanvas({
+            type: 'rendererFailed',
+            failure: {
+              kind: error instanceof WebGpuInitializationError ? 'webgpu-initialization' : 'renderer',
+              message: error.message,
+            },
+          });
+        },
         preserveDrawingBuffer: readableCanvas,
       }),
-    [cameraRig, graphicsBackend, readableCanvas],
+    [cameraRig, graphicsBackend, readableCanvas, sendToCanvas],
   );
 
-  const isCanvasReady = initializedRenderer?.factory === glProperty;
-  const isFirstFramePresented = presentedFactory === glProperty;
-  // Load spans for this factory's mount: commit to `onCreated`, then `onCreated` to the first presented frame.
-  const loadSpansRef = useRef<{
-    factory?: TauR3fGlFactory;
-    finishMount?: FinishViewerLoadSpan;
-    finishFirstFrame?: FinishViewerLoadSpan;
-  }>({});
-  useLayoutEffect(() => {
-    if (isContextLost) {
-      return;
-    }
-    const spans: typeof loadSpansRef.current = {
-      factory: glProperty,
-      finishMount: beginViewerLoadSpan('canvas.mount'),
-    };
-    loadSpansRef.current = spans;
-    return () => {
-      spans.finishMount?.('cancelled');
-      spans.finishFirstFrame?.('cancelled');
-    };
-  }, [glProperty, isContextLost]);
-  const markPresented = useCallback(() => {
-    if (loadSpansRef.current.factory === glProperty) {
-      loadSpansRef.current.finishFirstFrame?.();
-    }
-    // The factory is a function: pass it through an updater so React stores it rather than calling it.
-    setPresentedFactory(() => glProperty);
-    // The stage reads this to stop being busy (`ViewerStage` sets `aria-busy` on its canvas region).
-    graphicsRef.send({ type: 'rendererPresented', canvasId });
-  }, [canvasId, glProperty, graphicsRef]);
-  // Only a canvas that draws frames makes the stage wait for one. Declared in the commit that mounts it, so the stage
-  // is never painted as ready in between; a lost context's fallback draws no frames, so it ends the wait.
-  useLayoutEffect(() => {
-    if (isContextLost) {
-      return;
-    }
-    graphicsRef.send({ type: 'canvasMounted', canvasId });
-    return () => {
-      graphicsRef.send({ type: 'canvasUnmounted', canvasId });
-    };
-  }, [canvasId, glProperty, graphicsRef, isContextLost]);
-  useEffect(() => {
-    if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
-      return;
-    }
-    graphicsRef.send({
-      type: 'rendererInitialized',
-      payload: { canvasId, backend: initializedRenderer.backend },
-    });
-    return () => {
-      graphicsRef.send({ type: 'rendererRemoved', canvasId });
-    };
-  }, [canvasId, glProperty, graphicsRef, initializedRenderer, isContextLost]);
+  // The surface attaches its canvas actor in the commit that mounts it, so the stage is never painted as ready in
+  // between, and detaches it when this mount leaves; the context-lost fallback keeps the actor (and its budget). A
+  // Suspense boundary that hides and reveals this mount detaches and re-attaches the surface while this mount, and
+  // its R3F root, live on without a second `onCreated`. The detach records how far the renderer got, and the
+  // re-attached surface's new canvas actor resumes from there: lost again, or hosted on the root it already has.
+  const detachedPhase = useRef<CanvasSnapshot['value'] | undefined>(undefined);
+  const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
+    (element) => {
+      if (!element) {
+        const { canvas } = graphicsRef.getSnapshot().context;
+        detachedPhase.current = canvas?.canvasId === canvasId ? canvas.ref.getSnapshot().value : undefined;
+        graphicsRef.send({ type: 'canvasDetached', canvasId });
+        return;
+      }
+      const resumed = detachedPhase.current;
+      detachedPhase.current = undefined;
+      const reattached = resumed === 'ready' || resumed === 'presented' || resumed === 'lost';
+      graphicsRef.send({ type: 'canvasAttached', canvasId, kind: 'canvas', webglContext, admittedBytes, reattached });
+      const held = rootRef.current;
+      if (resumed === 'lost') {
+        sendToCanvas({ type: 'contextLost' });
+      } else if (reattached && held && !held.isRetired()) {
+        sendToCanvas(canvasHostCreated(held));
+      }
+    },
+    [admittedBytes, canvasId, graphicsRef, sendToCanvas, webglContext],
+  );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
     (canvas) => {
@@ -322,77 +259,29 @@ export function ThreeCanvasInstance({
       if (glProperty.isRetired()) {
         return;
       }
-      rootRef.current = state;
-      const loadSpans = loadSpansRef.current;
-      if (loadSpans.factory === glProperty) {
-        loadSpans.finishMount?.();
-        loadSpans.finishFirstFrame ??= beginViewerLoadSpan('frame.first');
-      }
+      const held: CanvasHostRoot = { root: state, isRetired: glProperty.isRetired };
+      rootRef.current = held;
       installTauPointerRays(state);
+      const created = canvasHostCreated(held);
       // R3F types its renderer as WebGL even when the factory supplies WebGPU.
       const renderer = state.gl as RendererInstance;
-
-      if ('isWebGPURenderer' in renderer) {
-        const webGpuRenderer = renderer;
-        const previousOnDeviceLost = webGpuRenderer.onDeviceLost;
-        webGpuRenderer.onDeviceLost = (
-          info: Parameters<InstanceType<typeof WebGPURenderer>['onDeviceLost']>[0],
-        ): void => {
-          if (glProperty.isRetired()) {
-            return;
-          }
-          previousOnDeviceLost.call(webGpuRenderer, info);
-          viewerContextLost('webgpu');
-          setIsContextLost(true);
-        };
-        // Three ignores a loss whose reason is "destroyed", taking it for its own `dispose()`. Only this factory disposes
-        // the renderer, and it retires first, so a destroyed device on a live canvas was revoked by the browser: a GPU
-        // process that cannot allocate the canvas's swap chain (Chromium on a software adapter) destroys the device right
-        // after the first frame. Nothing would draw again, so the canvas is remounted on WebGL, as for a failed start.
-        const { device } = webGpuRenderer.backend as { readonly device?: WebGpuLossObservable };
-        if (device) {
-          // async-iife: bootstrap -- A canvas callback cannot await a loss that may never come; it only reports one.
-          void (async (): Promise<void> => {
-            const info = await device.lost;
-            if (info.reason !== 'destroyed' || glProperty.isRetired()) {
-              return;
-            }
-            reportWebGpuCanvasLoss();
-            setRendererError(
-              new WebGpuInitializationError(`The browser destroyed the WebGPU device: ${info.message}`, {
-                cause: info,
-              }),
-            );
-          })();
-        }
-      } else {
-        renderer.domElement.addEventListener('webglcontextlost', (event): void => {
-          if (glProperty.isRetired()) {
-            return;
-          }
-          event.preventDefault();
-          viewerContextLost('webgl');
-          setIsContextLost(true);
-        });
-      }
-
-      const backend = renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
-      viewerRendererCreated(backend);
-      setInitializedRenderer({ factory: glProperty, backend });
+      viewerRendererCreated(created.backend, () => ({
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures,
+      }));
+      sendToCanvas(created);
     },
-    [glProperty],
+    [glProperty, sendToCanvas],
   );
 
-  if (rendererError) {
-    // The renderer never existed: hand the failure to the viewer's `WebglErrorBoundary` fallback.
-    throw rendererError;
+  if (failure) {
+    // The renderer never existed or its device is gone: hand the failure to the viewer's `WebglErrorBoundary` fallback.
+    throw failureError(failure);
   }
 
-  if (isContextLost) {
-    return <GraphicsContextLostFallback onRetry={onRetry} />;
-  }
-
-  return (
+  const surface = isContextLost ? (
+    <GraphicsContextLostFallback onRetry={onRetry} />
+  ) : (
     <Canvas
       // Spread consumer props before Tau policy props so callers cannot shadow `gl`, `dpr`, `frameloop`, or `onCreated`.
       {...canvasProperties}
@@ -431,12 +320,17 @@ export function ThreeCanvasInstance({
           </SceneOverlay>
         </OverlayDepthProvider>
         {isCanvasReady ? <ActorBridge /> : null}
-        {isCanvasReady && !isFirstFramePresented ? <FirstFramePresented onPresented={markPresented} /> : null}
-        {renderSurfaceSizeReporter(onSurfaceResize)}
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />
         ) : null}
       </ThreeGraphicsBackendProvider>
     </Canvas>
+  );
+
+  // The wrapper spans the canvas and its context-lost fallback, so the canvas actor outlives the swap to the fallback.
+  return (
+    <div ref={attachSurface} className='contents'>
+      {surface}
+    </div>
   );
 }

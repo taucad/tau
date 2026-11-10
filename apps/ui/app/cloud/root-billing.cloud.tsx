@@ -4,14 +4,14 @@ import { useSession } from '@better-auth-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import type { WirePaymentAction } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { ENV } from '#environment.config.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import {
   cancelPaymentAction,
   followPaymentRedirect,

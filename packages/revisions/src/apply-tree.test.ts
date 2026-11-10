@@ -1033,8 +1033,8 @@ describe('the entry closure of a tree write (D10)', () => {
         outcomes.push(outcome);
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree', signal: controller.signal }),
     ).rejects.toThrow();
-    /* It tore the checkout, so it is told failed, and the recovery that puts the prior files back lands. */
-    expect(outcomes).toEqual([{ failed: true }, { failed: false }]);
+    /* It tore the checkout and the recovery put the prior files back, so it left the checkout whole: neither is told failed (L5). */
+    expect(outcomes).toEqual([{ failed: false }, { failed: false }]);
     expect(endExpectation).toHaveBeenCalledTimes(3);
 
     /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */

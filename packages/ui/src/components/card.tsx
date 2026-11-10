@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { headingVariants } from '#components/heading.variants.js';
 import { cn } from '#utils/cn.js';
 
 /**
@@ -59,11 +60,31 @@ function CardHeader({ className, ...properties }: React.ComponentProps<'div'>): 
 }
 
 /**
- * Render a card title slot without imposing a heading level.
+ * Properties of `CardTitle`.
  *
  * @public
- * @param properties - Standard div properties.
+ */
+export type CardTitleProps = React.ComponentProps<'div'> & {
+  /**
+   * The role, which picks the look from the heading scale: `item` names the card's object,
+   * `title` heads a standalone card such as a sign-in form, `label` heads a compact metric or
+   * settings card. Defaults to `item`.
+   */
+  readonly variant?: 'title' | 'item' | 'label';
+  /**
+   * The outline level. When set, the slot renders that heading element; when omitted it stays a
+   * `div` outside the outline.
+   */
+  readonly level?: 1 | 2 | 3 | 4 | 5 | 6;
+};
+
+/**
+ * Render a card title slot. It imposes no heading level unless `level` is given, and takes its
+ * look from the heading scale through `variant`.
+ *
+ * @param properties - The variant, the optional level and standard div properties.
  * @returns The card title slot.
+ * @public
  *
  * @example <caption>Add a card title</caption>
  * ```typescript
@@ -72,9 +93,25 @@ function CardHeader({ className, ...properties }: React.ComponentProps<'div'>): 
  *
  * export const example = createElement(CardTitle, null, 'Model');
  * ```
+ *
+ * @example <caption>Make the title of a standalone card the page heading</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { CardTitle } from '@taucad/ui/components/card';
+ *
+ * export const example = createElement(CardTitle, { level: 1, variant: 'title' }, 'Sign in');
+ * ```
  */
-function CardTitle({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
-  return <div data-slot='card-title' className={cn('leading-none font-semibold', className)} {...properties} />;
+function CardTitle({ className, variant = 'item', level, ...properties }: CardTitleProps): React.JSX.Element {
+  // A heading element takes the same attributes as the div; only the tag differs.
+  const Tag = (level === undefined ? 'div' : `h${level}`) as 'div';
+  return (
+    <Tag
+      data-slot='card-title'
+      className={cn(headingVariants({ variant }), 'leading-none', className)}
+      {...properties}
+    />
+  );
 }
 
 /**

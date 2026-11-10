@@ -15,6 +15,7 @@ import type { KernelIssue, ResourceLimitDetails } from '#types/runtime.types.js'
 import type {
   RuntimeFactsStatus,
   RuntimeLateTerminal,
+  RuntimeOperationBegin,
   RuntimeObservationMode,
   RuntimeObservedTermination,
   RuntimeOperation,
@@ -239,6 +240,8 @@ const lateOutcomes: ReadonlySet<RuntimeOperationOutcome['type']> = new Set(['tim
 export class ClientOperationObserver {
   readonly #operations = new Topic<RuntimeOperationObservation>({ name: 'operation' });
   readonly #late = new Topic<RuntimeLateTerminal>({ name: 'operation-late' });
+  /* A host handler that throws never reaches the attempt. */
+  readonly #begins = new Topic<RuntimeOperationBegin>({ name: 'operation-begin', onError: () => undefined });
   readonly #transport: RuntimeTransport;
   #mode: RuntimeObservationMode = 'off';
   #sent: RuntimeObservationMode = 'off';
@@ -299,6 +302,17 @@ export class ClientOperationObserver {
   }
 
   /**
+   * Subscribe to attempts as they begin.
+   *
+   * @param handler - Receives each beginning once.
+   * @param options - An abort signal that unsubscribes.
+   * @returns The unsubscribe function.
+   */
+  public onBegin(handler: (begin: RuntimeOperationBegin) => void, options?: { signal?: AbortSignal }): () => void {
+    return this.#begins.subscribe(handler, options);
+  }
+
+  /**
    * Record whether the worker should compute facts, and tell it when it can.
    *
    * @param mode - The mode.
@@ -351,6 +365,9 @@ export class ClientOperationObserver {
       entryFormat?: string;
     }>,
   ): ObservedAttempt | undefined {
+    if (this.#begins.size > 0) {
+      this.#begins.emit({ operationId: input.operationId, operation: input.operation });
+    }
     if (this.#operations.size === 0 && this.#late.size === 0) {
       return undefined;
     }

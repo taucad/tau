@@ -410,7 +410,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         expect(projects.some((project) => project.id === id)).toBe(false);
         await page
           .getByPlaceholder('Search projects…')
-          .or(page.getByRole('heading', { name: 'No projects yet', exact: true }))
+          .or(page.getByRole('heading', { name: 'Built with Tau', exact: true }))
           .first()
           .waitFor();
         await expect

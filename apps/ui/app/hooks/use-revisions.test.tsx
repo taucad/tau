@@ -26,6 +26,7 @@ import {
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { resetPushRecords } from '#lib/revision-pushes.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {
@@ -79,6 +80,7 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   settlements = [];
   setRevisionSessionUser(undefined);
+  resetPushRecords();
 });
 
 describe('useRevisions', () => {
@@ -1050,10 +1052,57 @@ describe('useRevisionChanges', () => {
     expect(summaries.some((summary) => /\(save\)|msg_|Agent turn /u.test(summary))).toBe(false);
     /* A hand-written title is never rewritten. */
     expect(result.current.revisions[2]?.summary).toBe('Tapered wall');
-    /* The pseudonym stays stable and per workspace; the scheme is not copy. */
-    expect(result.current.revisions[1]?.actor).toBe('Anonymous · 2722de98');
+    /* Q3: an anonymous entry reads Anonymous; its hash is behind the debug setting. */
+    expect(result.current.revisions[1]?.actor).toBe('Anonymous');
     /* An agent turn's actor id is a model id; the person reads who did it. */
-    expect(result.current.revisions[0]?.actor).toBe('Tau agent');
+    expect(result.current.revisions[0]?.actor).toBe('Agent');
+  });
+
+  /*
+   * Fixtures L1–L4 (blueprint A2): the ids an older host recorded when it had
+   * no account — the project id, `tau-host`, an OS login name and an
+   * environment address. Each reads as the signed-in person or shows no name,
+   * and none is ever printed.
+   */
+  it('reads the fallback ids an older host recorded as you, or as no name, never as the id', async () => {
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4, source: 'user', actor: 'p', trigger: 'idle' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'tau-host', trigger: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'richard', trigger: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'maker@example.com', trigger: 'save' }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(4);
+    });
+
+    const [projectIdRow, tauHostRow, loginNameRow, addressRow] = result.current.revisions;
+    /* L1 and L2 are this host's own fallback ids: made on this device, by whoever is signed in. */
+    expect(projectIdRow?.isYours).toBe(true);
+    expect(tauHostRow?.isYours).toBe(true);
+    /* L3 and L4 cannot be told from another account's id without the push record (A3): no name. */
+    expect(loginNameRow?.isYours).toBeUndefined();
+    expect(addressRow?.isYours).toBeUndefined();
+    expect(result.current.revisions.map((revision) => revision.actor)).toEqual(['', '', '', '']);
+  });
+
+  /* Q2: a single-person project shows no who line on any row, the person's own or not. */
+  it('gives no row of a single-person project a who line except the agent and an anonymous entry', async () => {
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'user-1', trigger: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'user-2', trigger: 'save' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'import', actor: 'unknown' }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(3);
+    });
+
+    expect(result.current.revisions.map((revision) => revision.actor)).toEqual(['', '', '']);
   });
 
   /* F4: the session is a store the hook subscribes to, not a value it read once. */
@@ -1064,15 +1113,17 @@ describe('useRevisionChanges', () => {
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
     await waitFor(() => {
-      expect(result.current.revisions[0]?.actor).toBe('Another account');
+      expect(result.current.revisions).toHaveLength(1);
     });
+    expect(result.current.revisions[0]?.isYours).toBeUndefined();
 
     act(() => {
       setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
     });
 
-    /* HQ4: your own revisions say You, never your own name. */
-    expect(result.current.revisions[0]?.actor).toBe('You');
+    /* Q2: yours, and on a single-person project said by no who line at all. */
+    expect(result.current.revisions[0]?.isYours).toBe(true);
+    expect(result.current.revisions[0]?.actor).toBe('');
   });
 
   /* A9: the Restored row is named by what it restored, never by its trigger. */
@@ -1111,5 +1162,109 @@ describe('useRevisionChanges', () => {
     });
 
     expect(result.current.revisions.map((card) => card.parent)).toStrictEqual(['rev-1', undefined]);
+  });
+});
+
+/* Blueprint A3, client half: the push records name who backed each row up (I2 step 2). */
+describe('useRevisions with Tau Cloud push records (A3)', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  const tauCloud = (): void => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-3',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'backedUp' },
+    };
+  };
+  const page = {
+    format: 1,
+    pushes: [
+      {
+        generation: 1,
+        pushedAt: '2026-11-10T00:00:00.000Z',
+        pusher: { kind: 'account', accountId: 'user-bea', name: 'Bea' },
+        viaDevice: false,
+        tips: [{ ref: 'refs/heads/main', tip: 'rev-2' }],
+      },
+      {
+        generation: 2,
+        pushedAt: '2026-11-10T00:01:00.000Z',
+        pusher: { kind: 'account', accountId: 'user-bea', name: 'Bea' },
+        viaDevice: false,
+        tips: [
+          { ref: 'refs/heads/main', tip: 'rev-3' },
+          { ref: 'refs/tau/chats/chat-1', tip: 'rev-c' },
+        ],
+      },
+    ],
+    members: [
+      { accountId: 'user-1', name: 'Ada', role: 'owner' },
+      { accountId: 'user-bea', name: 'Bea', role: 'editor' },
+      { accountId: 'user-maya', name: 'Maya', role: 'editor' },
+    ],
+  };
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(
+      async () => new Response(JSON.stringify(page), { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'user-maya', parent: 'rev-2' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'root', parent: 'rev-1' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'tau-host' }),
+    ];
+  });
+
+  it('names the account that pushed each row, and recorded as beside one recorded as another member', async () => {
+    tauCloud();
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.actor)).toEqual(['Bea · recorded as Maya', 'Bea', 'Bea']);
+    });
+    expect(result.current.revisions.some((card) => card.isYours === true)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/v1\/projects\/p\/git\/pushes\?after=0$/u);
+  });
+
+  it('reads no push record for a project with no Tau Cloud backup', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-3',
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(3);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    /* This device's own fallback id is still the signed-in person, from step 3. */
+    expect(result.current.revisions[2]?.isYours).toBe(true);
+  });
+
+  it('resolves nothing from a 404, and falls to this device without a word', async () => {
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 404 }));
+    tauCloud();
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(3);
+    });
+
+    expect(result.current.revisions.map((card) => card.actor)).toEqual(['', '', '']);
+    expect(result.current.revisions[2]?.isYours).toBe(true);
   });
 });

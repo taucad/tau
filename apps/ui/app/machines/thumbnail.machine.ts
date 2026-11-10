@@ -1,7 +1,7 @@
 import { createAsyncLogic, setup, types } from 'xstate';
 import type { EnqueueObject, EventObject } from 'xstate';
 
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 export type ThumbnailKind = 'automatic-thumbnail' | 'manual-thumbnail';
 export type ThumbnailSkipReason = 'svg-source' | 'superseded' | 'locator-changed';

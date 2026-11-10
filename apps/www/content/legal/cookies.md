@@ -1,6 +1,6 @@
 # Storage and Cookie Policy
 
-*Effective date: November 8, 2026*
+*Effective date: November 9, 2026*
 
 This page explains what TAUCAD LIMITED ("Tau", "we") stores in your browser and on your device, and how to change your analytics choice. Read it with our [Privacy Policy](/legal/privacy).
 
@@ -19,7 +19,7 @@ If the consent cookie is missing, expired or from an older version of this polic
 
 ## Local storage for your preferences and projects
 
-Interface choices (sidebar state, kernel, model, editor and display preferences) are kept in `localStorage`. Your local projects and files are kept in IndexedDB or the Origin Private File System in the web app, and on disk in the desktop app. None of this is analytics. It stays until you delete it, clear the site or app data, or uninstall the app.
+Interface choices (sidebar state, kernel, model, editor and display preferences) are kept in `localStorage`. If a shared model stops the page while it is opening, `tau:kill-memory` remembers it for up to 7 days (an opaque model key, a count, a time and the app version, at most 10 models) so Tau shows "We paused this model" instead of running it again; it is never sent. Your local projects and files are kept in IndexedDB or the Origin Private File System in the web app, and on disk in the desktop app. None of this is analytics. It stays until you delete it, clear the site or app data, or uninstall the app.
 
 ## Optional analytics
 

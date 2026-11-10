@@ -5,14 +5,16 @@ import { CadViewer } from '#cad/cad-viewer.jsx';
 
 const graphics = vi.hoisted(() => ({
   send: vi.fn(),
-  context: { webGpuAvailable: false, webGpuProbeSettled: false, gltfPresentation: { requestedRevision: 0 } },
+  context: { webGpuAvailable: false, gltfPresentation: { requestedRevision: 0 } },
+  probing: true,
   backend: 'webgpu' as 'webgpu' | 'webgl',
 }));
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphics: () => ({ send: graphics.send }),
-  useGraphicsSelector: (selector: (state: { context: typeof graphics.context }) => unknown) =>
-    selector({ context: graphics.context }),
+  useGraphicsSelector: (
+    selector: (state: { context: typeof graphics.context; hasTag: (tag: string) => boolean }) => unknown,
+  ) => selector({ context: graphics.context, hasTag: (tag) => tag === 'backend-probing' && graphics.probing }),
 }));
 
 vi.mock('#environment/viewer-environment.jsx', () => ({
@@ -37,11 +39,8 @@ const canvasEvents = (): string[] =>
 describe('CadViewer capability wait', () => {
   beforeEach(() => {
     graphics.send.mockClear();
-    graphics.context = {
-      webGpuAvailable: false,
-      webGpuProbeSettled: false,
-      gltfPresentation: { requestedRevision: 0 },
-    };
+    graphics.context = { webGpuAvailable: false, gltfPresentation: { requestedRevision: 0 } };
+    graphics.probing = true;
     graphics.backend = 'webgpu';
   });
 
@@ -49,23 +48,26 @@ describe('CadViewer capability wait', () => {
     const view = render(<CadViewer />);
 
     expect(screen.queryByRole('img')).toBeNull();
-    expect(canvasEvents()).toEqual(['canvasMounted']);
+    // The placeholder attaches a canvas actor that never hosts a renderer, so the stage waits.
+    expect(canvasEvents()).toEqual(['canvasAttached']);
+    expect(graphics.send).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'placeholder' }));
 
     view.unmount();
-    expect(canvasEvents()).toEqual(['canvasMounted', 'canvasUnmounted']);
+    expect(canvasEvents()).toEqual(['canvasAttached', 'canvasDetached']);
     const [[mounted], [unmounted]] = graphics.send.mock.calls as [[{ canvasId: string }], [{ canvasId: string }]];
     expect(unmounted.canvasId).toBe(mounted.canvasId);
   });
 
   it('should mount once, on WebGPU, when the probe finds an adapter', () => {
-    graphics.context = { ...graphics.context, webGpuAvailable: true, webGpuProbeSettled: true };
+    graphics.context = { ...graphics.context, webGpuAvailable: true };
+    graphics.probing = false;
     render(<CadViewer />);
 
     expect(screen.getByRole('img', { name: 'Canvas on webgpu' })).toBeInTheDocument();
   });
 
   it('should mount on WebGL when the probe finds no adapter, fails or runs out of time', () => {
-    graphics.context = { ...graphics.context, webGpuAvailable: false, webGpuProbeSettled: true };
+    graphics.probing = false;
     render(<CadViewer />);
 
     expect(screen.getByRole('img', { name: 'Canvas on webgl' })).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
@@ -11,42 +11,37 @@ import {
 import { UpdateControl } from '#components/nav/update-control.js';
 import { useReloadOffered, useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
-const serverSnapshot = (): boolean => false;
-
-let reloadPromptOwners = 0;
-const reloadPromptOwnersTopic = new Topic<void>({ name: 'reload-prompt-owners' });
-
-/**
- * Claim the reload prompt while `isOwning`: an update control in an open sidebar, or the
- * error page's own "Tau has been updated" screen. The floating banner stays away meanwhile.
- *
- * @param isOwning - Whether the caller shows the prompt now.
- */
-export const useReloadPromptOwner = (isOwning: boolean): void => {
-  // A layout effect, so the banner steps aside in the same commit and never paints a duplicate prompt.
-  useLayoutEffect(() => {
-    if (!isOwning) {
-      return undefined;
-    }
-    reloadPromptOwners += 1;
-    reloadPromptOwnersTopic.emit();
-    return () => {
-      reloadPromptOwners -= 1;
-      reloadPromptOwnersTopic.emit();
-    };
-  }, [isOwning]);
-};
+/** Set by {@link BrowserUpdateReveal} when writes stop; the next {@link BrowserUpdate} to look opens its popover. */
+let pendingReveal = false;
+const revealTopic = new Topic<void>({ name: 'browser-update-reveal' });
 
 /**
- * `true` while another surface owns the reload prompt ({@link useReloadPromptOwner}), so the
- * floating fallback (`BuildSkewBanner`) covers only surfaces without one.
+ * Opens the sidebar once writes stop, so the stop never goes unseen. It renders nothing and is
+ * mounted beside the sidebar, not in it: the mobile sidebar is a sheet whose content, and with it
+ * {@link BrowserUpdate}, is unmounted while closed. An offer alone (a deploy in a lone tab that
+ * still writes) reveals nothing, a remount does not replay a reveal, and a withdrawn offer reveals
+ * nothing.
  */
-export const useReloadPromptOwned = (): boolean =>
-  useSyncExternalStore(
-    (listener) => reloadPromptOwnersTopic.subscribe(listener),
-    () => reloadPromptOwners > 0,
-    serverSnapshot,
-  );
+export function BrowserUpdateReveal(): undefined {
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  useEffect(() => {
+    let wasStopped = isReloadOffered() && haveWritesStopped();
+    return subscribeReloadOffer(() => {
+      const isStopped = isReloadOffered() && haveWritesStopped();
+      if (isStopped && !wasStopped) {
+        if (isMobile) {
+          setOpenMobile(true);
+        } else {
+          setOpen(true);
+        }
+        pendingReveal = true;
+        revealTopic.emit();
+      }
+      wasStopped = isStopped;
+    });
+  }, [isMobile, setOpen, setOpenMobile]);
+  return undefined;
+}
 
 const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | undefined =>
   supersedingBuildId > 0
@@ -57,32 +52,27 @@ const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | un
  * Browser counterpart of `DesktopUpdate`: a tab whose bundle has been superseded
  * by a newer one in another tab (blueprint DF20) has stopped writing durable
  * state, and one a deploy replaced (`#lib/stale-build-recovery`) is running old
- * code; both surface the same sidebar control and offer a reload.
+ * code; both surface the same sidebar control and offer a reload. The sidebar is the
+ * only surface that shows an update: there is no floating banner. Pair it with
+ * {@link BrowserUpdateReveal} outside the sidebar.
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useReloadOffered();
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
-  // A collapsed sidebar is inert, so only an open one can own the prompt.
-  useReloadPromptOwner(isMobile ? openMobile : sidebarOpen);
   useEffect(() => {
-    /* Opened for the user only once writes have stopped. An offer alone (a deploy in a lone tab that
-     * still writes) shows the control where it is, without opening the sidebar. A remount does not
-     * replay a reveal, and a withdrawn offer reveals nothing. */
-    let wasStopped = isReloadOffered() && haveWritesStopped();
-    const reveal = (): void => {
-      const isStopped = isReloadOffered() && haveWritesStopped();
-      if (isStopped && !wasStopped) {
-        showSidebar(true);
+    // Opens the popover for a reveal, including one requested before this control mounted.
+    const consumeReveal = (): void => {
+      if (pendingReveal) {
+        pendingReveal = false;
         setRevealed(true);
         setOpen(true);
       }
-      wasStopped = isStopped;
     };
-    return subscribeReloadOffer(reveal);
-  }, [showSidebar]);
+    consumeReveal();
+    return revealTopic.subscribe(consumeReveal);
+  }, []);
   if (!superseded) {
     return undefined;
   }

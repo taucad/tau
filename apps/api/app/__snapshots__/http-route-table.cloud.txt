@@ -48,6 +48,7 @@ GET /projects/:id/share | v1 | AuthGuard,AuthGuard | required | ProjectShareCont
 GET /projects/:projectId/collaborators | v1 | AuthGuard | required | CollaboratorsController.list
 GET /projects/:projectId/deletion | v1 | AuthGuard | required | ProjectDeletionController.status
 GET /projects/:projectId/git/catalogue | v1 | AuthGuard | required | GitCatalogueController.catalogue
+GET /projects/:projectId/git/pushes | v1 | AuthGuard | required | GitPushesController.pushes
 GET /projects/:projectId/preview | v1 | AuthGuard | required | ProjectPreviewController.get
 GET /projects/:projectId/usage | v1 | AuthGuard | required | UsageController.usage
 GET /publications/:id | v1 | AuthGuard | optional | PublicationsController.getPublication

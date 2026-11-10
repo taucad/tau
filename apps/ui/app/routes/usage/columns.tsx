@@ -2,7 +2,7 @@ import type { ColumnDef, Row } from '@tanstack/react-table';
 import type { ReactNode } from 'react';
 import { format } from 'date-fns';
 import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { getUsageColor } from '#routes/usage/provider-colors.js';

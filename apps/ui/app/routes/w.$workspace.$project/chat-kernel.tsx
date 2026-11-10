@@ -26,7 +26,7 @@ import { useProject } from '#hooks/use-project.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
 import { GeometryUnitTiming, GeometryUnitSummary } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
-import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
 import {
   usePaneviewPersistence,
   getInitialPanelOptions,

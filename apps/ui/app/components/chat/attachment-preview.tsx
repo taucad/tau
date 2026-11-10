@@ -6,7 +6,7 @@ import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 /** The directories one project chat's attachment references resolve against. */
 export type ChatAttachmentDirectories = {

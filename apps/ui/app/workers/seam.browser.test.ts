@@ -27,7 +27,7 @@ import {
 } from '#workers/agent-host.contract.js';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 import { livePlacementPort } from '#workers/test/agent-host-resident.fixture.js';
 
 /** Which fault the owner suffers on its next `start`. */

@@ -279,6 +279,31 @@ describe('ClientOperationObserver', () => {
   });
 });
 
+describe('operation-begin', () => {
+  it('should announce each attempt as it begins, even when nobody observes settles', () => {
+    const observer = new ClientOperationObserver('web-worker');
+    const begins: unknown[] = [];
+    const stop = observer.onBegin((begin) => begins.push(begin));
+
+    const attempt = observer.begin({ operation: 'render', operationId: 'op-1' });
+    stop();
+    observer.begin({ operation: 'evaluate', operationId: 'op-2' });
+
+    expect(begins).toEqual([{ operation: 'render', operationId: 'op-1' }]);
+    /* Announcing a beginning builds no attempt: only settle subscribers make one. */
+    expect(attempt).toBeUndefined();
+  });
+
+  it('should keep a throwing begin listener away from the attempt', () => {
+    const observer = new ClientOperationObserver('web-worker');
+    observer.onBegin(() => {
+      throw new Error('host bug');
+    });
+
+    expect(() => observer.begin({ operation: 'initialize', operationId: 'op-1' })).not.toThrow();
+  });
+});
+
 describe('outcomeOf', () => {
   it('should carry the limit a supervisor killed the host for', () => {
     const observer = new ClientOperationObserver('utility');

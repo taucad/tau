@@ -43,6 +43,7 @@ export { startRunReporter } from '#run-reporter.js';
 export type { RunReporter, RunReporterOptions } from '#run-reporter.js';
 export type { HostRunState } from '#host.schemas.js';
 export { hostRevisionActor } from '#revision-actor.js';
+export type { HostRevisionActorInput, HostRevisionActorResolver } from '#revision-actor.js';
 export {
   createProjectRevisionPort,
   createProjectRevisions,

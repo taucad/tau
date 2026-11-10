@@ -2,13 +2,14 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { publicationKernelExtensions } from '#publications/publication-runtime.utils.js';
+import { publicationKernelExtensions } from '@taucad/api-projects/publications/publication-runtime.utils';
 
 /*
  * `createCliRuntime` is the Tau CLI's composition, the runtime `tau export`, `tau test` and `@taucad/cli/geospec`'s
  * `tauExporter` serve. It is not a published subpath of `@taucad/cli`, so the parity test resolves it through the
- * package root the devDependency already provides. The API keeps its own table because it must not import plugin
- * packages at runtime — this test is what stops that table from drifting.
+ * package root this project's devDependency provides. The API keeps its own table because it must not import plugin
+ * packages at runtime — this test is what stops that table from drifting. It lives outside the API so that the
+ * API depends on no kernel: a kernel or CLI change runs this test, not the API lane.
  */
 const loadCliKernelExtensions = async (): Promise<Readonly<Record<string, readonly string[]>>> => {
   const requireFromHere = createRequire(import.meta.url);

@@ -77,9 +77,12 @@ describe('model availability', () => {
   });
   it('is ready when no large object is outstanding', () => {
     expect(modelAvailability('ready', undefined)).toBe('ready');
-    /* D10: a render opens at `filled`; a tree written and not yet filled waits, whatever the facet says. */
-    expect(modelAvailability('ready', undefined, 'materialized')).toBe('files');
     expect(modelAvailability('ready', undefined, 'filled')).toBe('ready');
+  });
+  /* T5: "Downloading" only while a download runs; a wait for the fill's word is a check, never a download. */
+  it('waits as a check, not a download, while no download runs and the files are not yet filled', () => {
+    expect(modelAvailability('ready', undefined, 'materialized')).toBe('filesChecking');
+    expect(modelAvailability('ready', undefined, 'entryReady')).toBe('filesChecking');
   });
 });
 

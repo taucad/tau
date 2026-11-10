@@ -35,6 +35,7 @@
     "./publications/project-share.controller": "./src/publications/project-share.controller.ts",
     "./publications/publication-deletion": "./src/publications/publication-deletion.ts",
     "./publications/publication-materializer": "./src/publications/publication-materializer.ts",
+    "./publications/publication-runtime.utils": "./src/publications/publication-runtime.utils.ts",
     "./publications/publications.controller": "./src/publications/publications.controller.ts",
     "./publications/publications.dto": "./src/publications/publications.dto.ts",
     "./publications/publications.service": "./src/publications/publications.service.ts",

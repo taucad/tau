@@ -20,6 +20,9 @@ import { after, test } from 'node:test';
 const guard = join(import.meta.dirname, 'nx-guard.ts');
 const writeToken = 'write-token';
 const readToken = 'read-token';
+const sessionToken = 'tcs1.session-for-pr-42';
+const requestToken = 'id-token-request-token';
+const oidcToken = 'oidc-jwt';
 
 type Step =
   | { put: string; bytes: number }
@@ -27,7 +30,12 @@ type Step =
   | { sleep: number }
   | { exit: number }
   | { failIfCache: string };
-type Result = { status: number; milliseconds: number; port: number; bytes: number };
+type Result = {
+  status: number;
+  milliseconds: number;
+  port: number;
+  bytes: number;
+};
 type Run = { server: string; results: Result[] };
 
 const fakeNxSource = `#!${process.execPath}
@@ -105,6 +113,8 @@ type Upstream = {
     partsInFlight: number;
     maxPartsInFlight: number;
     aborts: number;
+    oidc: number;
+    sessions: number;
   };
   close: () => Promise<void>;
 };
@@ -113,6 +123,8 @@ type UpstreamOptions = {
   putDelayMilliseconds?: (hash: string) => number;
   /** A status to answer instead of the normal one. */
   override?: (method: string, path: string) => number | undefined;
+  /** The status `POST /v1/session` answers (200 issues `sessionToken`). */
+  sessionStatus?: number;
 };
 
 const readAll = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> => {
@@ -138,7 +150,16 @@ const decoder = new TextDecoder();
 const startUpstream = async (options: UpstreamOptions = {}): Promise<Upstream> => {
   const store = new Map<string, Uint8Array<ArrayBuffer>>();
   const uploads = new Map<string, Map<number, Uint8Array<ArrayBuffer>>>();
-  const counts = { gets: 0, puts: 0, parts: 0, partsInFlight: 0, maxPartsInFlight: 0, aborts: 0 };
+  const counts = {
+    gets: 0,
+    puts: 0,
+    parts: 0,
+    partsInFlight: 0,
+    maxPartsInFlight: 0,
+    aborts: 0,
+    oidc: 0,
+    sessions: 0,
+  };
   const wait = async (hash: string): Promise<void> =>
     new Promise((resolve) => {
       // Unreferenced, so an upload the guard abandoned does not keep this process alive.
@@ -164,7 +185,9 @@ const startUpstream = async (options: UpstreamOptions = {}): Promise<Upstream> =
     reply(200, { partNumber: Number(part), etag: `etag-${part}` });
   };
   const complete = ({ hash, body, reply }: Exchange): void => {
-    const { parts } = JSON.parse(decoder.decode(body)) as { parts: Array<{ partNumber: number }> };
+    const { parts } = JSON.parse(decoder.decode(body)) as {
+      parts: Array<{ partNumber: number }>;
+    };
     const received = uploads.get(hash);
     store.set(hash, concat(parts.map(({ partNumber }) => received?.get(partNumber) ?? new Uint8Array())));
     reply(200);
@@ -184,27 +207,63 @@ const startUpstream = async (options: UpstreamOptions = {}): Promise<Upstream> =
       reply(204);
     },
   };
+  /** GitHub's OIDC token endpoint (ACTIONS_ID_TOKEN_REQUEST_URL) and the cache's `POST /v1/session`. */
+  const identity = ({
+    method,
+    path,
+    authorization,
+    reply,
+  }: {
+    method: string;
+    path: string;
+    authorization: string;
+    reply: (status: number, payload?: Record<string, unknown>) => void;
+  }): boolean => {
+    if (path.startsWith('/oidc?')) {
+      counts.oidc += 1;
+      const audience = new URL(path, 'http://localhost').searchParams.get('audience');
+      reply(authorization === `bearer ${requestToken}` && audience === 'tau-ci-cache' ? 200 : 403, {
+        value: oidcToken,
+      });
+      return true;
+    }
+    if (method !== 'POST' || path !== '/v1/session') {
+      return false;
+    }
+    counts.sessions += 1;
+    const status = authorization === `Bearer ${oidcToken}` ? (options.sessionStatus ?? 200) : 401;
+    reply(
+      status,
+      status === 200 ? { token: sessionToken, expiresAt: Math.floor(Date.now() / 1000) + 6 * 3600 } : undefined,
+    );
+    return true;
+  };
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const body = await readAll(request);
     const method = request.method ?? '';
     const path = request.url ?? '';
     const reply = (status: number, payload?: Uint8Array<ArrayBuffer> | Record<string, unknown>): void => {
       const bytes = payload instanceof Uint8Array ? payload : encoder.encode(payload ? JSON.stringify(payload) : '');
-      response.writeHead(status, { 'content-length': String(bytes.byteLength) });
+      response.writeHead(status, {
+        'content-length': String(bytes.byteLength),
+      });
       response.end(bytes);
     };
     const [, hash = '', multipart, part] = /^\/v1\/cache\/(\w+)(?:\/(multipart)(?:\/(\w+))?)?$/.exec(path) ?? [];
     const overridden = options.override?.(method, path);
     const authorization = request.headers.authorization ?? '';
-    if (overridden !== undefined) {
+    const writer = authorization === `Bearer ${writeToken}` || authorization === `Bearer ${sessionToken}`;
+    if (identity({ method, path, authorization, reply })) {
+      // Answered: GitHub's OIDC token endpoint or the cache's session route.
+    } else if (overridden !== undefined) {
       reply(overridden);
-    } else if (authorization !== `Bearer ${writeToken}` && authorization !== `Bearer ${readToken}`) {
+    } else if (!writer && authorization !== `Bearer ${readToken}`) {
       reply(401);
     } else if (method === 'GET' && !multipart) {
       counts.gets += 1;
       const entry = store.get(hash);
       reply(entry ? 200 : 404, entry);
-    } else if (authorization === `Bearer ${writeToken}`) {
+    } else if (writer) {
       const route = multipart ? (part === 'complete' ? 'complete' : part ? 'part' : 'multipart') : 'entry';
       const write = writes[`${method} ${route}`];
       if (write) {
@@ -253,11 +312,13 @@ const runGuard = async ({
   plan,
   token = writeToken,
   limits = {},
+  extraEnv = {},
 }: {
   server: string;
   plan: Step[];
   token?: string;
   limits?: Record<string, number>;
+  extraEnv?: Record<string, string>;
 }): Promise<GuardRun> => {
   const started = performance.now();
   const env = {
@@ -266,6 +327,7 @@ const runGuard = async ({
     NX_SELF_HOSTED_REMOTE_CACHE_SERVER: server,
     NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token,
     NX_GUARD_TEST_LIMITS: JSON.stringify(limits),
+    ...extraEnv,
   };
   const child = spawn(
     process.execPath,
@@ -295,7 +357,14 @@ const runGuard = async ({
     stderr,
     starts: lines
       .filter((line) => line.startsWith('FAKE-NX-START '))
-      .map((line) => (JSON.parse(line.slice('FAKE-NX-START '.length)) as { server: string }).server),
+      .map(
+        (line) =>
+          (
+            JSON.parse(line.slice('FAKE-NX-START '.length)) as {
+              server: string;
+            }
+          ).server,
+      ),
     runs: lines
       .filter((line) => line.startsWith('FAKE-NX '))
       .map((line) => JSON.parse(line.slice('FAKE-NX '.length)) as Run),
@@ -366,7 +435,10 @@ void test('should answer 409 for an entry already stored, and count it as an acc
 void test('should turn upstream errors into a miss and a refused write, and warn', async () => {
   const upstream = await startUpstream({ override: () => 500 });
   try {
-    const run = await runGuard({ server: upstream.url, plan: [{ put: 'a1', bytes: 10 }, { get: 'a1' }] });
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ put: 'a1', bytes: 10 }, { get: 'a1' }],
+    });
     assert.equal(run.code, 0);
     assert.deepEqual(statuses(run), [403, 404]);
     assert.equal(run.tally.faults, 2);
@@ -380,7 +452,10 @@ void test('should turn upstream errors into a miss and a refused write, and warn
 void test('should treat an unreachable upstream as faults, not a failed command', async () => {
   const upstream = await startUpstream();
   await upstream.close();
-  const run = await runGuard({ server: upstream.url, plan: [{ put: 'a1', bytes: 10 }, { get: 'a1' }] });
+  const run = await runGuard({
+    server: upstream.url,
+    plan: [{ put: 'a1', bytes: 10 }, { get: 'a1' }],
+  });
   assert.equal(run.code, 0);
   assert.deepEqual(statuses(run), [403, 404]);
   assert.equal(run.tally.faults, 2);
@@ -492,7 +567,10 @@ void test('should give an upload a timeout that grows with its size', async () =
 void test('should keep serving a connection that Nx left idle for 7 s', async () => {
   const upstream = await startUpstream();
   try {
-    const run = await runGuard({ server: upstream.url, plan: [{ get: 'a1' }, { sleep: 7000 }, { get: 'b2' }] });
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ get: 'a1' }, { sleep: 7000 }, { get: 'b2' }],
+    });
     assert.deepEqual(statuses(run), [404, 404]);
     // One local port means one pooled connection: Node's default would have closed it after 5 s.
     assert.equal(new Set(run.runs[0]?.results.map((result) => result.port)).size, 1);
@@ -506,7 +584,11 @@ void test('should rerun once with the remote cache off after a remote cache erro
   try {
     const run = await runGuard({
       server: upstream.url,
-      plan: [{ failIfCache: ' NX   Failed to send request: error sending request for url' }],
+      plan: [
+        {
+          failIfCache: ' NX   Failed to send request: error sending request for url',
+        },
+      ],
     });
     assert.equal(run.code, 0);
     assert.equal(run.starts.length, 2);
@@ -544,7 +626,9 @@ const waited = (milliseconds: number | undefined): boolean => (milliseconds ?? 0
 const answeredAtOnce = (milliseconds: number | undefined): boolean => (milliseconds ?? slowUpload) < slowUpload / 2;
 
 void test('should answer the first write after its upload, later ones at once, and drain them at exit', async () => {
-  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  const upstream = await startUpstream({
+    putDelayMilliseconds: () => slowUpload,
+  });
   try {
     const run = await runGuard({
       server: upstream.url,
@@ -573,7 +657,9 @@ void test('should answer the first write after its upload, later ones at once, a
 });
 
 void test('should keep every write synchronous while the token is refused', async () => {
-  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  const upstream = await startUpstream({
+    putDelayMilliseconds: () => slowUpload,
+  });
   try {
     const run = await runGuard({
       server: upstream.url,
@@ -593,7 +679,9 @@ void test('should keep every write synchronous while the token is refused', asyn
 });
 
 void test('should wait for a write that would take the pending bytes over the cap', async () => {
-  const upstream = await startUpstream({ putDelayMilliseconds: () => slowUpload });
+  const upstream = await startUpstream({
+    putDelayMilliseconds: () => slowUpload,
+  });
   try {
     const run = await runGuard({
       server: upstream.url,
@@ -661,7 +749,9 @@ void test('should warn when a background upload faults', async () => {
 });
 
 void test('should abandon uploads still running at the drain limit, warn, and exit with Nx status at once', async () => {
-  const upstream = await startUpstream({ putDelayMilliseconds: (hash) => (hash === 'b2' ? 60_000 : 0) });
+  const upstream = await startUpstream({
+    putDelayMilliseconds: (hash) => (hash === 'b2' ? 60_000 : 0),
+  });
   try {
     const run = await runGuard({
       server: upstream.url,
@@ -678,6 +768,103 @@ void test('should abandon uploads still running at the drain limit, warn, and ex
       run.stderr,
       /::warning title=Nx remote cache uploads abandoned::1 background upload\(s\) were still running after the drain limit/,
     );
+  } finally {
+    await upstream.close();
+  }
+});
+
+/** The environment of a same-repository pull_request job granted `id-token: write`. */
+const pullRequestJob = (server: string, runnerTemporary: string): Record<string, string> => ({
+  GITHUB_EVENT_NAME: 'pull_request',
+  ACTIONS_ID_TOKEN_REQUEST_URL: `${server}/oidc?api-version=2.0`,
+  ACTIONS_ID_TOKEN_REQUEST_TOKEN: requestToken,
+  RUNNER_TEMP: runnerTemporary,
+});
+
+void test('should trade a pull request job OIDC token for a cache session that can write', async () => {
+  const upstream = await startUpstream();
+  const runnerTemporary = mkdtempSync(join(scratch, 'runner-temp-'));
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      token: readToken,
+      plan: [{ put: 'pr1', bytes: 10 }, { get: 'pr1' }],
+      extraEnv: pullRequestJob(upstream.url, runnerTemporary),
+    });
+    assert.equal(run.code, 0);
+    assert.deepEqual(statuses(run), [200, 200]);
+    assert.equal(upstream.store.has('pr1'), true);
+    assert.deepEqual([upstream.counts.oidc, upstream.counts.sessions], [1, 1]);
+    assert.match(run.stderr, new RegExp(`::add-mask::${sessionToken.replaceAll('.', String.raw`\.`)}`));
+    assert.doesNotMatch(run.stderr, /::warning/);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test("should reuse the job's saved session in a later Nx call", async () => {
+  const upstream = await startUpstream();
+  const runnerTemporary = mkdtempSync(join(scratch, 'runner-temp-'));
+  try {
+    for (const hash of ['pr2', 'pr3']) {
+      // oxlint-disable-next-line no-await-in-loop -- the second call must find the session the first one saved.
+      const run = await runGuard({
+        server: upstream.url,
+        token: readToken,
+        plan: [{ put: hash, bytes: 10 }],
+        extraEnv: pullRequestJob(upstream.url, runnerTemporary),
+      });
+      assert.deepEqual(statuses(run), [200]);
+    }
+    assert.deepEqual([upstream.counts.oidc, upstream.counts.sessions], [1, 1]);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should keep the read token and warn when the cache refuses a session', async () => {
+  const upstream = await startUpstream({ sessionStatus: 401 });
+  const runnerTemporary = mkdtempSync(join(scratch, 'runner-temp-'));
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      token: readToken,
+      plan: [{ put: 'pr4', bytes: 10 }],
+      extraEnv: pullRequestJob(upstream.url, runnerTemporary),
+    });
+    assert.equal(run.code, 0);
+    assert.deepEqual(statuses(run), [403]);
+    assert.equal(upstream.store.has('pr4'), false);
+    assert.match(
+      run.stderr,
+      /::warning title=Nx remote cache session unavailable::the cache answered 401 to the session request; this job keeps the read-only cache token/,
+    );
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should not ask for a session outside a pull_request job or without an OIDC grant', async () => {
+  const upstream = await startUpstream();
+  const runnerTemporary = mkdtempSync(join(scratch, 'runner-temp-'));
+  try {
+    const job = pullRequestJob(upstream.url, runnerTemporary);
+    const { ACTIONS_ID_TOKEN_REQUEST_URL: _url, ...noGrant } = job;
+    for (const extraEnv of [
+      { ...job, GITHUB_EVENT_NAME: 'merge_group' },
+      { ...job, GITHUB_EVENT_NAME: 'push' },
+      noGrant,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one guard at a time, so the counts belong to no run in particular.
+      const run = await runGuard({
+        server: upstream.url,
+        token: readToken,
+        plan: [{ get: 'pr5' }],
+        extraEnv,
+      });
+      assert.equal(run.code, 0);
+    }
+    assert.deepEqual([upstream.counts.oidc, upstream.counts.sessions], [0, 0]);
   } finally {
     await upstream.close();
   }

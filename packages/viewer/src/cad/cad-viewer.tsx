@@ -1,4 +1,5 @@
-import { memo, useId, useLayoutEffect } from 'react';
+import type { RefCallback } from 'react';
+import { memo, useCallback, useId } from 'react';
 import type { CanvasProps } from '@react-three/fiber';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact } from '@taucad/runtime';
@@ -37,13 +38,19 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
 function CanvasPendingCapability(): React.JSX.Element {
   const graphicsRef = useGraphics();
   const placeholderId = useId();
-  useLayoutEffect(() => {
-    graphicsRef.send({ type: 'canvasMounted', canvasId: placeholderId });
-    return () => {
-      graphicsRef.send({ type: 'canvasUnmounted', canvasId: placeholderId });
-    };
-  }, [graphicsRef, placeholderId]);
-  return <div className='size-full bg-background' />;
+  // Attached in the commit that mounts it, as a canvas's surface is: a placeholder canvas actor that never hosts a
+  // renderer, so it stays `creating` until the canvas replaces it.
+  const attachPlaceholder = useCallback<RefCallback<HTMLDivElement>>(
+    (element) => {
+      graphicsRef.send(
+        element
+          ? { type: 'canvasAttached', canvasId: placeholderId, kind: 'placeholder' }
+          : { type: 'canvasDetached', canvasId: placeholderId },
+      );
+    },
+    [graphicsRef, placeholderId],
+  );
+  return <div ref={attachPlaceholder} className='size-full bg-background' />;
 }
 
 /**
@@ -64,7 +71,7 @@ export const CadViewer = memo(
   }: CadViewerProperties): React.JSX.Element => {
     const { graphicsBackend } = useViewerEnvironment();
     const gpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
-    const isGpuProbeSettled = useGraphicsSelector((state) => state.context.webGpuProbeSettled);
+    const isGpuProbeSettled = useGraphicsSelector((state) => !state.hasTag('backend-probing'));
     const requestedGltfRevision = useGraphicsSelector((state) => state.context.gltfPresentation.requestedRevision);
 
     const graphicsBackendEffective = resolveGraphicsBackendPreference(graphicsBackend, gpuAvailable);

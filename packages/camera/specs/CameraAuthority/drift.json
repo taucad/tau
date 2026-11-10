@@ -18,6 +18,8 @@
     "camera.input.settling.setView#0": "PoseObserved",
     "camera.input.settling.xstate.after#0": "SettleElapsed",
     "camera.setBounds#0": "Changed",
+    "camera.setClipPolicy#0": "Unmodelled",
+    "camera.setRenderFrame#0": "Unmodelled",
     "camera.setUpDirection#0": "Changed",
     "camera.setVerticalFieldOfView#0": "Changed",
     "camera.setViewport#0": "Changed"
@@ -39,7 +41,7 @@
     "setViewport"
   ],
   "specs": {
-    "CameraAuthority.tla": "06d3ea7bd02b7c013459cb558d0b697b4970de8f48754cd4d5f9600270a1fa50"
+    "CameraAuthority.tla": "5d279233a3df30dc647fdcab30715d1f878ed266a0d6fc1f386944cb31c61f43"
   },
   "tables": {
     "CameraAuthority.export.cfg": "c6c84e03505b8bda410364bafe73cff1d8a7ea900dd93386df605a83375596da",

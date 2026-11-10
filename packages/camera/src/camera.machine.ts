@@ -197,14 +197,15 @@ export type CameraMachineEmitted =
  */
 export const cameraPoseSettleMilliseconds = 250;
 
-/** The `CameraAuthority.tla` action a transition refines (xstate-policy MC-R27). */
+/** The `CameraAuthority.tla` action a transition refines (xstate-policy MC-R27), or `Unmodelled` for one the spec does not model. */
 type CameraTransitionLabel =
   | 'PoseObserved'
   | 'EchoObserved'
   | 'InteractionEnded'
   | 'SettleElapsed'
   | 'Changed'
-  | 'Observe';
+  | 'Observe'
+  | 'Unmodelled';
 
 const upAxes: Readonly<Record<CameraUpAxis, CameraVector>> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const dragSources: ReadonlySet<string> = new Set(['input', 'gizmo']);
@@ -627,8 +628,9 @@ const cameraMachineDefinition = setup({
       );
       return patch && { context: commit(context, { patch, source: 'framing' }, enq) };
     }),
-    // The render frame and the clip policy are how a driver presents the pose, not the pose: no revision, no source.
-    setRenderFrame: ({ context, event }, enq) => {
+    // The render frame and the clip policy are how a driver presents the pose, not the pose: no revision, no source,
+    // and no spec variable, so the spec does not model them.
+    setRenderFrame: refines('Unmodelled', ({ context, event }, enq) => {
       const renderFrame = attempt(() => renderFrameForView(event.renderFrame, context.view.frameId));
       if (renderFrame === undefined) {
         return undefined;
@@ -639,8 +641,8 @@ const cameraMachineDefinition = setup({
       }
       enq.sendTo('cameraDriver', { type: 'sync', snapshot: driverSnapshot({ ...context, renderFrame }) });
       return { context: { renderFrame } };
-    },
-    setClipPolicy: ({ context, event }, enq) => {
+    }),
+    setClipPolicy: refines('Unmodelled', ({ context, event }, enq) => {
       const { clipPolicy: requested } = event;
       const clipPolicy = requested === undefined ? undefined : attempt(() => validClipPolicy(requested));
       if (requested !== undefined && clipPolicy === undefined) {
@@ -652,7 +654,7 @@ const cameraMachineDefinition = setup({
       }
       enq.sendTo('cameraDriver', { type: 'sync', snapshot: driverSnapshot({ ...context, clipPolicy }) });
       return { context: { clipPolicy } };
-    },
+    }),
   },
   states: {
     input: {

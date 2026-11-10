@@ -364,8 +364,12 @@ describe('cameraMachine conforms to CameraAuthority.tla', () => {
   });
 
   it('should name every camera action of the spec, and only actions the spec defines', () => {
-    const actions = cameraActions();
+    const labelled = cameraActions();
+    // The render frame and the clip policy change no spec variable: the spec does not model them (MC-R27).
+    const unmodelled = Object.keys(labelled).filter((key) => labelled[key] === 'Unmodelled');
+    const actions = Object.fromEntries(Object.entries(labelled).filter(([, action]) => action !== 'Unmodelled'));
 
+    expect(unmodelled).toEqual(['camera.setClipPolicy#0', 'camera.setRenderFrame#0']);
     expect(new Set(Object.values(actions))).toEqual(
       new Set(['PoseObserved', 'EchoObserved', 'InteractionEnded', 'SettleElapsed', 'Changed', 'Observe']),
     );

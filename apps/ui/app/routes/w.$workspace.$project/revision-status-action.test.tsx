@@ -251,24 +251,27 @@ describe('selectRevisionFacts', () => {
 
   describe('a revision that arrived while a turn holds the files (W5b, D12)', () => {
     const arrivedStatus = status({ remote: tauRemote, sync: sync({ state: 'backedUp', arrived: 'rev-14' }) });
-    const card = (actor: string): RevisionCard => ({
+    const card = (actor: string, isYours?: true): RevisionCard => ({
       revisionId: 'rev-14',
       n: 14,
       createdAt: 0,
       summary: 'Remote work',
       actor,
+      ...(isYours === undefined ? {} : { isYours }),
       turnId: undefined,
       conflicted: false,
       trigger: 'turn',
     });
 
     it.each([
-      ['the agent on Tau Cloud', card('Tau agent'), 'Rev 14 arrived from Tau agent on Tau Cloud'],
+      ['the agent on Tau Cloud', card('Agent'), 'Rev 14 arrived from Agent on Tau Cloud'],
       [
         'the viewer’s own other session, claiming no device (RV-W5b F11)',
-        card('You'),
+        card('', true),
         'Rev 14 arrived from another session',
       ],
+      ['a member of a shared project', card('Maya'), 'Rev 14 arrived from Maya on Tau Cloud'],
+      ['nobody the resolver can name, naming nobody', card(''), 'Rev 14 arrived from Tau Cloud'],
       ['a card History has not read yet', undefined, 'A new revision arrived'],
     ] as const)('says it arrived from %s, calmly', (_, arrived, sentence) => {
       expect(selectRevisionFacts(arrivedStatus, onMain, arrived)).toMatchObject({
@@ -280,7 +283,7 @@ describe('selectRevisionFacts', () => {
 
     it('lets work in progress speak first', () => {
       expect(
-        selectRevisionFacts({ ...arrivedStatus, minting: true }, { ...onMain, isDirty: true }, card('Tau agent')),
+        selectRevisionFacts({ ...arrivedStatus, minting: true }, { ...onMain, isDirty: true }, card('Agent')),
       ).toMatchObject({ mark: 'running', sentence: 'Saving…' });
     });
   });

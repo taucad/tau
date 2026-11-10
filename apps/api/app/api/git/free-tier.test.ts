@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FastifyReply } from 'fastify';
 import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
-import type { BillingTier } from '@taucad/billing';
 import type { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '@taucad/api-object-storage';
@@ -19,10 +18,10 @@ import { UsageController } from '#api/git/usage.controller.js';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 
 /**
- * Charter W8 (D16–D18): the free tier backs up to a 1 GiB account allowance
- * once D23's gate opens, and every refusal and meter quotes that one figure.
- * Each row starts from the entitlement the billing projection would answer, so
- * the gate is part of what is tested rather than stubbed around.
+ * Charter W8 (D16–D18): the free tier backs up to a 1 GiB account allowance,
+ * and every refusal and meter quotes that one figure. Each row starts from the
+ * entitlement the billing projection would answer, so the plan is part of what
+ * is tested rather than stubbed around.
  */
 
 const gib = 1024 ** 3;
@@ -80,8 +79,8 @@ const hostedRemote = ({
   return { access, repositories };
 };
 
-/** The billing projection with free sync open, as the go-live checklist leaves it. */
-const openTier = (tier: BillingTier): CommercialEntitlements => entitlementsFromTier(tier, { freeTierSync: true });
+/** An Enterprise plan whose override turns sync off: the one plan that cannot sync. */
+const syncOff = (): CommercialEntitlements => ({ ...entitlementsFromTier('enterprise'), canSyncFiles: false });
 
 /**
  * An LFS upload batch the reservation refuses: `files` did not fit into what
@@ -113,7 +112,7 @@ const oid = (fill: string): string => fill.repeat(64);
 
 describe('free tier on the Hosted Remote (D16)', () => {
   it('should admit a free owner’s push under 1 GiB with the 1 GiB allowance as its bound', async () => {
-    const { repositories } = hostedRemote({ entitlements: openTier('free'), usedBytes: 200 * 1024 ** 2 });
+    const { repositories } = hostedRemote({ entitlements: entitlementsFromTier('free'), usedBytes: 200 * 1024 ** 2 });
 
     const access = await repositories.authorize({ projectId, userId: ownerId, mode: 'write' });
 
@@ -122,8 +121,8 @@ describe('free tier on the Hosted Remote (D16)', () => {
     expect(access.quotaAudience).toBe('owner');
   });
 
-  it('should refuse a free owner’s push while D23’s gate is closed, whatever the allowance', async () => {
-    const { repositories } = hostedRemote({ entitlements: entitlementsFromTier('free') });
+  it('should refuse a push from an owner whose plan cannot sync, whatever the allowance', async () => {
+    const { repositories } = hostedRemote({ entitlements: syncOff() });
 
     await expect(repositories.authorize({ projectId, userId: ownerId, mode: 'write' })).rejects.toMatchObject({
       status: 403,
@@ -156,7 +155,7 @@ describe('quota refusal (D17)', () => {
   ];
 
   it('should refuse a free owner past 1 GiB with 413, the 1 GB plan and the largest files first', async () => {
-    const { repositories } = hostedRemote({ entitlements: openTier('free'), usedBytes: 900 * 1024 ** 2 });
+    const { repositories } = hostedRemote({ entitlements: entitlementsFromTier('free'), usedBytes: 900 * 1024 ** 2 });
 
     const refused = await refusedBatch(repositories, ownerId, overflowing);
 
@@ -173,7 +172,7 @@ describe('quota refusal (D17)', () => {
 
   it('should direct a write collaborator to the owner and quote no plan', async () => {
     const { repositories } = hostedRemote({
-      entitlements: openTier('free'),
+      entitlements: entitlementsFromTier('free'),
       role: 'write',
       usedBytes: 900 * 1024 ** 2,
     });
@@ -192,7 +191,7 @@ describe('quota refusal (D17)', () => {
 
   it('should tell an owner on the top tier to remove files rather than upgrade', async () => {
     const { repositories } = hostedRemote({
-      entitlements: openTier('enterprise'),
+      entitlements: entitlementsFromTier('enterprise'),
       usedBytes: storageLimitBytesByTier.enterprise - 1024,
     });
 
@@ -205,7 +204,7 @@ describe('quota refusal (D17)', () => {
   });
 
   it('should answer a push to a full allowance with 413 in the caller’s sentence', async () => {
-    const { repositories } = hostedRemote({ entitlements: openTier('free'), usedBytes: gib });
+    const { repositories } = hostedRemote({ entitlements: entitlementsFromTier('free'), usedBytes: gib });
 
     await expect(repositories.authorize({ projectId, userId: ownerId, mode: 'write' })).rejects.toMatchObject({
       status: 413,
@@ -230,7 +229,7 @@ const usageRoute = (
 describe('usage route (D18)', () => {
   /* RV-W8 F8: a looping client spends its own window, before any database read. */
   it('should refuse a caller past its window with 429 and Retry-After, reading nothing', async () => {
-    const { access, repositories } = hostedRemote({ entitlements: openTier('free') });
+    const { access, repositories } = hostedRemote({ entitlements: entitlementsFromTier('free') });
     const read = vi.spyOn(repositories, 'readStorageAllowance');
     const reply = mock<FastifyReply>();
 
@@ -243,7 +242,10 @@ describe('usage route (D18)', () => {
   });
 
   it('should answer the owner the figures a later 413 quotes', async () => {
-    const { access, repositories } = hostedRemote({ entitlements: openTier('free'), usedBytes: 340 * 1024 ** 2 });
+    const { access, repositories } = hostedRemote({
+      entitlements: entitlementsFromTier('free'),
+      usedBytes: 340 * 1024 ** 2,
+    });
     vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
       storageBytes: 300 * 1024 ** 2,
       lfsBytes: 40 * 1024 ** 2,
@@ -262,7 +264,7 @@ describe('usage route (D18)', () => {
   });
 
   it('should never charge retained packs against the allowance', async () => {
-    const { repositories } = hostedRemote({ entitlements: openTier('free') });
+    const { repositories } = hostedRemote({ entitlements: entitlementsFromTier('free') });
     vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
       storageBytes: 100 * 1024 ** 2,
       lfsBytes: 0,
@@ -275,7 +277,7 @@ describe('usage route (D18)', () => {
   });
 
   it('should answer an allowance of 0 while the plan cannot sync', async () => {
-    const { access, repositories } = hostedRemote({ entitlements: entitlementsFromTier('free') });
+    const { access, repositories } = hostedRemote({ entitlements: syncOff() });
 
     const usage = await usageRoute(access, repositories).usage(projectId, ownerId, mock<FastifyReply>());
 

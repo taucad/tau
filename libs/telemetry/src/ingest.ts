@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { llmGatewayProviders } from '#llm-gateway-vocabulary.js';
+import { llmGatewayProviders, promptCacheOutcomes } from '#llm-gateway-vocabulary.js';
 
 /**
  * Canonical entry name constants used in `performance.measure()` and ingest payloads.
@@ -335,11 +335,13 @@ const agentTurnEntrySchema = z.object({
         z.object({
           cause: z.enum(agentPrefixBreakCauses),
           provider: z.enum(llmGatewayProviders),
+          /** How much of the breaking request's prompt came from the cache; absent from a client older than the field. */
+          outcome: z.enum(promptCacheOutcomes).optional(),
           count: clampedInt(1000),
           reasoningOmitted: clampedInt(100_000),
         }),
       )
-      .max(agentPrefixBreakCauses.length * llmGatewayProviders.length)
+      .max(agentPrefixBreakCauses.length * llmGatewayProviders.length * promptCacheOutcomes.length)
       .optional(),
     context: agentTurnContextSchema.optional(),
   }),

@@ -382,7 +382,7 @@ describe('TelemetryController', () => {
       });
     });
 
-    it('should count each prefix break by cause and provider, and the reasoning it left out by cause', () => {
+    it('should count each prefix break by cause, provider and cache outcome, and the reasoning it left out by cause', () => {
       ingestSignedIn({
         entries: [
           {
@@ -393,7 +393,7 @@ describe('TelemetryController', () => {
               placement: 'browser',
               outcome: 'completed',
               prefixBreaks: [
-                { cause: 'clearing', provider: 'anthropic', count: 1, reasoningOmitted: 9 },
+                { cause: 'clearing', provider: 'anthropic', outcome: 'miss', count: 1, reasoningOmitted: 9 },
                 { cause: 'settings', provider: 'openai', count: 2, reasoningOmitted: 0 },
               ],
             },
@@ -408,6 +408,7 @@ describe('TelemetryController', () => {
             [AttributeKey.AGENT_ID]: 'tau',
             [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: 'clearing',
             [AttributeKey.GEN_AI_PROVIDER_NAME]: 'anthropic',
+            'tau.prompt_cache.outcome': 'miss',
           },
         ],
         [
@@ -416,6 +417,8 @@ describe('TelemetryController', () => {
             [AttributeKey.AGENT_ID]: 'tau',
             [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: 'settings',
             [AttributeKey.GEN_AI_PROVIDER_NAME]: 'openai',
+            /* A client older than the field says nothing: the break is counted with no cache figure. */
+            'tau.prompt_cache.outcome': 'unreported',
           },
         ],
       ]);

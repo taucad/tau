@@ -669,11 +669,26 @@ describe('agent-loop decisions (R9)', () => {
 
 describe('prefix breaks (provider reasoning replay contract P1)', () => {
   const stamp = { digest: 'd', system: 's', tools: 't', settings: 'high' };
-  const reply = (id: string, prefix: Record<string, unknown>, internal?: Record<string, unknown>) => ({
+  type Extra = { internal?: Record<string, unknown>; usage?: { input: number; cacheRead: number; cacheWrite: number } };
+  const reply = (id: string, prefix: Record<string, unknown>, { internal, usage }: Extra = {}) => ({
     id,
     role: 'assistant',
     content: [{ type: 'text', text: 'Done.' }],
-    metadata: { provider: 'anthropic', prefix, ...(internal === undefined ? {} : { tauInternal: internal }) },
+    metadata: {
+      provider: 'anthropic',
+      prefix,
+      ...(internal === undefined ? {} : { tauInternal: internal }),
+      ...(usage === undefined
+        ? {}
+        : {
+            usage: {
+              ...usage,
+              output: 1,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          }),
+    },
   });
   const rows = term([
     life('admitted'),
@@ -682,12 +697,16 @@ describe('prefix breaks (provider reasoning replay contract P1)', () => {
     /* A stream checkpoint carries no stamp; the final row that replaces it carries the reply's. */
     {
       type: 'message.appended',
-      message: reply('reply-1', {}, { kind: 'stream-checkpoint', streamState: 'checkpoint' }),
+      message: reply('reply-1', {}, { internal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } }),
     },
     {
       type: 'message.envelope-replaced',
       messageId: 'reply-1',
-      replacement: reply('reply-1', { ...stamp, break: 'clearing', dropped: 9 }),
+      replacement: reply(
+        'reply-1',
+        { ...stamp, break: 'clearing', dropped: 9 },
+        { usage: { input: 40, cacheRead: 0, cacheWrite: 900 } },
+      ),
     },
     { type: 'message.appended', message: reply('reply-2', stamp) },
     { type: 'message.appended', message: reply('reply-3', { ...stamp, break: 'settings' }) },
@@ -697,8 +716,26 @@ describe('prefix breaks (provider reasoning replay contract P1)', () => {
 
   it('should record each break a reply carries once, with its provider and the reasoning it left out', () => {
     expect(foldChatLedger(emptyChatLedger, rows).runs['run-1']?.prefixBreaks).toEqual([
-      { cause: 'clearing', provider: 'anthropic', dropped: 9 },
+      { cause: 'clearing', provider: 'anthropic', dropped: 9, cache: 'miss' },
       { cause: 'settings', provider: 'anthropic', dropped: 0 },
+    ]);
+  });
+
+  it.each([
+    ['hit', { input: 10, cacheRead: 500, cacheWrite: 490 }],
+    ['partial', { input: 10, cacheRead: 499, cacheWrite: 491 }],
+    ['miss', { input: 10, cacheRead: 0, cacheWrite: 990 }],
+    [undefined, { input: 0, cacheRead: 0, cacheWrite: 0 }],
+  ] as const)('should read the breaking request as a cache %s from its reply usage', (cache, usage) => {
+    const broken = term([
+      life('admitted'),
+      committed,
+      life('running'),
+      { type: 'message.appended', message: reply('reply-1', { ...stamp, break: 'tools' }, { usage }) },
+      life('completed'),
+    ]);
+    expect(foldChatLedger(emptyChatLedger, broken).runs['run-1']?.prefixBreaks).toEqual([
+      { cause: 'tools', provider: 'anthropic', dropped: 0, ...(cache === undefined ? {} : { cache }) },
     ]);
   });
 

@@ -10,6 +10,7 @@ import type { GltfSurfaceBatches } from '#graphics/three/utils/gltf-surface-batc
 import { separateGltfNodeChildren } from '#graphics/three/utils/gltf-node-groups.js';
 import { subscribeToMatcapLoad } from '#graphics/three/materials/matcap-material.js';
 import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.js';
+import { viewerUploadStarted } from '#lib/viewer-events.js';
 import { invalidateSceneTransparency } from '#graphics/three/utils/scene-transparency-revision.js';
 import { holdGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
@@ -689,6 +690,8 @@ function usePresentationPreparation({
     const cancellation = { cancelled: false };
     const isCancelled = (): boolean => cancellation.cancelled;
 
+    /* Before any GPU work: a host records the step a phone may not survive (crash capture blueprint). */
+    viewerUploadStarted();
     const preparationAt = performance.now();
     const presentationAdmission = holdGeometryPresentation(gltfFile);
     const receivedAt = geometryReceiptAt(gltfFile) ?? preparationAt;

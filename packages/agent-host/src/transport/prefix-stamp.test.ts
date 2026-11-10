@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import { readPrefixStamp } from '#log/prefix-stamp.js';
 import type { PrefixStamp } from '#log/prefix-stamp.js';
-import { prefixCodecEpoch, stampPrefix } from '#transport/prefix-stamp.js';
-import type { PrefixStampInput } from '#transport/prefix-stamp.js';
+import { prefixCodecEpoch, stampPrefix, withoutNativeReasoning } from '#transport/prefix-stamp.js';
+import type { PrefixStampInput, StampedPrefix } from '#transport/prefix-stamp.js';
 
 type Message = Context['messages'][number];
 
@@ -36,8 +36,9 @@ const tools: PrefixStampInput['tools'] = [
   { name: 'edit_file', description: 'Edit a file.', parameters: { type: 'object' } },
 ];
 
-const stamped = (overrides: Partial<PrefixStampInput> = {}): PrefixStamp =>
+const request = (overrides: Partial<PrefixStampInput> = {}): StampedPrefix =>
   stampPrefix({
+    epoch: prefixCodecEpoch,
     model,
     system: ['You are a CAD agent.'],
     tools,
@@ -48,6 +49,48 @@ const stamped = (overrides: Partial<PrefixStampInput> = {}): PrefixStamp =>
     evicted: 0,
     ...overrides,
   });
+const stamped = (overrides: Partial<PrefixStampInput> = {}): PrefixStamp => request(overrides).stamp;
+
+const thinking = (text: string) => ({ type: 'thinking', thinking: text, thinkingSignature: `sig-${text}` }) as const;
+const call = (id: string, signature?: string) =>
+  ({
+    type: 'toolCall',
+    id,
+    name: 'read_file',
+    arguments: { targetFile: `${id}.scad` },
+    ...(signature === undefined ? {} : { thoughtSignature: signature }),
+  }) as const;
+
+/**
+ * A chat as its durable rows hold it: every reply stamped by the request that produced it, which obeyed the replay
+ * rule in turn.
+ *
+ * @param messages - The whole history, replies included.
+ * @param shared - What every request of the chat sent besides its messages.
+ * @returns The stamp of each message's row, by index.
+ */
+const stampsOf = (messages: Message[], shared: Partial<PrefixStampInput> = {}): Array<PrefixStamp | undefined> => {
+  const stamps: Array<PrefixStamp | undefined> = [];
+  for (const [index, message] of messages.entries()) {
+    stamps.push(
+      message.role === 'assistant'
+        ? request({ ...shared, messages: messages.slice(0, index), stamps }).stamp
+        : undefined,
+    );
+  }
+  return stamps;
+};
+
+/* Three steps of one tool loop, each reply thinking before it calls. */
+const loop: Message[] = [
+  user('Make a nut'),
+  assistant([thinking('one'), call('call-1')]),
+  result('call-1', 'first'),
+  assistant([thinking('two'), call('call-2')]),
+  result('call-2', 'second'),
+  assistant([thinking('three'), { type: 'text', text: 'Done.' }]),
+  user('Make it M8'),
+];
 
 /**
  * The break a chat's second request suffers: the first request's reply carries its stamp into the second.
@@ -118,6 +161,7 @@ describe('stampPrefix', () => {
 
   it('should leave native reasoning out of the digest, and nothing else', () => {
     const call = { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { targetFile: 'a.scad' } } as const;
+    /* Whether a row replays its reasoning is decided from this digest, so the digest cannot depend on the answer. */
     const digestOf = (content: AssistantMessage['content']): string =>
       stamped({ messages: [user('Make a nut'), assistant(content), result('call-1', 'ok')] }).digest;
     const bare = digestOf([call]);
@@ -169,9 +213,108 @@ describe('stampPrefix', () => {
   });
 });
 
+describe('the replay rule (P2)', () => {
+  it('should replay every row while requests only append', () => {
+    const next = request({ messages: loop, stamps: stampsOf(loop) });
+    expect([...next.stale]).toEqual([]);
+    expect(next.stamp).toMatchObject({ replayed: 3 });
+    expect(next.stamp.break).toBeUndefined();
+  });
+
+  it('should leave out the reasoning minted after an edit, and keep what was minted before it', () => {
+    const stamps = stampsOf(loop);
+    const cleared = loop.map((message, index) => (index === 2 ? result('call-1', '[cleared]') : message));
+    const next = request({ messages: cleared, stamps, cleared: 1 });
+    /* Anthropic binds a block to everything before it: the first reply precedes the cleared result and stays valid. */
+    expect([...next.stale]).toEqual([3, 5]);
+    expect(next.stamp).toMatchObject({ break: 'clearing', replayed: 1, dropped: 2 });
+  });
+
+  it('should keep a stale row stale on every later request, and replay what was minted after the break', () => {
+    const stamps = stampsOf(loop);
+    const cleared = loop.map((message, index) => (index === 2 ? result('call-1', '[cleared]') : message));
+    const broken = request({ messages: cleared, stamps, cleared: 1 });
+    const reply = assistant([thinking('four'), { type: 'text', text: 'It is M8.' }]);
+    const later = request({
+      messages: [...cleared, reply, user('Thanks')],
+      stamps: [...stamps, broken.stamp, undefined],
+      cleared: 1,
+    });
+    /* Putting a block back after it was left out fails at the provider, so the verdict never flips. */
+    expect([...later.stale]).toEqual([3, 5]);
+    expect(later.stamp).toMatchObject({ replayed: 2 });
+    expect(later.stamp.break).toBeUndefined();
+  });
+
+  it('should treat a row with no stamp as stale', () => {
+    const stamps = stampsOf(loop).map((stamp, index) => (index === 1 ? undefined : stamp));
+    expect([...request({ messages: loop, stamps }).stale]).toEqual([1]);
+  });
+
+  it('should leave every row out when the system text or the tools change, and take them back with the old ones', () => {
+    const stamps = stampsOf(loop);
+    const planning = request({ messages: loop, stamps, system: ['You are a CAD agent in plan mode.'] });
+    expect([...planning.stale]).toEqual([1, 3, 5]);
+    expect(planning.stamp).toMatchObject({ break: 'instructions', dropped: 3 });
+    expect([...request({ messages: loop, stamps, tools: tools.slice(0, 1) }).stale]).toEqual([1, 3, 5]);
+
+    /* The reply minted in plan mode never saw the earlier reasoning. Back in agent mode the earlier rows' prefix is
+     * what it was, so they replay, and the plan-mode reply is the one left out. */
+    const planned = assistant([thinking('plan'), { type: 'text', text: 'A plan.' }]);
+    const back = request({
+      messages: [...loop, planned, user('Go')],
+      stamps: [...stamps, planning.stamp, undefined],
+    });
+    expect([...back.stale]).toEqual([7]);
+    expect(back.stamp).toMatchObject({ break: 'instructions', replayed: 3 });
+  });
+
+  it('should keep reasoning across a reasoning-level change, which no provider binds it to', () => {
+    const next = request({ messages: loop, stamps: stampsOf(loop), settings: 'low' });
+    expect([...next.stale]).toEqual([]);
+    expect(next.stamp).toMatchObject({ break: 'settings', replayed: 3 });
+    expect(next.stamp.dropped).toBeUndefined();
+  });
+
+  it('should leave another model’s rows to the transport and count nothing dropped on a model change', () => {
+    const other = { ...model, id: 'other-model' };
+    const next = request({ model: other, messages: loop, stamps: stampsOf(loop) });
+    expect([...next.stale]).toEqual([]);
+    expect(next.stamp.break).toBe('model');
+    expect(next.stamp.dropped).toBeUndefined();
+    expect(next.stamp.replayed).toBeUndefined();
+  });
+
+  it('should count reasoning a compaction summarised away as dropped', () => {
+    const stamps = stampsOf(loop);
+    const tail = [user('<summary>Earlier work.</summary>'), ...loop.slice(5)];
+    const next = request({ messages: tail, stamps: [undefined, ...stamps.slice(5)], summary: 'summary-1' });
+    expect([...next.stale]).toEqual([1]);
+    expect(next.stamp).toMatchObject({ break: 'compaction', dropped: 3 });
+  });
+
+  it('should distrust every stamp of another codec epoch and call it a release', () => {
+    const stamps = stampsOf(loop, { release: 'ui@1' });
+    const upgraded = request({ messages: loop, stamps, epoch: 'pi-ai@9.9.9/1', release: 'ui@2' });
+    expect([...upgraded.stale]).toEqual([1, 3, 5]);
+    expect(upgraded.stamp.break).toBe('definitions');
+  });
+
+  it('should strip native reasoning without moving the chain', () => {
+    const signed = assistant([thinking('one'), { type: 'text', text: 'A note.' }, call('call-1', 'gemini-signature')]);
+    const stripped = withoutNativeReasoning(signed);
+    expect(stripped).toMatchObject({ content: [{ type: 'text', text: 'A note.' }, call('call-1')] });
+    expect(JSON.stringify(stripped)).not.toContain('ignature');
+    const digestOf = (reply: Message): string =>
+      stamped({ messages: [user('Make a nut'), reply, result('call-1', 'ok')] }).digest;
+    expect(digestOf(stripped)).toBe(digestOf(signed));
+    expect(withoutNativeReasoning(user('Make a nut'))).toEqual(user('Make a nut'));
+  });
+});
+
 describe('readPrefixStamp', () => {
   it('should read back what a row stored and refuse anything else', () => {
-    const stamp = { ...stamped({ cleared: 1 }), break: 'clearing', dropped: 4 } as const;
+    const stamp = { ...stamped({ cleared: 1 }), replayed: 2, break: 'clearing', dropped: 4 } as const;
     expect(readPrefixStamp(structuredClone(stamp))).toEqual(stamp);
     expect(readPrefixStamp({ ...stamp, break: 'not-a-cause' })?.break).toBeUndefined();
     expect(readPrefixStamp({ digest: 'd' })).toBeUndefined();

@@ -2,9 +2,11 @@
 
 /**
  * Purpose: Inventory desktop payloads and reject CAD execution in the renderer.
- * Why: Client and utility builds are separate graphs; both need byte-level checks.
+ * Why: Client and utility builds are separate graphs; both need byte-level checks. The renderer is this app's
+ * `build:desktop` output, so the check lives here and runs whenever the renderer changes; `desktop`'s package
+ * targets depend on it.
  * Environment: None required. Paths default to this checkout's desktop build.
- * Usage: pnpm nx run desktop:check-renderer-payload --args='[--report-only] [--app PATH] [--archive PATH] [--output PATH] [--source-revision REV]'
+ * Usage: pnpm nx run ui:check-desktop-payload --args='[--report-only] [--app PATH] [--archive PATH] [--output PATH] [--source-revision REV]'
  * Exit codes: 0 for a valid inventory, 1 for invalid arguments or an ownership violation.
  */
 import { createHash } from 'node:crypto';
@@ -44,7 +46,7 @@ export type PayloadInventory = {
 };
 
 // Renderer-owned WASM: the KCL editor, the viewer's Clipper section caps and the desktop Terminal's VT engine
-// (`@aurigax-ai/ghostty-web`, declared by `apps/ui`). None of them runs CAD.
+// (`@aurigax-ai/ghostty-web`, declared by this app's manifest). None of them runs CAD.
 const allowedWasm = /^(?:kcl_wasm_lib_bg|clipper2z|ghostty-vt)(?:-[\w-]+)?\.wasm$/u;
 const approvedWasmProducers = [
   { specifier: '@taucad/kcl-wasm-lib/kcl.wasm', manifest: 'package.json' },
@@ -68,7 +70,7 @@ const embeddedWasmProducers = [
  * path derived from the manifest. A renderer file at one of those paths is admitted only when its bytes match the
  * manifest entry, and the manifest entry matches the staged file, so the stage is the producer provenance. The emitted
  * JavaScript of the .NET runtime (`dotnet.js` and its native loader) is covered the same way: it is the runtime's own
- * loader, so it is not in the module graph. Paths mirror `apps/ui/{csharp,openscad}-language-assets.vite-plugin.ts`.
+ * loader, so it is not in the module graph. Paths mirror `../{csharp,openscad}-language-assets.vite-plugin.ts`.
  */
 export type StagedLanguageServers = { csharp?: string; openscad?: string };
 const defaultStagedLanguageServers = (workspaceRoot: string): StagedLanguageServers => ({

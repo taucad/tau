@@ -9,13 +9,26 @@
  *
  * P1 (provider reasoning replay contract): where the prefix does change, the reply to the first request after the
  * change records one typed break on its durable row (`metadata.prefix.break`), and no other reply records any.
+ *
+ * P2: every scripted reply thinks first under a signature of its own, and every chat any scenario here drives is held
+ * to two checks over the bodies it sent (`runChat`). The binding oracle is the hermetic twin of Anthropic's
+ * `prefix_mismatch_behavior: "error"`: a replayed thinking block follows exactly what its minting request sent. The
+ * prefix contract holds P1 in both directions: a changed prefix has a typed break, and a typed break has a change.
  */
 import { describe, expect, it } from 'vitest';
 import { skillsUpdateMessageId } from '#harness/cad-middleware.js';
 import type { ClientContext, RecentSkill } from '#harness/cad-middleware.js';
 import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
-import { canonicalize, classifyBoundary, fixtureTools, recordingFetch } from '#harness/prefix-identity.fixture.js';
-import type { CapturedBody, ScriptedReply } from '#harness/prefix-identity.fixture.js';
+import {
+  bindingViolations,
+  canonicalize,
+  classifyBoundary,
+  fixtureTools,
+  prefixContractViolations,
+  recordingFetch,
+  replayedSignatures,
+} from '#harness/prefix-identity.fixture.js';
+import type { CapturedBody, ScriptedReply, SentRequest } from '#harness/prefix-identity.fixture.js';
 import { createSessionRecord } from '#harness/session-record.js';
 import { attachTurnContexts, createAgentSession } from '#harness/session.js';
 import { failureMarkerClearance } from '#host/run-history.js';
@@ -102,10 +115,14 @@ type ChatRun = Readonly<{
   requests: readonly ModelStreamRequest[][];
   /** The typed prefix break each reply's durable row records, per turn in reply order; `undefined` where none. */
   breaks: ReadonlyArray<ReadonlyArray<PrefixBreakCause | undefined>>;
+  /** Every answered request of the chat in send order, with the signature its reply's thinking carries. */
+  sent: readonly SentRequest[];
+  /** The durable log the chat left. */
+  events: readonly AgentLogEvent[];
 }>;
 
-/** The break each run's replies recorded: the last row of each assistant message is its final one. */
-const recordedBreaks = (events: readonly AgentLogEvent[], runId: string): Array<PrefixBreakCause | undefined> => {
+/** The final durable row of every assistant message, in the order the messages first appeared. */
+const finalReplies = (events: readonly AgentLogEvent[], runId?: string): ProviderMessage[] => {
   const replies = new Map<string, ProviderMessage>();
   for (const event of events) {
     const message =
@@ -114,18 +131,29 @@ const recordedBreaks = (events: readonly AgentLogEvent[], runId: string): Array<
         : event.type === 'message.envelope-replaced'
           ? event.replacement
           : undefined;
-    if (event.runId === runId && message?.role === 'assistant') {
+    if ((runId === undefined || event.runId === runId) && message?.role === 'assistant') {
       replies.set(message.id, message);
     }
   }
-  return [...replies.values()].map((message) => readPrefixStamp(message.metadata?.['prefix'])?.break);
+  return [...replies.values()];
 };
+
+/** The break recorded on the reply that minted a signature. */
+const breakOfReply = (replies: readonly ProviderMessage[], minted: string): PrefixBreakCause | undefined => {
+  const reply = replies.find((message) => JSON.stringify(message.content).includes(`"thinkingSignature":"${minted}"`));
+  return readPrefixStamp(reply?.metadata?.['prefix'])?.break;
+};
+
+/** The break each run's replies recorded: the last row of each assistant message is its final one. */
+const recordedBreaks = (events: readonly AgentLogEvent[], runId: string): Array<PrefixBreakCause | undefined> =>
+  finalReplies(events, runId).map((message) => readPrefixStamp(message.metadata?.['prefix'])?.break);
 
 /** Run one chat, turn by turn, over one durable log; each turn opens its own session as a host does. */
 const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
   const file = createMemoryEventLogFile();
   const perTurn: CapturedBody[][] = [];
   const perTurnRequests: ModelStreamRequest[][] = [];
+  const sent: SentRequest[] = [];
   let ids = 0;
   const nextId = (): string => {
     ids += 1;
@@ -138,7 +166,7 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
     const requests: ModelStreamRequest[] = [];
     const gateway = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
-      fetch: recordingFetch(turn.replies, captured),
+      fetch: recordingFetch(turn.replies, captured, sent),
       ...(turn.release === undefined ? {} : { release: turn.release }),
     });
     const transport: ModelTransport = {
@@ -212,7 +240,20 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
   }
   const log = await file.open();
   const events = await log.read();
-  return { turns: perTurn, requests: perTurnRequests, breaks: turns.map((turn) => recordedBreaks(events, turn.runId)) };
+  const breaks = turns.map((turn) => recordedBreaks(events, turn.runId));
+  /* The guard every scenario runs under. Only a scenario that seeds a defect may record a break nothing explains. */
+  const replies = finalReplies(events);
+  expect(bindingViolations(sent)).toEqual([]);
+  expect(
+    prefixContractViolations(
+      sent,
+      sent.map((request) => breakOfReply(replies, request.minted)),
+    ),
+  ).toEqual([]);
+  if (!turns.some((turn) => turn.tamper !== undefined)) {
+    expect(breaks.flat()).not.toContain('unsanctioned');
+  }
+  return { turns: perTurn, requests: perTurnRequests, breaks, sent, events };
 };
 
 /** A turn boundary: the last request of one turn against the first request of the next. */
@@ -406,25 +447,37 @@ describe('I1 request prefix identity across consecutive user turns', () => {
     }
   });
 
-  describe('named exceptions', () => {
-    it('should diverge only in the tools when the tool set changes', async () => {
-      const verdict = turnBoundary(await runChat([turnOne, { ...turnTwo, tools: fixtureTools.slice(0, 2) }]));
+  describe('typed breaks: where the prefix leaves the previous request, and what the reply records', () => {
+    it('should diverge only in the tools when the tool set changes, and record a tools break', async () => {
+      const run = await runChat([turnOne, { ...turnTwo, tools: fixtureTools.slice(0, 2) }]);
+      const verdict = turnBoundary(run);
       expect(verdict.identicalThroughHistory).toBe(false);
       expect(verdict.divergence?.label.startsWith('tools[')).toBe(true);
+      expect(run.breaks[1]).toEqual(['tools']);
     });
 
-    it('should diverge only in the static system block when the mode changes', async () => {
-      const verdict = turnBoundary(
-        await runChat([turnOne, { ...turnTwo, staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` }]),
-      );
+    it('should diverge only in the static system block when the mode changes, and record an instructions break', async () => {
+      const run = await runChat([
+        turnOne,
+        { ...turnTwo, staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` },
+      ]);
+      const verdict = turnBoundary(run);
       expect(verdict.identicalThroughHistory).toBe(false);
       expect(verdict.divergence?.label).toBe('system[0]');
+      expect(run.breaks[1]).toEqual(['instructions']);
     });
 
-    it('should carry a model change on the request, never in the cached history', async () => {
+    it('should carry a model change on the request and render the other model’s reasoning as text, under a model break', async () => {
       const run = await runChat([turnOne, { ...turnTwo, modelId: 'anthropic-claude-sonnet-4.5' }]);
-      expect(run.turns[1]![0]!['model']).toBe('anthropic-claude-sonnet-4.5');
-      expectIdentical(run);
+      const switched = run.turns[1]![0]!;
+      expect(switched['model']).toBe('anthropic-claude-sonnet-4.5');
+      /* System and tools are the same bytes; the history leaves the previous request at the first reply, whose
+       * thinking another model cannot replay natively. */
+      const verdict = turnBoundary(run);
+      expect(verdict.divergence?.label).toBe('messages[2]:assistant');
+      expect(replayedSignatures(switched)).toEqual([]);
+      expect(JSON.stringify(switched['messages'])).toContain('reasoning sig-1');
+      expect(run.breaks[1]).toEqual(['model']);
     });
 
     it('should diverge only at the compaction summary, and keep identity within the run before and after it', async () => {
@@ -469,7 +522,179 @@ describe('I1 request prefix identity across consecutive user turns', () => {
       const next = run.requests[1]![0]!.messages.map((message) => message.id);
       expect(next.slice(0, ids.length)).toEqual(ids);
       expect(next.indexOf('tau:snapshot-context:run-2')).toBe(next.indexOf('user-run-2') - 1);
+      expect(run.breaks).toEqual([[undefined, undefined, 'compaction'], [undefined]]);
     });
+  });
+});
+
+describe('P2 native reasoning is replayed only under the prefix that minted it', () => {
+  const window = { contextWindow: 8192, summarize: 'Earlier work.' } as const;
+  const replayed = (run: ChatRun): string[][] => run.sent.map((request) => replayedSignatures(request.body));
+
+  it('should replay every reply’s reasoning on every later request while requests only append', async () => {
+    const run = await runChat([
+      { ...turnOne, replies: [readFile, readFile, readFile, done] },
+      turnTwo,
+      { ...turnTwo, runId: 'run-3', userText: 'Thicker' },
+    ]);
+    /* The guard proves nothing on a chat that never replays a block, so the control states what was replayed. */
+    expect(replayed(run)).toEqual([
+      [],
+      ['sig-1'],
+      ['sig-1', 'sig-2'],
+      ['sig-1', 'sig-2', 'sig-3'],
+      ['sig-1', 'sig-2', 'sig-3', 'sig-4'],
+      ['sig-1', 'sig-2', 'sig-3', 'sig-4', 'sig-5'],
+    ]);
+  });
+
+  it.each([
+    ['the tool set changes', { tools: fixtureTools.slice(0, 2) }],
+    ['the mode changes', { staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` }],
+  ] as const)('should leave out all earlier reasoning when %s, then replay what is minted after', async (_, change) => {
+    const run = await runChat([turnOne, { ...turnTwo, ...change, replies: [readFile, done] }]);
+    expect(replayed(run)).toEqual([[], ['sig-1'], [], ['sig-3']]);
+  });
+
+  it('should keep reasoning across an effort change, which no provider binds it to', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'high' },
+      { ...turnTwo, effort: 'medium' },
+    ]);
+    expect(replayed(run)).toEqual([[], ['sig-1'], ['sig-1', 'sig-2']]);
+  });
+
+  it('should take a model’s reasoning back when the chat returns to the prefix it was minted under', async () => {
+    const plan = `${staticPrompt}\n\n<plan_mode>plan</plan_mode>`;
+    const run = await runChat([
+      turnOne,
+      { ...turnTwo, staticPrompt: plan },
+      { ...turnTwo, runId: 'run-3', userText: 'Thicker' },
+      { ...turnTwo, runId: 'run-4', userText: 'Chamfer it', staticPrompt: plan },
+    ]);
+    /* The plan-mode reply never saw the agent-mode reasoning, and the agent-mode replies never saw its own: each
+     * lineage replays exactly its blocks, so no block ever follows a prefix it was not minted under. */
+    expect(replayed(run)).toEqual([[], ['sig-1'], [], ['sig-1', 'sig-2'], ['sig-3']]);
+    expect(run.breaks).toEqual([[undefined, undefined], ['instructions'], ['instructions'], ['instructions']]);
+  });
+
+  it('should leave out the reasoning minted after a cleared tool result, inside the run that cleared it', async () => {
+    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
+      tool: 'read_file',
+      input: { targetFile: `part-${String(index)}.scad` },
+      inputTokens: index === 9 ? 7000 : 3,
+    }));
+    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
+    const run = await runChat([
+      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
+      { ...turnTwo, ...long },
+    ]);
+    const signatures = replayed(run);
+    /* Ten replies thought before the results were cleared. The first precedes the first cleared result and stays
+     * valid; the nine after it are left out, in the open tool loop, and stay out on the next turn. */
+    expect(signatures[9]).toHaveLength(9);
+    expect(signatures[10]).toEqual(['sig-1']);
+    expect(signatures[11]).toEqual(['sig-1', 'sig-11']);
+  });
+
+  it('should leave out the reasoning a summary’s retained tail holds', async () => {
+    const run = await runChat([
+      { ...turnOne, ...window },
+      { ...turnTwo, ...window },
+      { ...turnTwo, ...window, runId: 'run-3', userText: 'Thicker', replies: [{ ...done, inputTokens: 7000 }] },
+      { ...turnTwo, ...window, runId: 'run-4', userText: 'Chamfer it' },
+    ]);
+    const signatures = replayed(run);
+    expect(run.breaks.flat().filter((cause) => cause !== undefined)).toEqual(['compaction']);
+    /* The tail kept replies with their thinking in the log; the request after the summary replays none of them. */
+    expect(signatures[3]).toEqual(['sig-1', 'sig-2', 'sig-3']);
+    expect(signatures[4]).toEqual([]);
+    const tail = run.requests[3]![0]!.messages.filter((message) => message.role === 'assistant');
+    expect(JSON.stringify(tail)).toContain('thinkingSignature');
+  });
+
+  it('should leave out reasoning after a defect rewrites the prefix, so even an unexplained edit cannot be refused', async () => {
+    const run = await runChat([
+      turnOne,
+      {
+        ...turnTwo,
+        tamper: (request) => ({
+          ...request,
+          messages: request.messages.map((message) =>
+            message.role === 'tool-output' ? { ...message, content: '[older result trimmed]' } : message,
+          ),
+        }),
+      },
+    ]);
+    /* The first reply precedes the rewritten result; the second was minted after it. */
+    expect(replayed(run)).toEqual([[], ['sig-1'], ['sig-1']]);
+  });
+
+  it('should leave the durable log as the provider wrote it: reasoning is left out of requests, never erased', async () => {
+    const run = await runChat([turnOne, { ...turnTwo, tools: fixtureTools.slice(0, 2), replies: [readFile, done] }]);
+    const kept = finalReplies(run.events).map(
+      (reply) => /"thinkingSignature":"(sig-\d+)"/u.exec(JSON.stringify(reply))?.[1],
+    );
+    expect(kept).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4']);
+  });
+});
+
+describe('the guard itself', () => {
+  const body = (system: string, messages: unknown[], effort = 'high'): CapturedBody => ({
+    model: 'fixture',
+    system,
+    tools: [],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire key.
+    output_config: { effort },
+    messages,
+  });
+  const ask = { role: 'user', content: 'Make a nut' };
+  const reply = {
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: 't', signature: 'sig-1' },
+      { type: 'text', text: 'Done.' },
+    ],
+  };
+  const next = { role: 'user', content: 'Make it M8' };
+
+  it('should pass a block replayed under the prefix that minted it', () => {
+    const sent = [
+      { body: body('S', [ask]), minted: 'sig-1' },
+      { body: body('S', [ask, reply, next]), minted: 'sig-2' },
+    ];
+    expect(bindingViolations(sent)).toEqual([]);
+    expect(prefixContractViolations(sent, [undefined, undefined])).toEqual([]);
+  });
+
+  it.each([
+    ['the system text changed', body('S2', [ask, reply, next])],
+    ['an earlier message changed', body('S', [{ role: 'user', content: 'Make a bolt' }, reply, next])],
+  ])('should report a block replayed after %s', (_, second) => {
+    const sent = [
+      { body: body('S', [ask]), minted: 'sig-1' },
+      { body: second, minted: 'sig-2' },
+    ];
+    expect(bindingViolations(sent)).toEqual([
+      'request 2: messages.1.content.0 (sig-1) is replayed after an edited prefix',
+    ]);
+    expect(prefixContractViolations(sent, [undefined, undefined])).toHaveLength(1);
+    expect(prefixContractViolations(sent, [undefined, 'instructions'])).toEqual([]);
+  });
+
+  it('should report an effort change with no typed break, and a typed break with no change', () => {
+    const sent = [
+      { body: body('S', [ask]), minted: 'sig-1' },
+      { body: body('S', [ask, reply, next], 'medium'), minted: 'sig-2' },
+    ];
+    expect(prefixContractViolations(sent, [undefined, undefined])).toEqual([
+      'request 2: the prefix or its cache parameters changed (parameters) with no typed break',
+    ]);
+    expect(prefixContractViolations(sent, [undefined, 'settings'])).toEqual([]);
+    const same = [sent[0]!, { body: body('S', [ask, reply, next]), minted: 'sig-2' }];
+    expect(prefixContractViolations(same, [undefined, 'settings'])).toEqual([
+      'request 2: a settings break is recorded and nothing changed',
+    ]);
   });
 });
 

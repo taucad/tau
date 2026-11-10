@@ -106,9 +106,10 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
     );
     return 1;
   }
-  const tools = options.tools ?? locateTools(context);
+  // A caller's validator needs no toolchain, so the tools are located (a `java -version` spawn) only for TLC.
+  const tools = options.validate === undefined ? (options.tools ?? locateTools(context)) : undefined;
   const skipped =
-    options.validate !== undefined || files.length === 0
+    tools === undefined || files.length === 0
       ? undefined
       : missingTools(context, { tools, needed: ['java', 'tlc'], target: `${options.project}:formal:logs` }, log);
   if (skipped !== undefined) {
@@ -116,7 +117,7 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
   }
   const validate =
     options.validate ??
-    (tools.java && tools.tlc ? tlcValidator(context, { java: tools.java, tlc: tools.tlc }) : undefined);
+    (tools?.java && tools.tlc ? tlcValidator(context, { java: tools.java, tlc: tools.tlc }) : undefined);
   if (!validate && files.length > 0) {
     return 1;
   }

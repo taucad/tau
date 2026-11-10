@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Node } from 'three/webgpu';
 import { WebglLimitFallback } from '#cad/webgl-fallback.jsx';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
@@ -79,8 +79,8 @@ function ThreeProviderCanvas({
 }: ThreeContextProperties): React.JSX.Element {
   const captureShaderStacks = useViewerFeature('webGpuShaderStacks');
 
+  // The canvas actor holds this viewer's slot in the budget for the canvas's life (acquire, resize, release).
   const webglRef = useWebglContextRef();
-  const holderId = useId();
 
   // oxlint-disable-next-line react/hook-use-state -- one-time snapshot, setter intentionally unused
   const [initialSurfaceBytes] = useState(() =>
@@ -98,34 +98,6 @@ function ThreeProviderCanvas({
 
     return !admitsViewerContext(webglRef.getSnapshot().context, initialSurfaceBytes);
   });
-
-  // A layout effect, so the holder exists before the canvas reports its first size.
-  useLayoutEffect(() => {
-    if (!webglRef || isOverLimit) {
-      return;
-    }
-
-    // WebGPU canvases hold a device and surface too, so both backends count against one budget.
-    webglRef.send({
-      type: 'acquire',
-      id: holderId,
-      bytes: initialSurfaceBytes,
-    });
-    return () => {
-      webglRef.send({ type: 'release', id: holderId });
-    };
-  }, [graphicsBackend, webglRef, isOverLimit, holderId, initialSurfaceBytes]);
-
-  const handleSurfaceResize = useCallback(
-    (cssPixels: number, pixelRatio: number): void => {
-      webglRef?.send({
-        type: 'resize',
-        id: holderId,
-        bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio),
-      });
-    },
-    [webglRef, holderId],
-  );
 
   useEffect(() => {
     if (!captureShaderStacks || graphicsBackend !== 'webgpu') {
@@ -170,7 +142,8 @@ function ThreeProviderCanvas({
       gizmoContainer={gizmoContainer}
       graphicsBackend={graphicsBackend}
       onRetry={handleRetry}
-      onSurfaceResize={webglRef ? handleSurfaceResize : undefined}
+      webglContext={webglRef}
+      admittedBytes={initialSurfaceBytes}
     >
       {children}
     </ThreeCanvasInstance>

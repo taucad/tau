@@ -96,6 +96,14 @@ describe('chatPersistenceMachine', () => {
               writes.push(`kernel:${input.chatId}:${input.activeKernel}`);
             },
           }),
+          persistKernelPreferenceActor: createAsyncLogic<
+            void,
+            { chatId: string; kernelPreference: Chat['kernelPreference'] }
+          >({
+            run: async ({ input }) => {
+              writes.push(`preference:${input.chatId}:${input.kernelPreference}`);
+            },
+          }),
           persistErrorActor: createAsyncLogic<void, { chatId: string; error: ChatError }>({
             run: async ({ input }) => {
               writes.push(`refusal:${input.chatId}:${input.error.code}`);
@@ -113,17 +121,25 @@ describe('chatPersistenceMachine', () => {
 
     actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'model-b' } });
     actor.send({ type: 'setActiveKernel', kernel: 'manifold' });
+    actor.send({ type: 'setKernelPreference', preference: 'auto' });
     actor.send({ type: 'setPersistedError', error: refusal });
     await waitFor(actor, (snapshot) =>
       snapshot.matches({
         activeExecutionPersistence: 'idle',
         activeKernelPersistence: 'idle',
+        kernelPreferencePersistence: 'idle',
         errorPersistence: 'idle',
       }),
     );
     expect(writes).toEqual(
-      expect.arrayContaining(['execution:chat_a:tau', 'kernel:chat_a:manifold', 'refusal:chat_a:HOST_CLOSED']),
+      expect.arrayContaining([
+        'execution:chat_a:tau',
+        'kernel:chat_a:manifold',
+        'preference:chat_a:auto',
+        'refusal:chat_a:HOST_CLOSED',
+      ]),
     );
+    expect(actor.getSnapshot().context.kernelPreference).toBe('auto');
 
     actor.send({ type: 'clearPersistedError' });
     expect(actor.getSnapshot().context.persistedError).toBeUndefined();

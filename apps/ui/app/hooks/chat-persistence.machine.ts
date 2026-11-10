@@ -3,7 +3,7 @@
 import { createAsyncLogic, setup, types } from 'xstate';
 import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
-import type { KernelId } from '@taucad/types/constants';
+import type { KernelId, KernelPreference } from '@taucad/types/constants';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 /** @public */
@@ -42,6 +42,8 @@ export type ChatPersistenceMachineContext = {
    */
   executionUnwritten?: boolean;
   activeKernel?: KernelId;
+  /** The chat row's kernel preference (blueprint D2); written only while the `autoKernel` flag is on. */
+  kernelPreference?: KernelPreference;
   fault?: string;
 };
 
@@ -60,7 +62,8 @@ type ChatPersistenceMachineEvents =
   /** A placement applied before its reach was known turned out unreachable: the chat runs here, holding it if it is
    * this device's own (XD2). */
   | { type: 'placementUnreachable'; execution: CadAgentExecution; heldPlacement?: TauAgentHostId }
-  | { type: 'setActiveKernel'; kernel: KernelId | undefined };
+  | { type: 'setActiveKernel'; kernel: KernelId | undefined }
+  | { type: 'setKernelPreference'; preference: KernelPreference };
 
 /**
  * The held placement a newly chosen execution leaves standing: only while the chat stays on this tab's local Tau,
@@ -112,6 +115,15 @@ const persistActiveKernelActor = createAsyncLogic<void, { chatId: string; active
   },
 });
 
+const persistKernelPreferenceActor = createAsyncLogic<
+  void,
+  { chatId: string; kernelPreference: KernelPreference | undefined }
+>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the persistKernelPreferenceActor actor was not provided.');
+  },
+});
+
 const hasValidChatId = (context: ChatPersistenceMachineContext): boolean =>
   Boolean(context.activeChatId?.startsWith('chat_'));
 
@@ -135,6 +147,7 @@ export const chatPersistenceMachine = setup({
     clearErrorActor,
     persistActiveExecutionActor,
     persistActiveKernelActor,
+    persistKernelPreferenceActor,
   },
 }).createMachine({
   id: 'chatPersistence',
@@ -150,6 +163,7 @@ export const chatPersistenceMachine = setup({
     persistedError: undefined,
     activeExecution: undefined,
     activeKernel: undefined,
+    kernelPreference: undefined,
   }),
   type: 'parallel',
   states: {
@@ -179,6 +193,7 @@ export const chatPersistenceMachine = setup({
                 activeExecution: event.output.chat?.activeExecution,
                 heldPlacement: event.output.heldPlacement,
                 activeKernel: event.output.chat?.activeKernel,
+                kernelPreference: event.output.chat?.kernelPreference,
               }),
             },
             onError: {
@@ -300,6 +315,33 @@ export const chatPersistenceMachine = setup({
         },
       },
     },
+    kernelPreferencePersistence: {
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            setKernelPreference: ({ context, event }) =>
+              hasValidChatId(context)
+                ? { target: 'persisting', context: { kernelPreference: event.preference } }
+                : undefined,
+          },
+        },
+        persisting: {
+          invoke: {
+            src: 'persistKernelPreferenceActor',
+            input: ({ context }) => ({ chatId: context.activeChatId!, kernelPreference: context.kernelPreference }),
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
+          },
+          on: {
+            setKernelPreference: ({ context, event }) =>
+              hasValidChatId(context)
+                ? { target: 'persisting', reenter: true, context: { kernelPreference: event.preference } }
+                : undefined,
+          },
+        },
+      },
+    },
     errorPersistence: {
       initial: 'idle',
       states: {
@@ -361,6 +403,8 @@ export const chatPersistenceIgnoredEvents: ReadonlyArray<readonly [state: string
   ['activeExecutionPersistence.persisting', 'setActiveExecution'],
   ['activeKernelPersistence.idle', 'setActiveKernel'],
   ['activeKernelPersistence.persisting', 'setActiveKernel'],
+  ['kernelPreferencePersistence.idle', 'setKernelPreference'],
+  ['kernelPreferencePersistence.persisting', 'setKernelPreference'],
 ];
 
 export type ChatPersistenceMachineState = ReturnType<typeof chatPersistenceMachine.getInitialSnapshot>;

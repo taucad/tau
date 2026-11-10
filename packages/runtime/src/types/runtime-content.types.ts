@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** Canonical framework-owned content property catalog. @public */
 export const runtimeContentProperties = {
   includeEdges: z.boolean().describe('Include auxiliary visible edge overlays'),
-  includeTopology: z.boolean().describe('Include Tau CAD topology metadata'),
+  includeTopology: z.boolean().describe('Include Tau topology metadata'),
 } as const;
 
 /** Tolerant-reader request schema shared by the public API and worker protocol. @public */

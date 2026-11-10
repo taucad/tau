@@ -3,6 +3,7 @@ export type EmailTemplateKind =
   | 'reset-password'
   | 'password-changed'
   | 'verify-email'
+  | 'account-exists'
   | 'publication-invite'
   | 'payment-failed'
   | 'auto-reload-disabled'
@@ -43,6 +44,17 @@ export type VerifyEmailTemplate = {
   readonly kind: 'verify-email';
   readonly email: string;
   readonly url: string;
+};
+
+/** Someone signed up with an address that already has a verified account (email readiness R10). */
+export type AccountExistsEmailTemplate = {
+  readonly kind: 'account-exists';
+  readonly email: string;
+  /** Sign-in page. */
+  readonly url: string;
+  /** Forgot-password page, for an owner who no longer knows the password. */
+  readonly resetUrl: string;
+  readonly device?: string;
 };
 
 export type PublicationInviteEmailTemplate = {
@@ -86,6 +98,7 @@ export type EmailTemplate =
   | ResetPasswordEmailTemplate
   | PasswordChangedEmailTemplate
   | VerifyEmailTemplate
+  | AccountExistsEmailTemplate
   | PublicationInviteEmailTemplate
   | PaymentFailedEmailTemplate
   | AutoReloadDisabledEmailTemplate

@@ -5,6 +5,7 @@ import { parseExpectedWriters } from '#environment.js';
 import {
   checkDataAccessEvent,
   fetchDataAccessEvents,
+  isForeignEvent,
   pollDataAccessLogs,
   pollQuery,
   pollWindowMilliseconds,
@@ -263,6 +264,18 @@ describe('checkDataAccessEvent', () => {
   });
 });
 
+describe('isForeignEvent', () => {
+  it("should never treat one of this Worker's own buckets as foreign", () => {
+    const foreignBuckets = new Set(['tau-prod-content-private', dependencies]);
+    expect(isForeignEvent({ bucket: 'tau-prod-content-private' }, { ...context, foreignBuckets })).toBe(true);
+    expect(isForeignEvent({ bucket: dependencies }, { ...context, foreignBuckets })).toBe(false);
+    expect(isForeignEvent({ bucket: dependencies }, { ...context, foreignBuckets, dependencyBucket: undefined })).toBe(
+      false,
+    );
+    expect(isForeignEvent({ bucket: 'tau-prod-content-private' }, context)).toBe(false);
+  });
+});
+
 describe('pollDataAccessLogs', () => {
   it('should report each event once across two passes', async () => {
     const kv = createFakeKv();
@@ -286,7 +299,7 @@ describe('pollDataAccessLogs', () => {
     };
     const first = await pollDataAccessLogs(input);
     const second = await pollDataAccessLogs({ ...input, to: to + 300_000 });
-    expect(first).toMatchObject({ ok: true, eventsSeen: 1, eventsNew: 1 });
+    expect(first).toMatchObject({ ok: true, eventsSeen: 1, eventsNew: 1, eventsForeign: 0 });
     expect(first.ok && first.lines.map((line) => line.event)).toEqual(['r2_audit.unexpected_writer']);
     expect(second).toMatchObject({
       ok: true,
@@ -294,6 +307,74 @@ describe('pollDataAccessLogs', () => {
       eventsNew: 0,
       lines: [],
     });
+  });
+
+  it('should skip a foreign bucket before both checks, and still alarm on an unknown one', async () => {
+    const kv = createFakeKv();
+    const fetcher = respond([
+      telemetryEvent('prod-put', {
+        action: 'PutObject',
+        bucket: 'tau-prod-content-private',
+        resource: { key: 'blobs/revisions-maintenance/liveness/recover-projects.json' },
+        interface: 'S3',
+        actor: { accessKeyId: 'token-prod' },
+      }),
+      telemetryEvent('prod-bulk', {
+        action: 'DeleteObjects',
+        bucket: 'tau-prod-content-private',
+        interface: 'API',
+      }),
+      telemetryEvent('rogue', {
+        action: 'PutObject',
+        bucket: 'tau-rogue-bucket',
+        interface: 'S3',
+        actor: { accessKeyId: 'token-prod' },
+      }),
+    ]);
+    const result = await pollDataAccessLogs({
+      accountId: 'a',
+      token: 't',
+      to,
+      kv,
+      expected,
+      dependencyBucket: dependencies,
+      foreignBuckets: new Set(['tau-prod-content-private']),
+      environment: 'staging',
+      fetch: fetcher,
+    });
+    expect(result).toMatchObject({ ok: true, eventsSeen: 3, eventsNew: 1, eventsForeign: 2 });
+    expect(result.ok && result.lines).toEqual([
+      expect.objectContaining({
+        event: 'r2_audit.unexpected_writer',
+        bucket: 'tau-rogue-bucket',
+        reason: 'unknown-bucket',
+      }),
+    ]);
+    // A skipped event costs no KV operation.
+    expect(kv.puts.map(({ key }) => key)).toEqual(['seen:rogue']);
+  });
+
+  it('should check every bucket without foreign buckets', async () => {
+    const fetcher = respond([
+      telemetryEvent('prod-put', {
+        action: 'PutObject',
+        bucket: 'tau-prod-content-private',
+        interface: 'S3',
+        actor: { accessKeyId: 'token-prod' },
+      }),
+    ]);
+    const result = await pollDataAccessLogs({
+      accountId: 'a',
+      token: 't',
+      to,
+      kv: createFakeKv(),
+      expected,
+      dependencyBucket: dependencies,
+      environment: 'staging',
+      fetch: fetcher,
+    });
+    expect(result).toMatchObject({ ok: true, eventsNew: 1, eventsForeign: 0 });
+    expect(result.ok && result.lines.map((line) => line.reason)).toEqual(['unknown-bucket']);
   });
 
   it('should fail cleanly when KV is down', async () => {

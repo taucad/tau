@@ -9,6 +9,8 @@
 import { safeguardPatternOf } from '#harness/safeguard-pattern.js';
 import type { SafeguardPattern } from '#harness/safeguard-pattern.js';
 import { canonicalJson } from '#log/canonical-json.js';
+import { readPrefixStamp } from '#log/prefix-stamp.js';
+import type { PrefixBreakCause } from '#log/prefix-stamp.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
 import type { ClassifiedRow } from '#log/event-schema.js';
 import { projectionBatchSchema } from '#log/projection-facts.js';
@@ -77,6 +79,19 @@ export type LedgerCompaction = Readonly<{
   outcome: 'cleared' | 'generated' | 'placeholder';
 }>;
 
+/**
+ * One prefix break a run's replies recorded (`metadata.prefix.break`): the first request after the break did not
+ * reproduce the previous request's prefix, so the provider's prompt cache restarted there.
+ * @public
+ */
+export type LedgerPrefixBreak = Readonly<{
+  cause: PrefixBreakCause;
+  /** The provider the request went to, as its reply's row names it. */
+  provider?: string;
+  /** Native reasoning blocks the request left out because of the break. */
+  dropped: number;
+}>;
+
 /** @public */
 export type RunEntry = Readonly<{
   kind: 'tau' | 'external';
@@ -111,6 +126,8 @@ export type RunEntry = Readonly<{
   safeguards?: readonly LedgerSafeguard[];
   /** Compaction decisions across the run's attempts, in log order; absent until one is taken. */
   compactions?: readonly LedgerCompaction[];
+  /** Prefix breaks across the run's attempts, in log order; absent until a request suffers one. */
+  prefixBreaks?: readonly LedgerPrefixBreak[];
 }>;
 
 /** @public */
@@ -550,6 +567,16 @@ const createFold = (ledger: ChatLedger) => {
         const binding = message.metadata?.tauInternal;
         const attemptId = binding?.['attemptId'];
         const stop = message.metadata?.stopReason;
+        /* A reply's final row carries its request's stamp; a stream checkpoint of the same reply carries none. */
+        const stamp = message.role === 'assistant' ? readPrefixStamp(message.metadata?.['prefix']) : undefined;
+        if (stamp?.break !== undefined) {
+          const entry = entryOf(event.runId);
+          const provider = message.metadata?.provider;
+          entry.prefixBreaks = [
+            ...(entry.prefixBreaks ?? []),
+            { cause: stamp.break, ...(provider === undefined ? {} : { provider }), dropped: stamp.dropped ?? 0 },
+          ];
+        }
         if (
           message.role === 'assistant' &&
           binding?.['kind'] === 'billing-invocation' &&

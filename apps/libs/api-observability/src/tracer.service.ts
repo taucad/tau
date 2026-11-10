@@ -1,6 +1,7 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Injectable } from '@nestjs/common';
-import { trace, context, SpanStatusCode, propagation } from '@opentelemetry/api';
+import { trace, context, SpanKind, SpanStatusCode, propagation } from '@opentelemetry/api';
+import type { Tracer } from '@opentelemetry/api';
 
 const tracer = trace.getTracer('tau-api');
 
@@ -12,6 +13,79 @@ export const injectTraceContext = (): Record<string, string> => {
   const carrier: Record<string, string> = {};
   propagation.inject(context.active(), carrier);
   return carrier;
+};
+
+/** Token counts a model call reports, in OpenTelemetry GenAI terms. */
+export type GenAiUsage = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly reasoningTokens?: number;
+};
+
+/** An open `gen_ai` chat span, ended once with the call's outcome. */
+export type GenAiChatSpan = {
+  readonly succeed: (usage: GenAiUsage) => void;
+  readonly fail: (errorType: string) => void;
+};
+
+/**
+ * Start a client span for one model call with the OpenTelemetry GenAI
+ * attributes: operation, provider, requested model and output ceiling, then
+ * usage or `error.type` when it ends.
+ *
+ * Content-free by construction: it takes no prompt or completion, so neither
+ * can reach a span.
+ *
+ * @param request - The provider's `gen_ai.provider.name`, the provider's model id and the output ceiling.
+ * @param spanTracer - The tracer, injectable for tests.
+ * @returns The span's two endings; the first call wins.
+ */
+export const startGenAiChatSpan = (
+  request: { readonly providerName: string; readonly requestModel: string; readonly maxTokens?: number },
+  spanTracer: Tracer = tracer,
+): GenAiChatSpan => {
+  const span = spanTracer.startSpan(`chat ${request.requestModel}`, {
+    kind: SpanKind.CLIENT,
+    attributes: {
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.provider.name': request.providerName,
+      'gen_ai.request.model': request.requestModel,
+      ...(request.maxTokens === undefined ? {} : { 'gen_ai.request.max_tokens': request.maxTokens }),
+    },
+  });
+  let ended = false;
+  return {
+    succeed: (usage) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      span.setAttributes({
+        'gen_ai.usage.input_tokens': usage.inputTokens,
+        'gen_ai.usage.output_tokens': usage.outputTokens,
+        ...(usage.cacheReadTokens === undefined
+          ? {}
+          : { 'gen_ai.usage.cache_read_input_tokens': usage.cacheReadTokens }),
+        ...(usage.cacheWriteTokens === undefined
+          ? {}
+          : { 'gen_ai.usage.cache_creation_input_tokens': usage.cacheWriteTokens }),
+        ...(usage.reasoningTokens === undefined ? {} : { 'gen_ai.usage.reasoning_tokens': usage.reasoningTokens }),
+      });
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+    },
+    fail: (errorType) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      span.setAttribute('error.type', errorType);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.end();
+    },
+  };
 };
 
 @Injectable()

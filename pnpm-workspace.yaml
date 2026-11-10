@@ -73,14 +73,6 @@ catalog:
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': 2.0.48
-  '@langchain/anthropic': ^1.5.0
-  '@langchain/cerebras': ^1.0.4
-  '@langchain/core': ^1.2.17
-  '@langchain/google-vertexai': ^2.2.0
-  '@langchain/langgraph': ^1.4.4
-  '@langchain/ollama': ^1.3.0
-  '@langchain/openai': ^1.5.1
-  '@langchain/xai': ^1.4.3
   '@modelcontextprotocol/ext-apps': 1.7.5
   '@modelcontextprotocol/sdk': ^1.32.1
   '@msgpack/msgpack': ^3.1.3
@@ -173,7 +165,6 @@ catalog:
   '@tiptap/pm': ^3.30.5
   '@tiptap/react': ^3.30.5
   '@tiptap/suggestion': ^3.30.5
-  '@traceloop/instrumentation-langchain': ^0.27.0
   '@types/express': ^5.0.0
   '@types/js-yaml': ^4.0.9
   '@types/json-schema': ^7.0.15
@@ -476,7 +467,6 @@ peerDependencyRules:
     fumadocs-mdx>vite: ^8.0.0
     vite-svg-sprite-wrapper>vite: ^8.0.0
 patchedDependencies:
-  '@ai-sdk/langchain@2.0.181': tools/pnpm/patches/@ai-sdk__langchain@2.0.181.patch
   '@kittycad/lib@2.0.48': tools/pnpm/patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: tools/pnpm/patches/vite-plugin-mkcert@2.0.0.patch
   zod@4.4.3: tools/pnpm/patches/zod@4.4.3.patch
@@ -489,8 +479,6 @@ patchedDependencies:
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2
-  '@langchain/cerebras@1.0.4>uuid': 11.1.1
-  '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@react-three/fiber': 9.8.2
   '@streamdown/math>katex': 0.18.2
   '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6

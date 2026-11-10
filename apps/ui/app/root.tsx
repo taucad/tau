@@ -10,7 +10,6 @@ import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 import { BuildSkewBanner } from '#components/build-skew-banner.js';
-import { CrashReportPrompt } from '#components/crash-report-prompt.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
@@ -105,7 +104,6 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
       documentChrome={
         <>
           <BuildSkewBanner />
-          <CrashReportPrompt />
           <OfflineShell />
         </>
       }

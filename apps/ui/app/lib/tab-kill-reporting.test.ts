@@ -34,11 +34,13 @@ describe('tab kill reporting (SB3, A11)', () => {
   it('reports a synthetic TabKilledError grouped by classification and route, with the dead page’s trail', async () => {
     const reported = await reportDetectedKill(kill());
 
-    expect(reported).toEqual({ delivered: true, eventId: undefined });
+    expect(reported).toBe(true);
     const [error, details] = vi.mocked(reportUiError).mock.calls[0] ?? [];
     expect(error).toBeInstanceOf(TabKilledError);
     expect((error as Error).name).toBe('TabKilledError');
     expect(details).toMatchObject({
+      /* Usage and diagnostics data: never stored against an account (crash capture blueprint). */
+      anonymous: true,
       fingerprint: ['tab-killed', 'foreground', 'routes/w.$workspace.$project'],
       level: 'warning',
       tags: {
@@ -93,7 +95,7 @@ describe('tab kill reporting (SB3, A11)', () => {
   it('says the report did not land when the reporting path throws, so the kill stays pending', async () => {
     vi.mocked(reportUiError).mockRejectedValueOnce(new Error('no'));
 
-    await expect(reportDetectedKill(kill())).resolves.toEqual({ delivered: false, eventId: undefined });
+    await expect(reportDetectedKill(kill())).resolves.toBe(false);
   });
 
   it('reports how long a background page had been hidden', async () => {

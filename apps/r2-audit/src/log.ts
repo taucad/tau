@@ -66,6 +66,8 @@ export type HeartbeatLine = Readonly<{
   pass: 'scheduled' | 'queue';
   /** Whether `AUDIT_EXPECTED_WRITERS` parsed. */
   expectedWritersValid: boolean;
+  /** Whether `AUDIT_FOREIGN_BUCKETS` parsed (scheduled passes, only when the binding is set). */
+  foreignBucketsValid?: boolean;
   /** Notifications in the batch (queue passes). */
   messages?: number;
   /** Notifications that failed and were left for retry (queue passes). */
@@ -77,6 +79,8 @@ export type HeartbeatLine = Readonly<{
   eventsSeen?: number;
   /** Polled events not seen by an earlier pass. */
   eventsNew?: number;
+  /** Polled events in the window on another environment's bucket (`AUDIT_FOREIGN_BUCKETS`), skipped unchecked. */
+  eventsForeign?: number;
   /** True when the window returned the query limit, so some events may be missed. */
   truncated?: boolean;
   /** Alarm lines written in this pass. */

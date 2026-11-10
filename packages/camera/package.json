@@ -60,6 +60,8 @@
     "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
+    "@taucad/xstate-testing": "workspace:*",
+    "fast-check": "catalog:",
     "xstate": "catalog:"
   },
   "peerDependenciesMeta": {

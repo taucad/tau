@@ -7,7 +7,7 @@
  * scheduled heartbeat into `storage-audit-silent`.
  */
 
-import { dependencyBucket, parseExpectedWriters } from '#environment.js';
+import { dependencyBucket, parseExpectedWriters, parseForeignBuckets } from '#environment.js';
 import type { AuditEnvironment } from '#environment.js';
 import { auditEvents, consoleLogger, isAlarm } from '#log.js';
 import type { AuditLogger, AuditRecordLine, HeartbeatLine } from '#log.js';
@@ -47,7 +47,10 @@ export type AuditWorkerHandlers = Readonly<{
   scheduled: (controller: AuditScheduledController, environment: AuditEnvironment) => Promise<void>;
 }>;
 
-type PollSummary = Pick<HeartbeatLine, 'poll' | 'pollDetail' | 'eventsSeen' | 'eventsNew' | 'truncated'>;
+type PollSummary = Pick<
+  HeartbeatLine,
+  'poll' | 'pollDetail' | 'eventsSeen' | 'eventsNew' | 'eventsForeign' | 'truncated'
+>;
 
 /**
  * Build the Worker's handlers.
@@ -104,6 +107,8 @@ export const createAuditWorker = (options: AuditWorkerOptions = {}): AuditWorker
   const scheduled = async (controller: AuditScheduledController, environment: AuditEnvironment): Promise<void> => {
     const startedAt = now();
     const expected = parseExpectedWriters(environment.AUDIT_EXPECTED_WRITERS);
+    const foreign = parseForeignBuckets(environment.AUDIT_FOREIGN_BUCKETS);
+    const foreignSet = (environment.AUDIT_FOREIGN_BUCKETS?.trim() ?? '') !== '';
     const token = environment.AUDIT_QUERY_TOKEN?.trim();
     let alarms = 0;
     let summary: PollSummary;
@@ -117,6 +122,7 @@ export const createAuditWorker = (options: AuditWorkerOptions = {}): AuditWorker
         kv: environment.AUDIT_KV,
         expected,
         dependencyBucket: dependencyBucket(environment),
+        foreignBuckets: foreign.buckets,
         environment: environment.AUDIT_ENVIRONMENT,
         fetch: fetcher,
       });
@@ -129,6 +135,7 @@ export const createAuditWorker = (options: AuditWorkerOptions = {}): AuditWorker
           poll: 'ok',
           eventsSeen: result.eventsSeen,
           eventsNew: result.eventsNew,
+          ...(foreignSet ? { eventsForeign: result.eventsForeign } : {}),
           truncated: result.truncated,
         };
       } else {
@@ -140,6 +147,7 @@ export const createAuditWorker = (options: AuditWorkerOptions = {}): AuditWorker
       environment: environment.AUDIT_ENVIRONMENT,
       pass: 'scheduled',
       expectedWritersValid: expected.valid,
+      ...(foreignSet ? { foreignBucketsValid: foreign.valid } : {}),
       ...summary,
       alarms,
       durationMilliseconds: Math.max(0, now() - startedAt),

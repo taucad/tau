@@ -15,6 +15,7 @@ import { shellBaselineDenied } from '@taucad/native-process-core/shell';
 
 import { shellLimits } from '#shell/shell-contract.js';
 import type { ShellAccess } from '#shell/shell-contract.js';
+import type { ShellGitView } from '#shell/shell-git-view.js';
 
 /** Version-control directories no writable grant may expose (D20). */
 const controlDirectoryNames: ReadonlySet<string> = new Set(['.git', '.hg', '.svn', '.jj']);
@@ -401,7 +402,11 @@ export type ShellFilesystemPlan = Readonly<{
  * Compile one launch's filesystem: the checkout and the private session roots writable, granted folders as granted,
  * toolchain roots readable, the checkout's records read-only, and everything else protected denied.
  *
- * @param input - The checkout's real root and its protected paths, the private roots, the grant and the host.
+ * A read-only git view (blueprint E1) adds two read-only roots: the view in the launch's private root, and the real
+ * object store its alternates name, carved out of the still-denied `.git` that holds it. Nothing else of the real `.git`
+ * opens.
+ *
+ * @param input - The checkout's real root and its protected paths, the private roots, the grant, the host and the git view.
  * @returns The provider's roots.
  */
 export const compileShellFilesystem = async (
@@ -412,6 +417,7 @@ export const compileShellFilesystem = async (
     toolchain: readonly string[];
     access: ShellResolvedAccess;
     host: ShellGrantHost;
+    git?: Pick<ShellGitView, 'directory' | 'objects'> | undefined;
   }>,
 ): Promise<ShellFilesystemPlan> => {
   const { checkout, host, access } = input;
@@ -439,10 +445,16 @@ export const compileShellFilesystem = async (
   return {
     readable: [...new Set(readable)],
     writable: [...new Set(writable)],
-    /* A read-only path under a denied one stays denied: the provider re-allows reads of every read-only root. */
-    readOnly: input.checkoutProtected.readOnly.filter(
-      (path) => isAbsolute(path) && !deniedPaths.some((deny) => within(host.platform, path, deny)),
-    ),
+    /*
+     * A record under a denied path stays denied: the provider re-allows reads of every read-only root. The git view's
+     * object store is the one read-only root meant to open inside a denied one (E1).
+     */
+    readOnly: [
+      ...input.checkoutProtected.readOnly.filter(
+        (path) => isAbsolute(path) && !deniedPaths.some((deny) => within(host.platform, path, deny)),
+      ),
+      ...(input.git === undefined ? [] : [input.git.directory, input.git.objects]),
+    ],
     denied: deniedPaths,
     directories: [...new Set([...input.checkoutProtected.directories, ...writeControls])],
   };

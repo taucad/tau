@@ -159,6 +159,12 @@ type SyncMachineContextFields = Readonly<{
   pendingFetch: boolean;
   /** The signed-in person changed while the host was quiescing (audit R6): the remote is read afresh on release. */
   pendingSession: boolean;
+  /**
+   * A session change not yet pulled when the host began quiescing, or one that
+   * arrived during it (audit R6). Kept apart from `pendingSession`, which a push
+   * started during the hold clears: the release pulls for this one.
+   */
+  heldSessionPull: boolean;
   /** Holds new background work while the host waits for close. */
   quiescing: boolean;
   /** Transport cancellation was requested; local reconciliation still completes. */
@@ -1268,6 +1274,7 @@ const syncMachineDefinition = setup({
     conflictRef: undefined,
     pendingFetch: false,
     pendingSession: false,
+    heldSessionPull: false,
     quiescing: false,
     transportStopped: false,
     leaseSettled: false,
@@ -1304,9 +1311,9 @@ const syncMachineDefinition = setup({
   on: {
     quiesce: ({ context, event, value, guards }, enq) => {
       if (event.phase === 'release') {
-        const session = context.pendingSession && guards.hasRemote(context);
+        const hasRemote = guards.hasRemote(context);
         /* `failed.settled` opens again on its own once quiescing ends. */
-        if (session && (typeof value === 'string' || value['failed'] === undefined)) {
+        if (context.heldSessionPull && hasRemote && (typeof value === 'string' || value['failed'] === undefined)) {
           /* A session change held through the close is pulled now (audit R6). */
           enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
         }
@@ -1317,7 +1324,8 @@ const syncMachineDefinition = setup({
             transportStopped: false,
             pendingFetch: false,
             pendingFlush: false,
-            pendingSession: session,
+            pendingSession: context.pendingSession && hasRemote,
+            heldSessionPull: false,
           },
         };
       }
@@ -1327,6 +1335,8 @@ const syncMachineDefinition = setup({
           transportStopped: event.phase === 'cancel' || context.transportStopped,
           pendingFetch: false,
           pendingFlush: false,
+          /* A session change not yet pulled is held to the release (audit R6). */
+          heldSessionPull: context.heldSessionPull || context.pendingSession,
         },
       };
     },
@@ -1362,12 +1372,13 @@ const syncMachineDefinition = setup({
      */
     sessionChanged: ({ context, guards }, enq) => {
       if (!guards.hasRemote(context)) {
+        /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
         return {};
       }
       enq.sendTo('remoteMoves', { type: 'unwatch' });
       enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote ?? '' });
       enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
-      return { context: { pendingSession: true } };
+      return { context: { pendingSession: true, heldSessionPull: context.heldSessionPull || context.quiescing } };
     },
     leaseRetired: { context: { leaseSettled: true } },
     /* The root forwards every answer to a cut no turn asked for; only `minting`
@@ -1428,6 +1439,7 @@ const syncMachineDefinition = setup({
       context: {
         remote: undefined,
         pendingSession: false,
+        heldSessionPull: false,
         hasAppliedRemote: false,
         chats: 'unknown',
         recordProjection: undefined,
@@ -1618,6 +1630,7 @@ const syncMachineDefinition = setup({
             recordQueueDirty: false,
             pendingFetch: false,
             pendingSession: false,
+            heldSessionPull: false,
             leaseSettled: false,
             arrived: undefined,
           },
@@ -2484,6 +2497,7 @@ const syncMachineDefinition = setup({
       on: {
         sessionChanged: ({ context, guards }, enq) => {
           if (!guards.hasRemote(context)) {
+            /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
             return {};
           }
           enq.sendTo('remoteMoves', { type: 'unwatch' });

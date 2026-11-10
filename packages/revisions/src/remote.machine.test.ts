@@ -52,8 +52,9 @@
  * | 42 | `probing --cancel--> connected` | **R2**: cancelling the probe keeps the old remote and records no refusal |
  * | 43 | `reconnectRequired --connect(other)--> probing → reconnectRequired` | **R2**: and a remote waiting on its credential stays waiting, unannounced |
  * | 44 | `connected --connect(same)--> choosing` | **R2**: a re-grant or access change of the recorded remote is not probed |
+ * | 45 | `connected --sessionChanged--> connected.reading` | **audit R6**: the stored figure is dropped and re-read under the new session; every other state ignores the change |
  *
- * With rows 25–27 every transition in the machine has a row (W12 review R6).
+ * With rows 25–27 and 45 every transition in the machine has a row (W12 review R6, audit R6).
  */
 
 import { createActor, createAsyncLogic, setup } from 'xstate';

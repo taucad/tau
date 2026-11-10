@@ -82,6 +82,15 @@
  * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
  * | 76 | `pushing → recording → backedUp` over a leftover `projection` or another remote's entry | an accepted push is judged on what this remote is owed: `ok` with its lag and no backoff, and the entry it could not settle stays queued |
  * | 77 | `pushing → recording → queued` (refused chat ref beside a leftover `projection`) | a ref this push offered and the remote refused is still a `retry` |
+ * | 78 | `backedUp --sessionChanged--> opening` (stream unwatched and watched again) | **audit R6**: a session change re-reads a refused stream and pulls at once from an idle state |
+ * | 79 | `failed --sessionChanged--> opening` | **audit R6**: a failed project opens again under the new session, whatever the refusal |
+ * | 80 | `pushing --sessionChanged--> pushing → recording → opening` | **audit R6**: a push in flight is kept, and the pull follows it |
+ * | 81 | `opening --sessionChanged--> … → failed.settled(pendingSession) → opening` | **audit R6**: a refusal of an answer asked under the last session opens again, after the owed queue entry is recorded |
+ * | 82 | `--sessionChanged--> pushing → recording → failed` | **audit R6**: a refusal of a push started under the new session stays terminal |
+ * | 83 | `manual(pendingSession) --always--> opening` | **audit R6**: a manual remote busy for a session change reads it once it settles |
+ * | 84 | `quiesce(hold) --sessionChanged--> … --quiesce(release)--> opening` | **audit R6**: the pull is held through quiescing and made on release, even when a push ran during the hold |
+ * | 85 | `failed --quiesce(hold), sessionChanged, quiesce(release)--> failed.settled → opening` | **audit R6**: a release in `failed` pulls once |
+ * | 86 | `quiesce(hold) --sessionChanged, remoteDisconnected--> noRemote` | **audit R6**: a held change is forgotten with the remote |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -2222,6 +2231,7 @@ describe('syncMachine', () => {
       { type: 'leaseRetired', runId: 'run-1' },
       { type: 'remoteMoved', generation: 1, refs: [mainRef] },
       { type: 'remoteRefused', code: 'NOT_FOUND', message: 'not a member' },
+      { type: 'sessionChanged' },
       { type: 'branchChanged', branch: 'feature' },
       /* The root's answers to this machine's own merge cut (`sync-<n>`, D12). */
       {
@@ -2896,6 +2906,41 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
+  it('still pulls on release when a push started during the hold (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    /* The debounce does not wait for the release: the push starts during the hold. */
+    harness.clock.advance(5000);
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().value).toBe('backedUp');
+    });
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
   it('forgets a held session change when the remote goes before release (audit R6)', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -2905,6 +2950,7 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.actor.send({ type: 'quiesce', phase: 'release' });
 
     expect(harness.actor.getSnapshot().context.pendingSession).toBe(false);
+    expect(harness.actor.getSnapshot().context.heldSessionPull).toBe(false);
     harness.stop();
   });
 

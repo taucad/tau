@@ -53,6 +53,7 @@
     "@taucad/cli": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tau-examples": "workspace:*",
     "@taucad/vite": "workspace:*",
     "geospec": "catalog:",
     "geospec-engine": "catalog:"

@@ -1915,6 +1915,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@taucad/tau-examples':
+        specifier: workspace:*
+        version: link:../../libs/tau-examples
       '@taucad/vite':
         specifier: workspace:*
         version: link:../../libs/vite

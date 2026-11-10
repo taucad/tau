@@ -261,8 +261,10 @@ const view = (harness: Harness): SpecView => {
         back: context.readBack === 'reading',
       }
     : { active: false, purpose: 'none', forced: false, back: false };
+  const nextId = context.nextWriteId - (continued?.issued === undefined ? 0 : 1);
   if (context.closeFenced) {
-    return { phase: 'fenced', st, rd };
+    // Rule 7: no write is issued after the fence, so the write counter is compared too.
+    return { phase: 'fenced', st, rd, nextId };
   }
   const kept = context.ownWrites.filter((write) => write.writeId !== continued?.issued);
   const waiting =
@@ -272,7 +274,7 @@ const view = (harness: Harness): SpecView => {
     file: { bytes: harness.state.file },
     st,
     rd,
-    nextId: context.nextWriteId - (continued?.issued === undefined ? 0 : 1),
+    nextId,
     kept: kept.map((write) => write.writeId),
     inFlight: kept.filter((write) => write.state === 'inFlight').map((write) => write.writeId),
     lost: kept.filter((write) => write.state === 'lost').map((write) => write.writeId),
@@ -299,7 +301,7 @@ const project = (spec: SpecView): SpecView => {
     back: state.rd.active && state.rd.back,
   };
   if (state.phase === 'fenced') {
-    return { phase: 'fenced', st, rd };
+    return { phase: 'fenced', st, rd, nextId: state.nextId };
   }
   const withStatus = (status: string): number[] =>
     state.kept.filter((id) => state.wr[id - 1]?.status === status).toSorted((left, right) => left - right);

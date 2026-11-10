@@ -116,8 +116,8 @@ export function createRecordSync<T, P>(
     waiting.clear();
   };
   // Every region is final once the store is closed and its last write has answered: nothing answers after that.
-  // MC-R12: a fault discards the step that raised it, and the requests that step would have answered with it, so
-  // every request waiting at a fault is answered `false`; the store goes on answering what comes after.
+  // MC-R12: a fault discards the step that raised it, which can leave a region waiting on an effect that already
+  // finished. So a fault answers every waiting request `false`, and the store answers `false` to every request after.
   let faults = 0;
   actor.subscribe({
     next: (snapshot) => {
@@ -130,7 +130,8 @@ export function createRecordSync<T, P>(
     error: settleAll,
   });
   const stopped = (): boolean => actor.getSnapshot().status !== 'active';
-  const fenced = (): boolean => stopped() || actor.getSnapshot().context.closeFenced;
+  const faulted = (): boolean => actor.getSnapshot().context.faults > 0;
+  const fenced = (): boolean => stopped() || faulted() || actor.getSnapshot().context.closeFenced;
   /** Send a request and wait for its answer; a closed actor answers `false` without a send. */
   const request = async (
     send: (requestId: string) => void,
@@ -180,17 +181,19 @@ export function createRecordSync<T, P>(
         }),
       // A closed store whose last write is still on the wire answers the flush when that write does.
       flush: async () =>
-        stopped()
-          ? actor.getSnapshot().context.deferred === undefined
-          : request(
-              (requestId) => {
-                actor.send({ type: 'flush', requestId });
-              },
-              undefined,
-              stopped,
-            ),
+        faulted()
+          ? false
+          : stopped()
+            ? actor.getSnapshot().context.deferred === undefined
+            : request(
+                (requestId) => {
+                  actor.send({ type: 'flush', requestId });
+                },
+                undefined,
+                stopped,
+              ),
       close: () => {
-        if (!fenced()) {
+        if (!stopped() && !actor.getSnapshot().context.closeFenced) {
           actor.send({ type: 'close' });
         }
       },

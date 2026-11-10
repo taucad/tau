@@ -1139,6 +1139,48 @@ describe('recordSync', () => {
       expect(await two).toBe(true);
     });
 
+    it('should answer a flush once the edits made before it are written, while later edits keep arriving', async () => {
+      const store = harness({ editDebounce: 500 });
+      await store.observe();
+      const first = store.commands.edit({ name: 'one' });
+      const flushed = store.commands.flush();
+      await flush();
+      let answered: boolean | undefined;
+      void flushed.then((ok) => {
+        answered = ok;
+      });
+      const later = store.commands.edit({ name: 'two' });
+      await store.reply();
+
+      expect(await first).toBe(true);
+      expect(answered).toBe(true);
+      expect(store.writes).toHaveLength(1);
+
+      store.clock.advance(500);
+      await flush();
+      await store.reply();
+
+      expect(await later).toBe(true);
+      expect(store.writes).toHaveLength(2);
+    });
+
+    it('should publish the Try again read when an invalidate abandons it', async () => {
+      const store = harness();
+      await store.observe();
+      void store.commands.read();
+      store.reads.at(-1)?.settle({ status: 'failed', error: Object.assign(new Error('denied'), { code: 'EACCES' }) });
+      await flush();
+      const published = store.published().length;
+      void store.commands.retryRead();
+      store.commands.invalidate();
+      const read = store.commands.read();
+      await flush();
+      await store.serve();
+
+      expect(await read).toBe(true);
+      expect(store.published()).toHaveLength(published + 1);
+    });
+
     it('should report the read healthy when a write reply supersedes the read that was retrying', async () => {
       const store = harness();
       await store.observe();
@@ -1196,7 +1238,7 @@ describe('recordSync', () => {
       ]);
     });
 
-    it('should record a transition that throws and keep answering (MC-R12)', async () => {
+    it('should record a transition that throws and answer every request after it false (MC-R12)', async () => {
       const throwing: RecordPolicy<Fields, Fields> = {
         ...policy,
         diff(base, next) {
@@ -1217,10 +1259,11 @@ describe('recordSync', () => {
       expect(await commands.edit({ explode: 'yes' })).toBe(false);
       expect(actor.getSnapshot().context.fault).toBe('diff defect');
       expect(actor.getSnapshot().status).toBe('active');
-      expect(await commands.edit({ name: 'Front' })).toBe(true);
+      expect(await commands.edit({ name: 'Front' })).toBe(false);
+      expect(await commands.flush()).toBe(false);
     });
 
-    it('should answer a request waiting when a port reply faults (MC-R12)', async () => {
+    it('should answer a request waiting when a port reply faults, and every request after (MC-R12)', async () => {
       const throwing: RecordPolicy<Fields, Fields> = {
         ...policy,
         diff(base, next) {
@@ -1250,11 +1293,9 @@ describe('recordSync', () => {
       expect(actor.getSnapshot().context.fault).toBe('diff defect');
       expect(await ensured).toBe(false);
 
-      const read = commands.read();
-      await flush();
-      reads.at(-1)?.({ status: 'read', bytes: null });
-
-      expect(await read).toBe(false);
+      expect(await commands.read()).toBe(false);
+      expect(await commands.flush()).toBe(false);
+      expect(reads).toHaveLength(1);
     });
 
     it('should hold nothing but data in context at every step (D4)', async () => {

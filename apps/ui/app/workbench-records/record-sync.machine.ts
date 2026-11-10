@@ -135,8 +135,12 @@ export type RecordSyncContext<T, P> = Readonly<{
   readBack: 'none' | 'owed' | 'reading';
   /** The record the person last asked for, or the last foreign record while nothing is owed: the base of a diff. */
   intended: T | undefined;
-  /** Edits no write has taken yet. */
-  pending: Readonly<{ next: T; patch: P; requests: readonly string[] }> | undefined;
+  /** Edits no write has taken yet; `since` numbers the first of them. */
+  pending: Readonly<{ next: T; patch: P; requests: readonly string[]; since: number }> | undefined;
+  /** How many edits the store has taken. */
+  edits: number;
+  /** The edits the latest flush waits for: those numbered up to this. */
+  flushedUpTo: number;
   /** Fields a failed or refused write still owes the file. */
   deferred: P | undefined;
   commands: ReadonlyArray<Command<T>>;
@@ -154,7 +158,7 @@ export type RecordSyncContext<T, P> = Readonly<{
   /** The deferred patch waits for the retry timer, so a command served meanwhile leaves the timer due. */
   retryOwed: boolean;
   closeFenced: boolean;
-  /** An effect or child failure no transition modelled; the store keeps answering (MC-R12). */
+  /** An effect or child failure no transition modelled; the store answers `false` from then on (MC-R12). */
   fault: string | undefined;
   /** How many faults the store has recorded, so a request whose own step faulted can be answered. */
   faults: number;
@@ -230,10 +234,14 @@ const isReading = (value: StateValue): boolean => matchesState({ source: 'readin
 
 const isQuiet = (value: StateValue): boolean => !matchesState({ intent: 'debouncing' }, value);
 
-/** The edits of a debounce window count as due once the window ends, or at once while a flush waits. */
+/** A waiting flush covers the pending edits that began before it, not ones made after it. */
+const flushCovers = <T, P>(context: RecordSyncContext<T, P>): boolean =>
+  context.flushes.length > 0 && context.pending !== undefined && context.pending.since <= context.flushedUpTo;
+
+/** The edits of a debounce window count as due once the window ends, or at once when a waiting flush covers them. */
 const hasWork = <T, P>(context: RecordSyncContext<T, P>, value: StateValue): boolean =>
   context.commands.length > 0 ||
-  (context.pending !== undefined && (isQuiet(value) || context.flushes.length > 0)) ||
+  (context.pending !== undefined && (isQuiet(value) || flushCovers(context))) ||
   (context.flushes.length > 0 && (context.deferred !== undefined || context.readBack !== 'none'));
 
 /**
@@ -344,14 +352,10 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   };
 
   /** A read starts and supersedes the one in flight; its waiters wait for the latest. */
-  const startRead = (
-    context: Context,
-    request: { requestId?: string; forced: boolean },
-    value?: StateValue,
-  ): Patch => ({
+  const startRead = (context: Context, request: { requestId?: string; forced: boolean }): Patch => ({
     readRequests: request.requestId === undefined ? context.readRequests : [...context.readRequests, request.requestId],
-    /* A read that supersedes a forced one in flight is still forced: the person's "Try again" publishes. */
-    readForced: request.forced || (value !== undefined && isReading(value) && context.readForced),
+    /* A forced read owes a publish until a read completes: one that supersedes or follows an abandoned one is forced. */
+    readForced: request.forced || context.readForced,
     overlap: context.overlap || context.inFlight !== undefined,
     readBack: context.readBack === 'owed' ? 'reading' : context.readBack,
   });
@@ -462,7 +466,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     }
     /* A command served while a deferred edit waited for its timer leaves that edit's retry due. */
     const retryOwed = deferred !== undefined && (outcome === 'retry' || (cycle.kind !== 'edit' && context.retryOwed));
-    const owed = deferred !== undefined || !latest || context.commands.length > 0 || context.readBack !== 'none';
+    const owed =
+      deferred !== undefined || flushCovers(context) || context.commands.length > 0 || context.readBack !== 'none';
     if (context.flushes.length > 0 && (!owed || (!saved && cycle.flushed && latest && context.commands.length === 0))) {
       answer(enq, context.flushes, !owed);
       patch.flushes = [];
@@ -550,7 +555,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   }).createMachine({
     id: 'record-sync',
     version: '1',
-    /* A fault no transition modelled is recorded and the store keeps answering (MC-R12). */
+    /* A fault no transition modelled is recorded; the composition root then answers every request `false` (MC-R12). */
     onError: refines('Unmodelled', ({ context, event }) => ({
       context: { fault: messageOf(event.error), faults: context.faults + 1 },
     })),
@@ -569,6 +574,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       readBack: 'none',
       intended: undefined,
       pending: undefined,
+      edits: 0,
+      flushedUpTo: 0,
       deferred: undefined,
       commands: [],
       flushes: [],
@@ -593,7 +600,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               : {
                   target: '.reading',
                   reenter: true,
-                  context: startRead(context, { requestId: event.requestId, forced: event.forced }, value),
+                  context: startRead(context, { requestId: event.requestId, forced: event.forced }),
                 },
           ),
           retryRead: refines('ForcedRead', ({ context, event, value }, enq) =>
@@ -605,7 +612,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   context: reported(
                     context,
                     {
-                      ...startRead(context, { requestId: event.requestId, forced: true }, value),
+                      ...startRead(context, { requestId: event.requestId, forced: true }),
                       readFailures: 0,
                       health: { ...context.health, read: 'retrying' },
                     },
@@ -617,7 +624,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           'write.readRequested': refines('WatchRead', ({ context, value }) =>
             matchesState({ source: 'fenced' }, value)
               ? {}
-              : { target: '.reading', reenter: true, context: startRead(context, { forced: false }, value) },
+              : { target: '.reading', reenter: true, context: startRead(context, { forced: false }) },
           ),
           close: refines('CloseFence', ({ context, value }, enq) => {
             if (matchesState({ source: 'fenced' }, value)) {
@@ -671,6 +678,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                         // Target rule 5: a read that completes while a write is in flight overlaps it.
                         overlap: context.overlap || context.inFlight !== undefined,
                         readRequests: [],
+                        readForced: false,
                         readFailures: 0,
                         readBack: context.readBack === 'reading' ? 'none' : context.readBack,
                         health: { ...context.health, read: 'ok' },
@@ -699,7 +707,12 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 target: settledSource(context),
                 context: reported(
                   context,
-                  { ...dropRead(context, enq), readFailures: 0, health: { ...context.health, read: 'ok' } },
+                  {
+                    ...dropRead(context, enq),
+                    readForced: false,
+                    readFailures: 0,
+                    health: { ...context.health, read: 'ok' },
+                  },
                   enq,
                 ),
               })),
@@ -758,7 +771,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           flush: refines('Unmodelled', ({ context, event, value }) =>
             matchesState({ write: 'fenced' }, value)
               ? undefined
-              : { context: { flushes: [...context.flushes, event.requestId] } },
+              : { context: { flushes: [...context.flushes, event.requestId], flushedUpTo: context.edits } },
           ),
           ensure: refines('Unmodelled', ({ context, event, value }) =>
             matchesState({ write: 'fenced' }, value)
@@ -1095,12 +1108,15 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
 
   function accumulate(context: Context, event: { requestId: string; next: T }): Patch {
     const base = context.origin === 'none' ? undefined : (context.intended ?? context.published.record);
+    const edits = context.edits + 1;
     return {
       intended: event.next,
+      edits,
       pending: {
         next: event.next,
         patch: policy.combine(context.pending?.patch, policy.diff(base, event.next)),
         requests: [...(context.pending?.requests ?? []), event.requestId],
+        since: context.pending?.since ?? edits,
       },
     };
   }

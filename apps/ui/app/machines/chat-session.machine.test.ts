@@ -877,6 +877,39 @@ describe('chatSessionMachine — the chat waits on its own clock (audit R5)', ()
     actor.stop();
   });
 
+  it('should record a lookup that throws as a fault and stop waiting for good', async () => {
+    const clock = new StepClock();
+    let asked = 0;
+    const actor = createActor(
+      chatSessionMachine.provide({
+        actors: {
+          lookUpModelAttempt: createAsyncLogic<'settled' | 'waiting', { readonly attemptId: string }>({
+            run: async () => {
+              asked += 1;
+              throw new Error('route broke');
+            },
+          }),
+        },
+      }),
+      { input: { chatId: 'chat-1', projectId: 'proj_1' }, clock },
+    ).start();
+    const due: AutoResumePlan[] = [];
+    actor.on('autoResumeDue', ({ plan }) => {
+      due.push(plan);
+    });
+
+    actor.send({ type: 'autoResumeOffered', plan: pendingPlan });
+    await clock.advanceAsync(0);
+
+    expect(autoResumeState(actor)).toBe('idle');
+    expect(actor.getSnapshot().context.fault).toContain('route broke');
+    actor.send({ type: 'autoResumeOffered', plan: pendingPlan });
+    await clock.advanceAsync(60_000);
+    expect(asked).toBe(1);
+    expect(due).toEqual([]);
+    actor.stop();
+  });
+
   it('should stop asking at the run’s bound and resume nothing', async () => {
     const { actor, clock, due, lookups } = startOnClock();
 

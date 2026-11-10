@@ -84,7 +84,7 @@
 \* heartbeat as `after` delays the store drives (audit R5). A wait that ends sends a `continue`
 \* gesture, which never enters the queue; a gesture ends the wait. Submit, Prepare and delivery unchanged.
 \* Only a viewed chat with a published admission waits; the resumed plan stays in hand until its
-\* failure leaves. Neither touches the queue.
+\* failure leaves, or its admission refuses it. Neither touches the queue.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

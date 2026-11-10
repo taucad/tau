@@ -2974,6 +2974,7 @@ export class ChatSessionStore {
     let offered: string | undefined;
     /* The wait this page resumed: its card stays until the failure it answered leaves (`autoResume.resuming`). */
     let resumed: AutoResumePlan | undefined;
+    let landed = false;
     let awaitsPull = false;
     const live = (): boolean =>
       this.#sessions.get(chatId) === session && stateActorRef.getSnapshot().status === 'active';
@@ -3015,7 +3016,21 @@ export class ChatSessionStore {
         return;
       }
       resumed = plan;
-      void this.requestTurn(chatId, { kind: 'continue' });
+      landed = false;
+      /* After this emit settles, so the gesture is admitted rather than queued behind it, and its refusal is heard. */
+      queueMicrotask(() => {
+        void this.requestTurn(chatId, { kind: 'continue' }).finally(() => {
+          // A refused resume leaves the failure in place: the wait ends, spent, and the card offers Resume again.
+          if (resumed === plan && !landed && live() && !this.#isAdmittingTurn(session)) {
+            resumed = undefined;
+            offered = undefined;
+            stateActorRef.send({ type: 'autoResumeWithdrawn' });
+          }
+        });
+      });
+    });
+    const resumeLanded = stateActorRef.on('startTurnRequest', () => {
+      landed = true;
     });
     const offerPull = (): void => {
       if (!live()) {
@@ -3043,6 +3058,7 @@ export class ChatSessionStore {
     };
     return [
       autoResumeDue,
+      resumeLanded,
       { unsubscribe: unsubscribeChat },
       { unsubscribe: unsubscribeProjection },
       persistence,

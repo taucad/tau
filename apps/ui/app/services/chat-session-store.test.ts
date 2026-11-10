@@ -7124,6 +7124,12 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
   it('should resume a rate-limited run once its wait ends, with no failure card mounted', async () => {
     const { clock, store, session } = await openOnClock('chat_r5_rate');
+    // The resume is still being admitted: its card stays up until the run reports.
+    const admission = Promise.withResolvers<never>();
+    publishAdmission(session.chatId, async (gesture) => {
+      admitted.push(gesture);
+      return admission.promise;
+    });
 
     publishLogRows(store, session.chatId, rateLimitedRows('run_r5_rate'));
 
@@ -7141,13 +7147,80 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
       expect(continues()).toEqual([{ kind: 'continue' }]);
     });
 
-    // The failure stays on screen until the resumed run reports, and nothing resumes it a second time.
     clock.advance(60_000);
     await Promise.resolve();
     expect(continues()).toHaveLength(1);
     expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'resuming' })).toBe(true);
     publishLogRows(store, session.chatId, [lifecycleRow(3, 'running', 'run_r5_rate')], 3);
     expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
+    admission.reject(new Error('Row over.'));
+    await vi.waitFor(() => {
+      expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(false);
+    });
+    store.release(session.chatId);
+  });
+
+  it('should end a refused resume spent, so the card offers Resume again and nothing loops', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_refused');
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_refused'));
+
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+      expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
+    });
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toBeUndefined();
+
+    clock.advance(60_000);
+    await Promise.resolve();
+    expect(continues()).toHaveLength(1);
+    store.release(session.chatId);
+  });
+
+  it('should wait anew when the resumed run fails again on its next attempt', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_again');
+    const admission = Promise.withResolvers<never>();
+    publishAdmission(session.chatId, async (gesture) => {
+      admitted.push(gesture);
+      return admission.promise;
+    });
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_again'));
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(continues()).toHaveLength(1);
+    });
+    admission.reject(new Error('Settled by the row.'));
+    publishAdmission(session.chatId, (gesture) => {
+      admitted.push(gesture);
+      throw new Error('Refused by the row.');
+    });
+
+    publishLogRows(
+      store,
+      session.chatId,
+      [
+        logRow(3, { runId: 'run_r5_again', type: 'run.lifecycle', state: 'running', attempt: 2 }),
+        logRow(4, {
+          runId: 'run_r5_again',
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 2,
+          detail: { code: 'RATE_LIMITED', message: 'Wait again.', status: 429, details: { retryAfterSeconds: 4 } },
+        }),
+      ],
+      3,
+    );
+
+    await vi.waitFor(() => {
+      expect(session.stateActorRef.getSnapshot().context.autoResume).toMatchObject({
+        key: 'rateLimit:run_r5_again:2',
+        delayMilliseconds: 4000,
+      });
+    });
+    clock.advance(4000);
+    await vi.waitFor(() => {
+      expect(continues()).toHaveLength(2);
+    });
     store.release(session.chatId);
   });
 

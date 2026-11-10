@@ -171,7 +171,9 @@ Wherever a provider asks for these, use the same values.
 | Documentation                  | `https://docs.tau.new`                                                     | n/a                                |
 | Source repository              | `https://github.com/taucad/tau`                                            | same                               |
 | Support contact shown to users | `help@tau.new`                                                             | `help@taucad.dev`                  |
-| Transactional sender           | `Tau <identity@tau.new>`                                                   | `Tau <identity@taucad.dev>`        |
+| Sender, account and security   | `Tau <identity@tau.new>`                                                   | `Tau <identity@taucad.dev>`        |
+| Sender, sharing                | `Tau <notifications@tau.new>`                                              | `Tau <notifications@taucad.dev>`   |
+| Sender, billing                | `Tau Billing <billing@tau.new>`                                            | `Tau Billing <billing@taucad.dev>` |
 | Owner of every registration    | The `taucad` organization or the company account, never a personal account | same                               |
 
 ### 8. Record What Is Registered

@@ -633,7 +633,7 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
     expect(card).not.toHaveTextContent(gatewaySentence);
     expect(card).not.toHaveTextContent('Everything up to here is saved.');
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Debug details']);
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));

@@ -34,7 +34,8 @@ describe('@taucad/api package metadata', () => {
     },
   );
 
-  it.each(['@taucad/runtime', '@taucad/cli', '@taucad/api-extractor'])(
+  // The headless GeoSpec harness lives with the `test_model` projection in `@taucad/agent-tools`.
+  it.each(['@taucad/runtime', '@taucad/cli', '@taucad/api-extractor', 'geospec', 'geospec-engine'])(
     'does not depend on %s at all, even for tests',
     async (name) => {
       const packageJson = await readPackageJson();
@@ -43,15 +44,6 @@ describe('@taucad/api package metadata', () => {
       expect(packageJson.devDependencies?.[name]).toBeUndefined();
     },
   );
-
-  it('keeps the GeoSpec substrate available to tests only', async () => {
-    const packageJson = await readPackageJson();
-
-    // `app/testing/tau-geospec-harness.ts` runs GeoSpec headlessly against an
-    // in-memory filesystem. `geospec` is published from taucad/geospec and comes
-    // from its catalog pin.
-    expect(packageJson.devDependencies?.['geospec']).toBe('catalog:');
-  });
 
   it('has no reference to the dissolved @taucad/testing package', async () => {
     const packageJson = await readPackageJson();

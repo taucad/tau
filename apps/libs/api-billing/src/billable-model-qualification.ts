@@ -614,12 +614,22 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       throw invalidRequest('Images are not qualified for this model route');
     }
     const maximumOutput = billableModelOutputMaximum(parsed.data);
-    if (
-      maximumOutput === undefined ||
-      parsed.data[selected.outputParameter] === undefined ||
-      maximumOutput > selected.outputMaximum
-    ) {
-      throw invalidRequest('Exactly one bounded output-token maximum is required');
+    /* Each message names the field the route expects, so a host and route that disagree on it
+     * read as a Tau contract fault, not as a refusal of the person's request. */
+    if (maximumOutput === undefined) {
+      throw invalidRequest(
+        `Model request must carry exactly one output-token maximum; route ${selected.routeId} expects ${selected.outputParameter}`,
+      );
+    }
+    if (parsed.data[selected.outputParameter] === undefined) {
+      throw invalidRequest(
+        `Model request bounds output with a field route ${selected.routeId} does not accept; it expects ${selected.outputParameter}`,
+      );
+    }
+    if (maximumOutput > selected.outputMaximum) {
+      throw invalidRequest(
+        `Model request ${selected.outputParameter} of ${maximumOutput} exceeds route ${selected.routeId}'s maximum of ${selected.outputMaximum}`,
+      );
     }
     const contextBound = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
     if (contextBound < 0n) {

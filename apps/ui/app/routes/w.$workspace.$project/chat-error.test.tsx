@@ -517,7 +517,7 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('should name a refused request and offer a model switch ahead of Resume', () => {
+  it('should name a request Tau could not send and offer a model switch ahead of Resume', () => {
     projected({
       category: errorCategory.toolError,
       title: 'Processing Error',
@@ -528,7 +528,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('The model refused this request')).toBeInTheDocument();
+    expect(screen.getByText('Tau could not send this request')).toBeInTheDocument();
+    expect(screen.queryByText('The model refused this request')).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch model', 'Resume']);
   });

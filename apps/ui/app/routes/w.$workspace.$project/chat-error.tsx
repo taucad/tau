@@ -307,12 +307,13 @@ function codedErrorCard({
 
   // A refusal of the request itself resumes once the model or its settings
   // change; re-issuing it unchanged meets the same refusal, which is honest and
-  // costs nothing.
+  // costs nothing. INVALID_REQUEST is Tau's own host or gateway contract refusing
+  // the request before any model saw it, so the card does not blame the model.
   if (category === 'switchModel') {
     return (
       <ChatErrorPausedTurn
         className={className}
-        title='The model refused this request'
+        title={code === 'INVALID_REQUEST' ? 'Tau could not send this request' : 'The model refused this request'}
         reason={error.message}
         resumable={retry === 'resume' && resumable}
         guidance='Change the model or its settings, then resume.'

@@ -2,6 +2,7 @@
   "packages/viewer/src/cad/cad-viewer.tsx": 1,
   "packages/viewer/src/cad/section-tool-row.tsx": 4,
   "packages/viewer/src/cad/section-view-control.tsx": 1,
+  "packages/viewer/src/graphics/svg/svg-viewer.tsx": 1,
   "packages/viewer/src/graphics/svg/use-panzoom-reset.tsx": 1,
   "packages/viewer/src/graphics/three/actor-bridge.tsx": 5,
   "packages/viewer/src/graphics/three/controls.tsx": 1,

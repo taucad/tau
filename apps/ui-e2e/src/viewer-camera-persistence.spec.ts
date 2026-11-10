@@ -65,8 +65,8 @@ const editDebounceMilliseconds = 500;
 const witnessRowMilliseconds = 400;
 /** Drag 2's last move must come more than this after drag 1's, measured from drag 1's last move. */
 const secondDragEndAfterFirstMilliseconds = editDebounceMilliseconds;
-/** The longest gap a witness retry may ask for: inside the window with margin for the press. */
-const witnessRetryGapLimitMilliseconds = 650;
+/** A witness retry aims its achieved gap at the middle of the snap window, 250 to 750 ms. */
+const witnessTargetGapMilliseconds = poseSettleMilliseconds + editDebounceMilliseconds / 2;
 /** How many pairs a witness row may run to land one inside the window, as the harness's three reps. */
 const witnessAttempts = 3;
 /** Lets the page finish loading, or the previous pair's save and echo land, before a pair starts. */
@@ -260,7 +260,7 @@ function expectSecondDragPoseKept(pair: DragPair, gapMilliseconds: number): void
 
 test.describe('Viewer camera persistence', () => {
   test.for([200, 400, 700, 900])(
-    'keeps the second orbit drag pose when drag 2 starts at least %i ms after drag 1 ends',
+    'keeps the second orbit drag pose with a %i ms gap requested between the drags',
     { timeout: 180_000 },
     async (gapMilliseconds, { annotate }) => {
       await openBirdhouseFixture();
@@ -279,16 +279,17 @@ test.describe('Viewer camera persistence', () => {
           break;
         }
 
-        /* On a fast host drag 2 can end too soon after drag 1 for its save to miss drag 1's write.
-         * Ask for a longer gap next time, still inside the window, so the drags end far enough apart. */
-        const shortfall =
-          secondDragEndAfterFirstMilliseconds - (pair.timeline.gapMilliseconds + pair.timeline.secondDragMilliseconds);
-        if (shortfall >= 0) {
-          requestedGapMilliseconds = Math.min(
-            witnessRetryGapLimitMilliseconds,
-            requestedGapMilliseconds + shortfall + 50,
-          );
-        }
+        /* Steer the next pair's achieved gap toward the middle of the window, in either direction:
+         * slow round trips push it past 750 ms, and on a fast host drag 2 can end too soon after drag 1
+         * for its save to miss drag 1's write, which a longer gap fixes. */
+        const targetGapMilliseconds = Math.max(
+          witnessTargetGapMilliseconds,
+          secondDragEndAfterFirstMilliseconds + 50 - pair.timeline.secondDragMilliseconds,
+        );
+        requestedGapMilliseconds = Math.max(
+          0,
+          requestedGapMilliseconds + targetGapMilliseconds - pair.timeline.gapMilliseconds,
+        );
       }
       /* oxlint-enable no-await-in-loop */
 

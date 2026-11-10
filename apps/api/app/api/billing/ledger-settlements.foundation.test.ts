@@ -16,6 +16,7 @@ import { seedBillingFixturePolicy } from '@taucad/api-billing/testing/billing-po
 import { fulfillPaidFixture, seedPaidPurchase } from '@taucad/api-billing/testing/billing-payment.fixture';
 import type { OtlpSpan } from '@taucad/api-agent-observability/langfuse-observation';
 import { langfuseObservation, pseudonymKey } from '@taucad/api-agent-observability/langfuse-observation';
+import { evidenceFixture, providerFact } from '@taucad/api-agent-observability/testing/evidence.fixture';
 import type { LangfuseObservationRow } from '@taucad/api-agent-observability/langfuse-scorecard';
 import { reconcileLedger } from '@taucad/api-agent-observability/ledger-reconciliation';
 import { ledgerSettlements } from '@taucad/api-agent-observability/ledger-settlements';
@@ -154,7 +155,7 @@ const rowOf = (span: OtlpSpan): LangfuseObservationRow => {
 };
 
 describe('ledgerSettlements PostgreSQL foundation', () => {
-  it("reads a window's terminal settlements under the account owner and reconciles them with the facts written for them", async () => {
+  it("reads a window's terminal settlements under the account owner and reconciles them with the generations that carry them", async () => {
     const fixture = await createFixture();
     const from = new Date(Date.now() - 1000);
     const charged = [
@@ -189,7 +190,20 @@ describe('ledgerSettlements PostgreSQL foundation', () => {
           fixture.userId,
           authority,
         );
-        const observation = langfuseObservation(evidence, { environment: 'synthetic', protection: 'free' }, pseudonym);
+        /* The generation of the call the operation funded, with the settlement's values, as delivery sends it (LW4). */
+        const call = await evidenceFixture({
+          principal: fixture.userId,
+          project: 'project-a',
+          authority: 'api-reported',
+          fact: providerFact(),
+          semantic: operation.attemptKey,
+        });
+        const { fact } = evidence.payload;
+        const observation = langfuseObservation(
+          call,
+          { environment: 'synthetic', protection: 'free', settlement: fact.kind === 'financial' ? fact : undefined },
+          pseudonym,
+        );
         return rowOf(observation!.spans[0]!);
       }),
     );

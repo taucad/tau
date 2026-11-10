@@ -1,15 +1,17 @@
 import { contractId } from '@taucad/agent-observability/identity';
-import { observationGroup, settlementMappers } from '#langfuse-observation.js';
+import { observationGroup, observationMapperVersion } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
 import { creditsOfAtoms } from '#settlement-evidence.js';
 
 /*
  * T15 (U36): the settled credits Langfuse holds, checked against the ledger
  * that settled them. The ledger is the financial truth; Langfuse holds a copy
- * for analysis. Every observed settlement must name a ledger settlement and
- * carry its charge exactly. A ledger settlement Langfuse does not hold is
- * counted apart: the account may not have allowed summaries, or delivery is
- * still behind, so it is coverage, never drift.
+ * for analysis, as metadata on the generation each settlement settled (LW4).
+ * Every observed settlement must name a ledger settlement and carry its charge
+ * exactly. A ledger settlement Langfuse does not hold is counted apart: the
+ * account may not have allowed summaries, delivery is still behind, or the
+ * settlement came after its generation went (`late`), so it is coverage, never
+ * drift.
  */
 
 /** One terminal settlement, as the ledger holds it. @public */
@@ -54,10 +56,11 @@ const totalOf = (atoms: readonly number[]): SettlementTotal => ({
 });
 
 /**
- * Compare the settlements Langfuse holds with the ledger's, settlement by settlement.
+ * Compare the settlements Langfuse holds with the ledger's, settlement by settlement: each generation that carries a
+ * ledger id and a charge is one observed settlement.
  *
  * @param settlements - The ledger's terminal settlements in the window.
- * @param rows - Observations read from the same environment and window.
+ * @param rows - Generations read from the same environment and window.
  * @param environment - The Langfuse environment the rows were read from.
  * @returns What matched, what is missing, and any drift.
  * @public
@@ -75,17 +78,16 @@ export const reconcileLedger = async (
       }),
     ),
   );
-  /* One settlement is one ledger id: a replay, or the same settlement under v4.3 and v5, is counted once. */
+  /* One settlement is one ledger id: a replay of its generation is counted once. */
   const observed = new Map<string, number>();
   for (const { metadata = {} } of rows) {
-    const ledger = text(metadata, 'fact.ledger');
-    const value = metadata['fact.credits'];
+    const ledger = text(metadata, 'ledger');
+    const value = metadata['credits'];
     /* Langfuse returns a number, or a numeric string for some stored values; anything else carries no charge. */
     const credits = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
     if (
-      settlementMappers.has(text(metadata, 'mapper') ?? '') &&
+      text(metadata, 'mapper') === observationMapperVersion &&
       text(metadata, 'authority') === 'api-reported' &&
-      text(metadata, 'fact.kind') === 'financial' &&
       ledger !== undefined &&
       !observed.has(ledger) &&
       typeof credits === 'number' &&

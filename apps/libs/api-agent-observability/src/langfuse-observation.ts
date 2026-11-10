@@ -42,6 +42,8 @@ export type ObservationContext = Readonly<{
   protection: SourceProtection;
   /** The account's registered email and full name, for the export redaction pass over content (LQ13). */
   identity?: PersonalIdentity | undefined;
+  /** For a generation, the ledger's settlement of its call, when delivery holds it (LW4, rule 8). */
+  settlement?: SettlementFact | undefined;
 }>;
 
 /**
@@ -63,32 +65,8 @@ export const observationMapperVersion = 'langfuse-v5';
 /** The name of a run's root observation, and of every span's trace in a run. */
 export const runRootName = 'run-cad-agent';
 
-/** A settlement's span name, the same under v4.3 and v5 until LW4 moves its values onto the generation. */
-export const settlementObservationName = 'tau.financial';
-
-/** The mapper versions whose settlement spans a reader accepts: the same facts under the same names (LR5). */
-export const settlementMappers: ReadonlySet<string> = new Set(['langfuse-v4.3', observationMapperVersion]);
-
-/**
- * Fact fields that name a Tau record (a run, message, call, attempt or ledger
- * entry) rather than a vocabulary value. They reach the vendor only as the
- * trace's keyed digest, which still joins one field to another.
- */
-const referenceFields: ReadonlySet<string> = new Set([
-  'assessment',
-  'attempt',
-  'billing',
-  'call',
-  'dispatch',
-  'evidence',
-  'invocation',
-  'ledger',
-  'logicalCall',
-  'message',
-  'modelAttempt',
-  'modelCall',
-  'response',
-]);
+/** The span names of a generation: a run's call, a context compaction and a helper or direct call. */
+export const generationNames: ReadonlySet<string> = new Set(['call-model', 'compact-context', 'call-helper-model']);
 
 const sha256 = (...parts: readonly string[]): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -159,19 +137,7 @@ export const accountPseudonym = (environment: string, principal: string, pseudon
 
 const stringAttribute = (key: string, value: string): OtlpAttribute => ({ key, value: { stringValue: value } });
 const intAttribute = (key: string, value: number): OtlpAttribute => ({ key, value: { intValue: String(value) } });
-const scalar = (key: string, value: unknown): OtlpAttribute | undefined => {
-  if (typeof value === 'string') {
-    return stringAttribute(key, value);
-  }
-  if (typeof value === 'boolean') {
-    return { key, value: { boolValue: value } };
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Number.isInteger(value) ? intAttribute(key, value) : { key, value: { doubleValue: value } };
-  }
-  return undefined;
-};
-
+const doubleAttribute = (key: string, value: number): OtlpAttribute => ({ key, value: { doubleValue: value } });
 const tagsAttribute = (key: string, values: readonly string[]): OtlpAttribute => ({
   key,
   value: { arrayValue: { values: values.map((value) => ({ stringValue: value })) } },
@@ -188,6 +154,8 @@ type Section = NonNullable<MaybeSection>;
 type Part = Section['messages'][number]['parts'][number];
 type ProviderFact = SummaryFact & { kind: 'provider' };
 type CallKind = NonNullable<ProviderFact['callKind']>;
+/** A ledger settlement's fact, whose values ride on the generation it settled (LW4). */
+export type SettlementFact = SummaryFact & { kind: 'financial' };
 
 /**
  * What kind of model call a fact belongs to. Every fact but a model call is a run's. A provider fact names its kind;
@@ -258,26 +226,6 @@ const spanMilliseconds = (evidence: Evidence): number => {
   }
   return total;
 };
-
-/** The closed fact fields, one level deep, with every record reference as its keyed digest. */
-const factAttributes = (fact: Readonly<Record<string, unknown>>, group: (value: string) => string): OtlpAttribute[] =>
-  defined(
-    Object.entries(fact)
-      .flatMap(
-        ([key, value]): Array<readonly [string, unknown]> =>
-          value !== null && typeof value === 'object' && !Array.isArray(value)
-            ? Object.entries(value as Readonly<Record<string, unknown>>).map(
-                ([field, nested]) => [`${key}.${field}`, nested] as const,
-              )
-            : [[key, value]],
-      )
-      .map(([key, value]) =>
-        scalar(
-          metadataKey(`fact.${key}`),
-          referenceFields.has(key) && typeof value === 'string' ? group(value) : value,
-        ),
-      ),
-  );
 
 /** Everything a mapping needs about one receipt that does not depend on its fact. */
 type Mapping = Readonly<{
@@ -471,6 +419,23 @@ const contentAttributes = (content: ContentPayload, group: (value: string) => st
   ]);
 };
 
+/**
+ * The ledger's values for the call, beside Langfuse's own cost (LW4, LF-08): the supplier cost and the customer charge
+ * in USD, and the tariff and ledger entry as keyed digests. They are metadata, never `cost_details`, whose bare total
+ * would erase Langfuse's per-type breakdown (LD6). An unpriced supplier cost is left out, never sent as zero.
+ */
+const settlementAttributes = ({ context: { settlement }, group }: Mapping): OtlpAttribute[] =>
+  settlement === undefined
+    ? []
+    : defined([
+        settlement.supplierCost === null
+          ? undefined
+          : doubleAttribute(metadataKey('supplier_cost_usd'), settlement.supplierCost),
+        doubleAttribute(metadataKey('credits'), settlement.credits),
+        stringAttribute(metadataKey('tariff'), group(settlement.tariff)),
+        stringAttribute(metadataKey('ledger'), group(settlement.ledger)),
+      ]);
+
 const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentPayload): OtlpSpan => {
   const { evidence, group, kind } = mapping;
   const name = generationName(fact, kind);
@@ -514,6 +479,7 @@ const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentP
       fact.usage.reasoning === null ? undefined : intAttribute(metadataKey('reasoning_tokens'), fact.usage.reasoning),
       kind !== 'run' && mapping.chat !== undefined ? stringAttribute(metadataKey('chat'), mapping.chat) : undefined,
       ...(content === undefined ? [] : contentAttributes(content, group)),
+      ...settlementAttributes(mapping),
       ...(failed === undefined ? [] : level('ERROR', failed)),
     ]),
     status: failed === undefined ? { code: 1 } : { code: 2, message: failed },
@@ -711,30 +677,6 @@ const rootSpans = (mapping: Mapping, fact: OutcomeFact, content?: ContentPayload
 };
 
 /**
- * A settlement, which is a Langfuse object of its own only until LW4 moves its values onto its generation. Until then
- * it is a point-in-time span under the run's root that keeps the closed `fact.*` metadata the ledger reconciliation
- * reads.
- */
-const transitionalSpan = (mapping: Mapping, name: string, fact: Readonly<Record<string, unknown>>): OtlpSpan => {
-  const at = nanoseconds(startOf(mapping.evidence));
-  return {
-    traceId: mapping.traceId,
-    spanId: objectId(mapping),
-    parentSpanId: mapping.rootId,
-    name,
-    kind: 1,
-    startTimeUnixNano: at,
-    endTimeUnixNano: at,
-    attributes: [
-      ...mapping.common(runRootName),
-      stringAttribute('langfuse.observation.type', 'span'),
-      ...factAttributes(fact, mapping.group),
-    ],
-    status: { code: 1 },
-  };
-};
-
-/**
  * Run the export pass over one section (LQ13): emails everywhere text is kept, and the account's name only in prose
  * (text, readable thinking and check lines), never in a tool's arguments or result or in design source, where a name
  * match would corrupt code.
@@ -825,8 +767,9 @@ export const exportableEvidence = (
  * fact; a helper or direct call is a trace of its own. Account, chat, run and record ids reach the vendor only as
  * keyed or one-way digests, and no receipt id is sent.
  *
- * A fact that is not an operation (a check, a presentation, an instruction) maps to no object: the caller settles such
- * a receipt `superseded` and sends nothing. A content receipt maps as its fact does; a generation's also carries its
+ * A fact that is not an operation (a check, a presentation, an instruction, a settlement) maps to no object: the caller
+ * settles such a receipt `superseded` and sends nothing. A settlement's values ride on the generation it settled, in
+ * that generation's one send (LW4, rule 8). A content receipt maps as its fact does; a generation's also carries its
  * input, output, parameters and context digests (LW3), a tool's its arguments and result, and a root's this turn's
  * message, reply, design and checks (LW6), each after the export redaction pass.
  *
@@ -857,9 +800,6 @@ export const langfuseObservation = (
       }
       case 'outcome': {
         return rootSpans(mapping, fact, payload.plane === 'content' ? payload : undefined);
-      }
-      case 'financial': {
-        return [transitionalSpan(mapping, settlementObservationName, fact)];
       }
       default: {
         return undefined;

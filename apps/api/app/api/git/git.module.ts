@@ -12,6 +12,7 @@ import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
+import { GitPushesController } from '#api/git/pushes.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { ownerInFlightGateProvider } from '@taucad/api-git-core/admission/owner-in-flight.providers';
 import { DeriveScheduler } from '#api/git/forwarding/derive-scheduler.js';
@@ -41,6 +42,7 @@ import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-stor
   controllers: [
     GitController,
     GitCatalogueController,
+    GitPushesController,
     GitProxyController,
     RevisionSaltController,
     UsageController,

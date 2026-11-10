@@ -43,6 +43,8 @@ import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
+import { GitPushesController } from '#api/git/pushes.controller.js';
+import type { PushPage } from '#api/git/pushes.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
 import type { StorageGitService } from '@taucad/api-git-core/worker/storage-git.service';
@@ -305,11 +307,23 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         return { projectId: project, ownerId, role: caller.role };
       },
       invalidate: () => undefined,
+      /* Q2: ids, names and roles only. The guard's users carry an address; the directory never does. */
+      directory: async (_project: string, alsoNamed: readonly string[] = []) => {
+        const members = Object.entries(callers).flatMap(([label, caller]) =>
+          caller.role === undefined ? [] : [{ accountId: caller.id, name: `Member ${label}`, role: caller.role }],
+        );
+        return [
+          ...members,
+          ...alsoNamed
+            .filter((accountId) => !members.some((member) => member.accountId === accountId))
+            .map((accountId) => ({ accountId })),
+        ];
+      },
     };
 
     @Module({
       imports: [ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }), StorageModule],
-      controllers: [GitController, GitProxyController],
+      controllers: [GitController, GitProxyController, GitPushesController],
       providers: [
         GitRepositoryService,
         GitLfsService,
@@ -795,6 +809,103 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     });
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain('write access');
+  }, 120_000);
+
+  /**
+   * A3, Q1–Q3: who pushed what, from the server's own record. Chats are left
+   * out, no email is ever in the body, and the account behind a push that
+   * brought an anonymous commit reaches the owner only.
+   */
+  it('reads the push records to members, hiding an anonymous pusher from all but the owner', async () => {
+    const clone = path.join(workspace, 'push-records');
+    await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+    await writeFile(path.join(clone, 'attributed.ts'), 'export const attributed = 1;\n', 'utf8');
+    await gitOk(['add', '.'], clone);
+    await gitOk(['commit', '-m', 'attributed save'], clone);
+    const attributed = await runGit(
+      ['push', 'origin', 'HEAD:refs/heads/push-attributed', 'HEAD:refs/tau/chats/chat_push_records'],
+      clone,
+    );
+    expect(attributed.code, attributed.stderr).toBe(0);
+    const attributedHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    const attributedTip = attributedHead.stdout.trim();
+
+    await writeFile(path.join(clone, 'anonymous.ts'), 'export const anonymous = 1;\n', 'utf8');
+    await gitOk(['add', '.'], clone);
+    const committed = await runGit(['commit', '-m', 'anonymous save'], clone, {
+      GIT_AUTHOR_NAME: 'Anonymous',
+      GIT_AUTHOR_EMAIL: 'anon:3fa9c1d2@users.noreply.tau.new',
+    });
+    expect(committed.code, committed.stderr).toBe(0);
+    const anonymous = await runGit(['push', 'origin', 'HEAD:refs/heads/push-anonymous'], clone);
+    expect(anonymous.code, anonymous.stderr).toBe(0);
+    const anonymousHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    const anonymousTip = anonymousHead.stdout.trim();
+
+    const read = async (token: string, query = ''): Promise<{ status: number; body: string }> => {
+      const response = await fetch(`${baseUrl}/v1/projects/${projectId}/git/pushes${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { status: response.status, body: await response.text() };
+    };
+    const entryFor = (page: PushPage, ref: string): PushPage['pushes'][number] | undefined =>
+      page.pushes.find((entry) => entry.tips.some((tip) => tip.ref === ref));
+
+    const owner = await read(callers.owner.token);
+    expect(owner.status).toBe(200);
+    expect(owner.body).not.toContain('@');
+    const ownerPage = JSON.parse(owner.body) as PushPage;
+    const generations = ownerPage.pushes.map((entry) => entry.generation);
+    expect(generations).toStrictEqual(generations.toSorted((left, right) => left - right));
+    expect(ownerPage.pushes.flatMap((entry) => entry.tips).every((tip) => tip.ref.startsWith('refs/heads/'))).toBe(
+      true,
+    );
+    expect(entryFor(ownerPage, 'refs/heads/push-attributed')).toMatchObject({
+      pusher: { kind: 'account', accountId: callers.writer.id, name: 'Member writer' },
+      viaDevice: false,
+      tips: [{ ref: 'refs/heads/push-attributed', tip: attributedTip }],
+    });
+    expect(entryFor(ownerPage, 'refs/heads/push-attributed')).not.toHaveProperty('anonymous');
+    expect(entryFor(ownerPage, 'refs/heads/push-anonymous')).toMatchObject({
+      pusher: { kind: 'account', accountId: callers.writer.id },
+      anonymous: true,
+      tips: [{ ref: 'refs/heads/push-anonymous', tip: anonymousTip }],
+    });
+    expect(ownerPage.members.map((member) => member.accountId)).toContain(callers.writer.id);
+
+    for (const member of [callers.reader, callers.writer]) {
+      // oxlint-disable-next-line no-await-in-loop -- two members, read one after the other
+      const answer = await read(member.token);
+      expect(answer.status).toBe(200);
+      expect(answer.body).not.toContain('@');
+      const page = JSON.parse(answer.body) as PushPage;
+      const hidden = entryFor(page, 'refs/heads/push-anonymous');
+      expect(hidden).toStrictEqual({
+        generation: entryFor(ownerPage, 'refs/heads/push-anonymous')?.generation,
+        pushedAt: entryFor(ownerPage, 'refs/heads/push-anonymous')?.pushedAt,
+        pusher: { kind: 'anonymous' },
+        viaDevice: false,
+        tips: [{ ref: 'refs/heads/push-anonymous', tip: anonymousTip }],
+      });
+      expect(entryFor(page, 'refs/heads/push-attributed')?.pusher).toMatchObject({ accountId: callers.writer.id });
+    }
+
+    /* Paging by generation: after the attributed push, only what followed it. */
+    const attributedGeneration = entryFor(ownerPage, 'refs/heads/push-attributed')?.generation ?? 0;
+    const laterAnswer = await read(callers.owner.token, `?after=${String(attributedGeneration)}`);
+    const later = JSON.parse(laterAnswer.body) as PushPage;
+    expect(later.pushes.every((entry) => entry.generation > attributedGeneration)).toBe(true);
+    expect(entryFor(later, 'refs/heads/push-anonymous')).toBeDefined();
+    expect(entryFor(later, 'refs/heads/push-attributed')).toBeUndefined();
+    expect(later.next).toBeUndefined();
+    const invalid = await read(callers.owner.token, '?after=-1');
+    expect(invalid.status).toBe(400);
+
+    /* A caller with no relation is told the project does not exist (D27), and learns nothing else. */
+    const stranger = await read(callers.stranger.token);
+    expect(stranger.status).toBe(404);
+    expect(stranger.body).not.toContain(callers.writer.id);
+    expect(stranger.body).not.toContain('refs/heads');
   }, 120_000);
 
   /** Ruling P55: an account with no relation to the project is told it does not exist. */

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CanvasHostCommand } from '#machines/canvas.machine.js';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useState } from 'react';
+import { createActor, createCallbackLogic } from 'xstate';
+import { canvasMachine } from '#machines/canvas.machine.js';
 import type { ThreeCanvasInstanceProps } from '#graphics/three/three-canvas-instance.jsx';
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
@@ -23,10 +26,30 @@ vi.mock('#graphics/graphics-backend.js', async (importOriginal) => ({
   webGpuFallbackReason: () => fallback.reason,
 }));
 vi.mock('#graphics/three/three-canvas-instance.jsx', () => ({
-  ThreeCanvasInstance({ onSurfaceResize, graphicsBackend, children }: ThreeCanvasInstanceProps): React.JSX.Element {
-    useEffect(() => {
-      onSurfaceResize?.(canvas.cssPixels, 2);
-    }, [onSurfaceResize]);
+  ThreeCanvasInstance({
+    webglContext,
+    admittedBytes,
+    graphicsBackend,
+    children,
+  }: ThreeCanvasInstanceProps): React.JSX.Element {
+    const canvasId = useId();
+    // As the real canvas does: its canvas actor holds the budget slot from the mounting commit, and its host reports the
+    // canvas's own size.
+    useLayoutEffect(() => {
+      const actor = createActor(canvasMachine, {
+        input: { canvasId, kind: 'canvas', webglContext, admittedBytes },
+      }).start();
+      actor.send({
+        type: 'hostCreated',
+        backend: graphicsBackend,
+        surface: { width: canvas.cssPixels, height: 1, pixelRatio: 2 },
+        domElement: document.createElement('canvas'),
+        host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),
+      });
+      return () => {
+        actor.stop();
+      };
+    }, [admittedBytes, canvasId, graphicsBackend, webglContext]);
     // As the real canvas does, a renderer that cannot be created is reported after the canvas mounts.
     const [createError, setCreateError] = useState<Error>();
     useEffect(() => {

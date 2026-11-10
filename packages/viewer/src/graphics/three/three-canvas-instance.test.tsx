@@ -1,4 +1,7 @@
-import type { GraphicsEvent } from '#machines/graphics.machine.js';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import type { CanvasHostCommand } from '#machines/canvas.machine.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
+import { selectCanvasAwaitingFrame, selectCanvasBackend } from '#machines/canvas.machine.js';
 import type * as ReactThreeFiber from '@react-three/fiber';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
@@ -46,6 +49,12 @@ type StubCompute = (event: StubPointerEvent, state: StubRootState, previous?: St
 /** The slice of R3F's root state that `onCreated` and pointer compute read. */
 type StubRootState = {
   gl: Record<string, unknown>;
+  get: () => StubRootState;
+  invalidate: () => void;
+  viewport: Readonly<{ dpr: number }>;
+  internal: {
+    subscribe: (ref: { current: (state: StubFrameState) => void }, priority: number) => () => void;
+  };
   camera: Camera;
   pointer: Vector2;
   raycaster: Raycaster;
@@ -66,7 +75,10 @@ const frameCallbacks = vi.hoisted(
 const stubSize = vi.hoisted(() => ({ width: 800, height: 600 }));
 /** Frame requests made inside the stub root. */
 const stubInvalidate = vi.hoisted(() => vi.fn());
-const reportRenderer = vi.hoisted(() => vi.fn<(event: GraphicsEvent) => void>());
+/** The graphics actor the canvas attaches to; each test starts a fresh one. */
+const graphicsHolder = vi.hoisted(
+  (): { current: ReturnType<typeof createActor<typeof graphicsMachine>> | undefined } => ({ current: undefined }),
+);
 const enabledFeatures = vi.hoisted(() => new Set<string>());
 /** When set, the mocked renderer factory throws it, as three's `WebGLRenderer` does without a context. */
 const rendererFailure = vi.hoisted((): { error: Error | undefined } => ({ error: undefined }));
@@ -93,7 +105,7 @@ vi.mock('#graphics/three/render-fps-overlay.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => cameraRig,
-  useGraphics: () => ({ send: reportRenderer }),
+  useGraphics: () => graphicsHolder.current,
 }));
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
@@ -132,8 +144,10 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
             webglListeners.push(listener);
           }
         },
-        removeEventListener(): void {
-          void 0;
+        removeEventListener(type: string, listener: EventListener): void {
+          if (type === 'webglcontextlost' && webglListeners.includes(listener)) {
+            webglListeners.splice(webglListeners.indexOf(listener), 1);
+          }
         },
       };
 
@@ -156,10 +170,28 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
         };
       const state: StubRootState = {
         gl,
+        get: () => state,
+        invalidate: stubInvalidate,
+        viewport: { dpr: 1 },
+        internal: {
+          // As R3F's loop: the host adapter observes frames through the root's own subscription.
+          subscribe(ref, priority) {
+            const entry = {
+              callback: (frame: StubFrameState): void => {
+                ref.current(frame);
+              },
+              priority,
+            };
+            frameCallbacks.push(entry);
+            return () => {
+              frameCallbacks.splice(frameCallbacks.indexOf(entry), 1);
+            };
+          },
+        },
         camera: stubRootCamera,
         pointer: new Vector2(),
         raycaster: new Raycaster(),
-        size: { width: 800, height: 600 },
+        size: stubSize,
         events: { compute: computeFrom('offset') },
         setEvents(events) {
           state.events = { ...state.events, ...events };
@@ -252,6 +284,10 @@ vi.mock('#graphics/three/actor-bridge.jsx', () => ({
   ActorBridge: () => <div data-testid='actor-bridge' />,
 }));
 
+const canvas = () => graphicsHolder.current?.getSnapshot().context.canvas?.ref;
+const backend = () => selectCanvasBackend(canvas()?.getSnapshot());
+const createCallbackLogicStub = () => createCallbackLogic<CanvasHostCommand, undefined>(() => undefined);
+
 /** The bridge's DOM can commit before the stub frame hook's passive effect subscribes. */
 const waitForPresentationObserver = async () =>
   waitFor(() => {
@@ -271,7 +307,10 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
     enabledFeatures.clear();
-    reportRenderer.mockClear();
+    graphicsHolder.current = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      { input: {} },
+    ).start();
     fireLatestWebGlContextLost = undefined;
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
@@ -292,27 +331,19 @@ describe('ThreeCanvasInstance', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    graphicsHolder.current?.stop();
   });
 
   it('should publish the initialized backend, then clear it on context loss', async () => {
     const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
-    // Only the mount itself is declared before the renderer exists; no backend is published yet.
-    expect(reportRenderer.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted']);
+    // Only the surface is attached before the renderer exists; no backend is published yet.
+    expect(canvas()?.getSnapshot().value).toBe('creating');
+    expect(backend()).toBeUndefined();
     await waitFor(() => {
-      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
-        type: 'rendererInitialized',
-        payload: { backend: 'webgl' },
-      });
+      expect(backend()).toBe('webgl');
     });
-    const initialized = reportRenderer.mock.lastCall?.[0];
-    if (initialized?.type !== 'rendererInitialized') {
-      throw new Error('Expected initialized renderer status.');
-    }
     act(() => fireLatestWebGlContextLost?.());
-    expect(reportRenderer).toHaveBeenLastCalledWith({
-      type: 'rendererRemoved',
-      canvasId: initialized.payload.canvasId,
-    });
+    expect(backend()).toBeUndefined();
     view.unmount();
   });
 
@@ -320,36 +351,38 @@ describe('ThreeCanvasInstance', () => {
     stubCoordinateSystem = WebGPUCoordinateSystem;
     const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
     await waitFor(() => {
-      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
-        type: 'rendererInitialized',
-        payload: { backend: 'webgpu' },
-      });
+      expect(backend()).toBe('webgpu');
     });
     view.unmount();
-    expect(reportRenderer.mock.lastCall?.[0].type).toBe('rendererRemoved');
+    expect(canvas()).toBeUndefined();
   });
 
-  it('should retain truthful status through StrictMode and retire it on unmount', async () => {
+  it('should keep one canvas actor and one host through StrictMode and stop it on unmount', async () => {
     const view = render(
       <StrictMode>
         <KeyedThreeCanvas canvasKey='status' />
       </StrictMode>,
     );
     await waitFor(() => {
-      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
-        type: 'rendererInitialized',
-        payload: { backend: 'webgl' },
+      expect(backend()).toBe('webgl');
+    });
+    const ref = canvas();
+    expect(Object.keys(ref?.getSnapshot().children ?? {}).filter((id) => id === 'host')).toEqual(['host']);
+    // A replayed `onCreated` reaches the same actor, which keeps its host.
+    act(() => {
+      ref?.send({
+        type: 'hostCreated',
+        backend: 'webgl',
+        surface: { width: 800, height: 600, pixelRatio: 1 },
+        domElement: document.createElement('canvas'),
+        host: createCallbackLogicStub(),
       });
     });
-    const initialized = reportRenderer.mock.lastCall?.[0];
-    if (initialized?.type !== 'rendererInitialized') {
-      throw new Error('Expected initialized renderer status.');
-    }
+    expect(canvas()).toBe(ref);
+    expect(frameCallbacks.filter(({ priority }) => priority === 6)).toHaveLength(1);
     view.unmount();
-    expect(reportRenderer).toHaveBeenLastCalledWith({
-      type: 'rendererRemoved',
-      canvasId: initialized.payload.canvasId,
-    });
+    expect(canvas()).toBeUndefined();
+    expect(ref?.getSnapshot().status).toBe('stopped');
   });
 
   it('retains the renderer before scene layout effects can allocate environment targets', () => {
@@ -476,12 +509,10 @@ describe('ThreeCanvasInstance', () => {
     expect(screen.getByTestId('gpu-inspector')).toBeInTheDocument();
   });
 
-  it('declares a canvas that draws frames from its mounting commit until its context is lost', async () => {
+  it('attaches a canvas that awaits its frame from its mounting commit until its context is lost', async () => {
     render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
-    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
-    if (mounted?.type !== 'canvasMounted') {
-      throw new Error('Expected the canvas to declare itself in its mounting commit.');
-    }
+    expect(selectCanvasAwaitingFrame(canvas()?.getSnapshot())).toBe(true);
+    const ref = canvas();
     await waitFor(() => {
       expect(fireLatestWebGlContextLost).toBeDefined();
     });
@@ -491,18 +522,19 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
     });
-    // The fallback draws no frames, so the stage stops waiting for one.
-    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
+    // The fallback draws no frames, so the stage stops waiting; the lost actor stays until Retry or unmount.
+    expect(canvas()).toBe(ref);
+    expect(ref?.getSnapshot().value).toBe('lost');
+    expect(selectCanvasAwaitingFrame(ref?.getSnapshot())).toBe(false);
   });
 
-  it('withdraws the canvas declaration when it unmounts', () => {
+  it('detaches the canvas when it unmounts', () => {
     const view = render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
-    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
-    if (mounted?.type !== 'canvasMounted') {
-      throw new Error('Expected the canvas to declare itself in its mounting commit.');
-    }
+    const ref = canvas();
+    expect(ref).toBeDefined();
     view.unmount();
-    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
+    expect(canvas()).toBeUndefined();
+    expect(ref?.getSnapshot().status).toBe('stopped');
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {
@@ -596,21 +628,13 @@ describe('ThreeCanvasInstance', () => {
     expect(observer).toBeDefined();
     // The canvas may have drawn before the observer subscribed: it asks for exactly one frame to observe.
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
-    const presented = (): GraphicsEvent[] =>
-      reportRenderer.mock.calls.map(([event]) => event).filter((event) => event.type === 'rendererPresented');
-
     // Submitting the frame is not presenting it: nothing is reported until two animation frames later.
     act(() => {
       observer.callback({ size: stubSize });
     });
-    expect(presented()).toEqual([]);
+    expect(canvas()?.getSnapshot().value).toBe('ready');
     await waitFor(() => {
-      expect(presented()).toHaveLength(1);
-    });
-    const initialized = reportRenderer.mock.calls.find(([event]) => event.type === 'rendererInitialized')?.[0];
-    expect(presented()[0]).toEqual({
-      type: 'rendererPresented',
-      canvasId: initialized?.type === 'rendererInitialized' ? initialized.payload.canvasId : undefined,
+      expect(canvas()?.getSnapshot().value).toBe('presented');
     });
     expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
@@ -650,7 +674,7 @@ describe('ThreeCanvasInstance', () => {
     expect(callbacks).toHaveLength(2);
     view.unmount();
     expect(cancel).toHaveBeenCalledWith(2);
-    expect(reportRenderer.mock.calls.some(([event]) => event.type === 'rendererPresented')).toBe(false);
+    expect(canvas()).toBeUndefined();
   });
 
   it('forwards explicit Canvas event routing props to R3F', async () => {

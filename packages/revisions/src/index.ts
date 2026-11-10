@@ -151,6 +151,8 @@ export {
 export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
+export { readRevisionGraph } from '#revision-graph.js';
+export type { RevisionGraph, RevisionGraphRequest, RevisionGraphRow } from '#revision-graph.js';
 export {
   generatedGitattributesContent,
   generatedGitattributesPath,

@@ -265,7 +265,15 @@ const numbersOn = async (
   return numbers;
 };
 
-const rowOf = (
+/**
+ * One log entry as a row; shared with the graph read, which numbers nothing.
+ *
+ * @param entry - The entry the port's log reported.
+ * @param revisionNumber - Its first-parent ordinal, or `undefined` when it has none here.
+ * @param tags - The versions naming it, sorted.
+ * @returns The row.
+ */
+export const rowOf = (
   entry: RevisionLogEntry,
   revisionNumber: number | undefined,
   tags: readonly string[] = [],

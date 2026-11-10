@@ -5,6 +5,7 @@ import type { ProjectManifest, ProjectManifestParseIssue as CoreProjectManifestP
 /* oxlint-disable no-barrel-files/no-barrel-files -- This private entrypoint forwards the public project manifest authority without duplicating schemas. */
 export {
   convertLegacyProjectManifestBytes,
+  mainEntryPath,
   parseProjectManifestBytes,
   projectIdSchema,
   projectManifestMaxBytes,

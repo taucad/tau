@@ -91,7 +91,7 @@ type ProjectContextType = {
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** The main entry path from project.assets.main.entryPath. */
+  /** The main entry path from project.assets.main?.entryPath. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
   resolveParameterEntry: (filePath: string, manifest: ParameterManifest) => void;
@@ -1042,13 +1042,13 @@ export function ProjectProvider({
   );
 
   const getMainFilename = useCallback(async () => {
-    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main.entryPath));
+    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main?.entryPath));
 
-    if (!snapshot.context.project?.assets.main.entryPath) {
+    if (!snapshot.context.project?.assets.main?.entryPath) {
       throw new Error('Main file not found');
     }
 
-    return snapshot.context.project.assets.main.entryPath;
+    return snapshot.context.project.assets.main?.entryPath;
   }, [actorRef]);
 
   const value = useMemo<ProjectContextType>(() => {

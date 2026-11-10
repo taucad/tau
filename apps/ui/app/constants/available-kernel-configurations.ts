@@ -19,16 +19,16 @@ export const availableKernelConfigurations = (): readonly KernelEntry[] => {
 export const isKernelAvailable = (kernelId: string): boolean =>
   availableKernelConfigurations().some(({ id }) => id === kernelId);
 
-/** Resolve the native runtime requirement declared by the product catalog for an entry path. */
+/** Resolve the native runtime requirement declared by the product catalog for an entry path; none while there is no entry. */
 export const nativeKernelRequirementForEntryPath = (
-  entryPath: string,
+  entryPath: string | undefined,
 ):
   | {
       readonly configuration: KernelConfiguration;
       readonly runtimeKernelId: string;
     }
   | undefined => {
-  const extension = entryPath.split('.').at(-1)?.toLowerCase();
+  const extension = entryPath?.split('.').at(-1)?.toLowerCase();
   const configuration = kernelConfigurations.find(
     ({ mainFile }) => extension !== undefined && mainFile.toLowerCase().endsWith(`.${extension}`),
   ) as KernelConfiguration | undefined;

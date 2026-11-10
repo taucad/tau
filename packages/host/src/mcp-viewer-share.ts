@@ -111,14 +111,15 @@ const manifestFor = async (
   const bytes = await readRegularFile(join(root, 'tau.json')).catch(() => undefined);
   const parsed = bytes === undefined ? undefined : parseProjectManifestBytes(bytes);
   if (parsed?.success === true) {
-    const { thumbnail } = parsed.data.assets.main;
+    // An entry-less project has no main yet: the shown entry becomes it, with no thumbnail to carry.
+    const thumbnail = parsed.data.assets.main?.thumbnail;
     return {
       manifest: projectToManifest({
         ...parsed.data,
         assets: {
           main: {
             entryPath,
-            ...(thumbnail !== undefined && parsed.data.assets.main.entryPath === entryPath ? { thumbnail } : {}),
+            ...(thumbnail !== undefined && parsed.data.assets.main?.entryPath === entryPath ? { thumbnail } : {}),
           },
         },
       }),
@@ -154,7 +155,7 @@ const closureFiles = async (
 > => {
   const names = await readdir(input.root).catch(() => []);
   const readmePath = names.find((name) => name.toLocaleLowerCase('en-US') === 'readme.md');
-  const { thumbnail } = manifest.assets.main;
+  const thumbnail = manifest.assets.main?.thumbnail;
   const result = await input.snapshotSource({
     root: input.root,
     entryPath: input.entryPath,

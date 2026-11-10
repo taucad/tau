@@ -657,7 +657,7 @@ function PublishRevisionDialog({
               commands.confirmPublish({
                 tag,
                 projectName,
-                entryPath: project?.assets.main.entryPath ?? '',
+                entryPath: project?.assets.main?.entryPath ?? '',
                 visibility: 'public',
                 title: projectName,
               });

@@ -86,13 +86,11 @@ describe('generated example artifacts', () => {
       const locator = `${entry.kernel}.${entry.name}`;
       expect(parsed).not.toHaveProperty('id');
       expect(locators.has(locator)).toBe(false);
-      expect(existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.entryPath))).toBe(
-        true,
-      );
-      if (parsed.assets.main.thumbnail) {
-        expect(
-          existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.thumbnail)),
-        ).toBe(true);
+      const { main } = parsed.assets;
+      expect(main, `${locator} declares a main entry`).toBeDefined();
+      expect(existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, main?.entryPath ?? ''))).toBe(true);
+      if (main?.thumbnail) {
+        expect(existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, main.thumbnail))).toBe(true);
       }
       locators.add(locator);
       count++;

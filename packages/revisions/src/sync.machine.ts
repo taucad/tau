@@ -1302,21 +1302,12 @@ const syncMachineDefinition = setup({
   /* Connectivity and the remote are facts about the host, not about which state
    * the scheduler is in, so they are handled once at the root. */
   on: {
-    quiesce: ({ context, event, value, guards }) => {
+    quiesce: ({ context, event, value, guards }, enq) => {
       if (event.phase === 'release') {
-        if (context.pendingSession && guards.hasRemote(context)) {
-          /* A session change held through the close is read now (audit R6). */
-          return {
-            target: '.opening',
-            reenter: true,
-            context: {
-              quiescing: false,
-              transportStopped: false,
-              pendingFetch: false,
-              pendingFlush: false,
-              pendingSession: false,
-            },
-          };
+        const session = context.pendingSession && guards.hasRemote(context);
+        if (session) {
+          /* A session change held through the close is pulled now (audit R6). */
+          enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
         }
         return {
           ...(value === 'queued' ? { target: '.queued', reenter: true } : {}),
@@ -1325,7 +1316,7 @@ const syncMachineDefinition = setup({
             transportStopped: false,
             pendingFetch: false,
             pendingFlush: false,
-            pendingSession: false,
+            pendingSession: session,
           },
         };
       }
@@ -1360,36 +1351,22 @@ const syncMachineDefinition = setup({
       return {};
     },
     /*
-     * The page's signed-in person changed (audit R6, rule 19): the remote is
-     * read afresh under the new session, as a freshly started root would. Like
-     * `open`, from any state: an answer still in flight was asked under the
-     * last session and is dropped with the state it belongs to, and a terminal
-     * refusal may have been that session's. Re-entering from the root restarts
-     * the root's own children too, so the move stream (a refused one is never
-     * re-read for the remote it already watches) is a fresh subscription that
-     * `opening` watches again. Held while quiescing, read on release.
+     * The page's signed-in person changed (audit R6, rule 19). The remote is
+     * read afresh under the new session without abandoning anything in flight:
+     * the move stream is watched again (a refused one is never re-read for the
+     * remote it already watches), and the remote is pulled as a move would be,
+     * at once from an idle state and when a busy one settles. `pendingSession`
+     * survives the busy state: an answer it gets under the last session that
+     * lands in `failed` opens again from there. Every `opening` clears it.
      */
-    sessionChanged: ({ context, guards, value }) => {
+    sessionChanged: ({ context, guards }, enq) => {
       if (!guards.hasRemote(context)) {
         return {};
       }
-      if (context.quiescing) {
-        return { context: { pendingSession: true } };
-      }
-      /* A push or queue write left in flight was cleared from `pending*` on
-       * entry and never settled: it is owed again, so the reopened pull pushes. */
-      const abandoned =
-        typeof value === 'string'
-          ? value === 'pushing' || value === 'recording'
-          : value['pushing'] !== undefined || value['recording'] !== undefined || value['conflicted'] !== undefined;
-      return {
-        target: '.opening',
-        reenter: true,
-        context: {
-          pendingSession: false,
-          ...(abandoned ? { pendingMint: true, recordQueueDirty: true, ...markUnsyncedRecords(context) } : {}),
-        },
-      };
+      enq.sendTo('remoteMoves', { type: 'unwatch' });
+      enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote ?? '' });
+      enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
+      return { context: { pendingSession: true } };
     },
     leaseRetired: { context: { leaseSettled: true } },
     /* The root forwards every answer to a cut no turn asked for; only `minting`
@@ -1639,6 +1616,7 @@ const syncMachineDefinition = setup({
             attemptStartedAt: Date.now(),
             recordQueueDirty: false,
             pendingFetch: false,
+            pendingSession: false,
             leaseSettled: false,
             arrived: undefined,
           },
@@ -2497,7 +2475,22 @@ const syncMachineDefinition = setup({
      */
     failed: {
       entry: ({ context }, enq) => ({ context: settleEveryPush(context, enq, 'failed') }),
+      /* A refusal answered under the last session (audit R6): this session opens again, the stream watched afresh. */
+      always: ({ context, guards }, enq) => {
+        if (!context.pendingSession || context.quiescing || !guards.hasRemote(context)) {
+          return undefined;
+        }
+        enq.sendTo('remoteMoves', { type: 'unwatch' });
+        return { target: 'opening' };
+      },
       on: {
+        sessionChanged: ({ context, guards }, enq) => {
+          if (!guards.hasRemote(context)) {
+            return {};
+          }
+          enq.sendTo('remoteMoves', { type: 'unwatch' });
+          return context.quiescing ? { context: { pendingSession: true } } : { target: 'opening' };
+        },
         syncNow: ({ context, event }, enq) =>
           context.quiescing
             ? holdPushRequest(context, event, enq)

@@ -49,6 +49,11 @@ export type RevisionClient = Readonly<{
    * kept. Signing in mints the bound repository's credential and has a remote
    * refused while signed out try again; signing out withdraws it.
    *
+   * Like the actor (`setActor`), the change applies to the next revision:
+   * edits not yet recorded when it happens are recorded under the new
+   * identity, as a desktop host already did. The root is no longer released,
+   * so no close cut is taken under the outgoing identity first.
+   *
    * The first call after an open or a close is the open's own: it always
    * sends the frame, which the route queues before {@link RevisionClient.open}
    * (D36). Resolves once that frame is sent.

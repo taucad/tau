@@ -2695,104 +2695,20 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
-  it('reads a refused stream afresh when the session changes (audit R6)', async () => {
+  it('reads a refused stream afresh and pulls when the session changes (audit R6)', async () => {
     const harness = start();
     await openCleanly(harness);
     harness.holds.sendBack('remoteMoves', { type: 'remoteRefused', code: 'REMOTE_UNAUTHORIZED', message: 'x' });
-    const before = harness.holds.deliveries.length;
-
-    harness.actor.send({ type: 'sessionChanged' });
-
-    /* A fresh subscription, watched again: the refused session is not the one asked. */
-    expect(harness.holds.inputsFor('remoteMoves')).toHaveLength(2);
-    await vi.waitFor(() => {
-      expect(harness.holds.deliveries.slice(before).map(({ event }) => event)).toEqual([
-        { type: 'watch', remote: 'tau' },
-      ]);
-    });
-
-    harness.stop();
-  });
-
-  it('drops an answer asked under the last session when the session changes (audit R6)', async () => {
-    const harness = start();
     await vi.waitFor(() => {
       expect(harness.effects.running('fetch')).toBe(1);
-    });
-
-    harness.actor.send({ type: 'sessionChanged' });
-    await vi.waitFor(() => {
-      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
-    });
-    /* The last session's fetch answers 401 after the change: it was stopped with its state, so nothing hears it. */
-    harness.effects.settle('fetch', {
-      error: Object.assign(new Error('Sign in.'), { code: 'REMOTE_UNAUTHORIZED' }),
-    });
-    await Promise.resolve();
-    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
-    expect(harness.actor.getSnapshot().matches('opening')).toBe(true);
-
-    harness.stop();
-  });
-
-  it('owes a push the session change abandoned, records only (audit R6)', async () => {
-    const harness = start();
-    await openCleanly(harness);
-    harness.actor.send({ type: 'recordsChanged' });
-    harness.clock.advance(2000);
-    await vi.waitFor(() => {
-      expect(harness.effects.running('push')).toBe(1);
-    });
-
-    harness.actor.send({ type: 'sessionChanged' });
-    await vi.waitFor(() => {
-      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
     });
     harness.effects.settle('fetch', {
       output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
     });
-
-    /* Never *Backed up* over the records that did not leave: the reopened pull pushes them. */
     await vi.waitFor(() => {
-      expect(harness.effects.inputsFor('push')).toHaveLength(2);
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
     });
-    expect(harness.actor.getSnapshot().matches('backedUp')).toBe(false);
-    harness.stop();
-  });
-
-  it('forgets a held session change when the remote goes before release (audit R6)', async () => {
-    const harness = start();
-    await openCleanly(harness);
-    harness.actor.send({ type: 'quiesce', phase: 'hold' });
-    harness.actor.send({ type: 'sessionChanged' });
-    harness.actor.send({ type: 'remoteDisconnected' });
-    harness.actor.send({ type: 'quiesce', phase: 'release' });
-
-    expect(harness.actor.getSnapshot().context.pendingSession).toBe(false);
-    harness.stop();
-  });
-
-  it('holds a session change through quiescing and reads the remote on release (audit R6)', async () => {
-    const harness = start();
-    await openCleanly(harness);
-    const fetches = harness.effects.inputsFor('fetch').length;
-
-    harness.actor.send({ type: 'quiesce', phase: 'hold' });
-    harness.actor.send({ type: 'sessionChanged' });
-    await Promise.resolve();
-    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
-
-    harness.actor.send({ type: 'quiesce', phase: 'release' });
-    await vi.waitFor(() => {
-      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
-    });
-
-    harness.stop();
-  });
-
-  it('pulls a backed-up project when the session changes (audit R6)', async () => {
-    const harness = start();
-    await openCleanly(harness);
+    const before = harness.holds.deliveries.length;
     const fetches = harness.effects.inputsFor('fetch').length;
 
     harness.actor.send({ type: 'sessionChanged' });
@@ -2800,7 +2716,11 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
     });
-
+    /* Unwatched, then watched again: the refused subscription is replaced, not repeated. */
+    expect(harness.holds.deliveries.slice(before, before + 2).map(({ event }) => event)).toEqual([
+      { type: 'unwatch' },
+      { type: 'watch', remote: 'tau' },
+    ]);
     harness.stop();
   });
 
@@ -2825,9 +2745,81 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
     });
-    expect(harness.holds.inputsFor('remoteMoves')).toHaveLength(2);
-    expect(harness.holds.deliveries.at(-1)?.event).toEqual({ type: 'watch', remote: 'tau' });
+    harness.stop();
+  });
 
+  it('keeps a push in flight when the session changes, and pulls once it settles (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+    await Promise.resolve();
+    expect(harness.effects.running('push')).toBe(1);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it('opens again when an answer asked under the last session is a refusal (audit R6)', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('Sign in.'), { code: 'REMOTE_UNAUTHORIZED' }),
+    });
+
+    /* The last session's 401 is not this session's: the pull runs again under it. */
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    harness.stop();
+  });
+
+  it('holds a session change through quiescing and pulls on release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    await Promise.resolve();
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it('forgets a held session change when the remote goes before release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'remoteDisconnected' });
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+
+    expect(harness.actor.getSnapshot().context.pendingSession).toBe(false);
     harness.stop();
   });
 

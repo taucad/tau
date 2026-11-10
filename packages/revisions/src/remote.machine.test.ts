@@ -1090,28 +1090,6 @@ describe('remoteMachine', () => {
     actor.stop();
   });
 
-  it('reads a connect refused under the last session again from the remotes list (audit R6)', async () => {
-    const { actor } = start({
-      readRemote: reads(undefined),
-      writeRemote: createAsyncLogic({ run: async () => ({ remote: tauRemote }) }),
-      validate: createAsyncLogic({
-        run: async (): Promise<Readonly<{ storage?: RemoteStorage }>> => {
-          throw new Error('Sign in to Tau.');
-        },
-      }),
-    });
-    await settle();
-    actor.send({ type: 'connect', kind: 'tau' });
-    await settle();
-    expect(selectRemoteFacet(actor.getSnapshot()).phase).toBe('failed');
-
-    actor.send({ type: 'sessionChanged' });
-    await settle();
-
-    expect(selectRemoteFacet(actor.getSnapshot()).phase).toBe('none');
-    actor.stop();
-  });
-
   it('38 (F9): ignores a storage read that finishes after a refusal set the figures', async () => {
     let answer: ((storage: RemoteStorage) => void) | undefined;
     const { actor } = start({

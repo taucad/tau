@@ -2062,6 +2062,193 @@ describe('createGatewayModelTransport', () => {
     });
   });
 
+  describe('reasoning controls the catalog declares for a model', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- The provider wires asserted here use snake_case. */
+    const anthropicReply = (start: Record<string, unknown> = {}): Response =>
+      responseFromChunks([
+        `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 }, ...start } })}\n\n`,
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+      ]);
+    const sendAnthropic = async (
+      overrides: Partial<ModelStreamRequest>,
+      start?: Record<string, unknown>,
+    ): Promise<{ body: Record<string, unknown>; beta: string | undefined; events: ModelStreamEvent[] }> => {
+      let body: Record<string, unknown> = {};
+      let beta: string | undefined;
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          body = JSON.parse(init?.body as string) as Record<string, unknown>;
+          beta = new Headers(init?.headers).get('anthropic-beta') ?? undefined;
+          return anthropicReply(start);
+        }),
+      });
+      const events = await collect(transport.stream(request({ providerKind: 'anthropic', ...overrides })));
+      return { body, beta, events };
+    };
+    const bindingBeta = 'thinking-binding-controls-2026-08-01';
+    const effortBeta = 'mid-conversation-output-config-2026-07-01';
+
+    it('should send no binding control and no effort marker for a model that declares neither', async () => {
+      const { body, beta } = await sendAnthropic({ reasoning: { effort: 'medium', display: 'summarized' } });
+
+      expect(body['thinking']).toEqual({ type: 'adaptive', display: 'summarized' });
+      expect(body).toMatchObject({ output_config: { effort: 'medium' } });
+      expect(JSON.stringify(body['messages'])).not.toContain('"system"');
+      expect(beta ?? '').not.toContain(bindingBeta);
+      expect(beta ?? '').not.toContain(effortBeta);
+    });
+
+    it.each([
+      ['drop', 'drop_block'],
+      ['refuse', 'error'],
+    ] as const)(
+      'should tell Anthropic to %s a replayed block whose prefix changed, on a model with no transcript effort',
+      async (replayBinding, behavior) => {
+        const { body, beta } = await sendAnthropic({ reasoning: { effort: 'medium', replayBinding } });
+
+        expect(body['thinking']).toMatchObject({
+          type: 'adaptive',
+          block_binding: { prefix_mismatch_behavior: behavior },
+        });
+        expect(body).toMatchObject({ output_config: { effort: 'medium' } });
+        expect(beta?.split(',')).toContain(bindingBeta);
+        expect(beta ?? '').not.toContain(effortBeta);
+      },
+    );
+
+    it('should carry the effort in the transcript and pin the request field, for a model that reads it there', async () => {
+      const { body, beta, events } = await sendAnthropic({
+        reasoning: { effort: 'medium', display: 'summarized', effortInTranscript: true, replayBinding: 'refuse' },
+      });
+
+      /* The request field no longer moves with the level: that is what keeps the provider's cached messages. */
+      expect(body).toMatchObject({ output_config: { effort: 'high' } });
+      expect(body['thinking']).toEqual({
+        type: 'adaptive',
+        display: 'summarized',
+        block_binding: { prefix_mismatch_behavior: 'error' },
+      });
+      expect(body['messages']).toEqual([
+        expect.objectContaining({ role: 'user' }),
+        { role: 'system', content: [], output_config: { effort: 'medium' } },
+      ]);
+      expect(beta?.split(',')).toEqual(expect.arrayContaining([bindingBeta, effortBeta]));
+      /* The reply's row records the level it ran at, which the next request puts back in front of it. */
+      expect(events).toContainEqual({
+        type: 'message-metadata',
+        metadata: expect.objectContaining({ reasoningLevel: 'medium' }) as unknown,
+      });
+    });
+
+    it('should put a recorded level back in front of the reply that ran at it', async () => {
+      const { body } = await sendAnthropic(
+        await continuing({
+          providerKind: 'anthropic',
+          reasoning: { effort: 'low', effortInTranscript: true },
+          messages: [
+            { id: 'user-1', role: 'user', content: 'hello' },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'hi' }],
+              metadata: { reasoningLevel: 'high' },
+            },
+            { id: 'user-2', role: 'user', content: 'again' },
+          ],
+        }),
+      );
+
+      expect((body['messages'] as Array<{ role: string }>).map((message) => message.role)).toEqual([
+        'user',
+        'system',
+        'assistant',
+        'user',
+        'system',
+      ]);
+      expect(body['messages']).toMatchObject([
+        {},
+        { role: 'system', output_config: { effort: 'high' } },
+        {},
+        {},
+        { role: 'system', output_config: { effort: 'low' } },
+      ]);
+    });
+
+    it('should carry the effort as a configuration update on the Responses wire, for an OpenAI model that reads it there', async () => {
+      let body: Record<string, unknown> = {};
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async (_input, init) => {
+          body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return responseFromChunks([
+            'data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n',
+          ]);
+        }),
+      });
+
+      await collect(
+        transport.stream(
+          request({ providerKind: 'openai', reasoning: { effort: 'high', summary: 'auto', effortInTranscript: true } }),
+        ),
+      );
+
+      expect(body).toMatchObject({ reasoning: { effort: 'medium', summary: 'auto' } });
+      expect((body['input'] as unknown[]).at(-1)).toEqual({
+        type: 'configuration_update',
+        reasoning: { effort: 'high' },
+      });
+    });
+
+    it('should leave the effort on the request for xAI, whose Responses wire has no transcript form', async () => {
+      let body: Record<string, unknown> = {};
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async (_input, init) => {
+          body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return responseFromChunks([
+            'data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n',
+          ]);
+        }),
+      });
+
+      await collect(
+        transport.stream(request({ providerKind: 'xai', reasoning: { effort: 'high', effortInTranscript: true } })),
+      );
+
+      expect(body).toMatchObject({ reasoning: { effort: 'high' } });
+      expect(JSON.stringify(body['input'])).not.toContain('configuration_update');
+    });
+
+    it('should record the replayed blocks the provider itself left out, which the replay rule should have', async () => {
+      const { events } = await sendAnthropic(
+        { reasoning: { effort: 'medium', replayBinding: 'drop' } },
+        {
+          input_transformations: [
+            { type: 'thinking_dropped', path: 'messages.1.content.0', reason: 'prefix_binding_mismatch' },
+            { type: 'thinking_dropped', path: 'messages.3.content.0', reason: 'prefix_binding_mismatch' },
+            /* Another model's block is not an edit, and a value this build does not know is not counted. */
+            { type: 'thinking_dropped', path: 'messages.5.content.0', reason: 'model_binding_mismatch' },
+            { type: 'something_new', path: 'messages.7.content.0', reason: 'prefix_binding_mismatch' },
+          ],
+        },
+      );
+
+      expect(events).toContainEqual({ type: 'message-metadata', metadata: { reasoningDroppedByProvider: 2 } });
+    });
+
+    it('should record nothing when the provider left nothing out', async () => {
+      const { events } = await sendAnthropic(
+        { reasoning: { effort: 'medium', replayBinding: 'drop' } },
+        { input_transformations: [] },
+      );
+
+      expect(events.filter((event) => event.type === 'message-metadata' && !isPrefixStamp(event))).toEqual([]);
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- End provider wire assertions. */
+  });
+
   it('parses CRLF correctly at every byte boundary and joins multiline data fields', async () => {
     const frame =
       'event: message\r\ndata: {"choices":[\r\ndata: {"delta":{"content":"ok"},"finish_reason":"stop"}]}\r\n\r\ndata: [DONE]\r\n\r\n';

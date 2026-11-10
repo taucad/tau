@@ -8,7 +8,8 @@
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this
-// project's test and typecheck cache; nx.json lists the helper as a `test` and `typecheck` input instead.
+// project's test and typecheck cache; nx.json lists the helper as a `typecheck` input and this project's
+// project.json lists it as a `test` input instead.
 // nx-ignore-next-line
 import { checkReactEventLayerCeiling } from '@taucad/oxlint/react-event-layer';
 import { describe, expect, it } from 'vitest';

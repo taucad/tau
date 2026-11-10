@@ -48,7 +48,8 @@ concurrency:
 
 jobs:
   # One affected computation for the lanes that need a project list or a flag: the
-  # service, browser, formal, GeoSpec and standalone lanes, the PR-only reports, and
+  # service, browser, formal, GeoSpec, native-host, viewer-parity and standalone lanes,
+  # the PR-only reports, and
   # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
   # for it: they run their own `nx affected` and read the queue verdict themselves.
   # Every selector here is a tag, a target name or a project type — no job in this
@@ -75,6 +76,9 @@ jobs:
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       standalone: ${{ steps.plan.outputs.standalone }}
+      native-hosts: ${{ steps.plan.outputs.native-hosts }}
+      native-linux: ${{ steps.plan.outputs.native-linux }}
+      viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
       reused: ${{ steps.queue.outputs.run-id }}
     steps:
       # A queue run diffs against its first parent (`nx-set-shas` sets NX_BASE to `HEAD^1`
@@ -117,6 +121,10 @@ jobs:
           # factory); Nx marks each affected when any dependency of it changes. Billing
           # contracts: the project that owns them (`api-billing`) or one it depends on changed.
           # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
+          # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
+          # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
+          # native rows it runs. Viewer parity (`viewer-parity.yml`): the project that owns the gate
+          # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"]},
@@ -126,7 +134,10 @@ jobs:
              "formal": {"targets": ["formal"]},
              "geospec-examples": {"targets": ["test-geospec"]},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"]},
-             "standalone": {"tags": ["ci:standalone"]}}
+             "standalone": {"tags": ["ci:standalone"]},
+             "native-hosts": {"tags": ["ci:native-hosts"]},
+             "native-linux": {"targets": ["test:native-linux"]},
+             "viewer-parity": {"targets": ["test:viewer-parity"]}}
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -155,10 +166,13 @@ jobs:
           geospec_examples=$(flag geospec-examples)
           cli_e2e=$(flag cli-e2e)
           browser_projects=$(jq -c '.browser' <<< "$lanes")
+          native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
+          native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
+          viewer_parity=$(flag viewer-parity)
           run_api=$api
           run_billing=$billing
-          # The queue run already ran the formal, browser, GeoSpec and CLI end-to-end lanes on
-          # this tree, and the API tests and billing contracts where it concluded them
+          # The queue run already ran the formal, browser, GeoSpec, CLI end-to-end, native-host and
+          # viewer-parity lanes on this tree, and the API tests and billing contracts where it concluded them
           # `success`. The API lane's suites are the affected `tag:scope:api` projects of that
           # queue run, which is the verdict the affected lanes reuse too: every earlier commit
           # carries its own. A service lane the queue run skipped or failed runs here when this
@@ -168,13 +182,20 @@ jobs:
             browser=false
             geospec_examples=false
             cli_e2e=false
+            viewer_parity=false
             browser_projects='[]'
             if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi
             if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi
-            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec and CLI end-to-end lanes skip; queue service lanes: $QUEUE_LANES."
+            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec, CLI end-to-end and viewer-parity lanes skip; queue service lanes: $QUEUE_LANES."
+          fi
+          # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
+          # every Linux row, and the Intel row when affected since its last successful push run.
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            native_hosts=false
+            native_linux=''
           fi
           # A pull request runs the fast lanes only. The service, formal, browser, GeoSpec,
-          # CLI end-to-end and standalone lanes run in the merge queue, on the exact commit
+          # CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue, on the exact commit
           # that lands: a PR run of them proved nothing the queue does not prove again, and
           # PR runs held about six times the queue's runner minutes when the 60-job pool was
           # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
@@ -188,9 +209,12 @@ jobs:
             browser=false
             geospec_examples=false
             cli_e2e=false
+            native_hosts=false
+            native_linux=''
+            viewer_parity=false
             browser_projects='[]'
             standalone=false
-            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end and standalone lanes run in the merge queue."
+            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue."
           fi
           {
             echo "apps=$(jq -c '.apps' <<< "$lanes")"
@@ -204,6 +228,9 @@ jobs:
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
             echo "standalone=$standalone"
+            echo "native-hosts=$native_hosts"
+            echo "native-linux=$native_linux"
+            echo "viewer-parity=$viewer_parity"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes this plan found affected (`api`,
           # `billing-e2e`), and the merge-queue run this push reused with that run's
@@ -494,11 +521,39 @@ jobs:
     uses: ./.github/workflows/standalone-projects.yml
     secrets: inherit
 
+  # The Linux native host rows (`native-hosts.yml`), in the merge queue when the plan finds a
+  # `tag:ci:native-hosts` or `test:native-linux` project affected, with the affected
+  # `test:native-linux` projects. Its plan job is skipped when called; a push to `main`, the
+  # nightly and a dispatch run that workflow on their own. The required check waits for it.
+  native-hosts:
+    name: Native hosts
+    needs: [plan]
+    if: needs.plan.outputs.native-hosts == 'true'
+    permissions: # The called workflow's plan job declares these, though it is skipped here
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    uses: ./.github/workflows/native-hosts.yml
+    with:
+      native-linux: ${{ needs.plan.outputs.native-linux }}
+
+  # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
+  # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
+  # waits for it.
+  viewer-parity:
+    name: Viewer parity
+    needs: [plan]
+    if: needs.plan.outputs.viewer-parity == 'true'
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/viewer-parity.yml
+
   # The required check. It passes only when the plan and every affected lane passed, and the
-  # browser, GeoSpec example-contract and CLI end-to-end lanes too when this run needed them.
+  # browser, GeoSpec example-contract, CLI end-to-end, native-host and viewer-parity lanes too
+  # when this run needed them: a skip of a lane the plan selected fails it.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane, browser, geospec-examples, cli-e2e]
+    needs: [plan, affected-lane, browser, geospec-examples, cli-e2e, native-hosts, viewer-parity]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -512,6 +567,10 @@ jobs:
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
           CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
           CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
+          NATIVE_HOSTS_REQUIRED: ${{ needs.plan.outputs.native-hosts }}
+          NATIVE_HOSTS_RESULT: ${{ needs.native-hosts.result }}
+          VIEWER_PARITY_REQUIRED: ${{ needs.plan.outputs.viewer-parity }}
+          VIEWER_PARITY_RESULT: ${{ needs.viewer-parity.result }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: |
@@ -528,6 +587,8 @@ jobs:
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
           if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
+          if [ "$NATIVE_HOSTS_REQUIRED" = true ]; then test "$NATIVE_HOSTS_RESULT" = success; fi
+          if [ "$VIEWER_PARITY_REQUIRED" = true ]; then test "$VIEWER_PARITY_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an

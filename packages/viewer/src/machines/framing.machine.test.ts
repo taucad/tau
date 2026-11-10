@@ -373,6 +373,36 @@ describe('framing machine', () => {
       ]);
     });
 
+    it('should not fit while the latest measurement is empty', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera });
+      framing.send(measured('a', box(1), 2));
+      framing.send(measured('rebuilding', box(1), 0));
+      scripted.clear();
+
+      framing.send({ type: 'fitRequested' });
+      expect(scripted.sent()).toEqual([]);
+
+      framing.send(measured('a', box(1), 2));
+      framing.send({ type: 'fitRequested' });
+      expect(scripted.sent()).toEqual([
+        { type: 'setBounds', bounds: box(1) },
+        { type: 'frameGeometry', bounds: box(1), margin: 0.1, source: 'fit' },
+      ]);
+    });
+
+    /* A deliberate change (D14): the hook's reference died with its mount, so a remount only refreshed the bounds. */
+    it('should refit when a remounted canvas measures a new presentation that moved over 10 %', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera });
+      framing.send(measured('a', box(1), 2));
+      scripted.clear();
+
+      framing.send(measured('edited-while-unmounted', box(2), 4));
+
+      expect(scripted.sent()).toEqual([{ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' }]);
+    });
+
     it('should ignore Fit view before the first geometry', () => {
       const scripted = scriptCamera();
       const framing = startFraming({ camera: scripted.camera });

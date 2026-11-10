@@ -14,8 +14,10 @@
  * └── context: identity, pendingPose?, lastBounds?, lastRadius?
  * ```
  *
- * - The actor lives as long as the view, not as long as a React mount, so a remounted canvas re-measures into
- *   `framed` and never re-frames: that is true by construction, where the hook it replaces needed a session record.
+ * - The actor lives as long as the view, not as long as a React mount, so a remounted canvas that re-measures the
+ *   same presentation never re-frames: that is true by construction, where the hook it replaces needed a session
+ *   record. One deliberate change (D14): a remount whose first measurement is a new presentation that moved more than
+ *   10 % refits, where the hook, whose reference died with the mount, only refreshed the bounds.
  * - A measurement with a new key under the 10 % threshold leaves the camera alone and keeps the reference it compares
  *   against, so slow drift still refits once it adds up (characterised from `use-camera-framing.ts`, D14).
  * - The first frame and a refit are automatic (`framing`); Fit view is the person's command (`fit`), so only Fit view
@@ -136,7 +138,7 @@ type AwaitingContext = FramingContext & Readonly<{ pendingPose: FramingPendingPo
  * frames.
  */
 type FramedContext = FramingContext &
-  Readonly<{ key: string; lastBounds: CameraBounds; lastRadius: number; measuredBounds: CameraBounds }>;
+  Readonly<{ key: string; lastBounds: CameraBounds; lastRadius: number; measuredBounds: CameraBounds | undefined }>;
 
 type Measurement = Extract<FramingEvent, Readonly<{ type: 'geometryBoundsMeasured' }>>;
 
@@ -261,8 +263,9 @@ const framingMachineDefinition = setup({
         geometryBoundsMeasured: ({ context: held, event }, enq) => {
           const context = staged(held, event.stage);
           if (!hasGeometry(event)) {
-            // The model is momentarily empty (a rebuild in flight): the camera keeps the pose and bounds it has.
-            return { context };
+            // The model is momentarily empty (a rebuild in flight): the camera keeps the pose and bounds it has, and Fit
+            // view has nothing to fit until geometry returns.
+            return { context: { ...context, measuredBounds: undefined } };
           }
           if (event.key === context.key) {
             // The same presentation re-measured: refresh the bounds the clip planes derive from, keep the pose.
@@ -285,6 +288,10 @@ const framingMachineDefinition = setup({
         },
         fitRequested: ({ context: held, event }, enq) => {
           const context = staged(held, event.stage);
+          if (context.measuredBounds === undefined) {
+            // The latest measurement is empty: as the hook did, Fit view on an empty model changes nothing.
+            return { context };
+          }
           publishViewport(context, event.viewport, enq);
           // Fit view zooms and recentres on the model; it never turns the camera.
           enq.sendTo(context.camera, {

@@ -10,7 +10,7 @@
  *
  * `input` is the phase `specs/CameraAuthority.tla` models as `cam.input`. `gesture` is whether the person holds the
  * controls. The model's `PoseObserved` is a pose of a held gesture. A pose with no held gesture (damping after a
- * release, a wheel step, the legacy `setView`) is the model's `PoseObserved` followed by `InteractionEnded`, so it can
+ * release, a wheel step) is the model's `PoseObserved` followed by `InteractionEnded`, so it can
  * never hold the camera in `dragging`: only a held gesture does, and its `interactionEnded` leaves it.
  *
  * Timeout table (xstate-policy MC-R16):
@@ -166,6 +166,8 @@ export type CameraMachineEvent =
         source: 'input' | 'gizmo';
         /** Set on a controls update a driver synchronization caused. The camera ignores it (charter I3). */
         echoRevision?: number;
+        /** The render frame the pose rebased or rescaled to, taken in the same change so one gesture is one snapshot. */
+        renderFrame?: CameraRenderFrame;
       }>)
   | Readonly<{ type: 'interactionStarted' }>
   | Readonly<{ type: 'interactionMoved' }>
@@ -179,8 +181,6 @@ export type CameraMachineEvent =
     }>
   | Readonly<{ type: 'frameBounds'; bounds: CameraBounds; margin: number; source: 'focus' }>
   | (CameraAdoption & Readonly<{ type: 'adoptPersistedPose' }>)
-  /** Deprecated alias of `poseObserved` with the source `input`; the controls adapter (G4) removes its last sender. */
-  | (CameraPose & Readonly<{ type: 'setView' }>)
   /** Deprecated framing with the source `framing`; the framing actor (G5) replaces it with `frameGeometry`. */
   | Readonly<{ type: 'frame'; bounds?: CameraBounds; margin?: number }>;
 
@@ -498,8 +498,8 @@ type InputState = 'idle' | 'dragging' | 'settling';
 type PoseTransition = Readonly<{ target?: InputState; reenter?: boolean; context?: CameraPatch }> | undefined;
 
 /* A controls update a driver synchronization caused: an integer stamp marks one, and it never changes the camera (I3). */
-const observeEcho = ({ event }: Readonly<{ event: CameraEvent<'poseObserved' | 'setView'> }>): PoseTransition =>
-  event.type === 'poseObserved' && Number.isInteger(event.echoRevision) ? {} : undefined;
+const observeEcho = ({ event }: Readonly<{ event: CameraEvent<'poseObserved'> }>): PoseTransition =>
+  Number.isInteger(event.echoRevision) ? {} : undefined;
 
 /*
  * A pose the person made. Held, the gesture is live and the camera is `dragging`. Released, the pose restarts the
@@ -510,14 +510,17 @@ const observePose = (
     context,
     event,
     value,
-  }: Readonly<{ context: CameraMachineContext; event: CameraEvent<'poseObserved' | 'setView'>; value: StateValue }>,
+  }: Readonly<{ context: CameraMachineContext; event: CameraEvent<'poseObserved'>; value: StateValue }>,
   enq: CameraEnqueue,
 ): PoseTransition => {
-  const source = event.type === 'setView' ? 'input' : event.source;
+  const { source } = event;
   // A stamp that is not an integer marks no echo and no pose: the payload is refused.
   const patch =
-    dragSources.has(source) && (event.type === 'setView' || event.echoRevision === undefined)
-      ? attempt(() => posePatch(context, event))
+    dragSources.has(source) && event.echoRevision === undefined
+      ? attempt(() => ({
+          ...posePatch(context, event),
+          ...(given(event.renderFrame) && { renderFrame: renderFrameForView(event.renderFrame, context.view.frameId) }),
+        }))
       : undefined;
   if (patch === undefined) {
     return undefined;
@@ -556,7 +559,6 @@ const dropAdoption =
   };
 
 const observedPose = firstOf(refines('EchoObserved', observeEcho), refines('PoseObserved', observePose));
-const legacyPose = refines('PoseObserved', observePose);
 
 const cameraMachineDefinition = setup({
   schemas: {
@@ -572,7 +574,7 @@ const cameraMachineDefinition = setup({
   delays: { poseSettle: cameraPoseSettleMilliseconds },
 }).createMachine({
   id: 'camera',
-  version: '1',
+  version: '2',
   context: ({ input }) => {
     const view = createCameraView(input.initialView);
     const pixelBudget = assertPositive(input.pixelBudget ?? 0.25, 'pixelBudget');
@@ -663,14 +665,12 @@ const cameraMachineDefinition = setup({
         idle: {
           on: {
             poseObserved: observedPose,
-            setView: legacyPose,
             adoptPersistedPose: refines('Observe', adopt),
           },
         },
         dragging: {
           on: {
             poseObserved: observedPose,
-            setView: legacyPose,
             adoptPersistedPose: refines('Observe', dropAdoption('dragging')),
             interactionEnded: { target: 'settling', meta: { tla: 'InteractionEnded' } },
           },
@@ -679,7 +679,6 @@ const cameraMachineDefinition = setup({
           after: { poseSettle: { target: 'idle', meta: { tla: 'SettleElapsed' } } },
           on: {
             poseObserved: observedPose,
-            setView: legacyPose,
             adoptPersistedPose: refines('Observe', dropAdoption('settling')),
           },
         },
@@ -776,31 +775,36 @@ export const cameraRefusedPayloadReason = 'refusedPayload';
 const isLifecycleEvent = (type: string): boolean => /^@?xstate\./u.test(type);
 
 /**
- * Creates the camera actor as the root of its own system.
+ * Creates the inspector that reports a camera's refused events, for the system that runs it.
  *
- * A refused event takes no transition, so XState reports no dead letter for it. This root reports it through
- * `onRejectedEvent` instead, so a refusal is observable where a dead letter is. Events on
- * {@link cameraIgnoredEvents} are not refusals.
+ * A refused event takes no transition, so XState reports no dead letter for it. This inspector reports it through
+ * `onRejectedEvent` instead, with the reason `refusedPayload`, for every actor of {@link cameraMachine} in the system:
+ * the root of {@link createCameraActor}, or a camera spawned as another actor's child. Events on
+ * {@link cameraIgnoredEvents} are not refusals. Every inspection event is also forwarded to `inspect`.
  *
- * @param options - The machine input and the system's clock, inspector and rejection hook.
- * @returns The camera actor, not yet started.
+ * @param options - The system's inspector and rejection hook.
+ * @returns The inspector to pass as the system's `inspect`.
  * @public
  */
-export const createCameraActor = (options: CameraActorOptions): Actor<CameraMachine> => {
-  const { machine = cameraMachine, input, clock, inspect, onRejectedEvent } = options;
-  const forward = typeof inspect === 'function' ? inspect : (event: InspectionEvent) => inspect?.next?.(event);
-  const refusals = (event: InspectionEvent): void => {
-    forward(event);
+export const createCameraRefusalInspector =
+  ({ inspect, onRejectedEvent }: CameraActorSystemOptions) =>
+  (event: InspectionEvent): void => {
+    if (typeof inspect === 'function') {
+      inspect(event);
+    } else {
+      inspect?.next?.(event);
+    }
     if (
       onRejectedEvent === undefined ||
       event.type !== '@xstate.transition' ||
-      event.actorRef.sessionId !== event.rootId ||
+      (event.actorRef as Partial<Actor<CameraMachine>>).logic?.id !== 'camera' ||
       event.microsteps.length > 0 ||
       isLifecycleEvent(event.event.type)
     ) {
       return;
     }
     const { snapshot } = event;
+    const actorRef = event.actorRef as Actor<CameraMachine>;
     const { type } = event.event;
     if (
       snapshot.status !== 'active' ||
@@ -814,21 +818,33 @@ export const createCameraActor = (options: CameraActorOptions): Actor<CameraMach
     }
     onRejectedEvent({
       event: event.event,
-      targetRef: actor,
-      targetId: actor.id,
+      targetRef: actorRef,
+      targetId: actorRef.id,
       sourceRef: undefined,
       eventOrigin: event.sourceRef === undefined ? 'external' : 'actor',
       reason: cameraRefusedPayloadReason,
-      error: new RangeError(`The camera refused '${type}'.`),
+      error: new RangeError(type),
     });
   };
-  const actor: Actor<CameraMachine> = createActor(machine, {
+
+/**
+ * Creates the camera actor as the root of its own system, reporting refused events through
+ * {@link createCameraRefusalInspector}.
+ *
+ * @param options - The machine input and the system's clock, inspector and rejection hook.
+ * @returns The camera actor, not yet started.
+ * @public
+ */
+export const createCameraActor = (options: CameraActorOptions): Actor<CameraMachine> => {
+  const { machine = cameraMachine, input, clock, inspect, onRejectedEvent } = options;
+  return createActor(machine, {
     input,
     ...(clock === undefined ? {} : { clock }),
     ...(onRejectedEvent === undefined ? {} : { onRejectedEvent }),
-    ...(inspect === undefined && onRejectedEvent === undefined ? {} : { inspect: refusals }),
+    ...(inspect === undefined && onRejectedEvent === undefined
+      ? {}
+      : { inspect: createCameraRefusalInspector({ inspect, onRejectedEvent }) }),
   });
-  return actor;
 };
 
 /** Public snapshot type for {@link cameraMachine}. @public */

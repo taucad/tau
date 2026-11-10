@@ -83,7 +83,7 @@ The actor tracks the person's gesture in its `input` state. Send `interactionSta
 
 `adoptPersistedPose` applies a saved record's pose, orientation, field of view or up direction only in `input.idle`, as one change, and emits `adoptionApplied`. While the person drags or the camera settles, the record is dropped and the actor emits `adoptionDropped`. It is never queued, so the person's pose wins.
 
-A controls update that a driver synchronization caused carries an integer `echoRevision` on `poseObserved`. The camera ignores it; a stamp that is not an integer is refused.
+A controls update that a driver synchronization caused carries an integer `echoRevision` on `poseObserved`. The camera ignores it; a stamp that is not an integer is refused. A pose whose gesture moved the renderer's frame carries the new `renderFrame` on the same `poseObserved`, so the pose and the frame are one change.
 
 ### Refused events
 
@@ -99,7 +99,7 @@ const camera = createCameraActor({
 }).start();
 ```
 
-`createCameraActor` also forwards `clock` and `inspect`, so a test can step the settle window on a simulated clock.
+`createCameraActor` also forwards `clock` and `inspect`, so a test can step the settle window on a simulated clock. A camera spawned as another actor's child reports its refusals the same way when its system's root is created with `inspect: createCameraRefusalInspector({ onRejectedEvent })`.
 
 ### Up direction
 

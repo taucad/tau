@@ -102,7 +102,6 @@ const samples = {
     { type: 'adoptPersistedPose', requestId: 'sample-pose', pose },
     { type: 'adoptPersistedPose', requestId: 'sample-fields', verticalFieldOfView: 30, upDirection: 'y' },
   ],
-  setView: [{ type: 'setView', ...pose }],
   frame: [{ type: 'frame' }, { type: 'frame', bounds: sampleBounds, margin: 0.2 }],
 } as const satisfies { [Type in EventType]: readonly [EventOf<Type>, ...Array<EventOf<Type>>] };
 
@@ -165,8 +164,6 @@ const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachi
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a payload from an untyped sender.
     { type: 'poseObserved', ...pose, source: 'persisted' } as unknown as CameraMachineEvent,
   ],
-  ['a legacy pose with a zero direction', { type: 'setView', ...pose, direction: [0, 0, 0] }],
-  ['a legacy pose with a parallel up', { type: 'setView', ...pose, direction: [0, 0, 2] }],
   ['a frame margin above 0.5', { type: 'frameGeometry', bounds: sampleBounds, margin: 0.6, source: 'fit' }],
   [
     'inverted frame bounds',
@@ -241,7 +238,6 @@ const refusedPayloads: ReadonlyArray<readonly [label: string, event: CameraMachi
     'a pose with a non-integer echo stamp',
     { type: 'poseObserved', ...pose, source: 'input', echoRevision: Number.NaN },
   ],
-  ['an empty legacy pose', untyped({ type: 'setView' })],
   ['a frame with no bounds', untyped({ type: 'frameGeometry', margin: 0.1, source: 'fit' })],
   [
     'a frame with an empty orientation',
@@ -462,7 +458,6 @@ describe('cameraMachine totality', () => {
           ([requestId, value, verticalFieldOfView]) =>
             ({ type: 'adoptPersistedPose', requestId, pose: value, verticalFieldOfView }) as const,
         ),
-      anyPose.map((value) => ({ type: 'setView', ...value }) as const),
       fc.record({ bounds, margin }, { requiredKeys: [] }).map((options) => ({ type: 'frame', ...options }) as const),
     );
     const step = fc.oneof(

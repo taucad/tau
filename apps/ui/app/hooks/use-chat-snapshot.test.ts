@@ -3,6 +3,8 @@ import { workbenchRecords } from '@taucad/workbench';
 import { maxSnapshotFileTreeEntries, snapshotSchema } from '@taucad/chat';
 import type { FileEntry, FileProvenance, GeometryComponentManifest } from '@taucad/types';
 import {
+  projectKernelOwner,
+  projectSnapshotKernel,
   boundedProjectFileTree,
   projectFileTree,
   projectViewerSelection,
@@ -259,5 +261,45 @@ describe('boundedProjectFileTree', () => {
     expect(forward.fileTree[0]!.path).toBe('tau.json');
     expect(backward).toStrictEqual(forward);
     expect(snapshotSchema.safeParse(forward).success).toBe(true);
+  });
+});
+
+describe('projectKernelOwner', () => {
+  it('has no owner while main is undeclared or names no file (D3)', () => {
+    expect(projectKernelOwner({ entryPath: undefined, resolves: false, runtimeKernelId: undefined })).toBeUndefined();
+    expect(projectKernelOwner({ entryPath: 'main.ts', resolves: false, runtimeKernelId: 'replicad' })).toBeUndefined();
+  });
+
+  it('takes the kernel the runtime bound, mapped to its catalog id', () => {
+    expect(projectKernelOwner({ entryPath: 'main.scad', resolves: true, runtimeKernelId: 'openrscad' })).toEqual({
+      kernel: 'openscad',
+      entryPath: 'main.scad',
+    });
+    expect(projectKernelOwner({ entryPath: 'main.ts', resolves: true, runtimeKernelId: 'opencascade' })).toEqual({
+      kernel: 'opencascadejs',
+      entryPath: 'main.ts',
+    });
+  });
+
+  it('names a kernel by extension before the entry is described only when one kernel has it', () => {
+    expect(projectKernelOwner({ entryPath: 'part.kcl', resolves: true, runtimeKernelId: undefined })).toEqual({
+      kernel: 'zoo',
+      entryPath: 'part.kcl',
+    });
+    expect(projectKernelOwner({ entryPath: 'main.ts', resolves: true, runtimeKernelId: undefined })).toBeUndefined();
+  });
+});
+
+describe('projectSnapshotKernel', () => {
+  it('parses as the snapshot kernel object and names no plan', () => {
+    const kernel = projectSnapshotKernel({
+      preference: 'replicad',
+      owner: { kernel: 'replicad', entryPath: 'main.ts' },
+      profile: { available: ['openscad', 'replicad'] },
+    });
+
+    expect(snapshotSchema.safeParse({ kernel }).success).toBe(true);
+    expect(kernel.guidance).toBe('This project uses Replicad; activate the cad-replicad skill.');
+    expect(kernel.unavailable.some(({ kernel: id }) => id === 'zoo')).toBe(true);
   });
 });

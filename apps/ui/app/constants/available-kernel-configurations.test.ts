@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
+import { availableKernelConfigurations, routingKernelProfile } from '#constants/available-kernel-configurations.js';
 import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
@@ -20,5 +20,17 @@ describe('available kernel configurations', () => {
   it('should retain native host availability without browser preparation', () => {
     vi.mocked(desktopBridge, { partial: true }).mockReturnValue({ runtimeKernelIds: ['picogk', 'build123d'] });
     expect(availableKernelConfigurations().filter(({ id }) => ['picogk', 'build123d'].includes(id))).toHaveLength(2);
+  });
+
+  it('should offer routing what the runtime executes, less Zoo while its dispatch is closed', () => {
+    vi.mocked(desktopBridge, { partial: true }).mockReturnValue({ runtimeKernelIds: ['build123d'] });
+    const { available } = routingKernelProfile();
+    expect(available).toEqual(
+      availableKernelConfigurations()
+        .map(({ id }) => id)
+        .filter((id) => id !== 'zoo'),
+    );
+    expect(available).toContain('build123d');
+    expect(available).not.toContain('zoo');
   });
 });

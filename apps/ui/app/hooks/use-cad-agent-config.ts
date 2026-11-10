@@ -362,7 +362,7 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
   const mode = useChatSelector((state) => state.draftMode as ChatMode);
   const toolChoice = useChatSelector((state) => state.draftToolChoice as ToolSelection);
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
-  const snapshot = useChatSnapshot();
+  const snapshot = useChatSnapshot(kernelId);
   const contextPayload = useContextPayload();
 
   return {

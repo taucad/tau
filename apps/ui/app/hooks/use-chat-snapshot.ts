@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ChatSnapshot } from '@taucad/chat';
+import type { ChatSnapshot, SnapshotKernel } from '@taucad/chat';
+import { buildSnapshotKernel } from '@taucad/chat/prompts';
+import type { KernelOwner, KernelRoutingProfile } from '@taucad/chat/prompts';
+import { catalogKernelOfRuntimeKernel, kernelConfigurations } from '@taucad/types/constants';
+import type { KernelId, KernelPreference } from '@taucad/types/constants';
 import type { WorkbenchEntries, WorkbenchNode, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
 import type { FileEntry } from '@taucad/types';
 import { cadReferenceFromGeometryComponent, maxCadReferences } from '@taucad/chat/references';
@@ -19,6 +23,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { viewName } from '#workbench-records/view-titles.js';
 import { useFeature } from '#flags/use-feature.js';
+import { routingKernelProfile } from '#constants/available-kernel-configurations.js';
 
 const emptyLayoutSnapshot = (): undefined => undefined;
 const emptyLayoutSubscribe = (): (() => void) => () => undefined;
@@ -104,6 +109,42 @@ export const projectViewerSelection = (
   return candidates.find((candidate) => candidate.entryPath === preferredPath) ?? candidates[0];
 };
 
+/** The one catalog kernel whose entry file has this path's extension, when only one does (`.scad`, `.kcl`, `.cs`). */
+const kernelOfUniqueExtension = (entryPath: string): KernelId | undefined => {
+  const extension = entryPath.split('.').at(-1)?.toLowerCase();
+  const matches = kernelConfigurations.filter(({ mainFile }) => mainFile.toLowerCase().endsWith(`.${extension ?? ''}`));
+  return matches.length === 1 ? matches[0]?.id : undefined;
+};
+
+/**
+ * The project's owner kernel (blueprint D2): the kernel the runtime bound for the main entry, or, before the main entry
+ * has been described, the one kernel its extension can name. None while the project is entry-less, that is while main
+ * is undeclared or names no file (D3), or while a `.ts`, `.js` or `.py` entry has not been described yet.
+ */
+export const projectKernelOwner = (
+  input: Readonly<{ entryPath: string | undefined; resolves: boolean; runtimeKernelId: string | undefined }>,
+): KernelOwner | undefined => {
+  if (!input.entryPath || !input.resolves) {
+    return undefined;
+  }
+  const bound = input.runtimeKernelId === undefined ? undefined : catalogKernelOfRuntimeKernel(input.runtimeKernelId);
+  const kernel = bound ?? kernelOfUniqueExtension(input.entryPath);
+  return kernel === undefined ? undefined : { kernel, entryPath: input.entryPath };
+};
+
+/**
+ * The snapshot's `kernel` object (AKS-7): the facts an external agent reads to keep or choose a kernel, rendered from
+ * the same state the Tau agent's kernel text is.
+ */
+export const projectSnapshotKernel = (
+  input: Readonly<{ preference: KernelPreference; owner: KernelOwner | undefined; profile: KernelRoutingProfile }>,
+): SnapshotKernel =>
+  buildSnapshotKernel({
+    preference: input.preference,
+    ...(input.owner === undefined ? {} : { owner: input.owner }),
+    profile: input.profile,
+  });
+
 /**
  * Hook to get the current chat snapshot for message context.
  * This provides the LLM with awareness of what the user is currently working on.
@@ -114,9 +155,11 @@ export const projectViewerSelection = (
  * - openFiles: The files currently open in editor tabs
  * - viewerSelection: The components selected in the viewer, as structured references
  *
- * Each component can be toggled via user preferences (cookies).
+ * - kernel: The kernel preference, owner, availability and rendered kernel text (always sent)
  *
- * @returns ChatSnapshot object or undefined if no context is enabled/available
+ * Each other component can be toggled via user preferences (cookies).
+ *
+ * @returns ChatSnapshot object
  */
 /**
  * The project's files as the snapshot tells them to the model.
@@ -176,7 +219,7 @@ export const boundedProjectFileTree = (
       };
 };
 
-export function useChatSnapshot(): ChatSnapshot | undefined {
+export function useChatSnapshot(preference: KernelPreference): ChatSnapshot | undefined {
   const projectContext = useProject({ enableNoContext: true });
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- chat can mount without the project workspace provider.
   const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
@@ -190,6 +233,8 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
   const { treeService } = useFileManager();
 
   const [bounded, setBounded] = useState<ReturnType<typeof boundedProjectFileTree> | undefined>();
+  const mainEntryPath = projectContext?.mainEntryPath === '' ? undefined : projectContext?.mainEntryPath;
+  const [mainResolves, setMainResolves] = useState(false);
   const fileTree = bounded?.fileTree;
 
   useEffect(() => {
@@ -201,7 +246,9 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     let frame: number | undefined;
     const sync = (): void => {
       frame = undefined;
-      setBounded(boundedProjectFileTree(treeService.getTreeSnapshot().values()));
+      const tree = treeService.getTreeSnapshot();
+      setBounded(boundedProjectFileTree(tree.values()));
+      setMainResolves(mainEntryPath !== undefined && tree.get(mainEntryPath)?.type === 'file');
     };
     const schedule = (): void => {
       frame ??= requestAnimationFrame(sync);
@@ -216,7 +263,10 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
         cancelAnimationFrame(frame);
       }
     };
-  }, [treeService]);
+  }, [treeService, mainEntryPath]);
+
+  const mainUnit = mainEntryPath === undefined ? undefined : projectContext?.geometryUnits.get(mainEntryPath);
+  const mainRuntimeKernelId = useSelector(mainUnit, (state) => state?.context.activeKernelId);
 
   const editorState = useSelector(
     editorRef,
@@ -308,9 +358,16 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
       snapshot.viewerSelection = viewerSelection;
     }
 
-    if (Object.keys(snapshot).length === 0) {
-      return undefined;
-    }
+    /* Not a context toggle: the kernel facts decide what an external agent may write, so they always travel. */
+    snapshot.kernel = projectSnapshotKernel({
+      preference,
+      owner: projectKernelOwner({
+        entryPath: mainEntryPath,
+        resolves: mainResolves,
+        runtimeKernelId: mainRuntimeKernelId,
+      }),
+      profile: routingKernelProfile(),
+    });
 
     return snapshot;
   }, [
@@ -326,5 +383,9 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     projectContext?.entriesRecord,
     isTauDebugEnabled,
     viewerSelection,
+    preference,
+    mainEntryPath,
+    mainResolves,
+    mainRuntimeKernelId,
   ]);
 }

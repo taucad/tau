@@ -425,8 +425,9 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
   const packed = packedText === unusable ? undefined : packedBranchesAndTags(packedText ?? '');
   const shallow = await storeText(join(commonDirectory, 'shallow'));
   /* One id per line and the trailing newline git writes; git refuses any other line, an empty one included. */
-  const shallowBody = typeof shallow === 'string' ? shallow.replace(/\r?\n$/u, '') : '';
-  const shallowIds = shallowBody === '' ? [] : shallowBody.split(/\r?\n/u);
+  /* Only an empty file means no boundary; a newline alone is a bad shallow line. */
+  const shallowIds =
+    typeof shallow === 'string' && shallow !== '' ? shallow.replace(/\r?\n$/u, '').split(/\r?\n/u) : [];
   /* A linked checkout's index is its own, in its own git directory. */
   const index = await viewIndex(gitDirectory);
   /* Ignore patterns only, no secret. */

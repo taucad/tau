@@ -223,8 +223,8 @@ const agentEvidenceDeliveryOutcomes = [
 /** `tau.agent_evidence.state`: an agent-evidence backlog row's delivery state. */
 const agentEvidenceBacklogStates = ['pending', 'sending', 'confirmed', 'uncertain', 'rejected', 'expired'] as const;
 
-/** `outcome` of one Langfuse trace erasure step; only `absent` settles a trace. */
-const agentEvidenceErasureOutcomes = ['requested', 'retry', 'absent', 'present', 'recheck', 'lease_lost'] as const;
+/** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
+const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
 
 /**
  * Canonical metric registry for Tau.
@@ -1983,7 +1983,7 @@ export const TauMetrics = {
   agentEvidenceErasureTraces: defineCounter({
     name: 'tau.agent_evidence.erasure_traces',
     unit: '{trace}',
-    description: 'Langfuse traces moved through an erasure step, by outcome',
+    description: 'Langfuse trace deletion requests made for an erasure, by outcome',
     attributes: z.object({
       outcome: z.enum(agentEvidenceErasureOutcomes),
     }),

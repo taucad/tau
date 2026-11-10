@@ -22,9 +22,10 @@ export type FindOutcome = 'present' | 'absent' | 'unavailable';
 
 /**
  * What one bulk trace deletion request established. Langfuse queues the
- * deletion, so `requested` is not removal: only a later read can say.
+ * deletion; an `accepted` delete is the erasure (charter I6 as amended by
+ * ruling 9), and nothing reads it back.
  */
-export type DeleteOutcome = Readonly<{ kind: 'requested' }> | Readonly<{ kind: 'retry'; reason: string }>;
+export type DeleteOutcome = Readonly<{ kind: 'accepted' }> | Readonly<{ kind: 'retry'; reason: string }>;
 
 /**
  * One environment's observations in a time window. `partial` is a read cut
@@ -286,7 +287,7 @@ export class LangfuseClient {
    *
    * @param traceIds - The traces to delete, at most a bounded batch.
    * @param signal - Aborts the request.
-   * @returns Requested, or retry with a bounded reason.
+   * @returns Accepted, or retry with a bounded reason.
    */
   public async deleteTraces(traceIds: readonly string[], signal?: AbortSignal): Promise<DeleteOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
@@ -298,43 +299,9 @@ export class LangfuseClient {
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });
-      return response.ok ? { kind: 'requested' } : { kind: 'retry', reason: `http-${response.status}` };
+      return response.ok ? { kind: 'accepted' } : { kind: 'retry', reason: `http-${response.status}` };
     } catch (error) {
       return { kind: 'retry', reason: classifySendError(error).kind === 'not-sent' ? 'unreachable' : 'transport' };
-    }
-  }
-
-  /**
-   * Whether a trace still has any observation, to confirm a requested deletion.
-   * It reads one row of the v2 observations list filtered by the trace (there is
-   * no v2 detail route), and only the `core` fields, so nothing is read back but
-   * ids. Only an ok answer whose `data` is an empty array is absence; a 410
-   * (`LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`), any other non-ok answer, an
-   * unreadable body and a transport failure are `unavailable`, never absence.
-   *
-   * @param traceId - The trace.
-   * @param signal - Aborts the read.
-   * @returns Present, absent (an empty page) or unavailable.
-   */
-  public async traceExists(traceId: string, signal?: AbortSignal): Promise<FindOutcome> {
-    const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
-    try {
-      const response = await this.fetcher(observationsUrl(this.target, { traceId, fields: 'core', limit: '1' }), {
-        headers: { authorization: authorization(this.target) },
-        signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
-        redirect: 'error',
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        return 'unavailable';
-      }
-      const data = field(await readJson(response), 'data');
-      if (!Array.isArray(data)) {
-        return 'unavailable';
-      }
-      return data.length === 0 ? 'absent' : 'present';
-    } catch {
-      return 'unavailable';
     }
   }
 }

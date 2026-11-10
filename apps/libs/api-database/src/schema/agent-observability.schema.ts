@@ -122,7 +122,7 @@ export const agentEvidenceErasure = pgTable(
     /** The account or project id the erasure covers. */
     subjectId: text('subject_id').notNull(),
     admittedAt: timestamp('admitted_at', { withTimezone: true }).defaultNow().notNull(),
-    /** Set once every trace it named was read back absent. */
+    /** Set once Langfuse accepted the delete of every trace it named. */
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
@@ -133,8 +133,10 @@ export const agentEvidenceErasure = pgTable(
 
 /**
  * One Langfuse trace an erasure must remove, copied from the backlog when the
- * erasure was admitted. A trace is deleted, then read back after delivery's
- * visibility window; only an absent read settles it.
+ * erasure was admitted. A trace is deleted once delivery's visibility window
+ * has passed, and an accepted delete settles it as `accepted`: nothing reads it
+ * back (charter I6 as amended). `absent` is kept only on rows that were read
+ * back before that amendment.
  */
 export const agentEvidenceErasureTrace = pgTable(
   'agent_evidence_erasure_trace',
@@ -143,11 +145,12 @@ export const agentEvidenceErasureTrace = pgTable(
       .notNull()
       .references(() => agentEvidenceErasure.id, { onDelete: 'cascade' }),
     traceId: text('trace_id').notNull(),
-    state: text('state').$type<'pending' | 'requested' | 'absent'>().default('pending').notNull(),
+    state: text('state').$type<'pending' | 'accepted' | 'absent'>().default('pending').notNull(),
     attempts: integer('attempts').default(0).notNull(),
     leaseOwner: text('lease_owner'),
     /** A lease's end while held; otherwise when the trace is next due. */
     dueAt: timestamp('due_at', { withTimezone: true }).defaultNow().notNull(),
+    /** When Langfuse accepted the delete. */
     requestedAt: timestamp('requested_at', { withTimezone: true }),
     /** Bounded code for the last outcome (e.g. `http-503`); never vendor text. */
     reason: text('reason'),
@@ -155,7 +158,7 @@ export const agentEvidenceErasureTrace = pgTable(
   (table) => [
     primaryKey({ columns: [table.erasureId, table.traceId] }),
     index('agent_evidence_erasure_trace_due_idx').on(table.state, table.dueAt),
-    check('agent_evidence_erasure_trace_state_check', sql`${table.state} IN ('pending', 'requested', 'absent')`),
+    check('agent_evidence_erasure_trace_state_check', sql`${table.state} IN ('pending', 'accepted', 'absent')`),
   ],
 );
 

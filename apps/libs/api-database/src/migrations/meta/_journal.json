@@ -470,6 +470,13 @@
       "when": 1794189301116,
       "tag": "0067_supplier_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794312915029,
+      "tag": "0068_agent_evidence_erasure_accepted",
+      "breakpoints": true
     }
   ]
 }

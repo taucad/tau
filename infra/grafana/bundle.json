@@ -26,6 +26,6 @@
     "alerts/tau-storage-integrity.json": "e7b3d469f60927e7a7f75f2d855e25fc127e45956afdc25acae77ca89231f8ef",
     "alerts/tau-storage-triggers.json": "38c6ab3d5e70bfc7bdcf6ac29f4154758534c4ce435f3f9b79914ae9fac8d485",
     "alerts/tau-storage-warning.json": "90dc3104e67cba5c3d1d30a588990ce51af5158cc3add5e518c61b25bc3f81d0",
-    "alerts/tau-warning.json": "b3e66f8fe00a76d266bcbf40846b47138e688feeca216c0810f5ca305402c8a0"
+    "alerts/tau-warning.json": "efbd00a86a2e25edabc667b2aaa26a927656673f9cf8a4ecac31a4efb7087801"
   }
 }

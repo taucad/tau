@@ -1322,7 +1322,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: '(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome=~"retry|present"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="recheck"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[2h])) > 0)'
+              expr: 'sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="retry"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="accepted"}[2h])) > 0'
               intervalMs: 15000
               maxDataPoints: 20
               refId: erasure_stuck
@@ -1331,7 +1331,7 @@ groups:
         for: 2h
         annotations:
           runbook_url: docs/handbooks/cloud/system/services/agent-observability.md
-          summary: "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
+          summary: "For 2 h Langfuse trace deletions have been retried (a 429, a 5xx, a timeout or an unreachable host) with none accepted. An accepted delete is the erasure and Tau does not read it back; erasure of a deleted account is owed within a day, so check Langfuse availability and the deletion API's answer codes in the lifecycle log."
         labels:
           severity: warning
           service: tau-api

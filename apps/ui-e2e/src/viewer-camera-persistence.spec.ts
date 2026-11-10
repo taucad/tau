@@ -57,8 +57,16 @@ const dragSteps = 20;
 const poseSettleMilliseconds = 250;
 /** `editDebounce` in `view-settings-sync-host.tsx`: the wait between a save and its write. */
 const editDebounceMilliseconds = 500;
-/** Rows at or under this gap are the witnesses: they must run one pair inside the snap window. */
-const witnessRowLimitMilliseconds = 400;
+/**
+ * The witness row: the shortest requested gap inside the snap window (more than `poseSettle`, less
+ * than `poseSettle` plus `editDebounce`). The other rows assert the pose is kept but need not land
+ * in the window: 200 ms is shorter than the settle, and 700 and 900 ms gain round trips past it.
+ */
+const witnessRowMilliseconds = 400;
+/** Drag 2's last move must come more than this after drag 1's, measured from drag 1's last move. */
+const secondDragEndAfterFirstMilliseconds = editDebounceMilliseconds;
+/** The longest gap a witness retry may ask for: inside the window with margin for the press. */
+const witnessRetryGapLimitMilliseconds = 650;
 /** How many pairs a witness row may run to land one inside the window, as the harness's three reps. */
 const witnessAttempts = 3;
 /** Lets the page finish loading, or the previous pair's save and echo land, before a pair starts. */
@@ -173,15 +181,15 @@ async function readDragTimeline(): Promise<{ timeline: DragTimeline; secondPress
 
 /**
  * Whether a pair could have shown the snap with #1602 reverted: drag 2 started after drag 1's pose
- * was saved and before its echo could land, kept moving past the moment drag 1's write was due (a
- * save from drag 2 before then replaces drag 1's queued write, so no echo), and never paused long
- * enough to save a pose mid-drag.
+ * was saved and before its echo could land; drag 2's last move came more than 500 ms after drag 1's,
+ * so drag 2's own save (250 ms later) lands after drag 1's write was due and cannot replace it; and
+ * no drag paused long enough to save a pose mid-drag.
  */
 function isInSnapWindow(timeline: DragTimeline): boolean {
   return (
     timeline.gapMilliseconds > poseSettleMilliseconds &&
     timeline.gapMilliseconds < poseSettleMilliseconds + editDebounceMilliseconds &&
-    timeline.gapMilliseconds + timeline.secondDragMilliseconds > editDebounceMilliseconds &&
+    timeline.gapMilliseconds + timeline.secondDragMilliseconds > secondDragEndAfterFirstMilliseconds &&
     timeline.longestPauseMilliseconds < poseSettleMilliseconds
   );
 }
@@ -259,15 +267,27 @@ test.describe('Viewer camera persistence', () => {
       const center = await canvasCenter();
       await recordPointerMarks();
 
-      const isWitnessRow = gapMilliseconds <= witnessRowLimitMilliseconds;
+      const isWitnessRow = gapMilliseconds === witnessRowMilliseconds;
       const timelines: DragTimeline[] = [];
+      let requestedGapMilliseconds = gapMilliseconds;
       /* oxlint-disable no-await-in-loop -- Each pair needs the page quiet after the one before. */
       for (let attempt = 1; attempt <= (isWitnessRow ? witnessAttempts : 1); attempt += 1) {
-        const pair = await runDragPair(center, gapMilliseconds);
+        const pair = await runDragPair(center, requestedGapMilliseconds);
         timelines.push(pair.timeline);
         expectSecondDragPoseKept(pair, gapMilliseconds);
         if (isInSnapWindow(pair.timeline)) {
           break;
+        }
+
+        /* On a fast host drag 2 can end too soon after drag 1 for its save to miss drag 1's write.
+         * Ask for a longer gap next time, still inside the window, so the drags end far enough apart. */
+        const shortfall =
+          secondDragEndAfterFirstMilliseconds - (pair.timeline.gapMilliseconds + pair.timeline.secondDragMilliseconds);
+        if (shortfall >= 0) {
+          requestedGapMilliseconds = Math.min(
+            witnessRetryGapLimitMilliseconds,
+            requestedGapMilliseconds + shortfall + 50,
+          );
         }
       }
       /* oxlint-enable no-await-in-loop */

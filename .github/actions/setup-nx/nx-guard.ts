@@ -31,19 +31,36 @@
  *    at exit the guard waits at most 10 min for uploads still running. Entries it abandons and entries that fail
  *    after Nx was answered are counted and annotated as warnings; neither can fail the build or store a wrong entry.
  *
+ * 5. A same-repository pull request writes its own namespace (tau-cloud CP-5b). In a `pull_request` job granted
+ *    `id-token: write`, the guard trades the job's GitHub OIDC token (audience `tau-ci-cache`) for a session at
+ *    `POST /v1/session` and hands Nx the session instead of the read token. The Worker binds the session to the pull
+ *    request's number from the signed claims: it writes only that pull request's entries and reads `main`'s first, and
+ *    nothing it writes is read by `main`, the merge queue or another pull request. The session is kept in
+ *    `$RUNNER_TEMP` and reused by the job's later Nx calls until ten minutes before it expires. Any failure keeps the
+ *    read token and annotates a warning; fork and Dependabot jobs get no OIDC token and are left as they are.
+ *
  * Output is piped and scanned only while the remote cache is on; otherwise Nx inherits the terminal as before.
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
+import { join } from 'node:path';
 import process from 'node:process';
 
-type Outcome = { code: number | undefined; signal: NodeJS.Signals | undefined; matched: boolean };
+type Outcome = {
+  code: number | undefined;
+  signal: NodeJS.Signals | undefined;
+  matched: boolean;
+};
 
 const [realNx = 'nx', ...args] = process.argv.slice(2);
 const cacheServer = 'NX_SELF_HOSTED_REMOTE_CACHE_SERVER';
+const cacheToken = 'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN';
+const sessionPrefix = 'tcs1.';
+const sessionAudience = 'tau-ci-cache';
 // Nx's HttpRemoteCacheErrors (`errors.rs`), plus the cache Worker's 401 text.
 const remoteCacheError =
   /Misconfigured remote cache endpoint: |Failed to send request: |Unauthorized: missing or invalid token/;
@@ -51,7 +68,10 @@ const forwarded: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 const run = async (env: NodeJS.ProcessEnv, scan: boolean): Promise<Outcome> =>
   new Promise((resolve) => {
-    const child = spawn(realNx, args, { env, stdio: scan ? ['inherit', 'pipe', 'pipe'] : 'inherit' });
+    const child = spawn(realNx, args, {
+      env,
+      stdio: scan ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+    });
     const relays = forwarded.map((signal) => {
       const relay = (): void => {
         child.kill(signal);
@@ -84,7 +104,11 @@ const run = async (env: NodeJS.ProcessEnv, scan: boolean): Promise<Outcome> =>
       for (const { signal: name, relay } of relays) {
         process.off(name, relay);
       }
-      resolve({ code: code ?? undefined, signal: signal ?? undefined, matched });
+      resolve({
+        code: code ?? undefined,
+        signal: signal ?? undefined,
+        matched,
+      });
     });
   });
 
@@ -194,7 +218,13 @@ const readBody = async (request: IncomingMessage): Promise<Uint8Array<ArrayBuffe
 const startCacheRelay = async (
   upstream: string,
   limits: Limits,
-): Promise<{ url: string; tally: Tally; timing: Timing; lost: () => number; close: () => Promise<void> }> => {
+): Promise<{
+  url: string;
+  tally: Tally;
+  timing: Timing;
+  lost: () => number;
+  close: () => Promise<void>;
+}> => {
   const tally: Tally = {
     hits: 0,
     misses: 0,
@@ -251,7 +281,10 @@ const startCacheRelay = async (
 
   /** Writes one entry through the Worker's multipart routes; returns the status Nx gets. */
   const putInParts = async (request: IncomingMessage, path: string, body: Uint8Array<ArrayBuffer>): Promise<number> => {
-    const created = await forward(request, `${path}/multipart`, { method: 'POST', requestTimeout: 60_000 });
+    const created = await forward(request, `${path}/multipart`, {
+      method: 'POST',
+      requestTimeout: 60_000,
+    });
     if (created.status !== 200) {
       await created.arrayBuffer();
       if (created.status === 409) {
@@ -289,14 +322,20 @@ const startCacheRelay = async (
         const reply = await forward(request, `${path}/multipart/${index + 1}`, {
           method: 'PUT',
           body: body.subarray(index * partBytes, (index + 1) * partBytes),
-          headers: { 'content-type': 'application/octet-stream', 'x-upload-id': uploadId },
+          headers: {
+            'content-type': 'application/octet-stream',
+            'x-upload-id': uploadId,
+          },
           requestTimeout: signal,
         });
         if (reply.status !== 200) {
           await reply.arrayBuffer();
           throw new Error(`part ${index + 1}: ${reply.status}`);
         }
-        parts[index] = (await reply.json()) as { partNumber: number; etag: string };
+        parts[index] = (await reply.json()) as {
+          partNumber: number;
+          etag: string;
+        };
         await sendParts();
       };
       try {
@@ -344,7 +383,10 @@ const startCacheRelay = async (
   const handleGet = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {
     const started = performance.now();
     try {
-      const reply = await forward(request, path, { method: 'GET', requestTimeout: 300_000 });
+      const reply = await forward(request, path, {
+        method: 'GET',
+        requestTimeout: 300_000,
+      });
       if (reply.status === 200) {
         // Buffered, so a dropped download is a miss rather than a truncated entry.
         const body = new Uint8Array(await reply.arrayBuffer());
@@ -526,12 +568,92 @@ const withLoopbackNoProxy = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   return { ...env, NO_PROXY: merged, no_proxy: merged };
 };
 
+type Session = { token: string; expiresAt: number };
+
+const isSession = (value: unknown): value is Session =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Session).token === 'string' &&
+  (value as Session).token.startsWith(sessionPrefix) &&
+  typeof (value as Session).expiresAt === 'number';
+
+const sessionTimeout = 15_000;
+const sessionMargin = 600;
+
+/** A session an earlier Nx call of this job saved, if it has more than ten minutes left. */
+const savedSession = (file: string | undefined): string | undefined => {
+  try {
+    const cached: unknown = file ? JSON.parse(readFileSync(file, 'utf8')) : undefined;
+    return isSession(cached) && cached.expiresAt - Date.now() / 1000 > sessionMargin ? cached.token : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The cache session of this pull request job (item 5), or undefined to keep the token Nx already has. */
+const pullRequestSession = async (env: NodeJS.ProcessEnv, server: string): Promise<string | undefined> => {
+  const requestUrl = env.ACTIONS_ID_TOKEN_REQUEST_URL ?? '';
+  const requestToken = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? '';
+  if (
+    env.GITHUB_EVENT_NAME !== 'pull_request' ||
+    requestUrl === '' ||
+    requestToken === '' ||
+    (env[cacheToken] ?? '').startsWith(sessionPrefix)
+  ) {
+    return undefined;
+  }
+  const saved = env.RUNNER_TEMP ? join(env.RUNNER_TEMP, 'tau-ci-cache-session.json') : undefined;
+  const reused = savedSession(saved);
+  if (reused) {
+    return reused;
+  }
+  try {
+    const oidcUrl = new URL(requestUrl);
+    oidcUrl.searchParams.set('audience', sessionAudience);
+    const oidc = await fetch(oidcUrl, {
+      headers: { authorization: `bearer ${requestToken}` },
+      signal: AbortSignal.timeout(sessionTimeout),
+    });
+    if (!oidc.ok) {
+      throw new Error(`the OIDC token request answered ${oidc.status}`);
+    }
+    const { value } = (await oidc.json()) as { value?: unknown };
+    if (typeof value !== 'string' || value === '') {
+      throw new Error('the OIDC token request returned no token');
+    }
+    const answer = await fetch(new URL('/v1/session', server), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${value}` },
+      signal: AbortSignal.timeout(sessionTimeout),
+    });
+    if (!answer.ok) {
+      throw new Error(`the cache answered ${answer.status} to the session request`);
+    }
+    const session: unknown = await answer.json();
+    if (!isSession(session)) {
+      throw new Error('the cache returned no session');
+    }
+    // On stderr, like the warnings: stdout belongs to Nx and may be parsed (`--json`).
+    console.error(`::add-mask::${session.token}`);
+    if (saved) {
+      writeFileSync(saved, JSON.stringify(session), { mode: 0o600 });
+    }
+    return session.token;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    warn('Nx remote cache session unavailable', `${reason}; this job keeps the read-only cache token`);
+    return undefined;
+  }
+};
+
 const upstream = process.env[cacheServer] ?? '';
 const cacheOn = upstream !== '';
 // A nested Nx call (a target that runs Nx) already points at its parent's relay.
-const relay =
-  cacheOn && !upstream.startsWith(`http://${relayHost}:`) ? await startCacheRelay(upstream, readLimits()) : undefined;
-const cacheEnv = relay ? withLoopbackNoProxy({ ...process.env, [cacheServer]: relay.url }) : process.env;
+const nested = upstream.startsWith(`http://${relayHost}:`);
+const session = cacheOn && !nested ? await pullRequestSession(process.env, upstream) : undefined;
+const baseEnv = session ? { ...process.env, [cacheToken]: session } : process.env;
+const relay = cacheOn && !nested ? await startCacheRelay(upstream, readLimits()) : undefined;
+const cacheEnv = relay ? withLoopbackNoProxy({ ...baseEnv, [cacheServer]: relay.url }) : baseEnv;
 
 let result = await runOnceMoreOnSegfault(cacheEnv, cacheOn);
 
@@ -540,7 +662,7 @@ if (cacheOn && result.code !== 0 && result.matched) {
     'Nx remote cache unavailable',
     `nx ${args.join(' ')} failed on a remote cache error; rerunning once with the remote cache off`,
   );
-  result = await runOnceMoreOnSegfault({ ...process.env, [cacheServer]: '' }, false);
+  result = await runOnceMoreOnSegfault({ ...baseEnv, [cacheServer]: '' }, false);
 }
 
 if (relay) {

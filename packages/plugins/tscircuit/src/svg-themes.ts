@@ -83,8 +83,12 @@ const darkSchematic: SchematicColors = {
 /**
  * The converter writes a few colours into its own `<style>` block (text, symbol strokes, chip
  * fill) rather than reading the colour map; this CSS restyles those classes to the theme.
+ *
+ * `.boundary` is the sheet's background rectangle. Its outline, in the theme's sheet colour and a
+ * constant width on screen, sets the sheet apart from the viewer's grid behind it.
  */
 const schematicCss = (colors: SchematicColors): string => `
+  .boundary { stroke: ${colors['sheet']}; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
   .component, .component-pin { stroke: ${colors['component_outline']}; }
   .chip { fill: ${colors['component_body']}; stroke: ${colors['component_outline']}; }
   .text { fill: ${colors['value']}; }
@@ -133,4 +137,42 @@ export const pcbPaletteOptions = (
   };
   // The converter draws the mask at 80% opacity over the background, so the background is the mask too.
   return { colorOverrides, showSolderMask: true, layer: 'top', backgroundColor: css(maskColor) };
+};
+
+type BoardExtent = { width?: number; height?: number; center?: { x: number; y: number } };
+type BoardOutline = { outline?: ReadonlyArray<{ x: number; y: number }> };
+
+/**
+ * Declares the PCB SVG's scale as the schematic SVG declares its own: `data-real-to-screen-transform`, the matrix
+ * from board millimetres to SVG pixels. The kernel draws the board edge to edge (`matchBoardAspectRatio`, no padding
+ * outside the board), so the scale is the SVG width over the board width. The SVG viewer reads it to size its grid
+ * in millimetres. An SVG without a sized board, or with the attribute already, is returned as is.
+ *
+ * @param svg - The PCB SVG from circuit-to-svg.
+ * @param circuitJson - The circuit JSON it was drawn from.
+ * @returns The SVG with its scale declared on the root element.
+ */
+export const withPcbScale = (svg: string, circuitJson: ReadonlyArray<{ type: string }>): string => {
+  const rootTag = svg.slice(0, svg.indexOf('>'));
+  const board = circuitJson.find((element) => element.type === 'pcb_board') as (BoardExtent & BoardOutline) | undefined;
+  const svgWidth = Number(/\swidth="([\d.]+)"/.exec(rootTag)?.[1]);
+  if (!board || !(svgWidth > 0) || rootTag.includes('data-real-to-screen-transform')) {
+    return svg;
+  }
+  const xs = board.outline?.map((point) => point.x) ?? [];
+  const ys = board.outline?.map((point) => point.y) ?? [];
+  const [minX, maxX, maxY] =
+    xs.length > 0
+      ? [Math.min(...xs), Math.max(...xs), Math.max(...ys)]
+      : [
+          (board.center?.x ?? 0) - (board.width ?? 0) / 2,
+          (board.center?.x ?? 0) + (board.width ?? 0) / 2,
+          (board.center?.y ?? 0) + (board.height ?? 0) / 2,
+        ];
+  if (!(maxX > minX)) {
+    return svg;
+  }
+  const scale = svgWidth / (maxX - minX);
+  const matrix = [scale, 0, 0, -scale, -minX * scale, maxY * scale].join(',');
+  return svg.replace('<svg ', `<svg data-real-to-screen-transform="matrix(${matrix})" `);
 };

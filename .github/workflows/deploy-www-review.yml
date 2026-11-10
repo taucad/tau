@@ -64,6 +64,9 @@ jobs:
       # Only an explicit `installer_catalog=false` dispatch turns it off. A `staging.yml` call has no such input,
       # even when `staging.yml` itself was dispatched, so it formats as '' and keeps the catalog.
       WWW_INSTALLER_CATALOG: ${{ format('{0}', inputs.installer_catalog) == 'false' && 'false' || 'true' }}
+      # Consented page counts go to the app site's first-party collector on the same hostname
+      # (`apps/ui/netlify/edge-functions/marketing-events.ts`), never to PostHog directly.
+      WWW_ANALYTICS_ENDPOINT: /api/marketing-events
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       SITE_ID: 17066c91-5b08-4cc0-b45c-32b0ea08b4e9
       ALIAS: ${{ inputs.alias || 'staging' }}

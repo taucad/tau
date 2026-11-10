@@ -62,7 +62,7 @@ const card = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   n: 2,
   createdAt: new Date('2026-07-09T14:14:00').getTime(),
   summary: 'Thicker base',
-  actor: 'Tau agent',
+  actor: 'Agent',
   turnId: 'u1',
   conflicted: false,
   trigger: 'turn',
@@ -116,14 +116,19 @@ describe('RevisionRow', () => {
       'aria-expanded',
       'false',
     );
-    expect(item).toHaveTextContent('Tau agent');
+    expect(item).toHaveTextContent('Agent');
   });
 
-  it('never shows who made your own revision, nor a raw actor id (HQ4)', () => {
-    renderRow({ revision: card({ actor: 'You' }) });
+  it('shows no who line where the resolver gives none, nor a raw actor id (Q2, HQ4)', () => {
+    renderRow({ revision: card({ actor: '', isYours: true }) });
     const item = screen.getByRole('listitem');
     expect(item).not.toHaveTextContent('You');
     expect(item.textContent).not.toMatch(/user_|anon:|^agent$/u);
+  });
+
+  it('shows the who line a shared project gives your own row (Q2)', () => {
+    renderRow({ revision: card({ actor: 'You', isYours: true }) });
+    expect(screen.getByRole('listitem')).toHaveTextContent('You');
   });
 
   it('says so instead of inventing a number for a revision off this line', () => {

@@ -1061,8 +1061,8 @@ export function RevisionRow({
     revision.createdAt > 0
       ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
       : undefined;
-  /* Your own revisions need no attribution; everyone else's say who (HQ4). The Start version says how it began. */
-  const actor = start !== undefined || revision.actor === 'You' || revision.actor === '' ? undefined : revision.actor;
+  /* The who-resolver decides whether a row has a who line (Q2): none on a single-person project. The Start version says how it began. */
+  const actor = start !== undefined || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
      device's restore machine holds its undo target — never after a reload or another device's restore. */
@@ -1118,7 +1118,7 @@ export function RevisionRow({
                     )}
                     {actor === undefined ? null : (
                       <span className='flex min-w-0 items-center gap-1'>
-                        {actor === 'Tau agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
+                        {actor === 'Agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
                         <span className='min-w-0'>{actor}</span>
                       </span>
                     )}

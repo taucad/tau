@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/spec",
+    "types": ["node", "vitest/importMeta", "vitest"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024"],
+    "target": "ESNext"
+  },
+  "include": ["vitest.config.ts", "src/**/*.ts"]
+}

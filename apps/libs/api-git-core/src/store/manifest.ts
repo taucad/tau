@@ -47,6 +47,12 @@ export type PushRecord = {
   readonly refs: ReadonlyArray<{ readonly ref: string; readonly tip?: string }>;
   /** How many more moved refs the record counts but does not list; absent when none. */
   readonly omitted?: number;
+  /**
+   * Present when a commit new to the server in this push was recorded
+   * anonymously (an `anon:` author, Q3). The account above is then shown to
+   * the project's owner only; members read the push as anonymous.
+   */
+  readonly anonymous?: true;
 };
 
 /**
@@ -251,9 +257,12 @@ const readPushes = (value: unknown): PushRecord[] => {
     if (refs.length > pushRecordRefLimit) {
       refuse('malformed', 'a push record lists more refs than the limit');
     }
-    const { omitted } = entry as { omitted?: unknown };
+    const { omitted, anonymous } = entry as { omitted?: unknown; anonymous?: unknown };
     if (omitted !== undefined && (typeof omitted !== 'number' || !Number.isInteger(omitted) || omitted < 1)) {
       refuse('malformed', 'a push record counts its omitted refs with something other than a positive integer');
+    }
+    if (anonymous !== undefined && anonymous !== true) {
+      refuse('malformed', 'a push record marks anonymity with something other than true');
     }
     const moved = refs.map((move: unknown) => {
       const { ref, tip } = (isRecord(move) ? move : {}) as { ref?: unknown; tip?: unknown };
@@ -272,6 +281,7 @@ const readPushes = (value: unknown): PushRecord[] => {
       ...(viaDevice === undefined ? {} : { viaDevice }),
       refs: moved,
       ...(omitted === undefined ? {} : { omitted }),
+      ...(anonymous === true ? { anonymous } : {}),
     };
   });
 };
@@ -354,6 +364,8 @@ export type ManifestDraft = {
   readonly committedBy: string;
   /** The host that pushed on the account's behalf (W10); absent for the account's own push. */
   readonly viaDevice?: string;
+  /** Whether a commit this push brings was recorded anonymously (Q3); see {@link PushRecord.anonymous}. */
+  readonly anonymous?: boolean;
   /** Set only by a restore, which rolls forward into a new incarnation (NI6, NI7). */
   readonly incarnation?: string;
   /* oxlint-disable-next-line typescript/no-restricted-types -- same wire shape */
@@ -391,6 +403,7 @@ export const succeedManifest = (base: Manifest | undefined, draft: ManifestDraft
     ...(draft.viaDevice === undefined ? {} : { viaDevice: draft.viaDevice }),
     refs: moved.slice(0, pushRecordRefLimit),
     ...(moved.length > pushRecordRefLimit ? { omitted: moved.length - pushRecordRefLimit } : {}),
+    ...(draft.anonymous === true ? { anonymous: draft.anonymous } : {}),
   };
   const earlier = base?.pushes ?? [];
   const spills = earlier.length > 0 && encodedLength([...earlier, record]) > pushLogByteLimit;
@@ -433,6 +446,66 @@ export const spilledPushLog = (
     key: next.earlierPushes,
     bytes: new TextEncoder().encode(JSON.stringify(segment)),
   };
+};
+
+/**
+ * Parses a stored {@link PushLogSegment}, validating every record as the
+ * manifest's own log is validated.
+ *
+ * @param bytes - The segment object's bytes.
+ * @returns The segment.
+ * @throws ManifestError `malformed` when the bytes are not a segment.
+ */
+export const decodePushLogSegment = (bytes: Uint8Array<ArrayBuffer>): PushLogSegment => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch (error) {
+    throw new ManifestError('malformed', `push-log segment is not JSON: ${String(error)}`);
+  }
+  if (!isRecord(parsed)) {
+    refuse('malformed', 'push-log segment is not an object');
+  }
+  return { previous: readEarlierPushes(parsed['previous']), pushes: readPushes(parsed['pushes']) };
+};
+
+/** The most push records one read returns (A3). */
+export const pushRecordPageLimit = 100;
+
+/**
+ * The push records after `after`, oldest first, at most `limit` of them (A3).
+ *
+ * The manifest holds the newest stretch of the log; older stretches are
+ * reached through {@link Manifest.earlierPushes}, newest segment first, and
+ * are read only while the records held so far do not reach back to `after`.
+ *
+ * ponytail: a read from the start walks every segment (about 80 records
+ * each). A reader that pages forward from its last generation reads only the
+ * manifest; an index of segments by generation is the upgrade if a
+ * from-the-start read ever shows in latency.
+ *
+ * @param args - The manifest, a reader for a segment key, the generation to read after and the page size.
+ * @returns The records, and `next` — the `after` that continues — when more follow.
+ */
+export const pushRecordsAfter = async (args: {
+  readonly manifest: Manifest;
+  readonly readSegment: (key: string) => Promise<Uint8Array<ArrayBuffer>>;
+  readonly after: number;
+  readonly limit?: number;
+}): Promise<{ records: readonly PushRecord[]; next?: number }> => {
+  const limit = args.limit ?? pushRecordPageLimit;
+  let held: readonly PushRecord[] = args.manifest.pushes;
+  let key = args.manifest.earlierPushes;
+  while (key !== null && (held[0]?.generation ?? Number.POSITIVE_INFINITY) > args.after + 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each segment names the one before it
+    const segment = decodePushLogSegment(await args.readSegment(key));
+    held = [...segment.pushes, ...held];
+    key = segment.previous;
+  }
+  const following = held.filter((record) => record.generation > args.after);
+  const records = following.slice(0, limit);
+  const last = records.at(-1);
+  return following.length > limit && last !== undefined ? { records, next: last.generation } : { records };
 };
 
 /** Generations never repeat, so an ETag never repeats within one incarnation (NI6). */

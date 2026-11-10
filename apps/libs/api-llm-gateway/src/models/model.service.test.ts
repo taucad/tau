@@ -11,6 +11,7 @@ import type { Environment } from '@taucad/api-core';
 const maxEffectiveContextWindow = 200_000;
 
 const cappedModelIds = [
+  'anthropic-claude-fable-5.2',
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-5.5',
@@ -44,6 +45,7 @@ const cappedModelIds = [
 
 /** Every model Tau sends a PDF to. Vertex rows are included because the gateway rewrites their completions file part into an image_url PDF data URI. */
 const pdfInputModelIds = [
+  'anthropic-claude-fable-5.2',
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-5.5',
@@ -160,6 +162,7 @@ describe('modelList', () => {
         .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))
         .map((model) => model.id);
       expect(extraHigh).toEqual([
+        'anthropic-claude-fable-5.2',
         'anthropic-claude-fable-5.1',
         'anthropic-claude-fable-5',
         'anthropic-claude-opus-5.5',
@@ -304,14 +307,14 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-opus-5']?.recommended).toBe(false);
   });
 
-  it('recommends Fable 5.1 while retaining Fable 5', async () => {
+  it('recommends Fable 5.2 while retaining Fable 5.1 and Fable 5', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const fable51 = listedModels.find((model) => model.id === 'anthropic-claude-fable-5.1');
+    const fable52 = listedModels.find((model) => model.id === 'anthropic-claude-fable-5.2');
 
-    expect(fable51).toMatchObject({
+    expect(fable52).toMatchObject({
       recommended: true,
-      model: 'claude-fable-5-1',
+      model: 'claude-fable-5-2',
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
@@ -322,7 +325,7 @@ describe('ModelService', () => {
         contextWindow: maxEffectiveContextWindow,
         maxTokens: 128_000,
         knowledgeCutoff: '2026-06',
-        cost: { inputTokens: 10, outputTokens: 50, cacheReadTokens: 0.25, cacheWriteTokens: 12.5 },
+        cost: { inputTokens: 8, outputTokens: 40, cacheReadTokens: 0.2, cacheWriteTokens: 10 },
       },
       configuration: {
         streaming: true,
@@ -331,7 +334,8 @@ describe('ModelService', () => {
         outputConfig: { effort: 'high' },
       },
     });
-    expect(fable51?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(fable52?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(modelList.anthropic['claude-fable-5.1']?.recommended).toBe(false);
     expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
   });
 

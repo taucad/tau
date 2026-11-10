@@ -42,15 +42,18 @@ export const rateLimitBackoffMilliseconds = (retry: number, random: () => number
 /**
  * How long to wait before one automatic resume: the server's advice first, then backoff.
  *
- * @param input - The gateway's `Retry-After` estimate and the 1-based retry number.
+ * @param input - The gateway's `Retry-After` estimate, the 1-based retry number and the backoff's jitter source.
  * @returns The wait in milliseconds.
  * @public
  */
 export const rateLimitRetryDelayMilliseconds = (input: {
   readonly retryAfterSeconds?: number;
   readonly retry: number;
+  readonly random?: () => number;
 }): number =>
-  input.retryAfterSeconds === undefined ? rateLimitBackoffMilliseconds(input.retry) : input.retryAfterSeconds * 1000;
+  input.retryAfterSeconds === undefined
+    ? rateLimitBackoffMilliseconds(input.retry, input.random)
+    : input.retryAfterSeconds * 1000;
 
 /* Attempts of each run already resumed automatically by this page. Keyed by attempt so
  * a card that remounts for the same failure cannot resume it twice. */

@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/plugins/picogk",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "ci:native-hosts"],
   "targets": {
     "test": {
       "dependsOn": [

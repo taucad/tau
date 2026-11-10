@@ -824,8 +824,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     if (window !== undefined) {
       fillWindows.delete(report.checkoutId);
       /* A failure names its reason: the facet carries it, and without it a dead end cannot be diagnosed. */
-      const outcome =
-        report.facet === undefined ? 'fill' : `failed fill (${report.facet.error ?? 'no reason given'})`;
+      const outcome = report.facet === undefined ? 'fill' : `failed fill (${report.facet.error ?? 'no reason given'})`;
       logWorkerTimings(`${outcome} of ${String(window.objects)} objects`, workerTimings.summarize(window.startedAt));
     }
   };

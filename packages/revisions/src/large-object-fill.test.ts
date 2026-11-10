@@ -23,7 +23,12 @@ const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPoin
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
 const setup = (
-  options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean; retryMilliseconds?: number[] }> = {},
+  options: Readonly<{
+    flushBytes?: number;
+    flushMilliseconds?: number;
+    byOid?: boolean;
+    retryMilliseconds?: number[];
+  }> = {},
 ) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {

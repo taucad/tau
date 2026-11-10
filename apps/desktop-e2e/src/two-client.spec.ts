@@ -78,7 +78,7 @@ import type { UiServer } from '#support/two-client/ui-server.js';
  * directions with file, revision and chat identity.
  */
 
-const proLimitBytes = 10 * 1024 ** 3;
+const proLimitBytes = 100 * 1024 ** 3;
 const fiveMiB = 5 * 1024 ** 2;
 const fiftyMiB = 50 * 1024 ** 2;
 const continuationOwner = 'W13/V18 · S48(15)';

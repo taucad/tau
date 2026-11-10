@@ -1040,7 +1040,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   it('refuses an over-quota LFS batch with 413 and the file list', async () => {
-    state.storageBytes = 10 * 1024 ** 3 - 1024;
+    state.storageBytes = 100 * 1024 ** 3 - 1024;
     const objects = [
       { oid: 'b'.repeat(64), size: 4096 },
       { oid: 'c'.repeat(64), size: 8192 },

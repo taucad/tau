@@ -126,7 +126,7 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
   );
 };
 
-const proLimitBytes = 10 * 1024 ** 3;
+const proLimitBytes = 100 * 1024 ** 3;
 
 /** The volume the tier's API writes bare repositories to (`global-setup.ts`). */
 const hostedRemoteRoot = resolve(import.meta.dirname, '../../../../out/test-results/api-e2e-git/git-root');

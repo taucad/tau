@@ -10,7 +10,7 @@
 #   watchdog reads every scheduled workflow, so a red or missing sweep alerts the operator.
 # Not a `ci.yml` lane: `ci.yml` is the colour of `main` and the gate every release reads, so a
 # third-party site must not decide it; its lanes select affected Nx projects and cached targets,
-# while this checks changed files over the network uncached; and `ci.yml` is in `sharedGlobals`.
+# while this checks changed files over the network uncached.
 # It is not a required check. Read-only: no deployment credentials, no Nx.
 #
 # `apps/docs/lychee.toml` accepts no 403: npm's website answers automated clients with 403, so it

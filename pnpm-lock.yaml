@@ -1818,9 +1818,6 @@ importers:
       '@taucad/api-email':
         specifier: workspace:*
         version: link:../libs/api-email
-      '@taucad/api-extractor':
-        specifier: workspace:*
-        version: link:../../libs/api-extractor
       '@taucad/api-git-core':
         specifier: workspace:*
         version: link:../libs/api-git-core
@@ -1906,15 +1903,9 @@ importers:
       '@taucad/api-testing':
         specifier: workspace:*
         version: link:../libs/api-testing
-      '@taucad/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
       '@taucad/vite':
         specifier: workspace:*
         version: link:../../libs/vite

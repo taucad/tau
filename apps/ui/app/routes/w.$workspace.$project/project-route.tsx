@@ -207,6 +207,13 @@ export function ProjectRouteGate({
                 },
           );
         }
+        if (access.status === 'ready') {
+          /* Open it with the answer rather than from the effect below, after the commit that stores
+           * it: in between, a ready project that is not live yet derives `closed`, and its notice
+           * ("Project closed … Reopen project") painted for about 26 ms on a direct open. Opening a
+           * live project is a touch, so the effect's own open stays harmless. */
+          sessions.send({ type: 'open', projectId: requestedProjectId });
+        }
         setResolved({
           projectId: requestedProjectId,
           access,
@@ -233,7 +240,7 @@ export function ProjectRouteGate({
      * Finding 2). The manager's value carries `libraryRevision`, so it moves
      * with the library and `projectManager` alone re-runs this effect (P66).
      */
-  }, [requestedProjectId, projectManager, loadAttempt]);
+  }, [requestedProjectId, projectManager, loadAttempt, sessions]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).

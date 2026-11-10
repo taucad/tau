@@ -333,6 +333,7 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
  * non-editor state so these tests stay about what the *gate* derives and
  * whether the app shell survived it.
  */
+const renderedNoticeKinds = vi.hoisted((): string[] => []);
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
   const { useContext } = await import('react');
   const { ProjectRouteRetryContext } = await import('#routes/w.$workspace.$project/project-route-state.js');
@@ -340,6 +341,7 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
     ProjectRouteRetryContext,
     ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {
       const retry = useContext(ProjectRouteRetryContext);
+      renderedNoticeKinds.push(state.kind);
       return (
         <div>
           <p>Notice: {state.kind}</p>
@@ -925,6 +927,23 @@ describe('project route session identity', () => {
     });
     await screen.findAllByTestId('project-session');
     expect(focusedSessionId()).toBe(projectA);
+  });
+
+  it('should never render the closed notice while a ready project is opening', async () => {
+    const pendingA = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockReturnValue(pendingA.promise);
+    renderedNoticeKinds.length = 0;
+    renderRouteProvider();
+
+    await act(async () => {
+      pendingA.resolve(ready(projectA));
+      await pendingA.promise;
+    });
+    await screen.findAllByTestId('project-session');
+
+    /* Opening the session in an effect after the access commit derived `closed` for one commit. */
+    expect(renderedNoticeKinds).toContain('resolving');
+    expect(renderedNoticeKinds).not.toContain('closed');
   });
 
   it('should leave the initial loader for a retryable access error', async () => {

@@ -1,6 +1,6 @@
 ---
 host: minor
-cli: patch
+cli: minor
 ---
 
 A native host records the signed-in Tau account, never the machine. The desktop, `tau serve` and `tau revisions save` no longer read the OS login name, `GIT_AUTHOR_*`, `GIT_COMMITTER_*` or `EMAIL`, so neither enters a commit, a trailer or a tag.

@@ -33,7 +33,7 @@ import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
-import type { CanvasEvent, CanvasFailure } from '#machines/canvas.machine.js';
+import type { CanvasEvent, CanvasFailure, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 /**
@@ -202,17 +202,26 @@ export function ThreeCanvasInstance({
 
   // The surface attaches its canvas actor in the commit that mounts it, so the stage is never painted as ready in
   // between, and detaches it when this mount leaves; the context-lost fallback keeps the actor (and its budget). A
-  // Suspense boundary that hides and reveals this mount detaches and re-attaches the surface while the R3F root lives
-  // on without a second `onCreated`, so a re-attached surface hosts its new canvas actor on the root it already has.
+  // Suspense boundary that hides and reveals this mount detaches and re-attaches the surface while this mount, and
+  // its R3F root, live on without a second `onCreated`. The detach records how far the renderer got, and the
+  // re-attached surface's new canvas actor resumes from there: lost again, or hosted on the root it already has.
+  const detachedPhase = useRef<CanvasSnapshot['value'] | undefined>(undefined);
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
       if (!element) {
+        const { canvas } = graphicsRef.getSnapshot().context;
+        detachedPhase.current = canvas?.canvasId === canvasId ? canvas.ref.getSnapshot().value : undefined;
         graphicsRef.send({ type: 'canvasDetached', canvasId });
         return;
       }
-      graphicsRef.send({ type: 'canvasAttached', canvasId, kind: 'canvas', webglContext, admittedBytes });
+      const resumed = detachedPhase.current;
+      detachedPhase.current = undefined;
+      const reattached = resumed === 'ready' || resumed === 'presented' || resumed === 'lost';
+      graphicsRef.send({ type: 'canvasAttached', canvasId, kind: 'canvas', webglContext, admittedBytes, reattached });
       const held = rootRef.current;
-      if (held && !held.isRetired()) {
+      if (resumed === 'lost') {
+        sendToCanvas({ type: 'contextLost' });
+      } else if (reattached && held && !held.isRetired()) {
         sendToCanvas(canvasHostCreated(held));
       }
     },

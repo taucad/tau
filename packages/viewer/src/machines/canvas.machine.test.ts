@@ -5,8 +5,8 @@
  * 1. `creating`: initial
  * 2. `ready`: `hostCreated`
  * 3. `failed`: `rendererFailed`
- * 4. `presented`: `hostCreated`, `framePresented`
- * 5. `lost`: `hostCreated`, `contextLost`
+ * 4. `lost`: `contextLost` (a surface re-attached after its loss)
+ * 5. `presented`: `hostCreated`, `framePresented`
  */
 import type { RootState } from '@react-three/fiber';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -137,8 +137,8 @@ describe('canvas machine totality', () => {
       { state: 'creating', events: [] },
       { state: 'ready', events: ['hostCreated'] },
       { state: 'failed', events: ['rendererFailed'] },
+      { state: 'lost', events: ['contextLost'] },
       { state: 'presented', events: ['hostCreated', 'framePresented'] },
-      { state: 'lost', events: ['hostCreated', 'contextLost'] },
     ]);
     expect(unreachedStates(canvasMachine, pathOptions)).toEqual([]);
   });
@@ -343,10 +343,36 @@ describe('canvas lifecycle', () => {
     placeholder.stop();
   });
 
+  it('should resume lost, untimed, when a surface re-attaches after its context was lost', () => {
+    const budget = createActor(webglContextMachine, { input: {} }).start();
+    const canvas = startCanvas({ canvasId: 'c', kind: 'canvas', webglContext: budget, reattached: true });
+    canvas.send({ type: 'contextLost' });
+    expect(canvas.getSnapshot().value).toBe('lost');
+    expect(selectCanvasAwaitingFrame(canvas.getSnapshot())).toBe(false);
+    // The fallback holds the viewer's place in the budget, as before the surface was hidden.
+    expect(budget.getSnapshot().context.count).toBe(1);
+    canvas.stop();
+    expect(spans).toEqual([]);
+  });
+
+  it('should time nothing for a surface re-attached to a live renderer', () => {
+    const frames = animationFrames();
+    const loop = scriptRoot();
+    const canvas = startCanvas({ canvasId: 'c', kind: 'canvas', reattached: true });
+    canvas.send(hostCreated(createCanvasHostLogic({ root: loop.root, isRetired: () => false })));
+    loop.frame();
+    frames.run();
+    frames.run();
+    expect(canvas.getSnapshot().value).toBe('presented');
+    canvas.stop();
+    expect(spans).toEqual([]);
+  });
+
   it('should hold a placeholder busy without timing it, budgeting it or hosting a renderer', () => {
     const budget = createActor(webglContextMachine, { input: {} }).start();
     const canvas = startCanvas({ canvasId: 'p', kind: 'placeholder', webglContext: budget });
     canvas.send(hostCreated());
+    canvas.send({ type: 'contextLost' });
     expect(canvas.getSnapshot().value).toBe('creating');
     expect(selectCanvasAwaitingFrame(canvas.getSnapshot())).toBe(true);
     expect(budget.getSnapshot().context.count).toBe(0);

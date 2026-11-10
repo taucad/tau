@@ -11,7 +11,8 @@
  * - **ready**: R3F's `onCreated` handed over the host. The host adapter, a callback actor started with the R3F root in
  *   its input, holds the renderer, the DOM canvas and `invalidate` in its closure; none of them enters context.
  * - **presented**: the first frame with area reached the screen.
- * - **lost**: the browser took the GPU context; the canvas shows its context-lost fallback until Retry remounts it.
+ * - **lost**: the browser took the GPU context; the canvas shows its context-lost fallback until Retry remounts it. A
+ *   surface that re-attaches after its loss (a Suspense reveal) reports the loss again from `creating`.
  * - **failed**: the renderer could not start or its WebGPU device was destroyed; the viewer's error boundary takes it.
  *
  * It also holds the viewer's slot in the WebGL context budget (acquire on start, resize with the surface, release on
@@ -96,6 +97,11 @@ export type CanvasInput = Readonly<{
   webglContext?: WebglContextRef;
   /** The surface estimate the viewer was admitted with, held until the canvas reports its own size. */
   admittedBytes?: number;
+  /**
+   * The surface re-attached to a renderer that already exists (a Suspense reveal): nothing mounts, so the load spans
+   * are not timed.
+   */
+  reattached?: boolean;
 }>;
 
 /**
@@ -288,7 +294,10 @@ const canvasMachineDefinition = setup({
             input: { webglContext: input.webglContext, id: input.canvasId, bytes: input.admittedBytes ?? 0 },
           })
         : undefined,
-    loadSpans: spawn(canvasActors.loadSpans, { id: 'loadSpans', input: { timed: input.kind === 'canvas' } }),
+    loadSpans: spawn(canvasActors.loadSpans, {
+      id: 'loadSpans',
+      input: { timed: input.kind === 'canvas' && !input.reattached },
+    }),
     host: undefined,
   }),
   // Stopping the canvas stops its children: the host adapter, the open load spans and the budget slot end with it.
@@ -322,7 +331,15 @@ const canvasMachineDefinition = setup({
         surfaceResized: () => ({}),
         requestRender: () => ({}),
         framePresented: () => ({}),
-        contextLost: () => ({}),
+        // Only a surface re-attached after its context was lost reports a loss before a host: it shows the fallback
+        // again. A placeholder has no context to lose.
+        contextLost: ({ context }, enq) => {
+          if (context.kind === 'placeholder') {
+            return {};
+          }
+          stopDrawing(context, enq);
+          return { target: 'lost' };
+        },
       },
     },
     ready: {

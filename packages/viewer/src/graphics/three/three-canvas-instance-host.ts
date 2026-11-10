@@ -197,12 +197,14 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
  * @public
  */
 export const canvasHostCreated = (host: CanvasHostRoot): Extract<CanvasEvent, { type: 'hostCreated' }> => {
+  // The root state from `onCreated` is a snapshot: R3F replaces `size` and `viewport` on resize, so read it live.
+  const state = host.root.get();
   // R3F types its renderer as WebGL even when the factory supplies WebGPU.
-  const renderer = host.root.gl as RendererInstance;
+  const renderer = state.gl as RendererInstance;
   return {
     type: 'hostCreated',
     backend: renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl',
-    surface: surfaceOf(host.root),
+    surface: surfaceOf(state),
     domElement: renderer.domElement,
     host: createCanvasHostLogic(host),
   };

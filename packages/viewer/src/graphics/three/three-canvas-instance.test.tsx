@@ -21,6 +21,8 @@ import { mock } from 'vitest-mock-extended';
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebglErrorFallback } from '#cad/webgl-fallback.jsx';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import { subscribeViewerLoadTiming } from '#lib/viewer-load-timing.js';
+import type { ViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import * as CanvasGl from '#graphics/three/canvas-three-gl.js';
 import {
   infiniteGridFadeEndVisibleSpans,
@@ -285,6 +287,35 @@ vi.mock('#graphics/three/actor-bridge.jsx', () => ({
 }));
 
 const canvas = () => graphicsHolder.current?.getSnapshot().context.canvas?.ref;
+
+/** A canvas under a Suspense boundary that a test suspends (hiding the canvas) and then reveals. */
+const suspendable = () => {
+  let release: () => void = () => undefined;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  function Gate({ hold }: { readonly hold: boolean }): undefined {
+    if (hold) {
+      use(pending);
+    }
+    return undefined;
+  }
+  const tree = (hold: boolean) => (
+    <Suspense fallback={null}>
+      <Gate hold={hold} />
+      <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>
+    </Suspense>
+  );
+  return {
+    tree,
+    release: (): void => {
+      release();
+    },
+    pending,
+  };
+};
 const backend = () => selectCanvasBackend(canvas()?.getSnapshot());
 const createCallbackLogicStub = () => createCallbackLogic<CanvasHostCommand, undefined>(() => undefined);
 
@@ -642,24 +673,11 @@ describe('ThreeCanvasInstance', () => {
   });
 
   it('hosts the canvas again on its live root when a Suspense boundary hides and reveals it', async () => {
-    let release: () => void = () => undefined;
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
+    const { tree, release, pending } = suspendable();
+    const spans: ViewerLoadSpan[] = [];
+    const unsubscribe = subscribeViewerLoadTiming((span) => {
+      spans.push(span);
     });
-    function Gate({ hold }: { readonly hold: boolean }): undefined {
-      if (hold) {
-        use(pending);
-      }
-      return undefined;
-    }
-    const tree = (hold: boolean) => (
-      <Suspense fallback={null}>
-        <Gate hold={hold} />
-        <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
-          {null}
-        </ThreeCanvasInstance>
-      </Suspense>
-    );
     const { rerender } = render(tree(false));
     const observer = await waitForPresentationObserver();
     act(() => {
@@ -696,6 +714,39 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(canvas()?.getSnapshot().value).toBe('presented');
     });
+    // Nothing mounted again: the reveal times no second mount or first frame.
+    expect(spans.map(({ phase, outcome }) => [phase, outcome])).toEqual([
+      ['canvas.mount', 'ok'],
+      ['frame.first', 'ok'],
+    ]);
+    unsubscribe();
+  });
+
+  it('shows the context-lost fallback again when a Suspense boundary reveals a lost canvas', async () => {
+    const { tree, release, pending } = suspendable();
+    const { rerender } = render(tree(false));
+    await waitFor(() => {
+      expect(fireLatestWebGlContextLost).toBeDefined();
+    });
+    await act(async () => {
+      fireLatestWebGlContextLost?.();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
+    });
+
+    act(() => {
+      rerender(tree(true));
+    });
+    expect(canvas()).toBeUndefined();
+    await act(async () => {
+      release();
+      await pending;
+      rerender(tree(false));
+    });
+    expect(canvas()?.getSnapshot().value).toBe('lost');
+    expect(selectCanvasAwaitingFrame(canvas()?.getSnapshot())).toBe(false);
+    expect(screen.getByText('Graphics context lost')).toBeVisible();
   });
 
   it('waits for the canvas to have area before it observes a frame', async () => {

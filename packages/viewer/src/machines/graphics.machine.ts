@@ -353,6 +353,8 @@ export type GraphicsEvent =
       webglContext?: ActorRefFrom<typeof webglContextMachine>;
       /** The surface estimate the viewer was admitted with. */
       admittedBytes?: number;
+      /** The surface re-attached to a renderer that already exists, so its canvas actor times no load spans. */
+      reattached?: boolean;
     }
   /** The surface left the document: its canvas actor stops and returns its budget. */
   | { type: 'canvasDetached'; canvasId: string }
@@ -1137,6 +1139,7 @@ const graphicsMachineDefinition = setup({
               kind: event.kind,
               webglContext: event.webglContext,
               admittedBytes: event.admittedBytes,
+              reattached: event.reattached,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref } } };

@@ -18,7 +18,7 @@ You must be at least 16 to use Tau. If you are under 18, a parent or guardian mu
 
 If you use Tau for an organisation, you confirm you may bind it to these terms, and "you" includes the organisation.
 
-An account is for one person. Keep your password, sessions and API keys to yourself; what happens under your account is your responsibility, so tell us at support@tau.new if you think someone else is using it.
+An account is for one person. Keep your password, sessions and API keys to yourself; what happens under your account is your responsibility, so tell us at help@tau.new if you think someone else is using it.
 
 Use Tau lawfully and within our [Acceptable Use Policy](/legal/acceptable-use). We may limit API and usage rates to keep Tau working for everyone. Metered API usage is charged to your credits, and you are responsible for all charges under your API keys.
 
@@ -36,9 +36,9 @@ You authorise us, through Stripe, our payment processor, to charge your payment 
 
 **Automatic reload.** If you turn on automatic reload, you authorise us to charge your saved payment method the reload amount, plus tax, whenever your balance falls below the threshold you accepted, within the limits shown then. You can turn it off any time in Settings → Billing. If we change the reload terms, reloads pause until you accept the new ones, and they stop after repeated failed payments.
 
-**Cancelling Pro.** Cancel any time in Settings → Billing or by emailing support@tau.new. Pro runs to the end of the period you have paid for and does not renew. We do not refund part-used periods unless the law requires it (see [Consumer rights](#9-consumer-rights)).
+**Cancelling Pro.** Cancel any time in Settings → Billing or by emailing help@tau.new. Pro runs to the end of the period you have paid for and does not renew. We do not refund part-used periods unless the law requires it (see [Consumer rights](#9-consumer-rights)).
 
-**Refunds of top-ups.** Within 14 days of buying a top-up you can ask support@tau.new to refund the part you have not used. Used credits, included credits and promotional credits are not refundable. We may also refund to correct a billing error. Refunds go to the payment method you paid with, and the refunded credits are removed from your balance.
+**Refunds of top-ups.** Within 14 days of buying a top-up you can ask help@tau.new to refund the part you have not used. Used credits, included credits and promotional credits are not refundable. We may also refund to correct a billing error. Refunds go to the payment method you paid with, and the refunded credits are removed from your balance.
 
 **Failed payments and disputes.** If a renewal payment fails we will tell you and retry it. We do not add that month's included credits until it is paid. If it is still unpaid after 7 days, we may suspend Pro and end your subscription; any included credits you still hold expire then, and your top-up credits are not affected. If you think a charge is wrong, contact us before disputing it with your bank. If a chargeback succeeds, we may remove the credits that payment funded and pause paid features until any negative balance is settled.
 
@@ -66,7 +66,7 @@ If you send us feedback, we may use it without owing you anything. Contributions
 
 ## 5. Content rules and enforcement
 
-If content or an account breaks these terms, the law or our [Acceptable Use Policy](/legal/acceptable-use), we may remove the content, limit features, or suspend or close the account. We use automated checks and human review. We will tell you what we did and why unless the law stops us or telling you would put people at risk. If you think we got it wrong, write to support@tau.new and we will look again.
+If content or an account breaks these terms, the law or our [Acceptable Use Policy](/legal/acceptable-use), we may remove the content, limit features, or suspend or close the account. We use automated checks and human review. We will tell you what we did and why unless the law stops us or telling you would put people at risk. If you think we got it wrong, write to help@tau.new and we will look again.
 
 To report content that infringes your rights or is illegal, email legal@tau.new with the link and what is wrong.
 
@@ -95,7 +95,7 @@ You can stop using Tau at any time and delete your account in Settings → Data 
 If you are a consumer, nothing in these terms takes away rights the law gives you that cannot be excluded, and where that law gives you a bigger refund or remedy, the law wins.
 
 - **New Zealand.** The Consumer Guarantees Act 1993 and the Fair Trading Act 1986 apply to consumers. If you use Tau for business purposes, you agree that the Consumer Guarantees Act does not apply to our supply to you, and that this is fair and reasonable.
-- **European Union and United Kingdom.** You may cancel Pro or a top-up within 14 days of buying it, without giving a reason, by emailing support@tau.new from your account email. Tau starts straight away, so we refund what you paid less what you have already had: the part of the month that has passed for Pro, or the credits you have used for a top-up. We refund within 14 days of your notice, to the payment method you used. You may also bring a dispute in the courts of your home country.
+- **European Union and United Kingdom.** You may cancel Pro or a top-up within 14 days of buying it, without giving a reason, by emailing help@tau.new from your account email. Tau starts straight away, so we refund what you paid less what you have already had: the part of the month that has passed for Pro, or the credits you have used for a top-up. We refund within 14 days of your notice, to the payment method you used. You may also bring a dispute in the courts of your home country.
 - **Australia.** Our services come with guarantees that cannot be excluded under the Australian Consumer Law. For a major failure you can cancel and get a refund for the unused part, or compensation for its reduced value, plus compensation for other reasonably foreseeable loss. For other failures you are entitled to have the problem fixed in a reasonable time.
 
 ## 10. Law and disputes

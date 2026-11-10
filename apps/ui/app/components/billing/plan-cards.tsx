@@ -30,7 +30,7 @@ const subscriptionNotOpenMessage = (action: WirePaymentAction): string => {
       return 'Your payment is being confirmed. Your plan updates in a moment.';
     }
     case 'attention_required': {
-      return 'Your subscription needs attention. Contact support@tau.new.';
+      return 'Your subscription needs attention. Contact help@tau.new.';
     }
     default: {
       return 'Checkout is still being prepared. Try again in a minute.';

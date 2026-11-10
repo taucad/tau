@@ -445,8 +445,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       patch.writeFailed = false;
     }
     if (context.closeFenced) {
-      answer(enq, context.flushes, saved && deferred === undefined);
-      return { target: 'fenced', context: reported(context, { ...patch, flushes: [] }, enq) };
+      /* Edits the close kept back from the cycle on the wire are still owed after it settles (target rule 7). */
+      const folded = context.pending ? policy.combine(deferred, context.pending.patch) : deferred;
+      const owed = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
+      answer(enq, context.flushes, saved && owed === undefined);
+      return {
+        target: 'fenced',
+        context: reported(context, { ...patch, deferred: owed, pending: undefined, flushes: [] }, enq),
+      };
     }
     const owed = deferred !== undefined || !latest || context.commands.length > 0 || context.readBack !== 'none';
     if (context.flushes.length > 0 && (!owed || (!saved && cycle.flushed && latest && context.commands.length === 0))) {
@@ -779,27 +785,24 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               context.commands.map((command) => command.requestId),
               false,
             );
-            const folded = context.pending ? policy.combine(context.deferred, context.pending.patch) : context.deferred;
-            const deferred = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
-            const fenced = { closeFenced: true, pending: undefined, commands: [], deferred };
+            /* The edits no cycle has taken are kept apart, so settling a cycle cannot drop them. */
+            const pending = context.pending && { ...context.pending, requests: [] };
+            const fenced = { closeFenced: true, pending, commands: [] };
             if (matchesState({ write: 'writing' }, value)) {
               /* The write on the wire still answers its requesters; nothing is published after the close. */
               return { context: fenced };
             }
-            /* An overlapped write was applied; only its refresh read is abandoned. */
-            const applied = matchesState({ write: 'awaitingRefresh' }, value);
-            answer(enq, context.cycle?.requests ?? [], applied);
-            const owed = deferred !== undefined || (context.cycle !== undefined && !applied);
-            answer(enq, context.flushes, !owed);
-            return {
-              target: '.fenced',
-              context: {
-                ...fenced,
-                flushes: [],
-                cycle: undefined,
-                deferred: applied || context.cycle?.patch === undefined ? deferred : context.cycle.patch,
-              },
-            };
+            const { cycle } = context;
+            if (cycle) {
+              /* An overlapped write was applied, so only its refresh read is abandoned; a cycle waiting for a base is blocked. */
+              const applied = matchesState({ write: 'awaitingRefresh' }, value);
+              const settled = settle({ ...context, ...fenced }, enq, { cycle, outcome: applied ? 'saved' : 'blocked' });
+              return { target: '.fenced', context: { ...fenced, ...settled.context } };
+            }
+            const folded = pending ? policy.combine(context.deferred, pending.patch) : context.deferred;
+            const deferred = folded !== undefined && !policy.isEmpty(folded) ? folded : undefined;
+            answer(enq, context.flushes, deferred === undefined);
+            return { target: '.fenced', context: { ...fenced, pending: undefined, deferred, flushes: [] } };
           }),
           /* Stale outside the two waiting states: the writer was not waiting for this read. */
           'source.completed': refines('Unmodelled', () => ({})),

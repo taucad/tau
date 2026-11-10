@@ -942,6 +942,39 @@ describe('recordSync', () => {
       expect(store.clock.nextDue()).toBeUndefined();
       expect(store.actor.getSnapshot().status).toBe('done');
     });
+
+    it('should still owe an edit that waited behind the write on the wire when that write is applied after the close', async () => {
+      const store = harness();
+      await store.observe();
+      const saved = store.commands.edit({ name: 'Front' });
+      const late = store.commands.edit({ name: 'Late' });
+      store.commands.close();
+
+      expect(await late).toBe(false);
+
+      await store.reply();
+
+      expect(await saved).toBe(true);
+      expect(store.writes).toHaveLength(1);
+      expect(store.actor.getSnapshot().status).toBe('done');
+      expect(store.context().deferred).toEqual({ name: 'Late' });
+      expect(await store.commands.flush()).toBe(false);
+    });
+
+    it('should owe both the failed write and the edit that waited behind it after the close', async () => {
+      const store = harness();
+      await store.observe();
+      const saved = store.commands.edit({ name: 'Front', mode: 'a' });
+      const late = store.commands.edit({ name: 'Late' });
+      store.commands.close();
+      store.writes[0]?.settle({ status: 'failed', error: new Error('offline'), lost: false });
+      await flush();
+
+      expect(await saved).toBe(false);
+      expect(await late).toBe(false);
+      expect(store.context().deferred).toEqual({ name: 'Late', mode: 'a' });
+      expect(await store.commands.flush()).toBe(false);
+    });
   });
 
   describe('machine discipline', () => {

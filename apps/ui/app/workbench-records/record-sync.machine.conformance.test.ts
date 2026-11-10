@@ -399,7 +399,20 @@ describe('recordSync conforms to RecordSync.tla', () => {
       ),
     );
 
-    expect(new Set(Object.values(actions)).size).toBe(9);
+    // The spec actions the machine takes itself: `next` below less its `environment`.
+    expect(new Set(Object.values(actions))).toEqual(
+      new Set([
+        'Edit',
+        'IssueWrite',
+        'ReplyApplied',
+        'ReplyConflict',
+        'LoseReply',
+        'WatchRead',
+        'ForcedRead',
+        'CompleteRead',
+        'CloseFence',
+      ]),
+    );
 
     expect(
       checkActionCorrespondence(actions, {

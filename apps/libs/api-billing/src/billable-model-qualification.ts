@@ -138,6 +138,9 @@ const route = (
   ...extra,
 });
 
+/* Together's chat route is driven through pi-ai's `max_tokens` codec, the field every Together model has passed live on. */
+const togetherOutputParameter = 'max_tokens';
+
 const routes = [
   route(
     'anthropic-claude-fable-5.1',
@@ -317,6 +320,7 @@ const routes = [
     200_000,
     rates('2', '.2', undefined, '10'),
     {
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
     },
   ),
@@ -328,6 +332,7 @@ const routes = [
     131_072,
     rates('1.4', '.26', undefined, '4.4'),
     {
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
       allowsImage: false,
     },
@@ -340,6 +345,7 @@ const routes = [
     131_072,
     rates('.15', '.03', undefined, '.5'),
     {
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
     },
   ),
@@ -351,6 +357,7 @@ const routes = [
     131_072,
     rates('.15', '.015', undefined, '.6'),
     {
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
     },
   ),
@@ -362,6 +369,7 @@ const routes = [
     131_072,
     rates('1.32', '.13', undefined, '3.96'),
     {
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
       allowsImage: false,
     },
@@ -375,7 +383,6 @@ const routes = [
     rates('.12', '.008', undefined, '.8'),
     {
       combinedMaximum: 1_048_576n,
-      outputParameter: 'max_tokens',
       pricingRevision: '2026-11-09',
     },
   ),

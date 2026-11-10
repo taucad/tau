@@ -993,7 +993,7 @@ export const installStaleBuildRecovery = (): (() => void) => {
 };
 
 /**
- * Whether a reload prompt (the sidebar update control, the error page) shows: while the reload is
+ * Whether the reload prompt (the sidebar update control) shows: while the reload is
  * offered, and never while the page's own automatic reload is pending (a second reload would race
  * it); it shows again once that reload stalls.
  *

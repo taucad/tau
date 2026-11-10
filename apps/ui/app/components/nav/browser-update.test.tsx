@@ -12,10 +12,10 @@ const load = async () => {
   vi.resetModules();
   const skew = await import('#filesystem/build-skew.js');
   loaded.push(skew);
-  const { BrowserUpdate } = await import('#components/nav/browser-update.js');
+  const { BrowserUpdate, BrowserUpdateReveal } = await import('#components/nav/browser-update.js');
   // Same module instance as the control, so they share one sidebar context.
   const { SidebarProvider, useSidebar } = await import('@taucad/ui/components/sidebar');
-  return { ...skew, BrowserUpdate, SidebarProvider, useSidebar };
+  return { ...skew, BrowserUpdate, BrowserUpdateReveal, SidebarProvider, useSidebar };
 };
 
 const announce = async (buildId: number): Promise<void> => {
@@ -47,10 +47,11 @@ afterEach(() => {
 
 describe('browser update control', () => {
   it('stays absent until a newer build is open in another tab', async () => {
-    const { BrowserUpdate, SidebarProvider } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider } = await load();
     render(
       <SidebarProvider>
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -59,11 +60,12 @@ describe('browser update control', () => {
   it('reveals the sidebar prompt without taking editor focus and reloads only on request', async () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...globalThis.location, reload });
-    const { BrowserUpdate, SidebarProvider, buildId } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider defaultOpen={false}>
         <input aria-label='Model draft' />
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     screen.getByRole('textbox', { name: 'Model draft' }).focus();
@@ -83,10 +85,11 @@ describe('browser update control', () => {
   });
 
   it('shows the newest build when a later one is announced', async () => {
-    const { BrowserUpdate, SidebarProvider, buildId } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider>
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     const later = buildId + 48 * 3_600_000;
@@ -101,10 +104,11 @@ describe('browser update control', () => {
   });
 
   it('words a rollback as a replacement and dates the build it serves', async () => {
-    const { BrowserUpdate, SidebarProvider, buildId } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider>
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     const rolledBack = buildId - 48 * 3_600_000;
@@ -121,7 +125,8 @@ describe('browser update control', () => {
   });
 
   it("shows a lone tab's deploy offer without opening the sidebar while the tab still writes", async () => {
-    const { BrowserUpdate, SidebarProvider, useSidebar, buildId, offerReload, isBuildSuperseded } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, useSidebar, buildId, offerReload, isBuildSuperseded } =
+      await load();
     const SidebarState = (): React.JSX.Element => {
       const { open } = useSidebar();
       return <output aria-label='Sidebar' data-open={String(open)} />;
@@ -130,6 +135,7 @@ describe('browser update control', () => {
       <SidebarProvider defaultOpen={false}>
         <SidebarState />
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
 
@@ -144,7 +150,7 @@ describe('browser update control', () => {
   });
 
   it('opens the sidebar once writes stop, even after the offer was already shown', async () => {
-    const { BrowserUpdate, SidebarProvider, useSidebar, buildId, offerReload } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, useSidebar, buildId, offerReload } = await load();
     const SidebarState = (): React.JSX.Element => {
       const { open } = useSidebar();
       return <output aria-label='Sidebar' data-open={String(open)} />;
@@ -153,6 +159,7 @@ describe('browser update control', () => {
       <SidebarProvider defaultOpen={false}>
         <SidebarState />
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     act(() => {
@@ -166,7 +173,7 @@ describe('browser update control', () => {
   });
 
   it('does not open the sidebar again when the offer is withdrawn', async () => {
-    const { BrowserUpdate, SidebarProvider, useSidebar, buildId } = await load();
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, useSidebar, buildId } = await load();
     const SidebarState = (): React.JSX.Element => {
       const { open, setOpen } = useSidebar();
       return (
@@ -184,6 +191,7 @@ describe('browser update control', () => {
       <SidebarProvider defaultOpen={false}>
         <SidebarState />
         <BrowserUpdate />
+        <BrowserUpdateReveal />
       </SidebarProvider>,
     );
     await announce(buildId + 1);
@@ -204,5 +212,39 @@ describe('browser update control', () => {
     });
 
     expect(collapse).toHaveAttribute('data-open', 'false');
+  });
+
+  it('opens the closed mobile sheet once writes stop, while the control inside it is unmounted', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, useSidebar, buildId } = await load();
+    // The mobile sheet mounts its content, and the control with it, only while open.
+    const MobileSheet = (): React.JSX.Element => {
+      const { openMobile } = useSidebar();
+      return (
+        <>
+          <output aria-label='Mobile sheet' data-open={String(openMobile)} />
+          {openMobile ? <BrowserUpdate /> : null}
+        </>
+      );
+    };
+    render(
+      <SidebarProvider>
+        <BrowserUpdateReveal />
+        <MobileSheet />
+      </SidebarProvider>,
+    );
+    expect(screen.getByRole('status', { name: 'Mobile sheet' })).toHaveAttribute('data-open', 'false');
+
+    await announce(buildId + 1);
+
+    expect(screen.getByRole('status', { name: 'Mobile sheet' })).toHaveAttribute('data-open', 'true');
+    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
+      'Reload to continue with the latest version.',
+    );
   });
 });

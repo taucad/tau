@@ -137,7 +137,7 @@ export type BillingSettings = {
 /** Settings → Billing (`/?settings=billing`). */
 export const billingSettings = (page: Page): BillingSettings => ({
   async open(): Promise<string | undefined> {
-    const heading = page.getByText('Credit balance', { exact: true });
+    const heading = page.getByRole('heading', { name: 'Purchased credits', exact: true });
     let note: string | undefined;
     try {
       await page.goto(`${baseUrl}/?settings=billing`);
@@ -160,7 +160,7 @@ export const billingSettings = (page: Page): BillingSettings => ({
   addCredits: async () => page.getByRole('button', { name: 'Add credits' }).first().click(),
   manageSubscription: () => page.getByRole('button', { name: /Manage subscription/iu }),
   subscribe: () => page.getByRole('button', { name: /Upgrade to Pro/u }),
-  cancellationBanner: () => page.getByText(/^Pro until .+ reactivate any time from Manage subscription\.$/u),
+  cancellationBanner: () => page.getByText(/^Your .+ plan ends on .+\. You can resume it any time before then\.$/u),
   closure: {
     // Closure lives in Settings → Data controls, behind a confirmation dialog.
     async confirm(): Promise<void> {

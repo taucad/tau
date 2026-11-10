@@ -232,7 +232,7 @@ describe('AccountClosureSettings', () => {
     {
       state: 'attention',
       title: 'We couldn’t close your account',
-      description: 'Something needs fixing on our side. Email support@tau.new and we’ll finish it for you.',
+      description: 'Something needs fixing on our side. Email us and we’ll finish it for you.',
       action: 'Check again',
     },
   ])('says where a $state closure stands in plain words, never the wire state', async (row) => {

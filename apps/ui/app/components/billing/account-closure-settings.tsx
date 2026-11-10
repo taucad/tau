@@ -117,7 +117,10 @@ const closureRowCopy = (
     case 'attention': {
       return {
         title: 'We couldn’t close your account',
-        description: `Something needs fixing on our side. Email ${supportEmail} and we’ll finish it for you.`,
+        description:
+          closure.attention?.action === 'wait'
+            ? 'We’re still working on it. Check again in a few minutes.'
+            : 'Something needs fixing on our side. Email us and we’ll finish it for you.',
       };
     }
     case 'closed': {

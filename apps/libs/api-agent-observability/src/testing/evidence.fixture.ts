@@ -54,6 +54,10 @@ const payloadOf = (overrides: Overrides, plane: Evidence['payload']['plane'], te
   };
 };
 
+/** The semantic kind a fixture's plane and fact name. */
+const semanticKind = (plane: Overrides['plane'], fact: Overrides['fact']): Evidence['semantic']['kind'] =>
+  plane === 'feedback' ? 'rating' : (fact?.kind ?? 'instruction');
+
 /**
  * A valid host-reported envelope whose projection digest is computed, so a
  * test changes one claim at a time and keeps every other check passing.
@@ -74,8 +78,7 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       digest: sourceDigest,
     },
     semantic: {
-      kind:
-        plane === 'feedback' ? 'rating' : plane === 'summary' && overrides.fact ? overrides.fact.kind : 'instruction',
+      kind: semanticKind(plane, overrides.fact),
       id: overrides.semantic ?? 'message-1',
     },
     projection: { version: overrides.projectionVersion ?? 'v1', redactor: 'r1', digest: '0'.repeat(64) },
@@ -143,6 +146,23 @@ export const toolFact = (call = 'call-1'): Extract<Evidence['payload'], { plane:
   outcome: 'completed',
   revisionBefore: null,
   revisionAfter: null,
+});
+
+/** A completed model call's summary fact: a generation in Langfuse. */
+export const providerFact = (): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
+  kind: 'provider',
+  logicalCall: 'call-1',
+  attempt: null,
+  billing: null,
+  requestedModel: null,
+  resolvedModel: 'model-1',
+  provider: null,
+  response: null,
+  firstOutput: null,
+  purpose: 'generation',
+  callKind: 'run',
+  stop: 'stop',
+  usage: { input: 1, output: 1, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
 });
 
 /** The envelope as the host sends it. */

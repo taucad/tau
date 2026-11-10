@@ -6,15 +6,15 @@ API agent observability: evidence admission, delivery, erasure and the model-inv
 
 This module admits agent evidence, keeps it in an outbox, and delivers each admitted receipt to Langfuse as one OTLP observation. It also reads its settlements back for ledger reconciliation and erases it on request. The rules are in the [agent observability policy](../../../docs/policy/agent-observability-policy.md). This page explains what Langfuse holds and how to read it.
 
-### What Langfuse holds: summary facts only
+### What Langfuse holds: summary facts, and generation content where granted
 
-Langfuse is a **summary-only plane** under policy `purposes-v1`. Every observation carries ids, vocabulary values, counts, timings and token usage. It never carries prompts, model output, tool arguments, tool results, file contents or error messages.
+Langfuse is a **summary plane** under policy `purposes-v1`. Every summary observation carries ids, vocabulary values, counts, timings and token usage. It never carries prompts, model output, tool arguments, tool results, file contents or error messages.
 
 - Host facts (`authority: host-reported`) come from the browser host's committed rows (`libs/agent-observability/src/projection.ts`, mapper `host-turn-v4`). The host projects tool, check and outcome facts, the first time a run's text was shown, and ratings (on the feedback plane).
 - API facts (`authority: api-reported`) are provider attempts (`model-invocation-evidence.ts`, `api-provider-v3`) and ledger settlements (`settlement-evidence.ts`, `api-settlement-v2`).
-- `coverage.input` and `coverage.output` are `omitted` on every summary fact. Host facts report `usage: unsupported`, because usage and cost live on the provider and financial facts. An empty Input or Output panel is expected and does not mean data was lost.
+- `coverage.input` and `coverage.output` are `omitted` on every summary fact, or `missing` when content was due but the relay could not capture it. Host facts report `usage: unsupported`, because usage and cost live on the provider and financial facts. An empty Input or Output panel on a summary observation is expected and does not mean data was lost.
 - Account, project, run, attempt and record ids reach Langfuse only as keyed or one-way digests (`langfuse.user.id`, `langfuse.session.id`, `metadata.run`, `metadata.chat`, and the trace and object ids). Only the API can link a pseudonym back to an account.
-- A content plane exists in the contract but is separately granted. This document does not widen it, and nothing here changes which fields are collected.
+- A provider attempt also carries its input and output (`langfuse.observation.input` and `langfuse.observation.output`) only when two things hold: the deployment's `TAU_OBSERVABILITY_CONTENT_CAPTURE` mode permits the account (`off` by default; `allowlist` admits the ids in `TAU_OBSERVABILITY_CONTENT_ACCOUNTS`; `on`), and the account's `content` purpose is effective for the project. Only the messages new to the call are kept; history, system prompt and tool definitions become digests and counts, images and files become their type and size, and readable thinking is a labelled output part. Text is redacted at capture (`content-v1`) and again at export for the account's email and name. Tool arguments and design source are never redacted; a tool result over 64 KiB keeps only its size and digest. A withdrawn `content` purpose exports the summary instead.
 
 ### Why host facts show `protection: unknown`
 

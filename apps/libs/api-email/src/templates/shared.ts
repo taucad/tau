@@ -33,8 +33,8 @@ export type TauEmailLayoutProps = LayoutOptions & {
   /** Mono kicker above the heading, authored in sentence case and rendered uppercase. */
   readonly kicker: string;
   readonly heading: string;
-  /** Footer sentence explaining why this person received the email. */
-  readonly reason: string;
+  /** Footer sentence explaining why this person received the email; addresses in it use `address`. */
+  readonly reason: ReactNode;
   readonly children?: ReactNode;
 };
 
@@ -122,45 +122,108 @@ const styles = {
     color: light.muted,
     wordBreak: 'break-all',
   },
-  rule: { borderTop: `1px solid ${light.border}`, borderBottom: 'none', margin: '24px 0' },
+  // Gmail and Outlook ignore `color: inherit` on links and paint them blue, so the colour is explicit.
+  fallbackLink: { color: light.muted, textDecoration: 'underline' },
+  // With images blocked (classic Outlook, Gmail with non-Google accounts) the alt text stands in for the wordmark.
+  wordmark: {
+    display: 'block',
+    border: 0,
+    fontFamily: fontStack.sans,
+    fontSize: '16px',
+    lineHeight: '21px',
+    fontWeight: 600,
+    color: light.brand,
+  },
+  rule: {
+    borderTop: `1px solid ${light.border}`,
+    borderBottom: 'none',
+    margin: '24px 0',
+  },
   footer: { padding: '24px 0 0' },
   footerText: { margin: '0 0 8px', fontSize: '12px', lineHeight: '18px', color: light.muted },
   footerLink: { color: light.muted, textDecoration: 'underline' },
   inlineLink: { color: light.foreground, textDecoration: 'underline' },
+  addressBody: {
+    color: light.foreground,
+    textDecoration: 'none',
+    fontWeight: 600,
+  },
+  addressFooter: { color: light.muted, textDecoration: 'none' },
 } as const satisfies Record<string, CSSProperties>;
+
+/**
+ * Wordmark box in CSS pixels. `apps/ui/public/wordmark.png` is 1674×512, so 21 px tall is 69 px wide; Outlook for
+ * Windows sizes images from these attributes, not CSS. A test reads the PNG header and fails on drift.
+ */
+export const wordmarkSize = { width: 69, height: 21 } as const;
 
 /** React-email's Font emits a global `*` rule, so only one may exist; the mono face is a plain @font-face. */
 const monoFontFace = (assetBase: string): string =>
   `@font-face { font-family: 'Geist Mono'; font-style: normal; font-weight: 100 900; mso-font-alt: 'Consolas'; src: url(${assetBase}/fonts/GeistMono-Variable.woff2) format('woff2'); }`;
 
-/** Only the rules inline styles cannot express: the dark scheme and the narrow-width reflow. */
-const responsiveCss = `
-  @media (max-width: 600px) {
-    /* react-email moves Section padding onto the inner cell, so the overrides target the cell, not the table. */
-    .tau-container > tbody > tr > td { padding: 16px !important; }
-    .tau-card > tbody > tr > td { padding: 24px 20px !important; }
-    .tau-action { display: block !important; width: 100% !important; box-sizing: border-box !important; text-align: center !important; }
-    .tau-detail-label, .tau-detail-value { display: block !important; width: 100% !important; text-align: left !important; }
-    .tau-detail-label { padding-bottom: 0 !important; }
-    .tau-detail-value { padding-top: 2px !important; }
-  }
-  @media (prefers-color-scheme: dark) {
-    /* Body puts the className on <body> but repeats the same inline background on an unclassed wrapper cell that
-       paints over it. Both have to be overridden or the page stays light around the card. */
-    .tau-body,
-    .tau-body > table > tbody > tr > td { background-color: ${dark.canvas} !important; }
-    .tau-card { background-color: ${dark.surface} !important; border-color: ${dark.border} !important; }
-    .tau-fg, .tau-fg a { color: ${dark.foreground} !important; }
-    .tau-muted, .tau-muted a { color: ${dark.muted} !important; }
-    .tau-detail { background-color: ${dark.detail} !important; }
-    .tau-rule { border-top-color: ${dark.border} !important; }
-    /* Row authors its separator inline on the row table; without this the rows keep the light border. */
-    .tau-rule-row,
-    .tau-rule-row > tbody > tr,
-    .tau-rule-row > tbody > tr > td { border-top-color: ${dark.rowBorder} !important; }
-    .tau-action { background-color: ${dark.action} !important; background-image: ${light.actionSheen} !important; border-color: ${dark.actionBorder} !important; color: ${dark.actionForeground} !important; }
-  }
-`;
+/*
+ * The stylesheet ships as one purpose per <style> block, most important first. Gmail drops a whole block when it
+ * meets a rule it rejects (attribute selectors, nested at-rules, a block over its size limit), so a failure in a
+ * later block cannot take an earlier one with it. The CSS strings carry no comments: Apple Mail starts its inbox
+ * preview at the first literal `<body>` in the raw HTML, even one inside a comment, and Yahoo skips the rule after
+ * a comment. Explanations live here instead.
+ *
+ * Narrow width: react-email moves Section padding onto the inner cell, so the overrides target the cell.
+ *
+ * Dark: Body puts the className on the body element but repeats the same inline background on an unclassed wrapper
+ * cell, so both are overridden. Row authors its separator inline on the row table, hence the rule-row selectors.
+ *
+ * Client attributes: Apple data detectors wrap addresses and dates in blue links; Outlook.com and the Outlook apps
+ * ignore prefers-color-scheme and mark the elements they invert with data-ogsc (text) and data-ogsb (background).
+ */
+const narrowCss = [
+  '@media (max-width: 600px) {',
+  '.tau-container > tbody > tr > td { padding: 16px !important; }',
+  '.tau-card > tbody > tr > td { padding: 24px 20px !important; }',
+  '.tau-action { display: block !important; width: 100% !important; box-sizing: border-box !important; text-align: center !important; }',
+  '.tau-detail-label, .tau-detail-value { display: block !important; width: 100% !important; text-align: left !important; }',
+  '.tau-detail-label { padding-bottom: 0 !important; }',
+  '.tau-detail-value { padding-top: 2px !important; }',
+  '}',
+].join('\n');
+
+const darkCss = [
+  '@media (prefers-color-scheme: dark) {',
+  `.tau-body, .tau-body > table > tbody > tr > td { background-color: ${dark.canvas} !important; }`,
+  `.tau-card { background-color: ${dark.surface} !important; border-color: ${dark.border} !important; }`,
+  `.tau-fg, .tau-fg a { color: ${dark.foreground} !important; }`,
+  `.tau-muted, .tau-muted a { color: ${dark.muted} !important; }`,
+  `.tau-detail { background-color: ${dark.detail} !important; }`,
+  `.tau-rule { border-top-color: ${dark.border} !important; }`,
+  `.tau-rule-row, .tau-rule-row > tbody > tr, .tau-rule-row > tbody > tr > td { border-top-color: ${dark.rowBorder} !important; }`,
+  `.tau-action { background-color: ${dark.action} !important; background-image: ${light.actionSheen} !important; border-color: ${dark.actionBorder} !important; color: ${dark.actionForeground} !important; }`,
+  '}',
+].join('\n');
+
+const clientCss = [
+  'a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font-size: inherit !important; font-family: inherit !important; font-weight: inherit !important; line-height: inherit !important; }',
+  `[data-ogsc] .tau-fg, [data-ogsc] .tau-fg a { color: ${dark.foreground} !important; }`,
+  `[data-ogsc] .tau-muted, [data-ogsc] .tau-muted a { color: ${dark.muted} !important; }`,
+  `[data-ogsc] .tau-action { color: ${dark.actionForeground} !important; }`,
+  `[data-ogsb] .tau-body, [data-ogsb] .tau-body > table > tbody > tr > td { background-color: ${dark.canvas} !important; }`,
+  `[data-ogsb] .tau-card { background-color: ${dark.surface} !important; }`,
+  `[data-ogsb] .tau-detail { background-color: ${dark.detail} !important; }`,
+  `[data-ogsb] .tau-action { background-color: ${dark.action} !important; }`,
+].join('\n');
+
+/*
+ * Word-engine Outlook ignores max-width, so the container sits in a fixed-width table only Outlook reads. React
+ * cannot emit conditional comments, so the layout renders placeholder elements that `finalizeEmailHtml` swaps out.
+ */
+const msoOpenTag = 'tau-mso-open';
+const msoCloseTag = 'tau-mso-close';
+const msoOpen =
+  '<!--[if mso]><table role="presentation" width="560" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->';
+const msoClose = '<!--[if mso]></td></tr></table><![endif]-->';
+
+/** Replaces the layout's placeholders with the raw HTML React cannot render. Run on every rendered email. */
+export const finalizeEmailHtml = (html: string): string =>
+  html.replace(`<${msoOpenTag}></${msoOpenTag}>`, msoOpen).replace(`<${msoCloseTag}></${msoCloseTag}>`, msoClose);
 
 export const tauEmailLayout = ({
   assetBase,
@@ -180,19 +243,29 @@ export const tauEmailLayout = ({
       null,
       createElement('title', null, subject),
       createElement('meta', { name: 'color-scheme', content: 'light dark' }),
-      createElement('meta', { name: 'supported-color-schemes', content: 'light dark' }),
+      createElement('meta', {
+        name: 'supported-color-schemes',
+        content: 'light dark',
+      }),
+      createElement('style', null, narrowCss),
+      createElement('style', null, darkCss),
+      createElement('style', null, clientCss),
+      // Fonts last: Gmail rejects @font-face, and a rejected block must not be one the layout depends on.
+      createElement('style', null, monoFontFace(assetBase)),
       createElement(Font, {
         fontFamily: 'Geist',
         fallbackFontFamily: ['Helvetica', 'Arial', 'sans-serif'],
         webFont: { url: `${assetBase}/fonts/Geist-Variable.woff2`, format: 'woff2' },
         fontWeight: '100 900',
       }),
-      createElement('style', null, `${monoFontFace(assetBase)}${responsiveCss}`),
     ),
-    createElement(Preview, null, preheader),
+    // The layout's own <title> holds the subject; Preview would add a second one holding the preheader.
+    // oxlint-disable-next-line react/no-children-prop -- Preview requires children in its props type, so createElement's variadic form does not typecheck against it.
+    createElement(Preview, { useTitleTag: false, children: preheader }),
     createElement(
       Body,
       { className: 'tau-body', style: styles.body },
+      createElement(msoOpenTag),
       createElement(
         Container,
         { className: 'tau-container', style: styles.container },
@@ -201,10 +274,10 @@ export const tauEmailLayout = ({
           { style: styles.header },
           createElement(Img, {
             src: `${assetBase}/wordmark.png`,
-            width: '56',
-            height: '21',
+            width: String(wordmarkSize.width),
+            height: String(wordmarkSize.height),
             alt: 'Tau',
-            style: { display: 'block' },
+            style: styles.wordmark,
           }),
         ),
         createElement(
@@ -235,6 +308,7 @@ export const tauEmailLayout = ({
           ),
         ),
       ),
+      createElement(msoCloseTag),
     ),
   );
 
@@ -251,6 +325,30 @@ export const inlineLink = ({
   readonly href: string;
   readonly children?: ReactNode;
 }): ReactElement => createElement(Link, { href, style: styles.inlineLink }, children);
+
+/**
+ * An email address as a Tau-styled mailto link. Gmail and Apple Mail otherwise turn a bare address into their own
+ * blue link, so the address looks different in every client; an address that is already a link is left alone.
+ */
+export const address = ({
+  email,
+  tone = 'body',
+}: {
+  readonly email: string;
+  readonly tone?: 'body' | 'footer';
+}): ReactElement =>
+  createElement(
+    Link,
+    {
+      href: `mailto:${email}`,
+      className: tone === 'body' ? 'tau-address tau-fg' : 'tau-address tau-muted',
+      style: tone === 'body' ? styles.addressBody : styles.addressFooter,
+    },
+    email,
+  );
+
+/** Joins sentence fragments, some of them elements, into one node without React key warnings. */
+export const sentence = (...parts: readonly ReactNode[]): ReactElement => createElement(Fragment, null, ...parts);
 
 export type DetailRow = { readonly label: string; readonly value: ReactNode };
 
@@ -320,7 +418,7 @@ export const primaryAction = ({
       createElement(
         Text,
         { className: 'tau-muted', style: styles.fallbackUrl },
-        createElement(Link, { href, style: { color: 'inherit', textDecoration: 'underline' } }, href),
+        createElement(Link, { href, style: styles.fallbackLink }, href),
       ),
     ),
   );

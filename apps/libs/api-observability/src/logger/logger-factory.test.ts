@@ -27,6 +27,8 @@ describe('request log URL redaction', () => {
     ['/v1/github/callback/?error=access_denied&state=oauth-state', '/v1/github/callback/'],
     ['/v1/auth/callback/github?code=oauth-code&state=oauth-state', '/v1/auth/callback/github'],
     ['/v1/auth/callback/google?code=oauth-code', '/v1/auth/callback/google'],
+    ['/v1/auth/verify-email?token=jwt&callbackURL=%2F', '/v1/auth/verify-email'],
+    ['/v1/auth/magic-link/verify?token=secret&callbackURL=%2F', '/v1/auth/magic-link/verify'],
   ])('should keep only the path of the OAuth callback %s', (url, path) => {
     expect(redactUrlQuery(url)).toBe(path);
   });

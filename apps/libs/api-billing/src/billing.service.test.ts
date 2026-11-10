@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type Stripe from 'stripe';
-import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BillingService } from '#billing.service.js';
 import type { DatabaseService } from '@taucad/api-database';
@@ -159,37 +158,12 @@ describe('owned paid access deadlines', () => {
 });
 
 /*
- * Charter D23: the free tier's sync ships in code and stays shut until the
- * go-live checklist opens it. Every server gate (push, register, publish) and
- * the browser's plan read this projection, so this is the one switch.
+ * Every server gate (push, register, publish) and the browser's plan read this
+ * projection: a free account syncs within its 1 GB allowance.
  */
-describe('free-tier sync gate (D23)', () => {
-  it('should keep a free account off Tau Cloud sync while the gate is unset', async () => {
+describe('free-tier sync', () => {
+  it('should let a free account sync and publish', async () => {
     const { service } = createService([], false);
-    expect(await service.getEntitlements('user-a')).toMatchObject({
-      tier: 'free',
-      canSyncFiles: false,
-    });
-  });
-
-  /* F1: the flag is inert in production until the go-live commit deletes the clause. */
-  it('should ignore the gate under NODE_ENV=production and say so once', async () => {
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    /* ConfigService reads process.env before its own values, and vitest sets NODE_ENV=test. */
-    vi.stubEnv('NODE_ENV', 'production');
-    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
-
-    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', canSyncFiles: false });
-    await service.getEntitlements('user-a');
-    expect(warn.mock.calls.filter(([message]) => String(message).includes('TAU_FREE_TIER_SYNC_ENABLED'))).toHaveLength(
-      1,
-    );
-    warn.mockRestore();
-    vi.unstubAllEnvs();
-  });
-
-  it('should let a free account sync and publish once the deployment opens the gate', async () => {
-    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
     expect(await service.getEntitlements('user-a')).toMatchObject({
       tier: 'free',
       canSyncFiles: true,
@@ -197,8 +171,8 @@ describe('free-tier sync gate (D23)', () => {
     });
   });
 
-  it('should leave a paid account syncing whatever the gate says', async () => {
-    const { service } = createService([row()], true, { TAU_FREE_TIER_SYNC_ENABLED: false });
+  it('should leave a paid account syncing', async () => {
+    const { service } = createService([row()], true);
     expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', canSyncFiles: true });
   });
 });

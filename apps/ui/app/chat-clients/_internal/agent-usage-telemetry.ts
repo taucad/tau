@@ -615,11 +615,12 @@ const countedSince = <Entry, Labels extends Readonly<Record<string, string>>>(
 };
 
 /**
- * The prefix breaks this turn's replies recorded, by cause and provider, with the reasoning blocks they left out.
+ * The prefix breaks this turn's replies recorded, by cause, provider and what each cost in prompt cache, with the
+ * reasoning blocks they left out.
  *
  * @param run - The run's ledger entry.
  * @param initialRun - The entry as it stood when this turn was admitted: a resumed run's earlier attempts.
- * @returns One counted row per cause and provider; empty when every request reproduced its prefix.
+ * @returns One counted row per cause, provider and cache outcome; empty when every request reproduced its prefix.
  */
 const prefixBreaksOf = (
   run: RunEntry | undefined,
@@ -629,8 +630,9 @@ const prefixBreaksOf = (
   for (const entry of (run?.prefixBreaks ?? []).slice(initialRun?.prefixBreaks?.length ?? 0)) {
     /* The host's cause union is the ingest vocabulary; a provider the gateway vocabulary does not name is `other`. */
     const provider = llmGatewayProviders.find((candidate) => candidate === entry.provider) ?? 'other';
-    const key = `${entry.cause}:${provider}`;
-    const row = rows.get(key) ?? { cause: entry.cause, provider, count: 0, reasoningOmitted: 0 };
+    const outcome = entry.cache ?? 'unreported';
+    const key = `${entry.cause}:${provider}:${outcome}`;
+    const row = rows.get(key) ?? { cause: entry.cause, provider, outcome, count: 0, reasoningOmitted: 0 };
     rows.set(key, { ...row, count: row.count + 1, reasoningOmitted: row.reasoningOmitted + entry.dropped });
   }
   return [...rows.values()];

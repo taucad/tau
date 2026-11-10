@@ -189,6 +189,25 @@ export const parkPointer = async (page: Page): Promise<void> => {
   );
 };
 
+/**
+ * Open the workbench Model tree with its Ctrl+A shortcut, as a person does from outside text.
+ *
+ * Ctrl+A keeps Select All inside editable text (#1189), so pressing it while a parameter field
+ * or the composer still has focus selects that text and opens nothing. Focus leaves the text
+ * first; the shortcut itself is what is exercised.
+ *
+ * @param page - The renderer, on a project route.
+ */
+export const pressModelTreeShortcut = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== document.body) {
+      focused.blur();
+    }
+  });
+  await page.keyboard.press('Control+a');
+};
+
 /** Choose the CAD kernel from the home page's kernel row. */
 export const selectKernel = async (page: Page, kernelName: string): Promise<void> => {
   await page.getByRole('button', { name: kernelName, exact: true }).first().click();

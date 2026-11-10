@@ -239,9 +239,13 @@ export class TelemetryController {
         [AttributeKey.AGENT_COMPACTION_OUTCOME]: compactionOutcome,
       });
     }
-    for (const { cause, provider, count, reasoningOmitted } of prefixBreaks ?? []) {
+    for (const { cause, provider, outcome: cacheOutcome, count, reasoningOmitted } of prefixBreaks ?? []) {
       const broken = { ...agent, [AttributeKey.AGENT_PREFIX_BREAK_CAUSE]: cause };
-      this.metrics.agentPrefixBreaks.add(count, { ...broken, [AttributeKey.GEN_AI_PROVIDER_NAME]: provider });
+      this.metrics.agentPrefixBreaks.add(count, {
+        ...broken,
+        [AttributeKey.GEN_AI_PROVIDER_NAME]: provider,
+        'tau.prompt_cache.outcome': cacheOutcome ?? 'unreported',
+      });
       if (reasoningOmitted > 0) {
         this.metrics.agentReasoningOmittedBlocks.add(reasoningOmitted, broken);
       }

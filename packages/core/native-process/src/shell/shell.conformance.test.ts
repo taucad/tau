@@ -8,8 +8,9 @@
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only the noncacheable Nx target sets. `TAU_SHELL_CONFORMANCE_ROW` names
  * the row (LNX-U, LNX-U26, LNX-D, MAC-A, MAC-X), `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, and on Linux
- * `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap. macOS terminal rows are recorded
- * `operator-validation-pending` and never run here (ruling 2026-10-24T05:39Z).
+ * `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap. The Terminal rows (C08, C09) run on every row
+ * with the provider configured as the desktop ships it; on macOS that is the own-pty Seatbelt rule, and C09 proves a
+ * shell cannot write to or read the size of another session's tty (operator ruling 2026-11-09).
  */
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -320,7 +321,7 @@ describe.runIf(enabled)('shell conformance', () => {
     writeFileSync(join(outside, 'canary.txt'), 'OUTSIDE-CANARY\n');
     writeFileSync(join(home, 'notes.txt'), 'HOME-NOTES\n');
     writeFileSync(join(home, '.ssh', 'id_canary'), 'SSH-CANARY\n');
-    provider = createSandboxShellProvider({ bwrapPath, home });
+    provider = createSandboxShellProvider({ bwrapPath, home, ...(linux ? {} : { macOSTerminal: true }) });
     ready = true;
   });
 
@@ -690,70 +691,106 @@ describe.runIf(enabled)('shell conformance', () => {
     expect(statSync(beat).size).toBe(size);
   });
 
-  if (linux) {
-    conformance('C08', 'the Terminal shell owns its tty with job control, resize and Ctrl-C', async () => {
-      const process_ = await start(
-        launchOf('', {
-          arguments: ['--noprofile', '--norc', '--noediting', '-i'],
-          environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', PS1: '', TERM: 'dumb' },
-          stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
-        }),
-      );
-      if (process_.kind !== 'terminal') {
-        throw new Error('expected a terminal launch');
+  /** One interactive Terminal shell, typed into and read back the way the services host does. */
+  const openTerminal = async () => {
+    const process_ = await start(
+      launchOf('', {
+        arguments: ['--noprofile', '--norc', '--noediting', '-i'],
+        environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', PS1: '', TERM: 'dumb' },
+        stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
+      }),
+    );
+    if (process_.kind !== 'terminal') {
+      throw new Error('expected a terminal launch');
+    }
+    const session = { process: process_, transcript: '' };
+    const reading = (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of process_.output) {
+        session.transcript += decoder.decode(chunk, { stream: true });
       }
-      let transcript = '';
-      const reading = (async () => {
-        const decoder = new TextDecoder();
-        for await (const chunk of process_.output) {
-          transcript += decoder.decode(chunk, { stream: true });
+    })();
+    const waitFor = async (marker: string | RegExp): Promise<void> => {
+      const seen = (): boolean =>
+        typeof marker === 'string' ? session.transcript.includes(marker) : marker.test(session.transcript);
+      for (const deadline = Date.now() + 15_000; !seen(); ) {
+        if (Date.now() > deadline) {
+          throw new Error(`no ${marker} in ${JSON.stringify(session.transcript)}`);
         }
-      })();
-      const waitFor = async (marker: string): Promise<void> => {
-        for (const deadline = Date.now() + 15_000; !transcript.includes(marker); ) {
-          if (Date.now() > deadline) {
-            throw new Error(`no ${marker} in ${JSON.stringify(transcript)}`);
-          }
-          // oxlint-disable-next-line no-await-in-loop -- polls the transcript until the marker arrives.
-          await delay(20);
-        }
-      };
-      const type = (line: string): void => {
-        process_.write(new TextEncoder().encode(line));
-      };
+        // oxlint-disable-next-line no-await-in-loop -- polls the transcript until the marker arrives.
+        await delay(20);
+      }
+    };
+    const type = (line: string): void => {
+      process_.write(new TextEncoder().encode(line));
+    };
+    return { session, process: process_, reading, waitFor, type };
+  };
 
-      type('test -t 0 && echo TTY-$((40+2)); case $- in *m*) echo JOBS-$((2+3)) ;; esac\n');
-      await waitFor('TTY-42');
-      await waitFor('JOBS-5');
-      process_.resize({ columns: 137, rows: 43 });
-      type('echo SIZE-$(stty size | tr " " x)\n');
-      await waitFor('SIZE-43x137');
-      type('sleep 30\n');
-      await delay(300);
-      type('\u0003');
-      type('echo AFTER-$((1+1))\n');
-      await waitFor('AFTER-2');
-      type('exit 3\n');
+  /*
+   * Both platforms run the Terminal as the desktop ships it: on macOS that is the provider's `macOSTerminal` own-pty
+   * Seatbelt rule (`services-host-shell.ts`), so these rows qualify the shipped rule rather than a refusal.
+   */
+  conformance('C08', 'the Terminal shell owns its tty with job control, resize and Ctrl-C', async () => {
+    const { process: process_, reading, waitFor, type } = await openTerminal();
+    type('test -t 0 && echo TTY-$((40+2)); case $- in *m*) echo JOBS-$((2+3)) ;; esac\n');
+    await waitFor('TTY-42');
+    await waitFor('JOBS-5');
+    process_.resize({ columns: 137, rows: 43 });
+    type('echo SIZE-$(stty size | tr " " x)\n');
+    await waitFor('SIZE-43x137');
+    type('sleep 30\n');
+    await delay(300);
+    type('\u0003');
+    type('echo AFTER-$((1+1))\n');
+    await waitFor('AFTER-2');
+    type('exit 3\n');
 
-      expect(await process_.exited).toStrictEqual({ exitCode: 3 });
-      await reading;
-    });
-  } else {
-    conformance('C08', 'the Terminal stays refused until the own-pty validation run', async () => {
-      const outcome = await provider.launch(
+    expect(await process_.exited).toStrictEqual({ exitCode: 3 });
+    await reading;
+  });
+
+  conformance('C09', "a Terminal shell reaches only its own tty, never another session's", async () => {
+    const first = await openTerminal();
+    const second = await openTerminal();
+    second.type('echo "TTY<$(tty)>"\n');
+    await second.waitFor('TTY</dev/');
+    const other = /TTY<(\/dev\/[^>\s]+)>/u.exec(second.session.transcript)?.[1];
+    if (other === undefined) {
+      throw new Error(`no tty path in ${JSON.stringify(second.session.transcript)}`);
+    }
+    // Only the shell's own expansion prints PATHCHECK-7 or PATHCHECK-8; the tty echo of the command line cannot.
+    first.type(`echo PATHCHECK-$([ "$(tty)" = ${other} ] && echo $((3+4)) || echo $((4+4)))\n`);
+    await first.waitFor(/PATHCHECK-[78]/u);
+    // A sandbox with its own pty namespace (Linux) can name the same path; it is then this shell's own tty.
+    const samePath = first.session.transcript.includes('PATHCHECK-7');
+    first.type(
+      `printf 'INJECTED-%s' $((20+3)) > ${other} 2>/dev/null && echo WROTE-$((3+3)) || echo WRITE-DENIED-$((4+5))\n`,
+    );
+    await first.waitFor(samePath ? 'WROTE-6' : 'WRITE-DENIED-9');
+    if (!samePath) {
+      first.type(`stty size < ${other} 2>/dev/null && echo READ-SIZE-$((1+2)) || echo SIZE-DENIED-$((5+5))\n`);
+      await first.waitFor('SIZE-DENIED-10');
+    }
+    await delay(500);
+
+    expect(second.session.transcript).not.toContain('INJECTED-23');
+
+    first.type('exit 0\n');
+    second.type('exit 0\n');
+
+    expect(await first.process.exited).toStrictEqual({ exitCode: 0 });
+    expect(await second.process.exited).toStrictEqual({ exitCode: 0 });
+    await Promise.all([first.reading, second.reading]);
+  });
+
+  if (!linux) {
+    conformance('C19', 'a provider without the own-pty rule still refuses the Terminal', async () => {
+      const outcome = await createSandboxShellProvider({ bwrapPath, home }).launch(
         launchOf('', { stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
       );
 
       expect(outcome.status).toBe('unsupported');
-    });
-
-    it('C09: macOS own-pty Terminal containment', () => {
-      results.push({
-        id: 'C09',
-        title: 'macOS own-pty Terminal containment',
-        status: 'operator-validation-pending',
-        detail: 'Not run by agents; the operator runs the own-pty validation (ruling 2026-10-24T05:39Z).',
-      });
     });
   }
 });

@@ -4,6 +4,8 @@ import { useSession } from '@better-auth-ui/react';
 import type { PostHog, PostHogConfig } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
 import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
+import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
+import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
@@ -28,6 +30,20 @@ const loadSdk = async (): Promise<PostHog> => {
 };
 
 const isCapturing = (): boolean => sdk?.__loaded === true && !sdk.has_opted_out_capturing();
+
+/**
+ * Where a Sentry event's PostHog person and replay are (SB7). Read at event time, so it is absent the
+ * moment capture stops, and the replay link exists only while a recording runs.
+ */
+const readAnalyticsLink = (): AnalyticsLink | undefined => {
+  if (sdk === undefined || !isCapturing()) {
+    return undefined;
+  }
+  const personUrl = `${sdk.requestRouter.endpointFor('ui')}/project/${sdk.config.token}/person/${encodeURIComponent(sdk.get_distinct_id())}`;
+  return sdk.sessionRecordingStarted()
+    ? { personUrl, replayUrl: sdk.get_session_replay_url({ withTimestamp: true, timestampLookBack: 30 }) }
+    : { personUrl };
+};
 
 /**
  * Starts replay outside the critical rendering path.
@@ -71,6 +87,10 @@ function PostHogLifecycle({
      its own generation in state. Identification runs only while the two agree, and the state write
      is what re-renders to let it run. */
   const decision = useRef(0);
+  /* Whether this document has seen analytics off: an admission after that is a grant made here (on the
+     website in another tab, in the banner or in Cookie preferences), which PostHog records as `$opt_in`.
+     A load that starts already admitted is a returning visitor, not a new grant. */
+  const hasBeenInactive = useRef(false);
   const [admittedGeneration, setAdmittedGeneration] = useState(0);
 
   useEffect(() => {
@@ -78,6 +98,8 @@ function PostHogLifecycle({
     decision.current += 1;
     const generation = decision.current;
     if (!isActive) {
+      hasBeenInactive.current = true;
+      setAnalyticsLinkSource(undefined);
       /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
          which only an admission reaches. The storage a previous admission left is still cleared. */
       if (sdk?.__loaded === true) {
@@ -111,11 +133,15 @@ function PostHogLifecycle({
       } else {
         posthog.init(apiKey, options);
       }
+      const isGrantedHere = hasBeenInactive.current;
       // Re-acceptance, or a persisted opt-out marker from an earlier withdrawal. The SDK's
       // initial-pageview guard keeps this from emitting a second `$pageview`.
       if (posthog.has_opted_out_capturing()) {
-        posthog.opt_in_capturing({ captureEventName: false });
+        posthog.opt_in_capturing({ captureEventName: isGrantedHere ? '$opt_in' : false });
+      } else if (isGrantedHere) {
+        posthog.capture('$opt_in');
       }
+      setAnalyticsLinkSource(readAnalyticsLink);
       setAdmittedGeneration(generation);
       if (!isReplayEnabled) {
         return;
@@ -129,6 +155,7 @@ function PostHogLifecycle({
     return () => {
       withdrawn = true;
       cancelReplay?.();
+      setAnalyticsLinkSource(undefined);
     };
     // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
   }, [isActive, options, isReplayEnabled]);

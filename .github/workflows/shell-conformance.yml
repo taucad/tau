@@ -9,7 +9,7 @@
 #   namespaces only through the Tau-scoped profile the real APT selector installs with its bwrap copy. This
 #   row never uses `setup-linux-sandbox`, which relaxes that sysctl for the CAD workers.
 # - MAC-A and MAC-X: hosted `macos-26` (arm64) and `macos-26-intel` (x64), Seatbelt through the same
-#   provider. The macOS Terminal rows are recorded `operator-validation-pending`, never run here.
+#   provider. The macOS Terminal rows run with the shipped own-pty Seatbelt rule (operator ruling 2026-11-09).
 # - WIN-ARM is not a row yet: the Windows provider is paused.
 #
 # Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
@@ -133,6 +133,17 @@ jobs:
       - name: Install ripgrep
         run: command -v rg || brew install ripgrep
 
+      # node-pty 1.1.0 publishes its macOS `spawn-helper` mode 0644 and its fork path execs it, so every Terminal
+      # launch from the checkout fails with `posix_spawnp failed`. The packaged app sets the bit at staging
+      # (`runtime-stage.mts`); the rows run node-pty from the workspace, so they set it the same way here.
+      - name: Make the workspace node-pty spawn-helper executable
+        run: |
+          set -euo pipefail
+          helpers=$(find node_modules/.pnpm -path '*/node-pty/prebuilds/darwin-*/spawn-helper' -type f)
+          [ -n "$helpers" ] || { echo '::error::no node-pty darwin spawn-helper in the workspace'; exit 1; }
+          echo "$helpers" | xargs chmod 0755
+          echo "$helpers" | xargs ls -l
+
       - name: Run the conformance target
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
@@ -154,8 +165,7 @@ jobs:
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
         run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification --skip-nx-cache
 
-      # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
-      # until the operator's own-pty run, which this workflow never performs.
+      # The desktop Terminal rows (W5): probe, refusal and PTY rows, on macOS with the shipped own-pty Seatbelt rule.
       - name: Run the desktop terminal conformance target
         if: success() || failure()
         env:

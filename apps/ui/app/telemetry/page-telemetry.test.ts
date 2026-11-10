@@ -364,6 +364,28 @@ describe('createPageTelemetry', () => {
     ]);
   });
 
+  it('should count a detected tab kill by kernel and phase, with nothing else about the model', async () => {
+    const { page, posts } = harness();
+    page.setIdentity({ kind: 'signed-out' });
+    page.recordKill({ kernel: 'replicad', phase: 'gpu-upload', classification: 'foreground' });
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval);
+
+    const kills = posts()
+      .flatMap((post) => post.entries)
+      .filter((entry) => entry.name === 'runtime.kill');
+    expect(kills.map((entry) => entry.detail)).toEqual([
+      {
+        kernel: 'replicad',
+        phase: 'gpu-upload',
+        classification: 'foreground',
+        route: 'browser',
+        release: 'abcdef012345',
+        device: 'standard',
+        platform: 'chromium',
+      },
+    ]);
+  });
+
   it('should hand workers its context, without a caller', () => {
     const { page } = harness();
 

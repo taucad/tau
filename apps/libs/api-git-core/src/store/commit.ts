@@ -10,6 +10,7 @@ import { compactLease, shouldCompact } from '#store/compaction.js';
 import { RepositoryStoreError } from '#store/errors.js';
 import type { FaultInjector } from '#store/fault-points.js';
 import { readLeaseReferences, runGit } from '#store/lease.js';
+import { pushCarriesAnonymousCommit } from '#store/push-anonymity.js';
 import type { RepositoryLease } from '#store/lease.js';
 import {
   commitDeadlineMilliseconds,
@@ -311,13 +312,16 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       return undefined;
     }
     await assertCommittable(lease);
-    const inLease = await packFilesIn(lease.directory);
-    return { references, arrived: inLease.filter((name) => !lease.hydratedPackFiles.has(name)) };
+    const [inLease, anonymous] = await Promise.all([
+      packFilesIn(lease.directory),
+      pushCarriesAnonymousCommit({ directory: lease.directory, before: lease.manifest?.refs ?? {}, after: references }),
+    ]);
+    return { references, anonymous, arrived: inLease.filter((name) => !lease.hydratedPackFiles.has(name)) };
   });
   if (prepared === undefined) {
     return { committed: false, reason: 'no-ref-change' };
   }
-  const { references } = prepared;
+  const { references, anonymous } = prepared;
 
   const hydrated = lease.manifest?.packs ?? [];
   const plan = async (defer: boolean): Promise<PackPlan & { uploads: PlannedUpload[] }> => {
@@ -358,6 +362,7 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       packs: [...retainedLive, ...uploaded],
       committedBy: args.committedBy,
       ...(args.viaDevice === undefined ? {} : { viaDevice: args.viaDevice }),
+      anonymous,
     },
     at,
   );
@@ -455,7 +460,15 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         rebases < maximumRebases;
       const over = rebasable
         ? // oxlint-disable-next-line no-await-in-loop -- as above
-          await rebaseOverCompaction({ ...args, references, uploaded, arrived: prepared.arrived, at, byteCeiling })
+          await rebaseOverCompaction({
+            ...args,
+            references,
+            anonymous,
+            uploaded,
+            arrived: prepared.arrived,
+            at,
+            byteCeiling,
+          })
         : undefined;
       if (over === undefined) {
         throw error;
@@ -558,6 +571,7 @@ const rebaseOverCompaction = async (args: {
   committedBy: string;
   viaDevice?: string;
   references: Manifest['refs'];
+  anonymous: boolean;
   uploaded: readonly ManifestPack[];
   arrived: readonly string[];
   at: Date;
@@ -589,6 +603,7 @@ const rebaseOverCompaction = async (args: {
       packs: [...newer.packs, ...args.uploaded],
       committedBy: args.committedBy,
       ...(args.viaDevice === undefined ? {} : { viaDevice: args.viaDevice }),
+      anonymous: args.anonymous,
     },
     args.at,
   );

@@ -1318,7 +1318,7 @@ const startTree = async (
   filesystem: RevisionFileSystem,
   extra: Partial<RevisionActorsOptions> = {},
 ) => {
-  const { actor } = createProjectRevisionsActor({
+  const { actor, checkLargeObjects } = createProjectRevisionsActor({
     port,
     projectId: 'project-1',
     filesystem: async () => filesystem,
@@ -1354,7 +1354,7 @@ const startTree = async (
     });
     return minted('save', saves);
   };
-  return { actor, facts, minted, mintedIds, save };
+  return { actor, facts, minted, mintedIds, save, checkLargeObjects };
 };
 
 describe('restore, through the machine that owns it', () => {
@@ -1449,6 +1449,101 @@ describe('restore, through the machine that owns it', () => {
       closure: ['tau.json'],
     });
     expect(release).toHaveBeenCalledOnce();
+    tree.actor.stop();
+  }, 30_000);
+
+  /*
+   * L5: a restore that fails part-way must not leave the reading at treeReady with nothing that can move it. A
+   * write that rolled itself back left the checkout whole; one whose rollback failed too is put back by the
+   * person's Try again, so the viewer never waits on "Preparing model" with a button that cannot help.
+   */
+  const failingWrites = async (): Promise<{
+    tree: Awaited<ReturnType<typeof startTree>>;
+    filesystem: RevisionFileSystem;
+    outcomes: Array<{ failed?: boolean } | undefined>;
+    first: string;
+    fail: (count: number, after?: number) => void;
+  }> => {
+    let failures = 0;
+    let passes = 0;
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    const failing = new Proxy(filesystem, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+        if (property === 'applyBatch') {
+          return async (...parameters: unknown[]) => {
+            if (failures > 0 && passes > 0) {
+              passes -= 1;
+            } else if (failures > 0) {
+              failures -= 1;
+              throw new Error('The disk refused the write.');
+            }
+            return bound(...parameters);
+          };
+        }
+        return bound;
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const outcomes: Array<{ failed?: boolean } | undefined> = [];
+    const tree = await startTree(port, failing, {
+      onApplyingTree: (_place, _paths, bracket) =>
+        bracket?.purpose === 'tree'
+          ? (outcome) => {
+              outcomes.push(outcome);
+            }
+          : undefined,
+    });
+    /* A restore to `first` creates one file and replaces another: two changesets, so a failure between them tears. */
+    await filesystem.writeFile('extra.txt', 'added\n');
+    const first = await tree.save();
+    await filesystem.unlink('extra.txt');
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    await tree.save();
+    return {
+      tree,
+      filesystem,
+      outcomes,
+      first,
+      fail: (count, after = 0) => {
+        failures = count;
+        passes = after;
+      },
+    };
+  };
+
+  it.fails('tells a tree write that rolled itself back as whole, not torn', async () => {
+    const { tree, filesystem, outcomes, first, fail } = await failingWrites();
+    /* The second changeset fails and the rollback lands: the checkout is whole again. */
+    fail(1, 1);
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => outcomes.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+    expect(outcomes.some((outcome) => outcome?.failed === true)).toBe(false);
+    expect(await filesystem.exists('extra.txt')).toBe(false);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 2;\n');
+    tree.actor.stop();
+  }, 30_000);
+
+  it.fails('puts a torn checkout back when the person tries again', async () => {
+    const { tree, filesystem, outcomes, first, fail } = await failingWrites();
+    /* The second changeset and the rollback both fail: the checkout is torn. */
+    fail(2, 1);
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => outcomes.at(-1)?.failed, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+
+    await tree.checkLargeObjects(undefined);
+
+    await expect.poll(() => outcomes.at(-1)?.failed, { timeout: 10_000 }).toBe(false);
+    expect(await filesystem.exists('extra.txt')).toBe(false);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 2;\n');
     tree.actor.stop();
   }, 30_000);
 
